@@ -55,11 +55,12 @@ const useIOSMeta = () => {
 // --- NOTIFICATION MANAGER ---
 const useNotifications = () => {
   // FIX: Check if Notification API is available before accessing it
-  const [permission, setPermission] = useState(
-    typeof window !== 'undefined' && 'Notification' in window
-      ? Notification.permission
-      : 'default'
-  );
+  const [permission, setPermission] = useState(() => {
+    if (typeof window !== 'undefined' && 'Notification' in window) {
+      return Notification.permission;
+    }
+    return 'default';
+  });
 
   const requestPermission = async () => {
     // FIX: Check if Notification API exists
@@ -68,10 +69,14 @@ const useNotifications = () => {
       return;
     }
 
-    const result = await Notification.requestPermission();
-    setPermission(result);
-    if (result === 'granted') {
-      new Notification("EchoVault", { body: "Notifications enabled! We'll remind you to journal." });
+    try {
+      const result = await Notification.requestPermission();
+      setPermission(result);
+      if (result === 'granted') {
+        new Notification("EchoVault", { body: "Notifications enabled! We'll remind you to journal." });
+      }
+    } catch (error) {
+      console.error('Notification permission error:', error);
     }
   };
 
@@ -84,8 +89,12 @@ const useNotifications = () => {
       const now = new Date();
       const hour = now.getHours();
       const min = now.getMinutes();
-      if (hour === 9 && min === 0) new Notification("EchoVault: Morning Plan", { body: "What are you planning to do today? Record a quick thought." });
-      if (hour === 20 && min === 0) new Notification("EchoVault: End of Day", { body: "How did it go? Close your loops for the day." });
+      try {
+        if (hour === 9 && min === 0) new Notification("EchoVault: Morning Plan", { body: "What are you planning to do today? Record a quick thought." });
+        if (hour === 20 && min === 0) new Notification("EchoVault: End of Day", { body: "How did it go? Close your loops for the day." });
+      } catch (error) {
+        console.error('Notification error:', error);
+      }
     };
     const interval = setInterval(checkTime, 60000);
     return () => clearInterval(interval);
@@ -98,7 +107,7 @@ const useNotifications = () => {
 const safeString = (val) => {
   if (typeof val === 'string') return val;
   if (typeof val === 'number') return String(val);
-  if (typeof val === 'object') return JSON.stringify(val);
+  if (typeof val === 'object' && val !== null) return JSON.stringify(val);
   return "";
 };
 
@@ -291,7 +300,7 @@ const DecompressionScreen = ({ onClose }) => {
     const t4 = setTimeout(() => setStep(4), 9000); // Breathe Out
     const t5 = setTimeout(() => onClose(), 12000); // Finish
     return () => { clearTimeout(t1); clearTimeout(t2); clearTimeout(t3); clearTimeout(t4); clearTimeout(t5); };
-  }, [onClose]);
+  }, [onClose]); // FIX: Added onClose to dependency array
 
   return (
     <div className="fixed inset-0 bg-indigo-900 z-50 flex flex-col items-center justify-center text-white animate-in fade-in duration-500">
@@ -477,21 +486,30 @@ const Chat = ({ entries, onClose, category }) => {
       return;
     }
 
-    if (isSpeaking) {
-      window.speechSynthesis.cancel();
-      setIsSpeaking(false);
-      if (conversationMode) setConversationMode(false);
-      return;
-    }
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.onend = () => {
-      setIsSpeaking(false);
-      if (conversationMode) {
-        setTimeout(() => setVoiceInput(true), 500);
+    try {
+      if (isSpeaking) {
+        window.speechSynthesis.cancel();
+        setIsSpeaking(false);
+        if (conversationMode) setConversationMode(false);
+        return;
       }
-    };
-    setIsSpeaking(true);
-    window.speechSynthesis.speak(utterance);
+      const utterance = new SpeechSynthesisUtterance(text);
+      utterance.onend = () => {
+        setIsSpeaking(false);
+        if (conversationMode) {
+          setTimeout(() => setVoiceInput(true), 500);
+        }
+      };
+      utterance.onerror = (error) => {
+        console.error('Speech synthesis error:', error);
+        setIsSpeaking(false);
+      };
+      setIsSpeaking(true);
+      window.speechSynthesis.speak(utterance);
+    } catch (error) {
+      console.error('Speech synthesis error:', error);
+      setIsSpeaking(false);
+    }
   };
 
   const handleVoiceInput = async (b64, mime) => {
@@ -536,7 +554,11 @@ const Chat = ({ entries, onClose, category }) => {
                     setConversationMode(newMode);
                     if (newMode && !isSpeaking) setVoiceInput(true);
                     if (!newMode && typeof window !== 'undefined' && 'speechSynthesis' in window) {
-                        window.speechSynthesis.cancel();
+                        try {
+                          window.speechSynthesis.cancel();
+                        } catch (error) {
+                          console.error('Error canceling speech:', error);
+                        }
                         setVoiceInput(false);
                     }
                 }}
@@ -688,8 +710,13 @@ export default function App() {
   // Auth
   useEffect(() => {
     const init = async () => {
+      // FIX: Proper window check for global variable
       if (typeof window !== 'undefined' && typeof window.__initial_auth_token !== 'undefined' && window.__initial_auth_token) {
-        await signInWithCustomToken(auth, window.__initial_auth_token);
+        try {
+          await signInWithCustomToken(auth, window.__initial_auth_token);
+        } catch (error) {
+          console.error('Auth error:', error);
+        }
       }
     };
     init();
