@@ -207,6 +207,13 @@ const generateEmbedding = async (text) => {
 
 const transcribeAudio = async (base64, mimeType) => {
   try {
+    // FIX: Log request details for debugging
+    console.log('Transcription request:', {
+      mimeType,
+      audioLength: base64.length,
+      model: 'gemini-2.5-flash-preview-09-2025'
+    });
+
     const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${GEMINI_API_KEY}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -224,10 +231,18 @@ const transcribeAudio = async (base64, mimeType) => {
     if (!res.ok) {
       const errorData = await res.json().catch(() => ({}));
       console.error('Transcribe API error:', res.status, errorData);
+      console.error('Full error details:', {
+        status: res.status,
+        statusText: res.statusText,
+        error: errorData,
+        mimeType,
+        audioSizeBytes: base64.length
+      });
 
       // Return error indicator instead of null
       if (res.status === 429) return 'API_RATE_LIMIT';
       if (res.status === 401) return 'API_AUTH_ERROR';
+      if (res.status === 400) return 'API_BAD_REQUEST';
       return 'API_ERROR';
     }
 
@@ -870,28 +885,58 @@ export default function App() {
             setShowDecompression(true);
           }
 
-          await updateDoc(ref, {
-            analysis: analysis || {},
+          // FIX: Build update object without undefined fields (Firebase doesn't allow undefined)
+          const updateData = {
             title: analysis?.title || "New Memory",
             tags: analysis?.tags || [],
-            contextualInsight: insight?.found ? insight : null,
             analysisStatus: 'complete'
-          });
+          };
+
+          // Only add analysis fields that exist
+          updateData.analysis = {
+            mood_score: analysis?.mood_score ?? 0.5,
+            framework: analysis?.framework || 'general'
+          };
+
+          // Only include optional fields if they're defined
+          if (analysis?.cbt_breakdown) {
+            updateData.analysis.cbt_breakdown = analysis.cbt_breakdown;
+          }
+          if (analysis?.gibbs_reflection) {
+            updateData.analysis.gibbs_reflection = analysis.gibbs_reflection;
+          }
+
+          // Only add contextual insight if it exists
+          if (insight?.found) {
+            updateData.contextualInsight = insight;
+          }
+
+          try {
+            await updateDoc(ref, updateData);
+          } catch (updateError) {
+            console.error('Failed to update document:', updateError);
+            // Document might not exist anymore, try to verify
+            throw updateError;
+          }
         })
         .catch(async (error) => {
           // FIX: Critical - always mark as complete even if analysis fails
           console.error('Analysis failed, marking entry as complete with fallback values:', error);
 
-          await updateDoc(ref, {
-            analysis: {
-              mood_score: 0.5,
-              framework: 'general'
-            },
-            title: finalTex.substring(0, 50) + (finalTex.length > 50 ? '...' : ''),
-            tags: [],
-            contextualInsight: null,
-            analysisStatus: 'complete'
-          });
+          try {
+            await updateDoc(ref, {
+              analysis: {
+                mood_score: 0.5,
+                framework: 'general'
+              },
+              title: finalTex.substring(0, 50) + (finalTex.length > 50 ? '...' : ''),
+              tags: [],
+              analysisStatus: 'complete'
+            });
+          } catch (fallbackError) {
+            console.error('Even fallback update failed:', fallbackError);
+            // Document was probably deleted - nothing we can do
+          }
         });
     } catch (e) {
       console.error('Save failed:', e);
@@ -920,6 +965,12 @@ export default function App() {
 
     if (transcript === 'API_AUTH_ERROR') {
       alert("API authentication error - please check settings");
+      setProcessing(false);
+      return;
+    }
+
+    if (transcript === 'API_BAD_REQUEST') {
+      alert("Audio format not supported - please try recording again");
       setProcessing(false);
       return;
     }
