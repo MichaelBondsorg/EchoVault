@@ -218,9 +218,33 @@ const transcribeAudio = async (base64, mimeType) => {
         }]
       })
     });
+
+    // FIX: Check HTTP status
+    if (!res.ok) {
+      const errorData = await res.json().catch(() => ({}));
+      console.error('Transcribe API error:', res.status, errorData);
+
+      // Return error indicator instead of null
+      if (res.status === 429) return 'API_RATE_LIMIT';
+      if (res.status === 401) return 'API_AUTH_ERROR';
+      return 'API_ERROR';
+    }
+
     const data = await res.json();
-    return data.candidates?.[0]?.content?.parts?.[0]?.text || null;
-  } catch (e) { return null; }
+    const result = data.candidates?.[0]?.content?.parts?.[0]?.text || null;
+
+    // FIX: Log if no result returned
+    if (!result) {
+      console.error('Transcribe API returned no content:', data);
+      return 'API_NO_CONTENT';
+    }
+
+    console.log('Transcription result:', result);
+    return result;
+  } catch (e) {
+    console.error('Transcribe API exception:', e);
+    return 'API_EXCEPTION';
+  }
 };
 
 // --- THE AI ROUTER (The new Brain) ---
@@ -878,7 +902,39 @@ export default function App() {
   const handleAudioWrapper = async (base64, mime) => {
     setProcessing(true);
     const transcript = await transcribeAudio(base64, mime);
-    if (!transcript || transcript.includes("NO_SPEECH")) { alert("No speech detected"); setProcessing(false); return; }
+
+    // FIX: Better error messages based on error type
+    if (!transcript) {
+      alert("Transcription failed - please try again");
+      setProcessing(false);
+      return;
+    }
+
+    // Handle different error types with specific messages
+    if (transcript === 'API_RATE_LIMIT') {
+      alert("Too many requests - please wait a moment and try again");
+      setProcessing(false);
+      return;
+    }
+
+    if (transcript === 'API_AUTH_ERROR') {
+      alert("API authentication error - please check settings");
+      setProcessing(false);
+      return;
+    }
+
+    if (transcript.startsWith('API_')) {
+      alert("Transcription service temporarily unavailable - please try again");
+      setProcessing(false);
+      return;
+    }
+
+    if (transcript.includes("NO_SPEECH")) {
+      alert("No speech detected - please try speaking closer to the microphone");
+      setProcessing(false);
+      return;
+    }
+
     await saveEntry(transcript);
   };
 
