@@ -314,15 +314,23 @@ const analyzeEntry = async (text) => {
     const jsonStr = raw.replace(/```json|```/g, '').trim();
     const parsed = JSON.parse(jsonStr);
 
-    // FIX: Validate required fields
-    return {
+    // FIX: Build result object without undefined fields
+    const result = {
       title: parsed.title || text.substring(0, 50) + (text.length > 50 ? '...' : ''),
       tags: Array.isArray(parsed.tags) ? parsed.tags : [],
       mood_score: typeof parsed.mood_score === 'number' ? parsed.mood_score : 0.5,
-      framework: parsed.framework || 'general',
-      cbt_breakdown: parsed.cbt_breakdown,
-      gibbs_reflection: parsed.gibbs_reflection
+      framework: parsed.framework || 'general'
     };
+
+    // Only add optional framework fields if they exist (don't set to undefined)
+    if (parsed.cbt_breakdown) {
+      result.cbt_breakdown = parsed.cbt_breakdown;
+    }
+    if (parsed.gibbs_reflection) {
+      result.gibbs_reflection = parsed.gibbs_reflection;
+    }
+
+    return result;
   } catch (e) {
     console.error('analyzeEntry error:', e);
     return {
