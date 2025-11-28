@@ -105,6 +105,26 @@ const useNotifications = () => {
 };
 
 // --- SAFETY HELPERS ---
+// FIX: Remove all undefined values from an object (Firebase doesn't allow them)
+const removeUndefined = (obj) => {
+  if (obj === null || obj === undefined) return obj;
+  if (typeof obj !== 'object') return obj;
+  if (Array.isArray(obj)) return obj.map(removeUndefined);
+
+  const cleaned = {};
+  Object.keys(obj).forEach(key => {
+    const value = obj[key];
+    if (value !== undefined) {
+      if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+        cleaned[key] = removeUndefined(value);
+      } else {
+        cleaned[key] = value;
+      }
+    }
+  });
+  return cleaned;
+};
+
 const safeString = (val) => {
   if (typeof val === 'string') return val;
   if (typeof val === 'number') return String(val);
@@ -930,8 +950,12 @@ export default function App() {
           console.log('updateData.analysis has cbt_breakdown?', 'cbt_breakdown' in updateData.analysis);
           console.log('updateData.analysis has gibbs_reflection?', 'gibbs_reflection' in updateData.analysis);
 
+          // FIX: Remove ALL undefined values before sending to Firebase
+          const cleanedUpdateData = removeUndefined(updateData);
+          console.log('Cleaned updateData (after removing undefined):', JSON.stringify(cleanedUpdateData, null, 2));
+
           try {
-            await updateDoc(ref, updateData);
+            await updateDoc(ref, cleanedUpdateData);
           } catch (updateError) {
             console.error('Failed to update document:', updateError);
             // Document might not exist anymore, try to verify
@@ -943,7 +967,7 @@ export default function App() {
           console.error('Analysis failed, marking entry as complete with fallback values:', error);
 
           try {
-            await updateDoc(ref, {
+            const fallbackData = {
               analysis: {
                 mood_score: 0.5,
                 framework: 'general'
@@ -951,7 +975,13 @@ export default function App() {
               title: finalTex.substring(0, 50) + (finalTex.length > 50 ? '...' : ''),
               tags: [],
               analysisStatus: 'complete'
-            });
+            };
+
+            // FIX: Also clean fallback data
+            const cleanedFallbackData = removeUndefined(fallbackData);
+            console.log('Fallback data (cleaned):', JSON.stringify(cleanedFallbackData, null, 2));
+
+            await updateDoc(ref, cleanedFallbackData);
           } catch (fallbackError) {
             console.error('Even fallback update failed:', fallbackError);
             // Document was probably deleted - nothing we can do
