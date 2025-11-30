@@ -727,58 +727,168 @@ const WeeklyReport = ({ text, onClose }) => (
   </div>
 );
 
-const PromptScreen = ({ prompts, onSelectPrompt, onRecordFreely, onTypeFreely, onClose }) => {
+const PromptScreen = ({ prompts, mode, onModeChange, onSave, onClose, loading }) => {
+  const [textValue, setTextValue] = useState('');
+  const [recording, setRecording] = useState(false);
+  const [mediaRecorder, setMediaRecorder] = useState(null);
+  const [recordSeconds, setRecordSeconds] = useState(0);
+  const timerRef = useRef(null);
+
+  useEffect(() => {
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current);
+    };
+  }, []);
+
+  const startRecording = async () => {
+    if (typeof navigator === 'undefined' || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      alert("Microphone access not available");
+      return;
+    }
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mime = MediaRecorder.isTypeSupported("audio/webm") ? "audio/webm" : "audio/mp4";
+      const recorder = new MediaRecorder(stream, { mimeType: mime, audioBitsPerSecond: 16000 });
+      const chunks = [];
+
+      recorder.ondataavailable = e => chunks.push(e.data);
+      recorder.onstop = () => {
+        const reader = new FileReader();
+        reader.readAsDataURL(new Blob(chunks, { type: mime }));
+        reader.onloadend = () => onSave(reader.result.split(',')[1], mime);
+        stream.getTracks().forEach(t => t.stop());
+      };
+
+      recorder.start();
+      setMediaRecorder(recorder);
+      setRecording(true);
+      setRecordSeconds(0);
+      timerRef.current = setInterval(() => setRecordSeconds(s => s + 1), 1000);
+    } catch (e) {
+      alert("Microphone access denied");
+      console.error(e);
+    }
+  };
+
+  const stopRecording = () => {
+    if (mediaRecorder) {
+      mediaRecorder.stop();
+      setRecording(false);
+      clearInterval(timerRef.current);
+    }
+  };
+
   return (
     <div className="fixed inset-0 bg-white z-40 flex flex-col pt-[env(safe-area-inset-top)] animate-in slide-in-from-bottom-10 duration-200">
       <div className="p-4 border-b flex justify-between items-center bg-gradient-to-r from-indigo-600 to-purple-600 text-white shadow-md">
-        <h2 className="font-bold text-lg flex gap-2 items-center"><MessageCircle size={20}/> Ready to Reflect?</h2>
+        <h2 className="font-bold text-lg flex gap-2 items-center"><MessageCircle size={20}/> New Entry</h2>
         <button onClick={onClose} className="p-1 hover:bg-white/20 rounded-full"><X size={24}/></button>
       </div>
 
       <div className="flex-1 overflow-y-auto p-4 bg-gray-50">
         {prompts.length > 0 && (
-          <div className="mb-6">
-            <h3 className="text-sm font-bold text-gray-500 uppercase tracking-wide mb-3 flex items-center gap-2">
-              <Sparkles size={14}/> Recent Prompts
+          <div className="mb-4">
+            <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-2 flex items-center gap-2">
+              <Sparkles size={12}/> Reflect on these
             </h3>
-            <div className="space-y-2">
-              {prompts.map((prompt, i) => (
-                <button
-                  key={i}
-                  onClick={() => onSelectPrompt(prompt)}
-                  className="w-full bg-white p-4 rounded-xl border border-gray-200 shadow-sm hover:shadow-md hover:border-indigo-300 transition-all text-left group"
-                >
-                  <div className="flex items-start gap-3">
-                    <MessageSquarePlus size={18} className="text-indigo-500 shrink-0 mt-0.5 group-hover:scale-110 transition-transform"/>
-                    <p className="text-sm text-gray-700 font-medium italic">"{prompt}"</p>
+            <div className="bg-white rounded-xl p-4 border border-gray-200 shadow-sm">
+              <div className="space-y-2">
+                {prompts.map((prompt, i) => (
+                  <div key={i} className="flex items-start gap-2">
+                    <span className="text-indigo-500 text-xs mt-0.5">•</span>
+                    <p className="text-sm text-gray-700 italic">"{prompt}"</p>
                   </div>
-                </button>
-              ))}
+                ))}
+              </div>
             </div>
           </div>
         )}
 
-        <div className="mb-4">
-          <h3 className="text-sm font-bold text-gray-500 uppercase tracking-wide mb-3">Or Start Fresh</h3>
-          <div className="grid grid-cols-2 gap-3">
-            <button
-              onClick={onRecordFreely}
-              className="bg-gradient-to-r from-indigo-600 to-purple-600 text-white p-6 rounded-xl shadow-lg hover:shadow-xl transition-all flex flex-col items-center gap-2"
-            >
-              <Mic size={28} className="opacity-90"/>
-              <span className="font-bold text-base">Record</span>
-              <span className="text-xs opacity-75">Voice entry</span>
-            </button>
-            <button
-              onClick={onTypeFreely}
-              className="bg-gradient-to-r from-purple-600 to-pink-600 text-white p-6 rounded-xl shadow-lg hover:shadow-xl transition-all flex flex-col items-center gap-2"
-            >
-              <Keyboard size={28} className="opacity-90"/>
-              <span className="font-bold text-base">Type</span>
-              <span className="text-xs opacity-75">Text entry</span>
-            </button>
+        {!mode && (
+          <div className="mb-4">
+            <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">Choose input method</h3>
+            <div className="grid grid-cols-2 gap-3">
+              <button
+                onClick={() => onModeChange('voice')}
+                className="bg-gradient-to-r from-indigo-600 to-purple-600 text-white p-6 rounded-xl shadow-lg hover:shadow-xl transition-all flex flex-col items-center gap-2"
+              >
+                <Mic size={28} className="opacity-90"/>
+                <span className="font-bold text-base">Record</span>
+              </button>
+              <button
+                onClick={() => onModeChange('text')}
+                className="bg-gradient-to-r from-purple-600 to-pink-600 text-white p-6 rounded-xl shadow-lg hover:shadow-xl transition-all flex flex-col items-center gap-2"
+              >
+                <Keyboard size={28} className="opacity-90"/>
+                <span className="font-bold text-base">Type</span>
+              </button>
+            </div>
           </div>
-        </div>
+        )}
+
+        {mode === 'text' && (
+          <div className="mb-4">
+            <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">Your thoughts</h3>
+            <textarea
+              value={textValue}
+              onChange={e => setTextValue(e.target.value)}
+              className="w-full border rounded-xl p-4 h-48 focus:ring-2 focus:ring-indigo-500 outline-none bg-white shadow-sm"
+              placeholder="Type your entry here... You can address the prompts above or write freely."
+              autoFocus
+            />
+            <div className="flex justify-end gap-2 mt-3">
+              <button
+                onClick={() => {onModeChange(null); setTextValue('');}}
+                className="px-4 py-2 text-gray-500 hover:bg-gray-100 rounded-lg font-medium"
+              >
+                Back
+              </button>
+              <button
+                onClick={() => onSave(textValue)}
+                disabled={!textValue.trim() || loading}
+                className="px-6 py-2 bg-indigo-600 text-white rounded-lg font-medium flex gap-2 items-center hover:bg-indigo-700 disabled:bg-gray-300"
+              >
+                {loading ? <Loader2 className="animate-spin" size={18}/> : <Send size={18}/>} Save
+              </button>
+            </div>
+          </div>
+        )}
+
+        {mode === 'voice' && (
+          <div className="mb-4">
+            <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">Voice recording</h3>
+            <div className="bg-white rounded-xl p-6 border border-gray-200 shadow-sm flex flex-col items-center gap-4">
+              <button
+                onClick={recording ? stopRecording : startRecording}
+                disabled={loading}
+                className={`h-20 w-20 rounded-full flex items-center justify-center shadow-lg transition-all ${recording ? 'bg-red-500 scale-110 animate-pulse' : 'bg-indigo-600 hover:bg-indigo-700'} disabled:opacity-50`}
+              >
+                {recording ? <Square className="text-white fill-current" size={32}/> : <Mic className="text-white" size={32}/>}
+              </button>
+
+              {recording && (
+                <div className="bg-gray-800 text-white text-sm font-mono py-1.5 px-3 rounded">
+                  {Math.floor(recordSeconds/60)}:{String(recordSeconds%60).padStart(2,'0')}
+                </div>
+              )}
+
+              {loading && (
+                <div className="flex items-center gap-2 text-indigo-600 font-medium">
+                  <Loader2 className="animate-spin" size={18}/> Processing...
+                </div>
+              )}
+
+              <button
+                onClick={() => onModeChange(null)}
+                className="text-sm text-gray-500 hover:text-gray-700 font-medium"
+                disabled={recording || loading}
+              >
+                Back
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -890,6 +1000,7 @@ export default function App() {
   const [replyContext, setReplyContext] = useState(null);
   const [showDecompression, setShowDecompression] = useState(false);
   const [showPrompts, setShowPrompts] = useState(false);
+  const [promptMode, setPromptMode] = useState(null); // null, 'voice', or 'text'
 
   // Auth
   useEffect(() => {
@@ -983,6 +1094,8 @@ export default function App() {
       setProcessing(false);
       setMode('idle');
       setReplyContext(null);
+      setShowPrompts(false);
+      setPromptMode(null);
 
       // FIX: Added .catch() to ensure entry always gets marked as complete
       Promise.all([analyzeEntry(finalTex), generateInsight(finalTex, related, recent)])
@@ -1116,22 +1229,15 @@ export default function App() {
     setMode('recording_voice');
   };
 
-  const handleSelectPrompt = (prompt) => {
-    setReplyContext(prompt);
-    setShowPrompts(false);
-    setMode('recording_voice');
-  };
-
-  const handleRecordFreely = () => {
-    setReplyContext(null);
-    setShowPrompts(false);
-    setMode('recording_voice');
-  };
-
-  const handleTypeFreely = () => {
-    setReplyContext(null);
-    setShowPrompts(false);
-    setMode('recording_text');
+  const handlePromptSave = async (data, mimeType) => {
+    // Handle both text and audio from PromptScreen
+    if (typeof data === 'string' && !mimeType) {
+      // Text entry
+      await saveEntry(data);
+    } else {
+      // Audio entry
+      await handleAudioWrapper(data, mimeType);
+    }
   };
 
   const handleReport = async () => {
@@ -1198,10 +1304,14 @@ export default function App() {
       {showPrompts ? (
         <PromptScreen
           prompts={availablePrompts}
-          onSelectPrompt={handleSelectPrompt}
-          onRecordFreely={handleRecordFreely}
-          onTypeFreely={handleTypeFreely}
-          onClose={() => setShowPrompts(false)}
+          mode={promptMode}
+          onModeChange={setPromptMode}
+          onSave={handlePromptSave}
+          onClose={() => {
+            setShowPrompts(false);
+            setPromptMode(null);
+          }}
+          loading={processing}
         />
       ) : mode === 'recording_voice' ? (
         <VoiceRecorder onSave={handleAudioWrapper} onSwitch={() => setMode('recording_text')} loading={processing} />
