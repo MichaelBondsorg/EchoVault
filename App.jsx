@@ -131,13 +131,19 @@ const useNotifications = () => {
 const removeUndefined = (obj) => {
   if (obj === null || obj === undefined) return obj;
   if (typeof obj !== 'object') return obj;
-  if (Array.isArray(obj)) return obj.map(removeUndefined);
+  if (Array.isArray(obj)) {
+    return obj
+      .map(removeUndefined)
+      .filter(item => item !== undefined);
+  }
 
   const cleaned = {};
   Object.keys(obj).forEach(key => {
     const value = obj[key];
     if (value !== undefined) {
       if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+        cleaned[key] = removeUndefined(value);
+      } else if (Array.isArray(value)) {
         cleaned[key] = removeUndefined(value);
       } else {
         cleaned[key] = value;
@@ -280,16 +286,56 @@ const callOpenAI = async (systemPrompt, userPrompt) => {
   }
 };
 
-const generateEmbedding = async (text) => {
+const generateEmbedding = async (text, retryCount = 0) => {
   try {
+    if (!GEMINI_API_KEY || GEMINI_API_KEY === 'your_gemini_api_key_here') {
+      console.error('Gemini API key not configured - embeddings will not be generated');
+      return null;
+    }
+
+    if (!text || typeof text !== 'string' || text.trim().length === 0) {
+      console.error('generateEmbedding: Invalid or empty text provided');
+      return null;
+    }
+
     const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/text-embedding-004:embedContent?key=${GEMINI_API_KEY}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ content: { parts: [{ text: text }] } })
     });
+
+    if (!res.ok) {
+      const errorData = await res.json().catch(() => ({}));
+      console.error('Embedding API error:', res.status, errorData);
+
+      if (retryCount < 1 && res.status >= 500) {
+        console.log('Retrying embedding generation after server error...');
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        return generateEmbedding(text, retryCount + 1);
+      }
+
+      return null;
+    }
+
     const data = await res.json();
-    return data.embedding?.values || null;
-  } catch (e) { return null; }
+    const embedding = data.embedding?.values || null;
+
+    if (!embedding) {
+      console.error('Embedding API returned no embedding values:', data);
+    }
+
+    return embedding;
+  } catch (e) {
+    console.error('generateEmbedding exception:', e);
+
+    if (retryCount < 1) {
+      console.log('Retrying embedding generation after exception...');
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      return generateEmbedding(text, retryCount + 1);
+    }
+
+    return null;
+  }
 };
 
 const transcribeAudio = async (base64, mimeType) => {
@@ -567,7 +613,7 @@ const MoodHeatmap = ({ entries }) => {
   );
 };
 
-const EntryCard = ({ entry, onDelete, onUpdate, onReply }) => {
+const EntryCard = ({ entry, onDelete, onUpdate }) => {
   const [editing, setEditing] = useState(false);
   const [title, setTitle] = useState(entry.title);
   const isPending = entry.analysisStatus === 'pending';
@@ -575,11 +621,6 @@ const EntryCard = ({ entry, onDelete, onUpdate, onReply }) => {
   useEffect(() => { setTitle(entry.title); }, [entry.title]);
 
   const insightMsg = entry.contextualInsight?.message ? safeString(entry.contextualInsight.message) : null;
-  const followUpQuestions = Array.isArray(entry.contextualInsight?.followUpQuestions)
-    ? entry.contextualInsight.followUpQuestions
-    : entry.contextualInsight?.followUpQuestion
-      ? [entry.contextualInsight.followUpQuestion]
-      : [];
 
   const toggleCategory = () => {
     const newCategory = entry.category === 'work' ? 'personal' : 'work';
@@ -657,7 +698,6 @@ const Chat = ({ entries, onClose, category }) => {
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [voiceInput, setVoiceInput] = useState(false);
   const [conversationMode, setConversationMode] = useState(false);
-  const [relevantEntries, setRelevantEntries] = useState([]);
   const endRef = useRef(null);
 
   useEffect(() => endRef.current?.scrollIntoView(), [msgs]);
@@ -699,13 +739,50 @@ const Chat = ({ entries, onClose, category }) => {
     setVoiceInput(false);
     setLoading(true);
     const transcript = await transcribeAudio(b64, mime);
-    if (transcript) {
-      setTxt(transcript);
-      send(transcript);
-    } else {
+
+    if (!transcript) {
       setLoading(false);
       if (conversationMode) setConversationMode(false);
+      return;
     }
+
+    if (transcript === 'API_RATE_LIMIT') {
+      setMsgs(p => [...p, { role: 'sys', text: 'Too many requests - please wait a moment and try again.' }]);
+      setLoading(false);
+      if (conversationMode) setConversationMode(false);
+      return;
+    }
+
+    if (transcript === 'API_AUTH_ERROR') {
+      setMsgs(p => [...p, { role: 'sys', text: 'Voice transcription is not available - API authentication error.' }]);
+      setLoading(false);
+      if (conversationMode) setConversationMode(false);
+      return;
+    }
+
+    if (transcript === 'API_BAD_REQUEST') {
+      setMsgs(p => [...p, { role: 'sys', text: 'Audio format not supported - please try recording again.' }]);
+      setLoading(false);
+      if (conversationMode) setConversationMode(false);
+      return;
+    }
+
+    if (transcript.startsWith('API_')) {
+      setMsgs(p => [...p, { role: 'sys', text: 'Voice transcription temporarily unavailable - please try again or type your question.' }]);
+      setLoading(false);
+      if (conversationMode) setConversationMode(false);
+      return;
+    }
+
+    if (transcript.includes('NO_SPEECH')) {
+      setMsgs(p => [...p, { role: 'sys', text: 'No speech detected - please try speaking closer to the microphone.' }]);
+      setLoading(false);
+      if (conversationMode) setConversationMode(false);
+      return;
+    }
+
+    setTxt(transcript);
+    send(transcript);
   };
 
   const send = async (overrideText) => {
@@ -738,7 +815,6 @@ const Chat = ({ entries, onClose, category }) => {
         relevantContext = foundEntries
           .map(e => `[${e.createdAt.toLocaleDateString()}] ${e.title || 'Entry'}: ${e.text}`)
           .join('\n\n');
-        setRelevantEntries(foundEntries.map(e => e.id));
       }
     }
 
@@ -1370,7 +1446,7 @@ export default function App() {
       <div className="max-w-md mx-auto p-4">
         {visible.length > 0 && <MoodHeatmap entries={visible} />}
         <div className="space-y-4">
-          {visible.map(e => <EntryCard key={e.id} entry={e} onDelete={id => deleteDoc(doc(db, 'artifacts', APP_COLLECTION_ID, 'users', user.uid, 'entries', id))} onUpdate={(id, d) => updateDoc(doc(db, 'artifacts', APP_COLLECTION_ID, 'users', user.uid, 'entries', id), d)} onReply={handleReply} />)}
+          {visible.map(e => <EntryCard key={e.id} entry={e} onDelete={id => deleteDoc(doc(db, 'artifacts', APP_COLLECTION_ID, 'users', user.uid, 'entries', id))} onUpdate={(id, d) => updateDoc(doc(db, 'artifacts', APP_COLLECTION_ID, 'users', user.uid, 'entries', id), d)} />)}
         </div>
 
         {visible.length === 0 && (
