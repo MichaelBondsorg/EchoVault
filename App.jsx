@@ -1,9 +1,10 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import {
   Mic, Square, Trash2, Search, LogOut, Loader2, Sparkles, MessageCircle, X, Send,
-  Lightbulb, Edit2, Check, Share, LogIn, Activity, AlertTriangle, TrendingUp,
+  Lightbulb, Edit2, Check, Share, LogIn, Activity, AlertTriangle, TrendingUp, TrendingDown,
   Database, Briefcase, User as UserIcon, Keyboard, RefreshCw, Calendar, MessageSquarePlus,
-  Brain, Volume2, StopCircle, Bell, Headphones
+  Brain, Volume2, StopCircle, Bell, Headphones, Shield, Phone, Heart, Plus, ChevronRight,
+  FileText, Clipboard, Info, Wind, Droplets, Hand, Footprints, Download, CheckSquare, BarChart3
 } from 'lucide-react';
 
 import { initializeApp } from 'firebase/app';
@@ -13,7 +14,7 @@ import {
 } from 'firebase/auth';
 import {
   getFirestore, collection, addDoc, query, orderBy, onSnapshot,
-  Timestamp, deleteDoc, doc, updateDoc, limit, getDocs
+  Timestamp, deleteDoc, doc, updateDoc, limit, getDocs, setDoc
 } from 'firebase/firestore';
 
 // --- Configuration ---
@@ -34,6 +35,252 @@ const APP_COLLECTION_ID = 'echo-vault-v5-fresh';
 // FIX: Use environment variable instead of hardcoded key
 const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY;
 const OPENAI_API_KEY = import.meta.env.VITE_OPENAI_API_KEY;
+
+// --- AI MODEL CONFIGURATION ---
+const AI_CONFIG = {
+  classification: {
+    primary: 'gemini-1.5-flash',
+    fallback: 'gpt-4o-mini'
+  },
+  analysis: {
+    primary: 'gemini-2.5-flash-preview-05-20',
+    fallback: 'gpt-4o'
+  },
+  chat: {
+    primary: 'gpt-4o-mini',
+    fallback: 'gemini-1.5-flash'
+  },
+  embedding: {
+    primary: 'text-embedding-004',
+    fallback: null
+  },
+  transcription: {
+    primary: 'whisper-1',
+    fallback: null
+  }
+};
+
+// --- SAFETY CONSTANTS (Phase 0) ---
+const CRISIS_KEYWORDS = /suicide|kill myself|hurt myself|end my life|want to die|better off dead|no reason to live|end it all|don't want to wake up|better off without me/i;
+const WARNING_INDICATORS = /hopeless|worthless|no point|can't go on|trapped|burden|no way out|give up|falling apart/i;
+
+const DEFAULT_SAFETY_PLAN = {
+  copingStrategies: [
+    { activity: "Box Breathing (4-4-4-4)", notes: "Breathe in 4 sec, hold 4, out 4, hold 4" },
+    { activity: "Splash cold water on face", notes: "Activates dive reflex, slows heart rate" },
+    { activity: "Hold an ice cube", notes: "Sensory grounding technique" }
+  ],
+  professionalContacts: [
+    { name: "988 Suicide & Crisis Lifeline", phone: "988", type: "crisis" },
+    { name: "Crisis Text Line", phone: "741741", type: "crisis" }
+  ],
+  reasonsForLiving: [],
+  supportContacts: [],
+  warningSignsPersonal: [],
+  warningSignsPhysical: []
+};
+
+// --- PROMPT BANKS (Phase 2) ---
+const PERSONAL_PROMPTS = [
+  { id: 'p1', text: "What are you grateful for today?" },
+  { id: 'p2', text: "What is one thing you accomplished today that you're proud of?" },
+  { id: 'p3', text: "What was the highlight of your day?" },
+  { id: 'p4', text: "What did you learn about yourself today?" },
+  { id: 'p5', text: "What are three things that went well today, and why?" },
+  { id: 'p6', text: "What is your daily affirmation?" },
+  { id: 'p7', text: "What is your intention for today?" },
+  { id: 'p8', text: "What is one personal goal you want to focus on this week?" },
+  { id: 'p9', text: "What would make today feel like a success?" },
+  { id: 'p10', text: "What challenges did you face today, and how did you handle them?" },
+  { id: 'p11', text: "How did you take care of yourself today?" },
+  { id: 'p12', text: "What made you smile today?" },
+  { id: 'p13', text: "What did you do to help someone else today?" },
+  { id: 'p14', text: "What's on your mind right now?" }
+];
+
+const WORK_PROMPTS = [
+  { id: 'w1', text: "What was your biggest win at work today?" },
+  { id: 'w2', text: "What progress did you make on your key priorities?" },
+  { id: 'w3', text: "What's one thing you did today that moved the needle?" },
+  { id: 'w4', text: "What feedback did you receive today, and how did it land?" },
+  { id: 'w5', text: "What was the hardest part of your workday?" },
+  { id: 'w6', text: "What's one thing you want to improve in your workflow?" },
+  { id: 'w7', text: "What did you learn from a mistake or setback today?" },
+  { id: 'w8', text: "What conversation do you need to have that you've been avoiding?" },
+  { id: 'w9', text: "What are your top 3 priorities for tomorrow?" },
+  { id: 'w10', text: "What's blocking you right now, and what would unblock it?" },
+  { id: 'w11', text: "What would make this week a success?" },
+  { id: 'w12', text: "Who do you need to connect with this week?" }
+];
+
+// --- SAFETY CHECK FUNCTIONS ---
+const checkCrisisKeywords = (text) => CRISIS_KEYWORDS.test(text);
+const checkWarningIndicators = (text) => WARNING_INDICATORS.test(text);
+
+const checkLongitudinalRisk = (recentEntries) => {
+  const last7Days = recentEntries.filter(e => 
+    e.createdAt > new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
+  );
+  
+  if (last7Days.length < 3) {
+    console.log('Longitudinal risk check skipped: insufficient data', {
+      entriesInWindow: last7Days.length,
+      requiredMinimum: 3
+    });
+    return false;
+  }
+  
+  const avgMood = last7Days.reduce((sum, e) => 
+    sum + (e.analysis?.mood_score || 0.5), 0) / last7Days.length;
+  
+  const moodScores = last7Days.map(e => e.analysis?.mood_score || 0.5);
+  const n = moodScores.length;
+  const sumX = (n * (n - 1)) / 2;
+  const sumY = moodScores.reduce((a, b) => a + b, 0);
+  const sumXY = moodScores.reduce((sum, y, x) => sum + x * y, 0);
+  const sumX2 = (n * (n - 1) * (2 * n - 1)) / 6;
+  const slope = (n * sumXY - sumX * sumY) / (n * sumX2 - sumX * sumX);
+  
+  return avgMood < 0.25 || slope < -0.05;
+};
+
+const analyzeLongitudinalPatterns = (entries) => {
+  const patterns = [];
+  const moodEntries = entries.filter(e => e.entry_type !== 'task' && typeof e.analysis?.mood_score === 'number');
+  
+  if (moodEntries.length < 7) return patterns;
+  
+  const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+  const moodByDay = {};
+  dayNames.forEach(d => { moodByDay[d] = []; });
+  
+  moodEntries.forEach(e => {
+    const day = dayNames[e.createdAt.getDay()];
+    moodByDay[day].push(e.analysis.mood_score);
+  });
+  
+  const dayAverages = {};
+  dayNames.forEach(day => {
+    if (moodByDay[day].length >= 2) {
+      dayAverages[day] = moodByDay[day].reduce((a, b) => a + b, 0) / moodByDay[day].length;
+    }
+  });
+  
+  const avgMood = moodEntries.reduce((sum, e) => sum + e.analysis.mood_score, 0) / moodEntries.length;
+  
+  Object.entries(dayAverages).forEach(([day, avg]) => {
+    const diff = avg - avgMood;
+    if (diff < -0.15) {
+      patterns.push({
+        type: 'weekly_low',
+        day,
+        avgMood: avg,
+        overallAvg: avgMood,
+        message: `Your mood tends to dip on ${day}s (${Math.round(avg * 100)}% vs ${Math.round(avgMood * 100)}% average)`
+      });
+    } else if (diff > 0.15) {
+      patterns.push({
+        type: 'weekly_high',
+        day,
+        avgMood: avg,
+        overallAvg: avgMood,
+        message: `${day}s tend to be your best days (${Math.round(avg * 100)}% mood)`
+      });
+    }
+  });
+  
+  const triggerWords = ['deadline', 'meeting', 'presentation', 'conflict', 'argument', 'stress', 'anxiety', 'tired', 'exhausted', 'overwhelmed'];
+  triggerWords.forEach(trigger => {
+    const withTrigger = moodEntries.filter(e => e.text.toLowerCase().includes(trigger));
+    const withoutTrigger = moodEntries.filter(e => !e.text.toLowerCase().includes(trigger));
+    
+    if (withTrigger.length >= 3 && withoutTrigger.length >= 3) {
+      const avgWith = withTrigger.reduce((sum, e) => sum + e.analysis.mood_score, 0) / withTrigger.length;
+      const avgWithout = withoutTrigger.reduce((sum, e) => sum + e.analysis.mood_score, 0) / withoutTrigger.length;
+      const diff = ((avgWithout - avgWith) / avgWithout) * 100;
+      
+      if (diff > 10) {
+        patterns.push({
+          type: 'trigger_correlation',
+          trigger,
+          avgWith,
+          avgWithout,
+          percentDiff: diff,
+          message: `Entries mentioning "${trigger}" correlate with ${Math.round(diff)}% lower mood`
+        });
+      }
+    }
+  });
+  
+  const sortedByDate = [...moodEntries].sort((a, b) => a.createdAt - b.createdAt);
+  let recoveryDays = [];
+  
+  for (let i = 0; i < sortedByDate.length - 1; i++) {
+    if (sortedByDate[i].analysis.mood_score < 0.3) {
+      for (let j = i + 1; j < sortedByDate.length; j++) {
+        if (sortedByDate[j].analysis.mood_score >= 0.5) {
+          const daysDiff = Math.round((sortedByDate[j].createdAt - sortedByDate[i].createdAt) / (1000 * 60 * 60 * 24));
+          if (daysDiff <= 7) {
+            recoveryDays.push(daysDiff);
+          }
+          break;
+        }
+      }
+    }
+  }
+  
+  if (recoveryDays.length >= 3) {
+    const avgRecovery = recoveryDays.reduce((a, b) => a + b, 0) / recoveryDays.length;
+    patterns.push({
+      type: 'recovery_pattern',
+      avgDays: avgRecovery,
+      samples: recoveryDays.length,
+      message: `You typically recover from low moods within ${Math.round(avgRecovery)} days`
+    });
+  }
+  
+  const last30Days = moodEntries.filter(e => e.createdAt > new Date(Date.now() - 30 * 24 * 60 * 60 * 1000));
+  const last7Days = moodEntries.filter(e => e.createdAt > new Date(Date.now() - 7 * 24 * 60 * 60 * 1000));
+  
+  if (last30Days.length >= 5) {
+    const monthAvg = last30Days.reduce((sum, e) => sum + e.analysis.mood_score, 0) / last30Days.length;
+    const weekAvg = last7Days.length >= 3 
+      ? last7Days.reduce((sum, e) => sum + e.analysis.mood_score, 0) / last7Days.length 
+      : null;
+    
+    patterns.push({
+      type: 'monthly_summary',
+      monthAvg,
+      weekAvg,
+      entryCount: last30Days.length,
+      message: `This month: ${Math.round(monthAvg * 100)}% average mood across ${last30Days.length} entries${weekAvg ? ` (this week: ${Math.round(weekAvg * 100)}%)` : ''}`
+    });
+  }
+  
+  return patterns;
+};
+
+const shuffleArray = (array) => {
+  const shuffled = [...array];
+  for (let i = shuffled.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+  }
+  return shuffled;
+};
+
+const getPromptsForSession = (category, smartReflections, shownPromptIds = []) => {
+  if (smartReflections.length > 0) {
+    return { type: 'smart', prompts: smartReflections.slice(0, 3) };
+  }
+  
+  const bank = category === 'work' ? WORK_PROMPTS : PERSONAL_PROMPTS;
+  const available = bank.filter(p => !shownPromptIds.includes(p.id));
+  const pool = available.length >= 3 ? available : bank;
+  const selected = shuffleArray(pool).slice(0, 3);
+  
+  return { type: 'standard', prompts: selected.map(p => p.text) };
+};
 
 // --- iOS Meta Injection ---
 const useIOSMeta = () => {
@@ -412,11 +659,114 @@ const transcribeAudio = async (base64, mimeType) => {
   }
 };
 
-// --- THE AI ROUTER (The new Brain) ---
-// This function decides WHICH therapeutic framework to apply.
-const analyzeEntry = async (text) => {
+// --- ENTRY CLASSIFICATION (Phase 1) ---
+// Fast classification using gemini-flash to determine entry type
+const classifyEntry = async (text) => {
   const prompt = `
-    Analyze this journal entry and determine the most appropriate therapeutic framework.
+    Classify this journal entry into ONE of these types:
+    - "task": Pure task/todo list, no emotional content (e.g., "Need to buy groceries, call mom")
+    - "mixed": Contains both tasks AND emotional reflection (e.g., "Feeling stressed about the deadline, need to finish report")
+    - "reflection": Emotional processing, self-reflection, no tasks (e.g., "I've been thinking about my relationship...")
+    - "vent": Emotional release, dysregulated state, needs validation not advice (e.g., "I can't take this anymore, everything is falling apart")
+
+    Return JSON only:
+    {
+      "entry_type": "task" | "mixed" | "reflection" | "vent",
+      "confidence": 0.0-1.0,
+      "extracted_tasks": ["task1", "task2"] // Only if type is "task" or "mixed"
+    }
+  `;
+  
+  try {
+    const raw = await callGemini(prompt, text);
+    if (!raw) {
+      return { entry_type: 'reflection', confidence: 0.5, extracted_tasks: [] };
+    }
+    
+    const jsonStr = raw.replace(/```json|```/g, '').trim();
+    const parsed = JSON.parse(jsonStr);
+    
+    return {
+      entry_type: parsed.entry_type || 'reflection',
+      confidence: typeof parsed.confidence === 'number' ? parsed.confidence : 0.5,
+      extracted_tasks: Array.isArray(parsed.extracted_tasks) ? parsed.extracted_tasks : []
+    };
+  } catch (e) {
+    console.error('classifyEntry error:', e);
+    return { entry_type: 'reflection', confidence: 0.5, extracted_tasks: [] };
+  }
+};
+
+// --- THE AI ROUTER (The new Brain) ---
+// This function decides WHICH therapeutic framework to apply based on entry type.
+const analyzeEntry = async (text, entryType = 'reflection') => {
+  if (entryType === 'task') {
+    return {
+      title: text.substring(0, 50) + (text.length > 50 ? '...' : ''),
+      tags: ['task'],
+      mood_score: null,
+      framework: 'general',
+      entry_type: 'task'
+    };
+  }
+  
+  if (entryType === 'vent') {
+    const ventPrompt = `
+      This person is venting and needs validation, NOT advice or CBT reframing.
+      
+      Return JSON:
+      {
+        "title": "Short empathetic title (max 6 words)",
+        "tags": ["Tag1", "Tag2"],
+        "mood_score": 0.0-1.0 (0.0=very distressed, 1.0=calm),
+        "validation": "A warm, empathetic validation of their feelings (2-3 sentences)",
+        "cooldown": {
+          "technique": "grounding" | "breathing" | "sensory",
+          "instruction": "Simple 1-2 sentence instruction"
+        }
+      }
+    `;
+    
+    try {
+      const raw = await callGemini(ventPrompt, text);
+      if (!raw) {
+        return {
+          title: text.substring(0, 50) + (text.length > 50 ? '...' : ''),
+          tags: [],
+          mood_score: 0.3,
+          framework: 'support',
+          entry_type: 'vent'
+        };
+      }
+      
+      const jsonStr = raw.replace(/```json|```/g, '').trim();
+      const parsed = JSON.parse(jsonStr);
+      
+      return {
+        title: parsed.title || text.substring(0, 50) + (text.length > 50 ? '...' : ''),
+        tags: Array.isArray(parsed.tags) ? parsed.tags : [],
+        mood_score: typeof parsed.mood_score === 'number' ? parsed.mood_score : 0.3,
+        framework: 'support',
+        entry_type: 'vent',
+        vent_support: {
+          validation: parsed.validation || "It's okay to feel this way. Your feelings are valid.",
+          cooldown: parsed.cooldown || { technique: 'breathing', instruction: 'Take a slow, deep breath.' }
+        }
+      };
+    } catch (e) {
+      console.error('analyzeEntry (vent) error:', e);
+      return {
+        title: text.substring(0, 50) + (text.length > 50 ? '...' : ''),
+        tags: [],
+        mood_score: 0.3,
+        framework: 'support',
+        entry_type: 'vent'
+      };
+    }
+  }
+
+  const prompt = `
+    Analyze this journal entry with the enhanced CBT toolkit.
 
     ROUTING LOGIC:
     1. IF text shows anxiety, negative self-talk, or cognitive distortion -> Use 'cbt' framework.
@@ -431,45 +781,48 @@ const analyzeEntry = async (text) => {
 
       // Include ONLY IF framework == 'cbt'
       "cbt_breakdown": {
-        "trigger": "The situation",
-        "automatic_thought": "The negative thought",
-        "distortion": "Label (e.g. Catastrophizing)",
-        "challenge": "Rational reframe"
+        "automatic_thought": "The negative thought pattern identified",
+        "distortion": "Cognitive distortion label (e.g., Catastrophizing, All-or-Nothing)",
+        "validation": "Empathetic acknowledgment of their feelings (1-2 sentences)",
+        "socratic_question": "A thought-provoking question to challenge the thought",
+        "suggested_reframe": "A healthier way to think about this",
+        "behavioral_activation": {
+          "activity": "A simple activity under 5 minutes, no prep needed",
+          "rationale": "Why this helps (1 sentence)"
+        }
       }
     }
   `;
   try {
     const raw = await callGemini(prompt, text);
 
-    // FIX: Better error handling if API call failed
     if (!raw) {
       console.error('analyzeEntry: No response from Gemini API');
       return {
         title: text.substring(0, 50) + (text.length > 50 ? '...' : ''),
         tags: [],
         mood_score: 0.5,
-        framework: 'general'
+        framework: 'general',
+        entry_type: entryType
       };
     }
 
     const jsonStr = raw.replace(/```json|```/g, '').trim();
     const parsed = JSON.parse(jsonStr);
 
-    // FIX: Build result object without undefined fields
     const result = {
       title: parsed.title || text.substring(0, 50) + (text.length > 50 ? '...' : ''),
       tags: Array.isArray(parsed.tags) ? parsed.tags : [],
       mood_score: typeof parsed.mood_score === 'number' ? parsed.mood_score : 0.5,
-      framework: parsed.framework || 'general'
+      framework: parsed.framework || 'general',
+      entry_type: entryType
     };
 
-    // Only add CBT breakdown if it exists and is valid
     if (parsed.cbt_breakdown && typeof parsed.cbt_breakdown === 'object' && Object.keys(parsed.cbt_breakdown).length > 0) {
       result.cbt_breakdown = parsed.cbt_breakdown;
     }
 
     console.log('analyzeEntry result:', result);
-    console.log('Result has cbt_breakdown property?', 'cbt_breakdown' in result);
 
     return result;
   } catch (e) {
@@ -478,7 +831,8 @@ const analyzeEntry = async (text) => {
       title: text.substring(0, 50) + (text.length > 50 ? '...' : ''),
       tags: [],
       mood_score: 0.5,
-      framework: 'general'
+      framework: 'general',
+      entry_type: entryType
     };
   }
 };
@@ -536,7 +890,329 @@ const generateSynthesisAI = async (entries) => {
   return await callGemini(systemPrompt, context);
 };
 
+const generateDailySynthesis = async (dayEntries) => {
+  const reflectionEntries = dayEntries.filter(e => e.entry_type !== 'task');
+  if (reflectionEntries.length === 0) return null;
+  
+  const context = reflectionEntries.map(e => `[${e.createdAt.toLocaleTimeString()}] ${e.text}`).join('\n---\n');
+  const prompt = `
+    Based on these journal entries from a single day, write a 2-3 sentence summary that:
+    1. Captures the emotional arc of the day (how feelings evolved)
+    2. Identifies any key themes or events
+    3. Notes any significant mood shifts
+    
+    Be warm and insightful. Do NOT use bullet points or headers. Just write flowing prose.
+    Return ONLY the summary text, nothing else.
+  `;
+  
+  try {
+    const result = await callGemini(prompt, context);
+    return result || null;
+  } catch (e) {
+    console.error('generateDailySynthesis error:', e);
+    return null;
+  }
+};
+
 // --- UI COMPONENTS ---
+
+// Crisis Soft-Block Modal (Phase 0 - Tier 1)
+const CrisisSoftBlockModal = ({ onResponse, onClose }) => {
+  return (
+    <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4 animate-in fade-in duration-300">
+      <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl animate-in zoom-in-95 duration-300">
+        <div className="flex items-center gap-3 mb-4">
+          <div className="h-12 w-12 bg-indigo-100 rounded-full flex items-center justify-center">
+            <Heart className="text-indigo-600" size={24} />
+          </div>
+          <div>
+            <h2 className="text-lg font-bold text-gray-900">Just checking in</h2>
+            <p className="text-sm text-gray-500">I noticed some heavy words</p>
+          </div>
+        </div>
+        
+        <p className="text-gray-600 mb-6">Are you okay? Your wellbeing matters most.</p>
+        
+        <div className="space-y-3">
+          <button
+            onClick={() => onResponse('okay')}
+            className="w-full p-4 text-left rounded-xl border-2 border-gray-200 hover:border-indigo-300 hover:bg-indigo-50 transition-all"
+          >
+            <div className="font-semibold text-gray-800">I'm okay, just venting</div>
+            <div className="text-sm text-gray-500">Continue saving my entry</div>
+          </button>
+          
+          <button
+            onClick={() => onResponse('support')}
+            className="w-full p-4 text-left rounded-xl border-2 border-gray-200 hover:border-blue-300 hover:bg-blue-50 transition-all"
+          >
+            <div className="font-semibold text-gray-800">I could use some support</div>
+            <div className="text-sm text-gray-500">Show me helpful resources</div>
+          </button>
+          
+          <button
+            onClick={() => onResponse('crisis')}
+            className="w-full p-4 text-left rounded-xl border-2 border-red-200 hover:border-red-400 hover:bg-red-50 transition-all"
+          >
+            <div className="font-semibold text-red-700">I'm in crisis</div>
+            <div className="text-sm text-red-500">Connect me with help now</div>
+          </button>
+        </div>
+        
+        <button
+          onClick={onClose}
+          className="mt-4 w-full text-center text-sm text-gray-400 hover:text-gray-600"
+        >
+          Cancel
+        </button>
+      </div>
+    </div>
+  );
+};
+
+// Crisis Resources Screen (shown after "I could use support" or "I'm in crisis")
+const CrisisResourcesScreen = ({ level, onClose, onContinue }) => {
+  const isCrisis = level === 'crisis';
+  
+  return (
+    <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4 animate-in fade-in duration-300">
+      <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl max-h-[90vh] overflow-y-auto">
+        <div className="text-center mb-6">
+          <div className={`h-16 w-16 mx-auto rounded-full flex items-center justify-center mb-4 ${isCrisis ? 'bg-red-100' : 'bg-blue-100'}`}>
+            <Phone className={isCrisis ? 'text-red-600' : 'text-blue-600'} size={32} />
+          </div>
+          <h2 className="text-xl font-bold text-gray-900">
+            {isCrisis ? "Help is available right now" : "Support resources"}
+          </h2>
+          <p className="text-gray-500 mt-2">
+            {isCrisis 
+              ? "You don't have to face this alone. Please reach out."
+              : "Here are some resources that might help."}
+          </p>
+        </div>
+        
+        <div className="space-y-3 mb-6">
+          <a
+            href="tel:988"
+            className={`flex items-center gap-4 p-4 rounded-xl border-2 ${isCrisis ? 'border-red-200 bg-red-50' : 'border-gray-200'} hover:shadow-md transition-all`}
+          >
+            <div className={`h-12 w-12 rounded-full flex items-center justify-center ${isCrisis ? 'bg-red-200' : 'bg-gray-200'}`}>
+              <Phone className={isCrisis ? 'text-red-700' : 'text-gray-700'} size={20} />
+            </div>
+            <div>
+              <div className="font-bold text-gray-900">988 Suicide & Crisis Lifeline</div>
+              <div className="text-sm text-gray-500">Call or text 988 - Available 24/7</div>
+            </div>
+          </a>
+          
+          <a
+            href="sms:741741&body=HOME"
+            className="flex items-center gap-4 p-4 rounded-xl border-2 border-gray-200 hover:shadow-md transition-all"
+          >
+            <div className="h-12 w-12 rounded-full bg-gray-200 flex items-center justify-center">
+              <MessageCircle className="text-gray-700" size={20} />
+            </div>
+            <div>
+              <div className="font-bold text-gray-900">Crisis Text Line</div>
+              <div className="text-sm text-gray-500">Text HOME to 741741</div>
+            </div>
+          </a>
+          
+          <a
+            href="tel:911"
+            className="flex items-center gap-4 p-4 rounded-xl border-2 border-gray-200 hover:shadow-md transition-all"
+          >
+            <div className="h-12 w-12 rounded-full bg-gray-200 flex items-center justify-center">
+              <AlertTriangle className="text-gray-700" size={20} />
+            </div>
+            <div>
+              <div className="font-bold text-gray-900">Emergency Services</div>
+              <div className="text-sm text-gray-500">Call 911 for immediate help</div>
+            </div>
+          </a>
+        </div>
+        
+        {!isCrisis && (
+          <button
+            onClick={onContinue}
+            className="w-full py-3 bg-indigo-600 text-white rounded-xl font-semibold hover:bg-indigo-700 transition-colors mb-3"
+          >
+            Continue with my entry
+          </button>
+        )}
+        
+        <button
+          onClick={onClose}
+          className="w-full py-3 text-gray-500 hover:text-gray-700 text-sm"
+        >
+          {isCrisis ? "I'll reach out for help" : "Close"}
+        </button>
+      </div>
+    </div>
+  );
+};
+
+// Safety Plan Screen (Phase 0 - Story 0.5)
+const SafetyPlanScreen = ({ plan, onUpdate, onClose }) => {
+  const [editingSection, setEditingSection] = useState(null);
+  const [newItem, setNewItem] = useState('');
+  
+  const addItem = (section) => {
+    if (!newItem.trim()) return;
+    const updated = { ...plan };
+    if (section === 'copingStrategies') {
+      updated[section] = [...(updated[section] || []), { activity: newItem, notes: '' }];
+    } else if (section === 'supportContacts') {
+      updated[section] = [...(updated[section] || []), { name: newItem, phone: '', relationship: '' }];
+    } else {
+      updated[section] = [...(updated[section] || []), newItem];
+    }
+    onUpdate(updated);
+    setNewItem('');
+    setEditingSection(null);
+  };
+  
+  const removeItem = (section, index) => {
+    const updated = { ...plan };
+    updated[section] = updated[section].filter((_, i) => i !== index);
+    onUpdate(updated);
+  };
+  
+  const SectionCard = ({ title, icon: Icon, section, items, renderItem }) => (
+    <div className="bg-white rounded-xl p-4 border border-gray-100 shadow-sm">
+      <div className="flex items-center justify-between mb-3">
+        <div className="flex items-center gap-2">
+          <Icon size={18} className="text-indigo-600" />
+          <h3 className="font-semibold text-gray-800">{title}</h3>
+        </div>
+        <button
+          onClick={() => setEditingSection(editingSection === section ? null : section)}
+          className="text-indigo-600 hover:text-indigo-800"
+        >
+          <Plus size={18} />
+        </button>
+      </div>
+      
+      {items.length === 0 ? (
+        <p className="text-sm text-gray-400 italic">No items yet - tap + to add</p>
+      ) : (
+        <div className="space-y-2">
+          {items.map((item, i) => (
+            <div key={i} className="flex items-center justify-between bg-gray-50 rounded-lg p-2">
+              <span className="text-sm text-gray-700">{renderItem(item)}</span>
+              <button onClick={() => removeItem(section, i)} className="text-gray-400 hover:text-red-500">
+                <X size={14} />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+      
+      {editingSection === section && (
+        <div className="mt-3 flex gap-2">
+          <input
+            type="text"
+            value={newItem}
+            onChange={(e) => setNewItem(e.target.value)}
+            placeholder="Add new item..."
+            className="flex-1 px-3 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            autoFocus
+          />
+          <button
+            onClick={() => addItem(section)}
+            className="px-3 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium"
+          >
+            Add
+          </button>
+        </div>
+      )}
+    </div>
+  );
+  
+  return (
+    <div className="fixed inset-0 bg-gray-50 z-50 overflow-y-auto">
+      <div className="sticky top-0 bg-white border-b p-4 flex items-center justify-between z-10">
+        <div className="flex items-center gap-3">
+          <Shield className="text-indigo-600" size={24} />
+          <h1 className="text-lg font-bold text-gray-900">My Safety Plan</h1>
+        </div>
+        <button onClick={onClose} className="p-2 hover:bg-gray-100 rounded-full">
+          <X size={20} />
+        </button>
+      </div>
+      
+      <div className="max-w-md mx-auto p-4 space-y-4 pb-20">
+        <div className="bg-indigo-50 rounded-xl p-4 border border-indigo-100">
+          <p className="text-sm text-indigo-800">
+            Your safety plan is here for difficult moments. Customize it during calm times so it's ready when you need it.
+          </p>
+        </div>
+        
+        <SectionCard
+          title="Warning Signs"
+          icon={AlertTriangle}
+          section="warningSignsPersonal"
+          items={plan.warningSignsPersonal || []}
+          renderItem={(item) => item}
+        />
+        
+        <SectionCard
+          title="Coping Strategies"
+          icon={Wind}
+          section="copingStrategies"
+          items={plan.copingStrategies || []}
+          renderItem={(item) => item.activity}
+        />
+        
+        <SectionCard
+          title="Reasons for Living"
+          icon={Heart}
+          section="reasonsForLiving"
+          items={plan.reasonsForLiving || []}
+          renderItem={(item) => item}
+        />
+        
+        <SectionCard
+          title="Support Contacts"
+          icon={Phone}
+          section="supportContacts"
+          items={plan.supportContacts || []}
+          renderItem={(item) => item.name}
+        />
+        
+        <div className="bg-white rounded-xl p-4 border border-gray-100 shadow-sm">
+          <div className="flex items-center gap-2 mb-3">
+            <Phone size={18} className="text-red-600" />
+            <h3 className="font-semibold text-gray-800">Crisis Lines (Always Available)</h3>
+          </div>
+          <div className="space-y-2">
+            {(plan.professionalContacts || DEFAULT_SAFETY_PLAN.professionalContacts).map((contact, i) => (
+              <a
+                key={i}
+                href={contact.phone.length <= 3 ? `tel:${contact.phone}` : `sms:${contact.phone}`}
+                className="flex items-center justify-between bg-red-50 rounded-lg p-3 hover:bg-red-100 transition-colors"
+              >
+                <span className="text-sm font-medium text-red-800">{contact.name}</span>
+                <span className="text-sm text-red-600">{contact.phone}</span>
+              </a>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// Get Help Button (always visible in header)
+const GetHelpButton = ({ onClick }) => (
+  <button
+    onClick={onClick}
+    className="p-2 rounded-full hover:bg-red-50 text-red-500 transition-colors"
+    title="Get Help"
+  >
+    <Shield size={20} />
+  </button>
+);
 
 const DecompressionScreen = ({ onClose }) => {
   const [step, setStep] = useState(0);
@@ -586,29 +1262,489 @@ const MarkdownLite = ({ text }) => {
   );
 };
 
-const MoodHeatmap = ({ entries }) => {
+const MoodHeatmap = ({ entries, onDayClick }) => {
   const days = useMemo(() => new Array(30).fill(null).map((_, i) => {
     const d = new Date(); d.setDate(new Date().getDate() - (29 - i)); return d;
   }), []);
 
-  const getMoodEmoji = (d) => {
-    const entry = entries.find(e => e.createdAt.getDate() === d.getDate() && e.createdAt.getMonth() === d.getMonth());
-    if (!entry || typeof entry.analysis.mood_score !== 'number') return '⚪';
-    if (entry.analysis.mood_score >= 0.75) return '😊';
-    if (entry.analysis.mood_score >= 0.55) return '🙂';
-    if (entry.analysis.mood_score >= 0.35) return '😐';
-    if (entry.analysis.mood_score >= 0.15) return '😟';
+  const getDayData = (d) => {
+    const dayEntries = entries.filter(e => 
+      e.createdAt.getDate() === d.getDate() && 
+      e.createdAt.getMonth() === d.getMonth() &&
+      e.createdAt.getFullYear() === d.getFullYear()
+    );
+    const moodEntries = dayEntries.filter(e => e.entry_type !== 'task' && typeof e.analysis?.mood_score === 'number');
+    const avgMood = moodEntries.length > 0 
+      ? moodEntries.reduce((sum, e) => sum + e.analysis.mood_score, 0) / moodEntries.length 
+      : null;
+    const moodScores = moodEntries.map(e => e.analysis.mood_score);
+    const volatility = moodScores.length > 1 
+      ? Math.max(...moodScores) - Math.min(...moodScores) 
+      : 0;
+    return { entries: dayEntries, avgMood, volatility, hasEntries: dayEntries.length > 0 };
+  };
+
+  const getMoodEmoji = (avgMood) => {
+    if (avgMood === null) return '⚪';
+    if (avgMood >= 0.75) return '😊';
+    if (avgMood >= 0.55) return '🙂';
+    if (avgMood >= 0.35) return '😐';
+    if (avgMood >= 0.15) return '😟';
     return '😢';
   };
 
   return (
     <div className="bg-white p-4 rounded-xl border border-gray-100 shadow-sm mb-6">
       <div className="flex items-center gap-2 mb-3 text-gray-700 font-semibold text-xs uppercase tracking-wide"><Activity size={14} /> Mood (30 Days)</div>
-      <div className="flex justify-between gap-0.5 flex-wrap">{days.map((d, i) => (
-        <div key={i} className="text-xl" title={d.toLocaleDateString()}>
-          {getMoodEmoji(d)}
+      <div className="flex justify-between gap-0.5 flex-wrap">{days.map((d, i) => {
+        const dayData = getDayData(d);
+        return (
+          <button 
+            key={i} 
+            className={`text-xl transition-transform hover:scale-125 ${dayData.hasEntries ? 'cursor-pointer' : 'cursor-default opacity-50'} ${dayData.volatility > 0.3 ? 'ring-2 ring-orange-300 rounded' : ''}`}
+            title={`${d.toLocaleDateString()}${dayData.entries.length > 0 ? ` - ${dayData.entries.length} entries` : ''}${dayData.volatility > 0.3 ? ' (high volatility)' : ''}`}
+            onClick={() => dayData.hasEntries && onDayClick && onDayClick(d, dayData)}
+            disabled={!dayData.hasEntries}
+          >
+            {getMoodEmoji(dayData.avgMood)}
+          </button>
+        );
+      })}</div>
+    </div>
+  );
+};
+
+const DailySummaryModal = ({ date, dayData, onClose, onDelete, onUpdate }) => {
+  const [synthesis, setSynthesis] = useState(null);
+  const [loadingSynthesis, setLoadingSynthesis] = useState(true);
+  
+  useEffect(() => {
+    const loadSynthesis = async () => {
+      if (dayData.entries.length > 0) {
+        const result = await generateDailySynthesis(dayData.entries);
+        setSynthesis(result);
+      }
+      setLoadingSynthesis(false);
+    };
+    loadSynthesis();
+  }, [dayData.entries]);
+  
+  const sortedEntries = [...dayData.entries].sort((a, b) => a.createdAt - b.createdAt);
+  const getMoodEmoji = (score) => {
+    if (score === null || score === undefined) return '';
+    if (score >= 0.75) return '😊';
+    if (score >= 0.55) return '🙂';
+    if (score >= 0.35) return '😐';
+    if (score >= 0.15) return '😟';
+    return '😢';
+  };
+  
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-hidden flex flex-col">
+        <div className="p-6 border-b border-gray-100">
+          <div className="flex justify-between items-center">
+            <div>
+              <h2 className="text-xl font-bold text-gray-800">{date.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}</h2>
+              <p className="text-sm text-gray-500">{dayData.entries.length} entries {dayData.volatility > 0.3 && <span className="text-orange-500">(high mood volatility)</span>}</p>
+            </div>
+            <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X size={24} /></button>
+          </div>
         </div>
-      ))}</div>
+        
+        <div className="flex-1 overflow-y-auto p-6 space-y-4">
+          {loadingSynthesis ? (
+            <div className="bg-indigo-50 p-4 rounded-lg border border-indigo-100 flex items-center gap-3">
+              <Loader2 size={18} className="animate-spin text-indigo-500" />
+              <span className="text-sm text-indigo-700">Generating daily summary...</span>
+            </div>
+          ) : synthesis && (
+            <div className="bg-indigo-50 p-4 rounded-lg border border-indigo-100">
+              <div className="flex items-center gap-2 text-indigo-700 font-semibold text-xs uppercase mb-2">
+                <Sparkles size={14} /> Daily Summary
+              </div>
+              <p className="text-sm text-indigo-900 leading-relaxed">{synthesis}</p>
+            </div>
+          )}
+          
+          {sortedEntries.map((entry) => (
+            <div key={entry.id} className="border border-gray-100 rounded-lg p-4 hover:shadow-sm transition-shadow">
+              <div className="flex justify-between items-start mb-2">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-gray-400">{entry.createdAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                  {entry.entry_type && entry.entry_type !== 'reflection' && (
+                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded uppercase ${
+                      entry.entry_type === 'task' ? 'bg-yellow-100 text-yellow-700' : 
+                      entry.entry_type === 'mixed' ? 'bg-teal-100 text-teal-700' : 
+                      entry.entry_type === 'vent' ? 'bg-pink-100 text-pink-700' : 'bg-gray-100 text-gray-600'
+                    }`}>{entry.entry_type}</span>
+                  )}
+                  {typeof entry.analysis?.mood_score === 'number' && (
+                    <span className="text-lg">{getMoodEmoji(entry.analysis.mood_score)}</span>
+                  )}
+                </div>
+                <button onClick={() => onDelete(entry.id)} className="text-gray-300 hover:text-red-400"><Trash2 size={14} /></button>
+              </div>
+              <h4 className="font-semibold text-gray-800 mb-1">{entry.title}</h4>
+              <p className="text-sm text-gray-600 line-clamp-3">{entry.text}</p>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const TherapistExportScreen = ({ entries, onClose }) => {
+  const [selectedEntries, setSelectedEntries] = useState(new Set());
+  const [dateRange, setDateRange] = useState({ start: '', end: '' });
+  const [exporting, setExporting] = useState(false);
+  const [exportFormat, setExportFormat] = useState('pdf');
+  
+  const filteredEntries = useMemo(() => {
+    let filtered = entries.filter(e => e.entry_type !== 'task');
+    if (dateRange.start) {
+      const startDate = new Date(dateRange.start);
+      filtered = filtered.filter(e => e.createdAt >= startDate);
+    }
+    if (dateRange.end) {
+      const endDate = new Date(dateRange.end);
+      endDate.setHours(23, 59, 59);
+      filtered = filtered.filter(e => e.createdAt <= endDate);
+    }
+    return filtered.sort((a, b) => a.createdAt - b.createdAt);
+  }, [entries, dateRange]);
+  
+  const toggleEntry = (id) => {
+    const newSelected = new Set(selectedEntries);
+    if (newSelected.has(id)) {
+      newSelected.delete(id);
+    } else {
+      newSelected.add(id);
+    }
+    setSelectedEntries(newSelected);
+  };
+  
+  const selectAll = () => {
+    setSelectedEntries(new Set(filteredEntries.map(e => e.id)));
+  };
+  
+  const selectNone = () => {
+    setSelectedEntries(new Set());
+  };
+  
+  const getMoodEmoji = (score) => {
+    if (score === null || score === undefined) return '';
+    if (score >= 0.75) return '😊';
+    if (score >= 0.55) return '🙂';
+    if (score >= 0.35) return '😐';
+    if (score >= 0.15) return '😟';
+    return '😢';
+  };
+  
+  const generatePDF = async () => {
+    setExporting(true);
+    try {
+      const { jsPDF } = await import('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js');
+      const doc = new jsPDF();
+      
+      const selectedList = filteredEntries.filter(e => selectedEntries.has(e.id));
+      const moodScores = selectedList.filter(e => typeof e.analysis?.mood_score === 'number').map(e => e.analysis.mood_score);
+      const avgMood = moodScores.length > 0 ? moodScores.reduce((a, b) => a + b, 0) / moodScores.length : null;
+      
+      doc.setFontSize(20);
+      doc.text('EchoVault Journal Export', 20, 20);
+      
+      doc.setFontSize(10);
+      doc.text(`Generated: ${new Date().toLocaleDateString()}`, 20, 30);
+      doc.text(`Entries: ${selectedList.length}`, 20, 36);
+      if (avgMood !== null) {
+        doc.text(`Average Mood: ${(avgMood * 100).toFixed(0)}%`, 20, 42);
+      }
+      
+      let yPos = 55;
+      const pageHeight = 280;
+      const margin = 20;
+      
+      selectedList.forEach((entry, index) => {
+        if (yPos > pageHeight - 40) {
+          doc.addPage();
+          yPos = 20;
+        }
+        
+        doc.setFontSize(12);
+        doc.setFont(undefined, 'bold');
+        doc.text(`${entry.createdAt.toLocaleDateString()} - ${entry.title}`, margin, yPos);
+        yPos += 6;
+        
+        if (typeof entry.analysis?.mood_score === 'number') {
+          doc.setFontSize(9);
+          doc.setFont(undefined, 'normal');
+          doc.text(`Mood: ${(entry.analysis.mood_score * 100).toFixed(0)}%`, margin, yPos);
+          yPos += 5;
+        }
+        
+        doc.setFontSize(10);
+        doc.setFont(undefined, 'normal');
+        const textLines = doc.splitTextToSize(entry.text, 170);
+        textLines.forEach(line => {
+          if (yPos > pageHeight - 10) {
+            doc.addPage();
+            yPos = 20;
+          }
+          doc.text(line, margin, yPos);
+          yPos += 5;
+        });
+        
+        if (entry.analysis?.cbt_breakdown) {
+          const cbt = entry.analysis.cbt_breakdown;
+          yPos += 3;
+          doc.setFontSize(9);
+          doc.setFont(undefined, 'italic');
+          
+          if (cbt.automatic_thought) {
+            if (yPos > pageHeight - 20) { doc.addPage(); yPos = 20; }
+            doc.text(`Thought: ${cbt.automatic_thought}`, margin + 5, yPos);
+            yPos += 4;
+          }
+          if (cbt.distortion) {
+            if (yPos > pageHeight - 20) { doc.addPage(); yPos = 20; }
+            doc.text(`Distortion: ${cbt.distortion}`, margin + 5, yPos);
+            yPos += 4;
+          }
+          if (cbt.suggested_reframe || cbt.challenge) {
+            if (yPos > pageHeight - 20) { doc.addPage(); yPos = 20; }
+            doc.text(`Reframe: ${cbt.suggested_reframe || cbt.challenge}`, margin + 5, yPos);
+            yPos += 4;
+          }
+        }
+        
+        yPos += 8;
+      });
+      
+      doc.save('echovault-export.pdf');
+    } catch (e) {
+      console.error('PDF generation failed:', e);
+      alert('PDF generation failed. Falling back to JSON export.');
+      generateJSON();
+    }
+    setExporting(false);
+  };
+  
+  const generateJSON = () => {
+    const selectedList = filteredEntries.filter(e => selectedEntries.has(e.id));
+    const exportData = {
+      exportDate: new Date().toISOString(),
+      entryCount: selectedList.length,
+      entries: selectedList.map(e => ({
+        date: e.createdAt.toISOString(),
+        title: e.title,
+        text: e.text,
+        mood_score: e.analysis?.mood_score,
+        entry_type: e.entry_type,
+        tags: e.tags,
+        cbt_breakdown: e.analysis?.cbt_breakdown
+      }))
+    };
+    
+    const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'echovault-export.json';
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+  
+  const handleExport = () => {
+    if (selectedEntries.size === 0) {
+      alert('Please select at least one entry to export.');
+      return;
+    }
+    if (exportFormat === 'pdf') {
+      generatePDF();
+    } else {
+      generateJSON();
+    }
+  };
+  
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-hidden flex flex-col">
+        <div className="p-6 border-b border-gray-100 bg-gradient-to-r from-indigo-600 to-purple-600 text-white">
+          <div className="flex justify-between items-center">
+            <div>
+              <h2 className="text-xl font-bold flex items-center gap-2"><FileText size={20} /> Export for Therapist</h2>
+              <p className="text-sm opacity-80 mt-1">Select entries to include in your export</p>
+            </div>
+            <button onClick={onClose} className="text-white/80 hover:text-white"><X size={24} /></button>
+          </div>
+        </div>
+        
+        <div className="p-4 border-b border-gray-100 bg-gray-50">
+          <div className="flex flex-wrap gap-4 items-end">
+            <div>
+              <label className="text-xs font-semibold text-gray-500 uppercase block mb-1">From</label>
+              <input 
+                type="date" 
+                value={dateRange.start}
+                onChange={e => setDateRange(prev => ({ ...prev, start: e.target.value }))}
+                className="border rounded-lg px-3 py-2 text-sm"
+              />
+            </div>
+            <div>
+              <label className="text-xs font-semibold text-gray-500 uppercase block mb-1">To</label>
+              <input 
+                type="date" 
+                value={dateRange.end}
+                onChange={e => setDateRange(prev => ({ ...prev, end: e.target.value }))}
+                className="border rounded-lg px-3 py-2 text-sm"
+              />
+            </div>
+            <div>
+              <label className="text-xs font-semibold text-gray-500 uppercase block mb-1">Format</label>
+              <select 
+                value={exportFormat}
+                onChange={e => setExportFormat(e.target.value)}
+                className="border rounded-lg px-3 py-2 text-sm"
+              >
+                <option value="pdf">PDF</option>
+                <option value="json">JSON</option>
+              </select>
+            </div>
+            <div className="flex gap-2">
+              <button onClick={selectAll} className="text-xs text-indigo-600 hover:underline">Select All</button>
+              <button onClick={selectNone} className="text-xs text-gray-500 hover:underline">Clear</button>
+            </div>
+          </div>
+        </div>
+        
+        <div className="flex-1 overflow-y-auto p-4">
+          <p className="text-xs text-gray-500 mb-3">{selectedEntries.size} of {filteredEntries.length} entries selected</p>
+          <div className="space-y-2">
+            {filteredEntries.map(entry => (
+              <div 
+                key={entry.id}
+                onClick={() => toggleEntry(entry.id)}
+                className={`p-3 rounded-lg border cursor-pointer transition-all ${
+                  selectedEntries.has(entry.id) 
+                    ? 'border-indigo-500 bg-indigo-50' 
+                    : 'border-gray-200 hover:border-gray-300'
+                }`}
+              >
+                <div className="flex items-start gap-3">
+                  <div className={`w-5 h-5 rounded border-2 flex items-center justify-center mt-0.5 ${
+                    selectedEntries.has(entry.id) ? 'bg-indigo-600 border-indigo-600' : 'border-gray-300'
+                  }`}>
+                    {selectedEntries.has(entry.id) && <Check size={14} className="text-white" />}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className="text-xs text-gray-400">{entry.createdAt.toLocaleDateString()}</span>
+                      {typeof entry.analysis?.mood_score === 'number' && (
+                        <span className="text-sm">{getMoodEmoji(entry.analysis.mood_score)}</span>
+                      )}
+                    </div>
+                    <h4 className="font-medium text-gray-800 truncate">{entry.title}</h4>
+                    <p className="text-sm text-gray-500 line-clamp-2">{entry.text}</p>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+        
+        <div className="p-4 border-t border-gray-100 bg-gray-50">
+          <button
+            onClick={handleExport}
+            disabled={exporting || selectedEntries.size === 0}
+            className="w-full bg-indigo-600 text-white py-3 rounded-lg font-semibold flex items-center justify-center gap-2 hover:bg-indigo-700 disabled:bg-gray-300 disabled:cursor-not-allowed"
+          >
+            {exporting ? (
+              <><Loader2 size={18} className="animate-spin" /> Generating...</>
+            ) : (
+              <><Download size={18} /> Export {selectedEntries.size} Entries</>
+            )}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const InsightsPanel = ({ entries, onClose }) => {
+  const patterns = useMemo(() => analyzeLongitudinalPatterns(entries), [entries]);
+  
+  const getPatternIcon = (type) => {
+    switch (type) {
+      case 'weekly_low': return <TrendingDown size={16} className="text-orange-500" />;
+      case 'weekly_high': return <TrendingUp size={16} className="text-green-500" />;
+      case 'trigger_correlation': return <AlertTriangle size={16} className="text-amber-500" />;
+      case 'recovery_pattern': return <Heart size={16} className="text-pink-500" />;
+      case 'monthly_summary': return <Calendar size={16} className="text-indigo-500" />;
+      default: return <Sparkles size={16} className="text-purple-500" />;
+    }
+  };
+  
+  const getPatternColor = (type) => {
+    switch (type) {
+      case 'weekly_low': return 'bg-orange-50 border-orange-200';
+      case 'weekly_high': return 'bg-green-50 border-green-200';
+      case 'trigger_correlation': return 'bg-amber-50 border-amber-200';
+      case 'recovery_pattern': return 'bg-pink-50 border-pink-200';
+      case 'monthly_summary': return 'bg-indigo-50 border-indigo-200';
+      default: return 'bg-purple-50 border-purple-200';
+    }
+  };
+  
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-2xl max-w-lg w-full max-h-[90vh] overflow-hidden flex flex-col">
+        <div className="p-6 border-b border-gray-100 bg-gradient-to-r from-purple-600 to-indigo-600 text-white">
+          <div className="flex justify-between items-center">
+            <div>
+              <h2 className="text-xl font-bold flex items-center gap-2"><BarChart3 size={20} /> Your Patterns</h2>
+              <p className="text-sm opacity-80 mt-1">Insights from your journal entries</p>
+            </div>
+            <button onClick={onClose} className="text-white/80 hover:text-white"><X size={24} /></button>
+          </div>
+        </div>
+        
+        <div className="flex-1 overflow-y-auto p-4">
+          {patterns.length === 0 ? (
+            <div className="text-center py-12">
+              <div className="h-20 w-20 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                <BarChart3 size={32} className="text-gray-400" />
+              </div>
+              <h3 className="text-lg font-medium text-gray-800">Not enough data yet</h3>
+              <p className="text-sm text-gray-500 mt-2">Keep journaling! Patterns will appear after you have at least 7 entries with mood data.</p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {patterns.map((pattern, i) => (
+                <div key={i} className={`p-4 rounded-lg border ${getPatternColor(pattern.type)}`}>
+                  <div className="flex items-start gap-3">
+                    <div className="mt-0.5">{getPatternIcon(pattern.type)}</div>
+                    <div>
+                      <p className="text-sm font-medium text-gray-800">{pattern.message}</p>
+                      {pattern.type === 'trigger_correlation' && (
+                        <p className="text-xs text-gray-500 mt-1">Based on {Math.round(pattern.percentDiff)}% mood difference</p>
+                      )}
+                      {pattern.type === 'recovery_pattern' && (
+                        <p className="text-xs text-gray-500 mt-1">Based on {pattern.samples} recovery instances</p>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+        
+        <div className="p-4 border-t border-gray-100 bg-gray-50">
+          <p className="text-xs text-gray-500 text-center">Patterns are calculated from your recent entries and update automatically</p>
+        </div>
+      </div>
     </div>
   );
 };
@@ -617,22 +1753,32 @@ const EntryCard = ({ entry, onDelete, onUpdate }) => {
   const [editing, setEditing] = useState(false);
   const [title, setTitle] = useState(entry.title);
   const isPending = entry.analysisStatus === 'pending';
+  const entryType = entry.entry_type || 'reflection';
+  const isTask = entryType === 'task';
+  const isMixed = entryType === 'mixed';
+  const isVent = entryType === 'vent';
 
   useEffect(() => { setTitle(entry.title); }, [entry.title]);
 
   const insightMsg = entry.contextualInsight?.message ? safeString(entry.contextualInsight.message) : null;
+  const cbt = entry.analysis?.cbt_breakdown;
+  const ventSupport = entry.analysis?.vent_support;
 
   const toggleCategory = () => {
     const newCategory = entry.category === 'work' ? 'personal' : 'work';
     onUpdate(entry.id, { category: newCategory });
   };
 
+  const cardStyle = isTask 
+    ? 'bg-yellow-50 border-yellow-200' 
+    : 'bg-white border-gray-100';
+
   return (
-    <div className="bg-white rounded-xl p-5 shadow-sm border border-gray-100 hover:shadow-md transition-shadow mb-4 relative overflow-hidden">
+    <div className={`rounded-xl p-5 shadow-sm border hover:shadow-md transition-shadow mb-4 relative overflow-hidden ${cardStyle}`}>
       {isPending && <div className="absolute top-0 left-0 right-0 h-1 bg-gray-100"><div className="h-full bg-indigo-500 animate-progress-indeterminate"></div></div>}
 
       {/* Insight Box */}
-      {entry.contextualInsight?.found && insightMsg && (
+      {entry.contextualInsight?.found && insightMsg && !isTask && (
         <div className={`mb-4 p-3 rounded-lg text-sm border flex gap-3 ${entry.contextualInsight.type === 'warning' ? 'bg-red-50 border-red-100 text-red-800' : 'bg-blue-50 border-blue-100 text-blue-800'}`}>
           <Lightbulb size={18} className="shrink-0 mt-0.5"/>
           <div>
@@ -642,13 +1788,86 @@ const EntryCard = ({ entry, onDelete, onUpdate }) => {
         </div>
       )}
 
-      {/* CBT Breakdown */}
-      {entry.analysis.framework === 'cbt' && entry.analysis.cbt_breakdown && (
+      {/* Vent Support Display */}
+      {isVent && ventSupport && (
+        <div className="mb-4 space-y-3">
+          {ventSupport.validation && (
+            <p className="text-gray-500 italic text-sm">{ventSupport.validation}</p>
+          )}
+          {ventSupport.cooldown && (
+            <div className="bg-blue-50 p-3 rounded-lg border border-blue-100">
+              <div className="flex items-center gap-2 text-blue-700 font-semibold text-xs uppercase mb-2">
+                <Wind size={14} /> {ventSupport.cooldown.technique || 'Grounding'}
+              </div>
+              <p className="text-sm text-blue-800">{ventSupport.cooldown.instruction}</p>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Enhanced CBT Breakdown with Visual Hierarchy */}
+      {entry.analysis?.framework === 'cbt' && cbt && (
+        <div className="mb-4 space-y-3">
+          {/* Validation - italicized gray, appears first */}
+          {cbt.validation && (
+            <p className="text-gray-500 italic text-sm">{cbt.validation}</p>
+          )}
+          
+          {/* Distortion Badge */}
+          {cbt.distortion && (
+            <div className="flex items-center gap-2">
+              <span className="bg-orange-100 text-orange-700 px-2 py-1 rounded-full text-xs font-semibold flex items-center gap-1">
+                <Info size={12} />
+                {cbt.distortion}
+              </span>
+            </div>
+          )}
+          
+          {/* Automatic Thought */}
+          {cbt.automatic_thought && (
+            <div className="text-sm text-gray-700">
+              <span className="font-semibold">Thought:</span> {cbt.automatic_thought}
+            </div>
+          )}
+          
+          {/* Socratic Question - blue highlight box */}
+          {cbt.socratic_question && (
+            <div className="bg-blue-50 p-3 rounded-lg border-l-4 border-blue-400">
+              <div className="text-xs font-semibold text-blue-600 uppercase mb-1">Reflect:</div>
+              <p className="text-sm text-blue-800">{cbt.socratic_question}</p>
+            </div>
+          )}
+          
+          {/* Cognitive Reframe - green text */}
+          {(cbt.suggested_reframe || cbt.challenge) && (
+            <div className="text-sm">
+              <span className="text-green-700 font-semibold">Try thinking:</span>{' '}
+              <span className="text-green-800">{cbt.suggested_reframe || cbt.challenge}</span>
+            </div>
+          )}
+          
+          {/* Behavioral Activation - purple action card */}
+          {cbt.behavioral_activation && (
+            <div className="bg-purple-50 p-3 rounded-lg border border-purple-100">
+              <div className="flex items-center gap-2 text-purple-700 font-semibold text-xs uppercase mb-2">
+                <Footprints size={14} /> Try This (Under 5 min)
+              </div>
+              <p className="text-sm text-purple-800 font-medium">{cbt.behavioral_activation.activity}</p>
+              {cbt.behavioral_activation.rationale && (
+                <p className="text-xs text-purple-600 mt-1">{cbt.behavioral_activation.rationale}</p>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Legacy CBT Breakdown (for backwards compatibility) */}
+      {entry.analysis?.framework === 'cbt' && cbt && !cbt.validation && !cbt.socratic_question && cbt.challenge && !cbt.suggested_reframe && (
         <div className="mb-4 bg-indigo-50 p-3 rounded-lg border border-indigo-100 text-sm space-y-2">
           <div className="flex items-center gap-2 text-indigo-700 font-bold text-xs uppercase"><Brain size={12}/> Cognitive Restructuring</div>
           <div className="grid gap-2">
-            <div><span className="font-semibold text-indigo-900">Thought:</span> {entry.analysis.cbt_breakdown.automatic_thought}</div>
-            <div className="bg-white p-2 rounded border border-indigo-100"><span className="font-semibold text-green-700">Challenge:</span> {entry.analysis.cbt_breakdown.challenge}</div>
+            <div><span className="font-semibold text-indigo-900">Thought:</span> {cbt.automatic_thought}</div>
+            <div className="bg-white p-2 rounded border border-indigo-100"><span className="font-semibold text-green-700">Challenge:</span> {cbt.challenge}</div>
           </div>
         </div>
       )}
@@ -663,10 +1882,23 @@ const EntryCard = ({ entry, onDelete, onUpdate }) => {
             {entry.category}
             <RefreshCw size={8} className="opacity-50" />
           </button>
+          {/* Entry Type Badge */}
+          {entryType !== 'reflection' && (
+            <span className={`text-[10px] font-bold px-2 py-0.5 rounded uppercase tracking-wide flex items-center gap-1 ${
+              isTask ? 'bg-yellow-100 text-yellow-700' : 
+              isMixed ? 'bg-teal-100 text-teal-700' : 
+              isVent ? 'bg-pink-100 text-pink-700' : 'bg-gray-100 text-gray-600'
+            }`}>
+              {isMixed && <Clipboard size={10} />}
+              {entryType}
+            </span>
+          )}
           {entry.tags.map((t, i) => <span key={i} className="text-[10px] font-semibold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded">#{safeString(t)}</span>)}
         </div>
         <div className="flex items-center gap-2">
-          {typeof entry.analysis.mood_score === 'number' && <span className="px-2 py-1 rounded-full text-[10px] font-bold bg-gray-100">{(entry.analysis.mood_score * 100).toFixed(0)}%</span>}
+          {typeof entry.analysis?.mood_score === 'number' && entry.analysis.mood_score !== null && (
+            <span className="px-2 py-1 rounded-full text-[10px] font-bold bg-gray-100">{(entry.analysis.mood_score * 100).toFixed(0)}%</span>
+          )}
           <button onClick={() => onDelete(entry.id)} className="text-gray-300 hover:text-red-400 transition-colors"><Trash2 size={16}/></button>
         </div>
       </div>
@@ -674,7 +1906,7 @@ const EntryCard = ({ entry, onDelete, onUpdate }) => {
       <div className="mb-2 flex items-center gap-2">
         {editing ? (
           <div className="flex-1 flex gap-2">
-            <input value={title} onChange={e => setTitle(e.target.value)} className="flex-1 font-bold text-lg border-b-2 border-indigo-500 focus:outline-none" autoFocus />
+            <input value={title} onChange={e => setTitle(e.target.value)} className="flex-1 font-bold text-lg border-b-2 border-indigo-500 focus:outline-none bg-transparent" autoFocus />
             <button onClick={() => { onUpdate(entry.id, { title }); setEditing(false); }} className="text-green-600"><Check size={18}/></button>
           </div>
         ) : (
@@ -687,6 +1919,32 @@ const EntryCard = ({ entry, onDelete, onUpdate }) => {
 
       <div className="text-xs text-gray-400 mb-4 flex items-center gap-1 font-medium"><Calendar size={12}/> {entry.createdAt.toLocaleDateString()}</div>
       <p className="text-gray-600 text-sm whitespace-pre-wrap leading-relaxed">{entry.text}</p>
+      
+      {/* Extracted Tasks for mixed entries */}
+      {isMixed && entry.extracted_tasks && entry.extracted_tasks.length > 0 && (
+        <div className="mt-4 pt-3 border-t border-gray-100">
+          <div className="text-xs font-semibold text-gray-500 uppercase mb-2 flex items-center gap-1">
+            <Clipboard size={12} /> Tasks
+          </div>
+          <div className="space-y-1">
+            {entry.extracted_tasks.map((task, i) => (
+              <div key={i} className="flex items-center gap-2 text-sm">
+                <input 
+                  type="checkbox" 
+                  checked={task.completed} 
+                  onChange={() => {
+                    const updatedTasks = [...entry.extracted_tasks];
+                    updatedTasks[i] = { ...task, completed: !task.completed };
+                    onUpdate(entry.id, { extracted_tasks: updatedTasks });
+                  }}
+                  className="rounded border-gray-300"
+                />
+                <span className={task.completed ? 'line-through text-gray-400' : 'text-gray-700'}>{task.text}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 };
@@ -924,18 +2182,33 @@ const WeeklyReport = ({ text, onClose }) => (
   </div>
 );
 
-const PromptScreen = ({ prompts, mode, onModeChange, onSave, onClose, loading }) => {
+const PromptScreen = ({ prompts, mode, onModeChange, onSave, onClose, loading, category, onRefreshPrompts }) => {
   const [textValue, setTextValue] = useState('');
   const [recording, setRecording] = useState(false);
   const [mediaRecorder, setMediaRecorder] = useState(null);
   const [recordSeconds, setRecordSeconds] = useState(0);
+  const [displayPrompts, setDisplayPrompts] = useState(prompts);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const timerRef = useRef(null);
+
+  useEffect(() => {
+    setDisplayPrompts(prompts);
+  }, [prompts]);
 
   useEffect(() => {
     return () => {
       if (timerRef.current) clearInterval(timerRef.current);
     };
   }, []);
+  
+  const handleRefresh = () => {
+    setIsRefreshing(true);
+    const promptBank = category === 'work' ? WORK_PROMPTS : PERSONAL_PROMPTS;
+    const newPrompts = getPromptsForSession(promptBank, 3);
+    setDisplayPrompts(newPrompts);
+    if (onRefreshPrompts) onRefreshPrompts(newPrompts);
+    setTimeout(() => setIsRefreshing(false), 300);
+  };
 
   const startRecording = async () => {
     if (typeof navigator === 'undefined' || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
@@ -984,14 +2257,24 @@ const PromptScreen = ({ prompts, mode, onModeChange, onSave, onClose, loading })
       </div>
 
       <div className="flex-1 overflow-y-auto p-4 bg-gray-50">
-        {prompts.length > 0 && (
+        {displayPrompts.length > 0 && (
           <div className="mb-4">
-            <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-2 flex items-center gap-2">
-              <Sparkles size={12}/> Reflect on these
-            </h3>
-            <div className="bg-white rounded-xl p-4 border border-gray-200 shadow-sm">
+            <div className="flex justify-between items-center mb-2">
+              <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wide flex items-center gap-2">
+                <Sparkles size={12}/> Reflect on these
+              </h3>
+              <button 
+                onClick={handleRefresh}
+                className={`text-xs text-indigo-600 hover:text-indigo-800 flex items-center gap-1 transition-transform ${isRefreshing ? 'animate-spin' : ''}`}
+                title="Get new prompts"
+              >
+                <RefreshCw size={14} />
+                Refresh
+              </button>
+            </div>
+            <div className={`bg-white rounded-xl p-4 border border-gray-200 shadow-sm transition-opacity ${isRefreshing ? 'opacity-50' : ''}`}>
               <div className="space-y-2">
-                {prompts.map((prompt, i) => (
+                {displayPrompts.map((prompt, i) => (
                   <div key={i} className="flex items-start gap-2">
                     <span className="text-indigo-500 text-xs mt-0.5">•</span>
                     <p className="text-sm text-gray-700 italic">"{prompt}"</p>
@@ -999,6 +2282,12 @@ const PromptScreen = ({ prompts, mode, onModeChange, onSave, onClose, loading })
                 ))}
               </div>
             </div>
+            <button
+              onClick={() => onModeChange('skip')}
+              className="mt-2 text-xs text-gray-400 hover:text-gray-600"
+            >
+              Skip prompts and write freely
+            </button>
           </div>
         )}
 
@@ -1195,7 +2484,23 @@ export default function App() {
   const [replyContext, setReplyContext] = useState(null);
   const [showDecompression, setShowDecompression] = useState(false);
   const [showPrompts, setShowPrompts] = useState(false);
-  const [promptMode, setPromptMode] = useState(null); // null, 'voice', or 'text'
+  const [promptMode, setPromptMode] = useState(null);
+  
+  // Safety features (Phase 0)
+  const [safetyPlan, setSafetyPlan] = useState(DEFAULT_SAFETY_PLAN);
+  const [showSafetyPlan, setShowSafetyPlan] = useState(false);
+  const [crisisModal, setCrisisModal] = useState(null);
+  const [crisisResources, setCrisisResources] = useState(null);
+  const [pendingEntry, setPendingEntry] = useState(null);
+  
+  // Daily Summary Modal (Phase 2)
+  const [dailySummaryModal, setDailySummaryModal] = useState(null);
+  
+  // Therapist Export (Phase 3)
+  const [showExport, setShowExport] = useState(false);
+  
+  // Insights Panel (Phase 4)
+  const [showInsights, setShowInsights] = useState(false);
 
   // Auth
   useEffect(() => {
@@ -1222,6 +2527,44 @@ export default function App() {
       setEntries(safeData);
     });
   }, [user]);
+
+  // Load Safety Plan (Phase 0)
+  useEffect(() => {
+    if (!user) return;
+    const safetyPlanRef = doc(db, 'artifacts', APP_COLLECTION_ID, 'users', user.uid, 'safetyPlan', 'plan');
+    return onSnapshot(safetyPlanRef, (snap) => {
+      if (snap.exists()) {
+        setSafetyPlan({ ...DEFAULT_SAFETY_PLAN, ...snap.data() });
+      } else {
+        setSafetyPlan(DEFAULT_SAFETY_PLAN);
+      }
+    });
+  }, [user]);
+
+  // Save Safety Plan handler
+  const updateSafetyPlan = useCallback(async (newPlan) => {
+    if (!user) return;
+    const safetyPlanRef = doc(db, 'artifacts', APP_COLLECTION_ID, 'users', user.uid, 'safetyPlan', 'plan');
+    const planData = removeUndefined({
+      ...newPlan,
+      updatedAt: Timestamp.now()
+    });
+    try {
+      await setDoc(safetyPlanRef, planData, { merge: true });
+      setSafetyPlan(newPlan);
+    } catch (e) {
+      console.error('Failed to save safety plan:', e);
+    }
+  }, [user]);
+
+  // Longitudinal risk check (Phase 0 - Tier 3)
+  useEffect(() => {
+    if (!user || entries.length < 3) return;
+    const hasRisk = checkLongitudinalRisk(entries);
+    if (hasRisk) {
+      console.log('Longitudinal risk detected - consider showing proactive support');
+    }
+  }, [user, entries]);
 
   // Self-healing: Backfill embeddings for entries that are missing them
   useEffect(() => {
@@ -1292,9 +2635,32 @@ export default function App() {
     return prompts.slice(0, 5); // Return max 5 prompts
   }, [visible]);
 
-  const saveEntry = async (textInput) => {
+  const handleCrisisResponse = useCallback(async (response) => {
+    setCrisisModal(null);
+    
+    if (response === 'okay') {
+      if (pendingEntry) {
+        await doSaveEntry(pendingEntry.text, pendingEntry.safetyFlagged, response);
+        setPendingEntry(null);
+      }
+    } else if (response === 'support') {
+      setCrisisResources('support');
+    } else if (response === 'crisis') {
+      setCrisisResources('crisis');
+      setPendingEntry(null);
+    }
+  }, [pendingEntry]);
+
+  const handleCrisisResourcesContinue = useCallback(async () => {
+    setCrisisResources(null);
+    if (pendingEntry) {
+      await doSaveEntry(pendingEntry.text, pendingEntry.safetyFlagged, 'support');
+      setPendingEntry(null);
+    }
+  }, [pendingEntry]);
+
+  const doSaveEntry = async (textInput, safetyFlagged = false, safetyUserResponse = null) => {
     if (!user) return;
-    setProcessing(true);
 
     let finalTex = textInput;
     if (replyContext) {
@@ -1304,12 +2670,31 @@ export default function App() {
     const embedding = await generateEmbedding(finalTex);
     const related = findRelevantMemories(embedding, entries, cat);
     const recent = entries.slice(0, 5);
+    
+    const hasWarning = checkWarningIndicators(finalTex);
 
     try {
-      const ref = await addDoc(collection(db, 'artifacts', APP_COLLECTION_ID, 'users', user.uid, 'entries'), {
-        text: finalTex, category: cat, analysisStatus: 'pending', embedding,
-        createdAt: Timestamp.now(), userId: user.uid
-      });
+      const entryData = {
+        text: finalTex, 
+        category: cat, 
+        analysisStatus: 'pending', 
+        embedding,
+        createdAt: Timestamp.now(), 
+        userId: user.uid
+      };
+      
+      if (safetyFlagged) {
+        entryData.safety_flagged = true;
+        if (safetyUserResponse) {
+          entryData.safety_user_response = safetyUserResponse;
+        }
+      }
+      
+      if (hasWarning) {
+        entryData.has_warning_indicators = true;
+      }
+      
+      const ref = await addDoc(collection(db, 'artifacts', APP_COLLECTION_ID, 'users', user.uid, 'entries'), entryData);
 
       setProcessing(false);
       setMode('idle');
@@ -1317,58 +2702,62 @@ export default function App() {
       setShowPrompts(false);
       setPromptMode(null);
 
-      // FIX: Added .catch() to ensure entry always gets marked as complete
-      Promise.all([analyzeEntry(finalTex), generateInsight(finalTex, related, recent)])
-        .then(async ([analysis, insight]) => {
-          console.log('Analysis complete:', { analysis, insight });
-          console.log('Analysis object keys:', Object.keys(analysis));
-          console.log('Has cbt_breakdown?', 'cbt_breakdown' in analysis, analysis.cbt_breakdown);
+      (async () => {
+        try {
+          const classification = await classifyEntry(finalTex);
+          console.log('Entry classification:', classification);
+          
+          const [analysis, insight] = await Promise.all([
+            analyzeEntry(finalTex, classification.entry_type),
+            classification.entry_type !== 'task' ? generateInsight(finalTex, related, recent) : Promise.resolve(null)
+          ]);
+          
+          console.log('Analysis complete:', { analysis, insight, classification });
 
-          // AI ROUTER CHECK: Decompression for low mood
-          if (analysis && analysis.mood_score < 0.35) {
+          if (analysis && analysis.mood_score !== null && analysis.mood_score < 0.35) {
             setShowDecompression(true);
           }
 
-          // FIX: Build update object without undefined fields (Firebase doesn't allow undefined)
           const updateData = {
             title: analysis?.title || "New Memory",
             tags: analysis?.tags || [],
-            analysisStatus: 'complete'
+            analysisStatus: 'complete',
+            entry_type: classification.entry_type,
+            classification_confidence: classification.confidence
           };
+          
+          if (classification.extracted_tasks && classification.extracted_tasks.length > 0) {
+            updateData.extracted_tasks = classification.extracted_tasks.map(t => ({ text: t, completed: false }));
+          }
 
-          // Only add analysis fields that exist
           updateData.analysis = {
-            mood_score: analysis?.mood_score ?? 0.5,
+            mood_score: analysis?.mood_score,
             framework: analysis?.framework || 'general'
           };
 
-          // Only include CBT breakdown if it exists and is valid
           if (analysis?.cbt_breakdown && typeof analysis.cbt_breakdown === 'object' && Object.keys(analysis.cbt_breakdown).length > 0) {
             updateData.analysis.cbt_breakdown = analysis.cbt_breakdown;
           }
+          
+          if (analysis?.vent_support) {
+            updateData.analysis.vent_support = analysis.vent_support;
+          }
 
-          // Only add contextual insight if it exists
           if (insight?.found) {
             updateData.contextualInsight = insight;
           }
 
           console.log('Final updateData to save:', JSON.stringify(updateData, null, 2));
-          console.log('updateData.analysis has cbt_breakdown?', 'cbt_breakdown' in updateData.analysis);
 
-          // FIX: Remove ALL undefined values before sending to Firebase
           const cleanedUpdateData = removeUndefined(updateData);
-          console.log('Cleaned updateData (after removing undefined):', JSON.stringify(cleanedUpdateData, null, 2));
 
           try {
             await updateDoc(ref, cleanedUpdateData);
           } catch (updateError) {
             console.error('Failed to update document:', updateError);
-            // Document might not exist anymore, try to verify
             throw updateError;
           }
-        })
-        .catch(async (error) => {
-          // FIX: Critical - always mark as complete even if analysis fails
+        } catch (error) {
           console.error('Analysis failed, marking entry as complete with fallback values:', error);
 
           try {
@@ -1379,19 +2768,17 @@ export default function App() {
               },
               title: finalTex.substring(0, 50) + (finalTex.length > 50 ? '...' : ''),
               tags: [],
-              analysisStatus: 'complete'
+              analysisStatus: 'complete',
+              entry_type: 'reflection'
             };
 
-            // FIX: Also clean fallback data
             const cleanedFallbackData = removeUndefined(fallbackData);
-            console.log('Fallback data (cleaned):', JSON.stringify(cleanedFallbackData, null, 2));
-
             await updateDoc(ref, cleanedFallbackData);
           } catch (fallbackError) {
             console.error('Even fallback update failed:', fallbackError);
-            // Document was probably deleted - nothing we can do
           }
-        });
+        }
+      })();
     } catch (e) {
       console.error('Save failed:', e);
       alert("Save failed");
@@ -1399,11 +2786,26 @@ export default function App() {
     }
   };
 
+  const saveEntry = async (textInput) => {
+    if (!user) return;
+    setProcessing(true);
+    
+    const hasCrisis = checkCrisisKeywords(textInput);
+    
+    if (hasCrisis) {
+      setPendingEntry({ text: textInput, safetyFlagged: true });
+      setCrisisModal(true);
+      setProcessing(false);
+      return;
+    }
+    
+    await doSaveEntry(textInput);
+  };
+
   const handleAudioWrapper = async (base64, mime) => {
     setProcessing(true);
     const transcript = await transcribeAudio(base64, mime);
 
-    // FIX: Better error messages based on error type
     if (!transcript) {
       alert("Transcription failed - please try again");
       setProcessing(false);
@@ -1471,11 +2873,67 @@ export default function App() {
   return (
     <div className="min-h-screen bg-gray-50 pb-40 pt-[env(safe-area-inset-top)]">
       {showDecompression && <DecompressionScreen onClose={() => setShowDecompression(false)} />}
+      
+      {crisisModal && (
+        <CrisisSoftBlockModal 
+          onResponse={handleCrisisResponse}
+          onClose={() => {
+            setCrisisModal(null);
+            setPendingEntry(null);
+          }}
+        />
+      )}
+      
+      {crisisResources && (
+        <CrisisResourcesScreen 
+          level={crisisResources}
+          onClose={() => {
+            setCrisisResources(null);
+            setPendingEntry(null);
+          }}
+          onContinue={handleCrisisResourcesContinue}
+        />
+      )}
+      
+      {showSafetyPlan && (
+        <SafetyPlanScreen 
+          plan={safetyPlan}
+          onUpdate={updateSafetyPlan}
+          onClose={() => setShowSafetyPlan(false)}
+        />
+      )}
+      
+      {dailySummaryModal && (
+        <DailySummaryModal
+          date={dailySummaryModal.date}
+          dayData={dailySummaryModal.dayData}
+          onClose={() => setDailySummaryModal(null)}
+          onDelete={id => deleteDoc(doc(db, 'artifacts', APP_COLLECTION_ID, 'users', user.uid, 'entries', id))}
+          onUpdate={(id, d) => updateDoc(doc(db, 'artifacts', APP_COLLECTION_ID, 'users', user.uid, 'entries', id), d)}
+        />
+      )}
+      
+      {showExport && (
+        <TherapistExportScreen
+          entries={entries}
+          onClose={() => setShowExport(false)}
+        />
+      )}
+      
+      {showInsights && (
+        <InsightsPanel
+          entries={entries}
+          onClose={() => setShowInsights(false)}
+        />
+      )}
 
       <div className="bg-white border-b p-4 sticky top-0 z-20 shadow-sm">
         <div className="flex justify-between items-center mb-4">
           <h1 className="font-bold text-lg flex gap-2 text-gray-800"><Brain className="text-indigo-600"/> EchoVault</h1>
           <div className="flex gap-2">
+            <GetHelpButton onClick={() => setShowSafetyPlan(true)} />
+            <button onClick={() => setShowInsights(true)} className="p-2 rounded-full hover:bg-gray-100 text-gray-500" title="View Patterns"><BarChart3 size={20}/></button>
+            <button onClick={() => setShowExport(true)} className="p-2 rounded-full hover:bg-gray-100 text-gray-500" title="Export for Therapist"><FileText size={20}/></button>
             <button onClick={requestPermission} className={`p-2 rounded-full hover:bg-gray-100 ${permission === 'granted' ? 'text-indigo-600' : 'text-gray-400'}`} title="Notifications"><Bell size={20}/></button>
             <button onClick={() => setView('chat')} className="p-2 rounded-full hover:bg-gray-100 text-gray-500"><MessageCircle size={20}/></button>
             <button onClick={() => signOut(auth)} className="p-2 rounded-full hover:bg-red-50 text-red-500"><LogOut size={20}/></button>
@@ -1488,7 +2946,7 @@ export default function App() {
       </div>
 
       <div className="max-w-md mx-auto p-4">
-        {visible.length > 0 && <MoodHeatmap entries={visible} />}
+        {visible.length > 0 && <MoodHeatmap entries={visible} onDayClick={(date, dayData) => setDailySummaryModal({ date, dayData })} />}
         <div className="space-y-4">
           {visible.map(e => <EntryCard key={e.id} entry={e} onDelete={id => deleteDoc(doc(db, 'artifacts', APP_COLLECTION_ID, 'users', user.uid, 'entries', id))} onUpdate={(id, d) => updateDoc(doc(db, 'artifacts', APP_COLLECTION_ID, 'users', user.uid, 'entries', id), d)} />)}
         </div>
@@ -1524,8 +2982,9 @@ export default function App() {
             setPromptMode(null);
           }}
           loading={processing}
+          category={cat}
         />
-      ) : mode === 'recording_voice' ? (
+      ) : mode === 'recording_voice' ?(
         <VoiceRecorder onSave={handleAudioWrapper} onSwitch={() => setMode('recording_text')} loading={processing} />
       ) : mode === 'recording_text' ? (
         <TextInput onSave={saveEntry} onCancel={() => {setMode('idle'); setReplyContext(null);}} loading={processing} />
