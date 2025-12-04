@@ -269,15 +269,24 @@ const shuffleArray = (array) => {
   return shuffled;
 };
 
-const getPromptsForSession = (category, smartReflections, shownPromptIds = []) => {
+const getPromptsForSession = (category, smartReflections) => {
   if (smartReflections.length > 0) {
     return { type: 'smart', prompts: smartReflections.slice(0, 3) };
   }
   
   const bank = category === 'work' ? WORK_PROMPTS : PERSONAL_PROMPTS;
-  const available = bank.filter(p => !shownPromptIds.includes(p.id));
+  
+  // Track recently shown prompts in localStorage
+  const recentlyShown = JSON.parse(localStorage.getItem('recentPrompts') || '[]');
+  const available = bank.filter(p => !recentlyShown.includes(p.id));
   const pool = available.length >= 3 ? available : bank;
   const selected = shuffleArray(pool).slice(0, 3);
+  
+  // Update localStorage (keep last 10)
+  localStorage.setItem('recentPrompts', JSON.stringify([
+    ...selected.map(p => p.id),
+    ...recentlyShown
+  ].slice(0, 10)));
   
   return { type: 'standard', prompts: selected.map(p => p.text) };
 };
@@ -432,6 +441,41 @@ const sanitizeEntry = (id, data) => {
   };
 };
 
+// --- PDF LOADER (lazy-loads jsPDF from CDN) ---
+let jsPDFPromise = null;
+const loadJsPDF = () => {
+  if (typeof window === 'undefined') {
+    return Promise.reject(new Error('PDF export is only available in the browser'));
+  }
+  if (window.jspdf && window.jspdf.jsPDF) {
+    return Promise.resolve(window.jspdf.jsPDF);
+  }
+  if (jsPDFPromise) return jsPDFPromise;
+  
+  jsPDFPromise = new Promise((resolve, reject) => {
+    const existing = document.querySelector('script[data-jspdf]');
+    if (existing) {
+      existing.addEventListener('load', () => {
+        if (window.jspdf && window.jspdf.jsPDF) resolve(window.jspdf.jsPDF);
+        else reject(new Error('jsPDF global not found after script load'));
+      });
+      existing.addEventListener('error', () => reject(new Error('Failed to load jsPDF script')));
+      return;
+    }
+    const script = document.createElement('script');
+    script.src = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js';
+    script.async = true;
+    script.dataset.jspdf = 'true';
+    script.onload = () => {
+      if (window.jspdf && window.jspdf.jsPDF) resolve(window.jspdf.jsPDF);
+      else reject(new Error('jsPDF global not found after script load'));
+    };
+    script.onerror = () => reject(new Error('Failed to load jsPDF script'));
+    document.body.appendChild(script);
+  });
+  return jsPDFPromise;
+};
+
 // --- VECTOR MATH ---
 const cosineSimilarity = (vecA, vecB) => {
   if (!vecA || !vecB || vecA.length !== vecB.length) return 0;
@@ -455,9 +499,9 @@ const findRelevantMemories = (targetVector, allEntries, category, topK = 5) => {
 };
 
 // --- GEMINI API ---
-const callGemini = async (systemPrompt, userPrompt) => {
+const callGemini = async (systemPrompt, userPrompt, model = AI_CONFIG.analysis.primary) => {
   try {
-    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${GEMINI_API_KEY}`, {
+    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_API_KEY}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -673,12 +717,19 @@ const classifyEntry = async (text) => {
     {
       "entry_type": "task" | "mixed" | "reflection" | "vent",
       "confidence": 0.0-1.0,
-      "extracted_tasks": ["task1", "task2"] // Only if type is "task" or "mixed"
+      "extracted_tasks": [{ "text": "Buy milk", "completed": false }]
     }
+    
+    TASK EXTRACTION RULES (only for task/mixed types):
+    - Extract ONLY explicit tasks/to-dos
+    - Keep text concise (verb + object)
+    - SKIP vague intentions ("I should exercise more" → NOT a task)
+    - SKIP emotional statements ("I need to feel better" → NOT a task)
+    - If no clear tasks, return empty array
   `;
   
   try {
-    const raw = await callGemini(prompt, text);
+    const raw = await callGemini(prompt, text, AI_CONFIG.classification.primary);
     if (!raw) {
       return { entry_type: 'reflection', confidence: 0.5, extracted_tasks: [] };
     }
@@ -712,7 +763,15 @@ const analyzeEntry = async (text, entryType = 'reflection') => {
   
   if (entryType === 'vent') {
     const ventPrompt = `
-      This person is venting and needs validation, NOT advice or CBT reframing.
+      This person is venting and needs validation, NOT advice.
+      
+      CRITICAL RULES:
+      - DO NOT challenge their thoughts
+      - DO NOT offer solutions or advice
+      - DO NOT minimize ("at least...", "it could be worse...")
+      - DO NOT use "have you considered..."
+      
+      Goal: Lower physiological arousal through validation and grounding.
       
       Return JSON:
       {
@@ -1445,7 +1504,7 @@ const TherapistExportScreen = ({ entries, onClose }) => {
   const generatePDF = async () => {
     setExporting(true);
     try {
-      const { jsPDF } = await import('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js');
+      const jsPDF = await loadJsPDF();
       const doc = new jsPDF();
       
       const selectedList = filteredEntries.filter(e => selectedEntries.has(e.id));
