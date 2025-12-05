@@ -831,6 +831,12 @@ const analyzeEntry = async (text, entryType = 'reflection') => {
     1. IF text shows anxiety, negative self-talk, or cognitive distortion -> Use 'cbt' framework.
     2. OTHERWISE -> Use 'general' framework.
 
+    RESPONSE DEPTH RULES (IMPORTANT - be selective, less is more):
+    - For brief, low-stakes entries: Keep response minimal. Not every entry needs a full breakdown.
+    - Only include "perspective" if there's a clear cognitive distortion worth challenging.
+    - Only include "behavioral_activation" if the entry contains distress signals like: stressed, anxious, overwhelmed, stuck, can't stop, spiraling, panicking, worried, frustrated, exhausted, burnt out, drained.
+    - If an entry is casual/neutral (e.g., "stayed up late on TikTok"), a simple validation is enough - skip the full CBT breakdown.
+
     Return JSON:
     {
       "title": "Short creative title (max 6 words)",
@@ -838,19 +844,20 @@ const analyzeEntry = async (text, entryType = 'reflection') => {
       "mood_score": 0.5 (0.0=bad, 1.0=good),
       "framework": "cbt" | "general",
 
-      // Include ONLY IF framework == 'cbt'
+      // Include ONLY IF framework == 'cbt' AND the entry warrants it
       "cbt_breakdown": {
-        "automatic_thought": "The negative thought pattern identified",
-        "distortion": "Cognitive distortion label (e.g., Catastrophizing, All-or-Nothing)",
-        "validation": "Empathetic acknowledgment of their feelings (1-2 sentences)",
-        "socratic_question": "A thought-provoking question to challenge the thought",
-        "suggested_reframe": "A healthier way to think about this",
+        "automatic_thought": "The negative thought pattern identified (or null if not clear)",
+        "distortion": "Cognitive distortion label (or null if minor/not worth highlighting)",
+        "validation": "Empathetic acknowledgment of their feelings (1-2 sentences) - ALWAYS include this",
+        "perspective": "Combine reflection question + reframe. Format: 'Question to consider: [question] — Alternative view: [reframe]' (or null if not needed)",
         "behavioral_activation": {
           "activity": "A simple activity under 5 minutes, no prep needed",
           "rationale": "Why this helps (1 sentence)"
         }
       }
     }
+
+    NOTE: Return null for any cbt_breakdown field that isn't genuinely useful for this specific entry. Quality over quantity.
   `;
   try {
     const raw = await callGemini(prompt, text);
@@ -1916,13 +1923,17 @@ const EntryCard = ({ entry, onDelete, onUpdate }) => {
     <div className={`rounded-xl p-5 shadow-sm border hover:shadow-md transition-shadow mb-4 relative overflow-hidden ${cardStyle}`}>
       {isPending && <div className="absolute top-0 left-0 right-0 h-1 bg-gray-100"><div className="h-full bg-indigo-500 animate-progress-indeterminate"></div></div>}
 
-      {/* Insight Box */}
+      {/* Insight Box - now includes validation when both exist */}
       {entry.contextualInsight?.found && insightMsg && !isTask && (
         <div className={`mb-4 p-3 rounded-lg text-sm border flex gap-3 ${entry.contextualInsight.type === 'warning' ? 'bg-red-50 border-red-100 text-red-800' : 'bg-blue-50 border-blue-100 text-blue-800'}`}>
           <Lightbulb size={18} className="shrink-0 mt-0.5"/>
           <div>
             <div className="font-bold text-[10px] uppercase opacity-75 tracking-wider mb-1">{safeString(entry.contextualInsight.type)}</div>
             {insightMsg}
+            {/* Fold validation into insight when both exist */}
+            {cbt?.validation && (
+              <p className="mt-2 text-gray-600 italic border-t border-gray-200 pt-2">{cbt.validation}</p>
+            )}
           </div>
         </div>
       )}
@@ -1947,13 +1958,18 @@ const EntryCard = ({ entry, onDelete, onUpdate }) => {
       {/* Enhanced CBT Breakdown with Visual Hierarchy */}
       {entry.analysis?.framework === 'cbt' && cbt && (
         <div className="mb-4 space-y-3">
-          {/* Validation - italicized gray, appears first */}
-          {cbt.validation && (
+          {/* Validation - italicized gray, appears first (only if no insight to fold into) */}
+          {cbt.validation && !entry.contextualInsight?.found && (
             <p className="text-gray-500 italic text-sm">{cbt.validation}</p>
           )}
-          
-          {/* Distortion Badge */}
+
+          {/* Distortion Badge - only show if mood < 0.4 OR serious distortion type */}
           {cbt.distortion && (
+            entry.analysis?.mood_score < 0.4 ||
+            ['Catastrophizing', 'All-or-Nothing Thinking', 'All-or-Nothing', 'Mind Reading', 'Fortune Telling', 'Emotional Reasoning'].some(d =>
+              cbt.distortion?.toLowerCase().includes(d.toLowerCase())
+            )
+          ) && (
             <div className="flex items-center gap-2">
               <span className="bg-orange-100 text-orange-700 px-2 py-1 rounded-full text-xs font-semibold flex items-center gap-1">
                 <Info size={12} />
@@ -1961,30 +1977,38 @@ const EntryCard = ({ entry, onDelete, onUpdate }) => {
               </span>
             </div>
           )}
-          
+
           {/* Automatic Thought */}
           {cbt.automatic_thought && (
             <div className="text-sm text-gray-700">
               <span className="font-semibold">Thought:</span> {cbt.automatic_thought}
             </div>
           )}
-          
-          {/* Socratic Question - blue highlight box */}
-          {cbt.socratic_question && (
+
+          {/* NEW: Combined Perspective card (question + reframe) */}
+          {cbt.perspective && (
+            <div className="bg-gradient-to-r from-blue-50 to-green-50 p-3 rounded-lg border-l-4 border-blue-400">
+              <div className="text-xs font-semibold text-blue-600 uppercase mb-1">💭 Perspective</div>
+              <p className="text-sm text-gray-700">{cbt.perspective}</p>
+            </div>
+          )}
+
+          {/* LEGACY: Socratic Question - for backwards compatibility with old entries */}
+          {!cbt.perspective && cbt.socratic_question && (
             <div className="bg-blue-50 p-3 rounded-lg border-l-4 border-blue-400">
               <div className="text-xs font-semibold text-blue-600 uppercase mb-1">Reflect:</div>
               <p className="text-sm text-blue-800">{cbt.socratic_question}</p>
             </div>
           )}
-          
-          {/* Cognitive Reframe - green text */}
-          {(cbt.suggested_reframe || cbt.challenge) && (
+
+          {/* LEGACY: Cognitive Reframe - for backwards compatibility with old entries */}
+          {!cbt.perspective && (cbt.suggested_reframe || cbt.challenge) && (
             <div className="text-sm">
               <span className="text-green-700 font-semibold">Try thinking:</span>{' '}
               <span className="text-green-800">{cbt.suggested_reframe || cbt.challenge}</span>
             </div>
           )}
-          
+
           {/* Behavioral Activation - purple action card */}
           {cbt.behavioral_activation && (
             <div className="bg-purple-50 p-3 rounded-lg border border-purple-100">
