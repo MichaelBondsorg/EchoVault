@@ -988,17 +988,38 @@ const generateDailySynthesis = async (dayEntries) => {
     if (!result) return null;
 
     try {
-      // Strip markdown code blocks if present
-      const jsonStr = result.replace(/```json|```/g, '').trim();
-      const parsed = JSON.parse(jsonStr);
+      // Try multiple approaches to extract JSON from the response
+      let jsonStr = result;
+
+      // Approach 1: Extract content from markdown code blocks (handles ```json ... ``` or ``` ... ```)
+      const codeBlockMatch = result.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
+      if (codeBlockMatch) {
+        jsonStr = codeBlockMatch[1];
+      } else {
+        // Approach 2: Simple strip of markdown markers
+        jsonStr = result.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
+      }
+
+      // Approach 3: If still not valid JSON, try to find JSON object in the string
+      if (!jsonStr.startsWith('{')) {
+        const jsonMatch = jsonStr.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+          jsonStr = jsonMatch[0];
+        }
+      }
+
+      const parsed = JSON.parse(jsonStr.trim());
       if (parsed && typeof parsed.summary === 'string' && Array.isArray(parsed.bullets)) {
         return parsed;
       }
     } catch (parseErr) {
-      console.error('generateDailySynthesis JSON parse error:', parseErr);
+      console.error('generateDailySynthesis JSON parse error:', parseErr, 'Raw result:', result);
     }
 
-    return { summary: result, bullets: [] };
+    // Fallback: try to display something readable if we can't parse JSON
+    // Strip any markdown code blocks for display
+    const cleanedResult = result.replace(/```(?:json)?\s*/g, '').replace(/```\s*/g, '').trim();
+    return { summary: cleanedResult, bullets: [] };
   } catch (e) {
     console.error('generateDailySynthesis error:', e);
     return null;
