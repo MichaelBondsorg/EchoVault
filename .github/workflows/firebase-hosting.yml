@@ -8,6 +8,11 @@ on:
     branches:
       - claude/fix-app-jsx-crash-01CJ53i4VdchkRGVFFgXfQMV
 
+permissions:
+  contents: read
+  checks: write
+  pull-requests: write
+
 jobs:
   build_and_deploy:
     runs-on: ubuntu-latest
