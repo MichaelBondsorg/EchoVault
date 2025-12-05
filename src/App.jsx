@@ -43,7 +43,7 @@ const AI_CONFIG = {
     fallback: 'gpt-4o-mini'
   },
   analysis: {
-    primary: 'gemini-2.5-flash-preview-05-20',
+    primary: 'gemini-2.0-flash',
     fallback: 'gpt-4o'
   },
   chat: {
@@ -2319,10 +2319,9 @@ const PromptScreen = ({ prompts, mode, onModeChange, onSave, onClose, loading, c
   
   const handleRefresh = () => {
     setIsRefreshing(true);
-    const promptBank = category === 'work' ? WORK_PROMPTS : PERSONAL_PROMPTS;
-    const newPrompts = getPromptsForSession(promptBank, 3);
-    setDisplayPrompts(newPrompts);
-    if (onRefreshPrompts) onRefreshPrompts(newPrompts);
+    const result = getPromptsForSession(category, []);
+    setDisplayPrompts(result.prompts);
+    if (onRefreshPrompts) onRefreshPrompts(result.prompts);
     setTimeout(() => setIsRefreshing(false), 300);
   };
 
@@ -2335,7 +2334,7 @@ const PromptScreen = ({ prompts, mode, onModeChange, onSave, onClose, loading, c
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       const mime = MediaRecorder.isTypeSupported("audio/webm") ? "audio/webm" : "audio/mp4";
-      const recorder = new MediaRecorder(stream, { mimeType: mime, audioBitsPerSecond: 16000 });
+      const recorder = new MediaRecorder(stream, { mimeType: mime, audioBitsPerSecond: 128000 });
       const chunks = [];
 
       recorder.ondataavailable = e => chunks.push(e.data);
