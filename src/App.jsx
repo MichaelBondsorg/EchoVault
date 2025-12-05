@@ -986,16 +986,18 @@ const generateDailySynthesis = async (dayEntries) => {
   try {
     const result = await callGemini(prompt, context);
     if (!result) return null;
-    
+
     try {
-      const parsed = JSON.parse(result);
+      // Strip markdown code blocks if present
+      const jsonStr = result.replace(/```json|```/g, '').trim();
+      const parsed = JSON.parse(jsonStr);
       if (parsed && typeof parsed.summary === 'string' && Array.isArray(parsed.bullets)) {
         return parsed;
       }
     } catch (parseErr) {
       console.error('generateDailySynthesis JSON parse error:', parseErr);
     }
-    
+
     return { summary: result, bullets: [] };
   } catch (e) {
     console.error('generateDailySynthesis error:', e);
