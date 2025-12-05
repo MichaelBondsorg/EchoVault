@@ -1395,13 +1395,13 @@ const MoodHeatmap = ({ entries, onDayClick }) => {
         return (
           <button 
             key={i} 
-            className={`flex-1 rounded transition-all ${hasEntries ? 'cursor-pointer hover:opacity-80' : 'cursor-default'} ${volatility > 0.3 ? 'ring-2 ring-orange-300' : ''}`}
+            className={`flex-1 rounded transition-all ${hasEntries ? 'cursor-pointer hover:opacity-80' : 'cursor-default'}`}
             style={{
               backgroundColor: getMoodColor(avgMood),
               height: avgMood !== null ? `${Math.max(20, avgMood * 60)}px` : '20px',
               minWidth: '8px'
             }}
-            title={`${d.toLocaleDateString()}${hasEntries ? `: ${dayData.entries.length} entries${avgMood !== null ? ` - ${(avgMood * 100).toFixed(0)}%` : ''}` : ': No entry'}${volatility > 0.3 ? ' (high volatility)' : ''}`}
+            title={`${d.toLocaleDateString()}${hasEntries ? `: ${dayData.entries.length} entries${avgMood !== null ? ` - ${(avgMood * 100).toFixed(0)}%` : ''}` : ': No entry'}`}
             onClick={() => hasEntries && onDayClick && onDayClick(d, dayData)}
             disabled={!hasEntries}
           />
