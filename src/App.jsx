@@ -1017,6 +1017,17 @@ const generateInsight = async (current, relevantHistory, recentHistory) => {
     - "streak": Consistent positive behavior (3+ occurrences)
     - "absence": Something negative that used to appear frequently but hasn't lately
 
+    TEMPORAL REFERENCE RESOLUTION (CRITICAL):
+    Entries use relative time references like "yesterday", "last night", "tomorrow", "tonight", etc.
+    You MUST resolve these relative to EACH ENTRY'S DATE (shown in brackets), not today's date.
+
+    Example: If an entry from [12/5/2024] says "going to an event tomorrow" and the current entry
+    from [12/6/2024] says "went to the event last night" - these refer to the SAME EVENT (the night of 12/5-12/6).
+    Do NOT count this as two separate occurrences or a "pattern" of attending events.
+
+    Before flagging patterns or recurring themes, verify that entries are describing DIFFERENT events/situations,
+    not the same event referenced from different temporal perspectives.
+
     TIME-BOXING RULES (CRITICAL - respect these windows):
     - "Recurring theme" requires 3+ mentions within 14 days (not spread over months)
     - "Warning" patterns should be within 7 days to be relevant
@@ -1025,7 +1036,7 @@ const generateInsight = async (current, relevantHistory, recentHistory) => {
     - Don't flag patterns from entries older than 60 days unless truly significant
 
     RETURN found: true ONLY IF you identify:
-    - A recurring theme (3+ mentions within 14 days)
+    - A recurring theme (3+ DISTINCT occurrences within 14 days - same event mentioned twice doesn't count)
     - A direct contradiction or progress from recent entries (within 7 days)
     - A trigger pattern (similar situation → similar mood)
     - Genuine progress compared to 30 days ago
@@ -1043,7 +1054,7 @@ const generateInsight = async (current, relevantHistory, recentHistory) => {
   `;
 
   try {
-    const raw = await callGemini(prompt, `HISTORY:\n${context}\n\nCURRENT ENTRY:\n${current}`);
+    const raw = await callGemini(prompt, `HISTORY:\n${context}\n\nCURRENT ENTRY [${today.toLocaleDateString()} - written just now]:\n${current}`);
 
     // FIX: Handle null response
     if (!raw) {
