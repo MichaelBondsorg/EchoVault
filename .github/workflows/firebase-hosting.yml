@@ -3,10 +3,10 @@ name: Deploy to Firebase Hosting
 on:
   push:
     branches:
-      - claude/fix-app-jsx-crash-01CJ53i4VdchkRGVFFgXfQMV
+      - main
   pull_request:
     branches:
-      - claude/fix-app-jsx-crash-01CJ53i4VdchkRGVFFgXfQMV
+      - main
 
 permissions:
   contents: read
