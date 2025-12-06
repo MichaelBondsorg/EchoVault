@@ -438,7 +438,11 @@ const sanitizeEntry = (id, data) => {
     analysisStatus: data.analysisStatus || 'complete',
     embedding: data.embedding || null,
     contextualInsight: data.contextualInsight || null,
-    createdAt: safeDate(data.createdAt)
+    createdAt: safeDate(data.createdAt),
+    // Enhanced context fields
+    continues_situation: data.continues_situation || null,
+    goal_update: data.goal_update || null,
+    entry_type: data.entry_type || 'reflection'
   };
 };
 
@@ -989,7 +993,7 @@ const analyzeEntry = async (text, entryType = 'reflection') => {
   }
 };
 
-const generateInsight = async (current, relevantHistory, recentHistory) => {
+const generateInsight = async (current, relevantHistory, recentHistory, allEntries = []) => {
   const historyMap = new Map();
   [...recentHistory, ...relevantHistory].forEach(e => historyMap.set(e.id, e));
   const uniqueHistory = Array.from(historyMap.values());
@@ -998,15 +1002,50 @@ const generateInsight = async (current, relevantHistory, recentHistory) => {
 
   // Add date context for time-boxing
   const today = new Date();
+  const dayOfWeek = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][today.getDay()];
+
+  // Build enhanced context with structured tags
   const context = uniqueHistory.map(e => {
     const entryDate = e.createdAt instanceof Date ? e.createdAt : e.createdAt.toDate();
     const daysAgo = Math.floor((today - entryDate) / (1000 * 60 * 60 * 24));
-    return `[${entryDate.toLocaleDateString()} - ${daysAgo} days ago] ${e.text}`;
+    const tags = e.tags?.filter(t => t.startsWith('@')).join(', ') || '';
+    const moodInfo = e.analysis?.mood_score !== null && e.analysis?.mood_score !== undefined
+      ? ` [mood: ${e.analysis.mood_score.toFixed(1)}]` : '';
+    return `[${entryDate.toLocaleDateString()} - ${daysAgo} days ago]${moodInfo}${tags ? ` {${tags}}` : ''} ${e.text}`;
   }).join('\n');
+
+  // Compute mood trajectory
+  const moodTrajectory = computeMoodTrajectory(recentHistory);
+  const moodContext = moodTrajectory
+    ? `\nMOOD TRAJECTORY: ${moodTrajectory.description} (avg: ${moodTrajectory.average}, trend: ${moodTrajectory.trend})`
+    : '';
+
+  // Detect cyclical patterns (only if we have enough data)
+  const cyclicalPatterns = allEntries.length >= 14 ? detectCyclicalPatterns(allEntries) : null;
+  const cyclicalContext = cyclicalPatterns?.pattern
+    ? `\nCYCLICAL PATTERN DETECTED: ${cyclicalPatterns.pattern}`
+    : '';
+
+  // Find self-statements for contradiction detection
+  const selfStatements = uniqueHistory
+    .flatMap(e => e.tags?.filter(t => t.startsWith('@self:')) || [])
+    .filter((t, i, arr) => arr.indexOf(t) === i); // unique
+  const selfContext = selfStatements.length > 0
+    ? `\nSELF-STATEMENTS FROM HISTORY: ${selfStatements.join(', ')}`
+    : '';
+
+  // Find active goals for progress tracking
+  const activeGoals = uniqueHistory
+    .flatMap(e => e.tags?.filter(t => t.startsWith('@goal:')) || [])
+    .filter((t, i, arr) => arr.indexOf(t) === i);
+  const goalContext = activeGoals.length > 0
+    ? `\nACTIVE GOALS: ${activeGoals.join(', ')}`
+    : '';
 
   const prompt = `
     You are a proactive memory assistant analyzing journal entries.
-    Today's date: ${today.toLocaleDateString()}
+    Today's date: ${today.toLocaleDateString()} (${dayOfWeek})
+    ${moodContext}${cyclicalContext}${selfContext}${goalContext}
 
     INSIGHT TYPES (choose the most appropriate):
     - "warning": Negative pattern recurring (same trigger → same negative outcome)
@@ -1016,6 +1055,9 @@ const generateInsight = async (current, relevantHistory, recentHistory) => {
     - "progress": Positive trend or improvement over time
     - "streak": Consistent positive behavior (3+ occurrences)
     - "absence": Something negative that used to appear frequently but hasn't lately
+    - "contradiction": User's current behavior contradicts their self-statement (use gently!)
+    - "goal_check": Follow-up on a previously stated goal
+    - "cyclical": Day-of-week or time-based pattern observation
 
     TEMPORAL REFERENCE RESOLUTION (CRITICAL):
     Entries use relative time references like "yesterday", "last night", "tomorrow", "tonight", etc.
@@ -1027,6 +1069,20 @@ const generateInsight = async (current, relevantHistory, recentHistory) => {
 
     Before flagging patterns or recurring themes, verify that entries are describing DIFFERENT events/situations,
     not the same event referenced from different temporal perspectives.
+
+    STRUCTURED TAG AWARENESS:
+    - @person:name = recurring person in user's life
+    - @place:location = recurring location
+    - @goal:intention = something user wants to achieve
+    - @situation:context = ongoing multi-day situation
+    - @self:statement = how user describes themselves ("I always...", "I never...")
+
+    CONTRADICTION DETECTION (use sparingly and gently):
+    If the current entry contradicts a @self statement (e.g., @self:never_asks_for_help but entry shows asking for help),
+    frame it positively as growth or flexibility, not as catching them in a lie.
+
+    GOAL TRACKING:
+    If the current entry relates to a @goal tag, note progress, struggles, or completion.
 
     TIME-BOXING RULES (CRITICAL - respect these windows):
     - "Recurring theme" requires 3+ mentions within 14 days (not spread over months)
@@ -1041,13 +1097,16 @@ const generateInsight = async (current, relevantHistory, recentHistory) => {
     - A trigger pattern (similar situation → similar mood)
     - Genuine progress compared to 30 days ago
     - A notable absence of a previously frequent concern
+    - A gentle, positive contradiction of a self-limiting belief
+    - Progress or follow-up on a stated goal
+    - A cyclical pattern worth mentioning (if it's today's historically difficult day)
 
     If the connection feels forced, weak, or the entries are too old, return { "found": false }.
 
     Output JSON:
     {
       "found": true,
-      "type": "warning" | "encouragement" | "pattern" | "reminder" | "progress" | "streak" | "absence",
+      "type": "warning" | "encouragement" | "pattern" | "reminder" | "progress" | "streak" | "absence" | "contradiction" | "goal_check" | "cyclical",
       "message": "Concise, insightful observation (1-2 sentences max)",
       "followUpQuestions": ["Relevant question 1?", "Relevant question 2?"]
     }
@@ -1070,9 +1129,255 @@ const generateInsight = async (current, relevantHistory, recentHistory) => {
   }
 };
 
-const askJournalAI = async (entries, question) => {
-  const context = entries.slice(0, 30).map(e => `[${e.createdAt.toLocaleDateString()}] [${e.title}] ${e.text}`).join('\n');
-  const systemPrompt = `Answer based ONLY on journal entries. Use ### headers and * bullets. CONTEXT:\n${context}`;
+// --- ENHANCED CONTEXT EXTRACTION ---
+// Extracts structured tags for entities, goals, situations, and patterns
+const extractEnhancedContext = async (text, recentEntries = []) => {
+  // Build context from recent entries for continuity detection
+  const recentContext = recentEntries.slice(0, 10).map(e => {
+    const entryDate = e.createdAt instanceof Date ? e.createdAt : e.createdAt?.toDate?.() || new Date();
+    const tags = e.tags || [];
+    return `[${entryDate.toLocaleDateString()}] Tags: ${tags.join(', ') || 'none'} | ${e.text?.substring(0, 200) || ''}`;
+  }).join('\n');
+
+  const prompt = `
+    Extract structured context from this journal entry. This helps track people, goals, and ongoing situations across entries.
+
+    EXISTING CONTEXT FROM RECENT ENTRIES:
+    ${recentContext || 'No recent entries'}
+
+    EXTRACTION RULES:
+
+    1. PEOPLE (@person:name) - Extract mentioned people with lowercase, underscore-separated names
+       - Only real people with names or clear identifiers (mom, dad, boss, therapist)
+       - Skip generic references ("someone", "people", "they")
+       - Examples: @person:sarah, @person:mom, @person:dr_smith, @person:boss
+
+    2. PLACES (@place:name) - Significant locations
+       - Specific places that might recur: @place:office, @place:gym, @place:home, @place:coffee_shop
+       - Skip generic locations ("somewhere", "outside")
+
+    3. GOALS/INTENTIONS (@goal:description) - Things the user wants to do or change
+       - Explicit goals: "I want to...", "I need to...", "I'm going to..."
+       - Track these for follow-up: @goal:exercise_more, @goal:speak_up_at_work, @goal:call_mom_weekly
+       - Be specific but concise
+
+    4. ONGOING SITUATIONS (@situation:description) - Multi-day events or circumstances
+       - Job searches, health issues, relationship conflicts, projects
+       - Check if this continues a situation from recent entries
+       - Examples: @situation:job_interview_process, @situation:apartment_hunting, @situation:project_deadline
+
+    5. SELF-STATEMENTS (@self:statement) - How user describes themselves or their patterns
+       - "I always...", "I never...", "I'm the kind of person who..."
+       - Track these for contradiction detection
+       - Examples: @self:always_late, @self:bad_at_math, @self:never_asks_for_help
+
+    6. TOPIC TAGS (regular tags without @) - General themes
+       - Keep existing tag behavior for general topics
+       - Examples: anxiety, work, family, health, gratitude
+
+    Return JSON:
+    {
+      "structured_tags": ["@person:name", "@place:location", "@goal:description", "@situation:context", "@self:statement"],
+      "topic_tags": ["general", "topic", "tags"],
+      "continues_situation": "@situation:tag_from_recent_entries_if_this_continues_it" or null,
+      "goal_update": {
+        "tag": "@goal:tag_if_this_updates_a_previous_goal",
+        "status": "progress" | "achieved" | "abandoned" | "struggling" | null
+      } or null
+    }
+
+    Be conservative - only extract what's clearly present. Empty arrays are fine.
+  `;
+
+  try {
+    const raw = await callGemini(prompt, text, AI_CONFIG.classification.primary);
+    if (!raw) return { structured_tags: [], topic_tags: [], continues_situation: null, goal_update: null };
+
+    const jsonStr = raw.replace(/```json|```/g, '').trim();
+    return JSON.parse(jsonStr);
+  } catch (e) {
+    console.error('extractEnhancedContext error:', e);
+    return { structured_tags: [], topic_tags: [], continues_situation: null, goal_update: null };
+  }
+};
+
+// --- MOOD TRAJECTORY HELPER ---
+// Computes mood trajectory from recent entries for context
+const computeMoodTrajectory = (recentEntries) => {
+  const validEntries = recentEntries
+    .filter(e => e.analysis?.mood_score !== null && e.analysis?.mood_score !== undefined)
+    .slice(0, 7); // Last 7 entries with mood scores
+
+  if (validEntries.length < 2) return null;
+
+  const scores = validEntries.map(e => e.analysis.mood_score);
+  const avgMood = scores.reduce((a, b) => a + b, 0) / scores.length;
+  const latestMood = scores[0];
+  const oldestMood = scores[scores.length - 1];
+  const trend = latestMood - oldestMood;
+
+  // Detect streaks
+  let lowStreak = 0;
+  let highStreak = 0;
+  for (const score of scores) {
+    if (score < 0.4) lowStreak++;
+    else break;
+  }
+  for (const score of scores) {
+    if (score > 0.6) highStreak++;
+    else break;
+  }
+
+  return {
+    average: avgMood.toFixed(2),
+    trend: trend > 0.1 ? 'improving' : trend < -0.1 ? 'declining' : 'stable',
+    lowStreak: lowStreak >= 2 ? lowStreak : 0,
+    highStreak: highStreak >= 2 ? highStreak : 0,
+    description: lowStreak >= 3 ? `User has been struggling for ${lowStreak} entries` :
+                 highStreak >= 3 ? `User has been doing well for ${highStreak} entries` :
+                 trend > 0.15 ? 'Mood is improving recently' :
+                 trend < -0.15 ? 'Mood has been declining recently' :
+                 'Mood is relatively stable'
+  };
+};
+
+// --- CYCLICAL PATTERN DETECTION ---
+// Detects day-of-week and time-based patterns
+const detectCyclicalPatterns = (entries) => {
+  if (entries.length < 14) return null; // Need at least 2 weeks of data
+
+  const dayOfWeekMoods = { 0: [], 1: [], 2: [], 3: [], 4: [], 5: [], 6: [] };
+  const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+  entries.forEach(e => {
+    if (e.analysis?.mood_score !== null && e.analysis?.mood_score !== undefined) {
+      const date = e.createdAt instanceof Date ? e.createdAt : e.createdAt?.toDate?.() || new Date();
+      const dayOfWeek = date.getDay();
+      dayOfWeekMoods[dayOfWeek].push(e.analysis.mood_score);
+    }
+  });
+
+  const dayAverages = {};
+  let lowestDay = null;
+  let lowestAvg = 1;
+  let highestDay = null;
+  let highestAvg = 0;
+
+  for (let day = 0; day < 7; day++) {
+    const scores = dayOfWeekMoods[day];
+    if (scores.length >= 2) {
+      const avg = scores.reduce((a, b) => a + b, 0) / scores.length;
+      dayAverages[dayNames[day]] = avg.toFixed(2);
+
+      if (avg < lowestAvg) {
+        lowestAvg = avg;
+        lowestDay = dayNames[day];
+      }
+      if (avg > highestAvg) {
+        highestAvg = avg;
+        highestDay = dayNames[day];
+      }
+    }
+  }
+
+  // Only report if there's a significant difference (>0.15)
+  if (highestAvg - lowestAvg < 0.15) return null;
+
+  return {
+    lowestDay,
+    lowestAvg: lowestAvg.toFixed(2),
+    highestDay,
+    highestAvg: highestAvg.toFixed(2),
+    pattern: lowestAvg < 0.4 ? `${lowestDay}s tend to be harder for you` :
+             highestAvg > 0.7 ? `${highestDay}s are usually your best days` : null
+  };
+};
+
+// --- FIND ENTRIES BY TAG ---
+// Helper to find entries with specific structured tags
+const findEntriesByTag = (entries, tagPrefix) => {
+  return entries.filter(e =>
+    e.tags?.some(t => t.startsWith(tagPrefix))
+  );
+};
+
+// --- SMART CONTEXT RETRIEVAL FOR CHAT ---
+const getSmartChatContext = async (entries, question, questionEmbedding) => {
+  // 1. Semantic similarity (existing approach)
+  let semanticMatches = [];
+  if (questionEmbedding) {
+    semanticMatches = entries
+      .filter(e => e.embedding)
+      .map(e => ({
+        ...e,
+        similarity: cosineSimilarity(questionEmbedding, e.embedding)
+      }))
+      .filter(e => e.similarity > 0.3)
+      .sort((a, b) => b.similarity - a.similarity)
+      .slice(0, 10);
+  }
+
+  // 2. Tag-based matching - extract potential entities from question
+  const questionLower = question.toLowerCase();
+  const tagMatches = [];
+
+  // Find entries with matching @person tags
+  const personMatches = entries.filter(e =>
+    e.tags?.some(t => t.startsWith('@person:') && questionLower.includes(t.replace('@person:', '').replace('_', ' ')))
+  );
+  tagMatches.push(...personMatches);
+
+  // Find entries with matching @situation tags
+  const situationMatches = entries.filter(e =>
+    e.tags?.some(t => t.startsWith('@situation:') &&
+      questionLower.split(' ').some(word => t.toLowerCase().includes(word) && word.length > 3))
+  );
+  tagMatches.push(...situationMatches);
+
+  // Find entries with matching @goal tags
+  const goalMatches = entries.filter(e =>
+    e.tags?.some(t => t.startsWith('@goal:') &&
+      questionLower.split(' ').some(word => t.toLowerCase().includes(word) && word.length > 3))
+  );
+  tagMatches.push(...goalMatches);
+
+  // 3. Recent entries for general context
+  const recentEntries = entries.slice(0, 5);
+
+  // 4. Merge and deduplicate
+  const allMatches = new Map();
+  [...semanticMatches, ...tagMatches, ...recentEntries].forEach(e => {
+    if (!allMatches.has(e.id)) {
+      allMatches.set(e.id, e);
+    }
+  });
+
+  return Array.from(allMatches.values()).slice(0, 20);
+};
+
+const askJournalAI = async (entries, question, questionEmbedding = null) => {
+  // Use smart context retrieval
+  const relevantEntries = await getSmartChatContext(entries, question, questionEmbedding);
+
+  const context = relevantEntries.map(e => {
+    const date = e.createdAt instanceof Date ? e.createdAt : e.createdAt?.toDate?.() || new Date();
+    const tags = e.tags?.filter(t => t.startsWith('@')).join(', ') || '';
+    return `[${date.toLocaleDateString()}] [${e.title}] ${tags ? `{${tags}} ` : ''}${e.text}`;
+  }).join('\n');
+
+  const systemPrompt = `You are a helpful journal assistant with access to the user's personal entries.
+
+CONTEXT FROM JOURNAL ENTRIES:
+${context}
+
+INSTRUCTIONS:
+- Answer based ONLY on the journal entries provided
+- Reference specific dates when relevant
+- Notice patterns across entries (recurring people, places, goals, situations)
+- Tags starting with @ indicate: @person:name, @place:location, @goal:intention, @situation:ongoing_context, @self:self_statement
+- Use ### headers and * bullets for formatting
+- Be warm and personal - this is someone's private journal`;
+
   return await callGemini(systemPrompt, question);
 };
 
@@ -2284,7 +2589,23 @@ const EntryCard = ({ entry, onDelete, onUpdate }) => {
               {entryType}
             </span>
           )}
-          {entry.tags.map((t, i) => <span key={i} className="text-[10px] font-semibold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded">#{safeString(t)}</span>)}
+          {entry.tags.map((t, i) => {
+            const tag = safeString(t);
+            // Different styling for structured tags
+            if (tag.startsWith('@person:')) {
+              return <span key={i} className="text-[10px] font-semibold text-blue-600 bg-blue-50 px-2 py-0.5 rounded">{tag.replace('@person:', '👤 ')}</span>;
+            } else if (tag.startsWith('@place:')) {
+              return <span key={i} className="text-[10px] font-semibold text-green-600 bg-green-50 px-2 py-0.5 rounded">{tag.replace('@place:', '📍 ')}</span>;
+            } else if (tag.startsWith('@goal:')) {
+              return <span key={i} className="text-[10px] font-semibold text-amber-600 bg-amber-50 px-2 py-0.5 rounded">{tag.replace('@goal:', '🎯 ')}</span>;
+            } else if (tag.startsWith('@situation:')) {
+              return <span key={i} className="text-[10px] font-semibold text-purple-600 bg-purple-50 px-2 py-0.5 rounded">{tag.replace('@situation:', '📌 ')}</span>;
+            } else if (tag.startsWith('@self:')) {
+              return <span key={i} className="text-[10px] font-semibold text-rose-600 bg-rose-50 px-2 py-0.5 rounded">{tag.replace('@self:', '💭 ')}</span>;
+            }
+            // Regular topic tags
+            return <span key={i} className="text-[10px] font-semibold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded">#{tag}</span>;
+          })}
         </div>
         <div className="flex items-center gap-2">
           {typeof entry.analysis?.mood_score === 'number' && entry.analysis.mood_score !== null && (
@@ -3600,25 +3921,43 @@ export default function App() {
         try {
           const classification = await classifyEntry(finalTex);
           console.log('Entry classification:', classification);
-          
-          const [analysis, insight] = await Promise.all([
+
+          // Run analysis, insight generation, and enhanced context extraction in parallel
+          const [analysis, insight, enhancedContext] = await Promise.all([
             analyzeEntry(finalTex, classification.entry_type),
-            classification.entry_type !== 'task' ? generateInsight(finalTex, related, recent) : Promise.resolve(null)
+            classification.entry_type !== 'task' ? generateInsight(finalTex, related, recent, entries) : Promise.resolve(null),
+            classification.entry_type !== 'task' ? extractEnhancedContext(finalTex, recent) : Promise.resolve(null)
           ]);
-          
-          console.log('Analysis complete:', { analysis, insight, classification });
+
+          console.log('Analysis complete:', { analysis, insight, classification, enhancedContext });
 
           if (analysis && analysis.mood_score !== null && analysis.mood_score < 0.35) {
             setShowDecompression(true);
           }
 
+          // Merge topic tags from analysis with structured tags from enhanced context
+          const topicTags = analysis?.tags || [];
+          const structuredTags = enhancedContext?.structured_tags || [];
+          const contextTopicTags = enhancedContext?.topic_tags || [];
+          const allTags = [...new Set([...topicTags, ...structuredTags, ...contextTopicTags])];
+
           const updateData = {
             title: analysis?.title || "New Memory",
-            tags: analysis?.tags || [],
+            tags: allTags,
             analysisStatus: 'complete',
             entry_type: classification.entry_type,
             classification_confidence: classification.confidence
           };
+
+          // Store situation continuation info if detected
+          if (enhancedContext?.continues_situation) {
+            updateData.continues_situation = enhancedContext.continues_situation;
+          }
+
+          // Store goal update info if detected
+          if (enhancedContext?.goal_update?.tag) {
+            updateData.goal_update = enhancedContext.goal_update;
+          }
           
           if (classification.extracted_tasks && classification.extracted_tasks.length > 0) {
             updateData.extracted_tasks = classification.extracted_tasks.map(t => ({ text: t, completed: false }));
