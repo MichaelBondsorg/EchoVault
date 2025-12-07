@@ -1,0 +1,1 @@
+export { retrofitEntriesInBackground } from './retrofit';
