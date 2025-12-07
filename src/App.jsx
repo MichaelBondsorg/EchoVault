@@ -24,7 +24,7 @@ import {
 } from './config/constants';
 
 // Utils
-import { safeString, removeUndefined } from './utils/string';
+import { safeString, removeUndefined, formatMentions } from './utils/string';
 import { safeDate } from './utils/date';
 import { sanitizeEntry } from './utils/entries';
 
@@ -1171,7 +1171,7 @@ const EntryCard = ({ entry, onDelete, onUpdate }) => {
 
   useEffect(() => { setTitle(entry.title); }, [entry.title]);
 
-  const insightMsg = entry.contextualInsight?.message ? safeString(entry.contextualInsight.message) : null;
+  const insightMsg = entry.contextualInsight?.message ? formatMentions(safeString(entry.contextualInsight.message)) : null;
   const cbt = entry.analysis?.cbt_breakdown;
   const ventSupport = entry.analysis?.vent_support;
   const celebration = entry.analysis?.celebration;
