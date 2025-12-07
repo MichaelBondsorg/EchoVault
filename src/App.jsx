@@ -8,258 +8,40 @@ import {
   Menu
 } from 'lucide-react';
 
-import { initializeApp } from 'firebase/app';
+// Config
 import {
-  getAuth, onAuthStateChanged, signOut, signInWithCustomToken,
-  GoogleAuthProvider, signInWithPopup
-} from 'firebase/auth';
-import {
-  getFirestore, collection, addDoc, query, orderBy, onSnapshot,
+  auth, db,
+  onAuthStateChanged, signOut, signInWithCustomToken,
+  GoogleAuthProvider, signInWithPopup,
+  collection, addDoc, query, orderBy, onSnapshot,
   Timestamp, deleteDoc, doc, updateDoc, limit, getDocs, setDoc
-} from 'firebase/firestore';
+} from './config/firebase';
+import { AI_CONFIG, GEMINI_API_KEY, OPENAI_API_KEY } from './config/ai';
+import {
+  APP_COLLECTION_ID, CURRENT_CONTEXT_VERSION,
+  CRISIS_KEYWORDS, WARNING_INDICATORS, DEFAULT_SAFETY_PLAN,
+  PERSONAL_PROMPTS, WORK_PROMPTS
+} from './config/constants';
 
-// --- Configuration ---
-const firebaseConfig = {
-  apiKey: "AIzaSyBuhwHcdxEuYHf6F5SVlWR5BLRio_7kqAg",
-  authDomain: "echo-vault-app.firebaseapp.com",
-  projectId: "echo-vault-app",
-  storageBucket: "echo-vault-app.firebasestorage.app",
-  messagingSenderId: "581319345416",
-  appId: "1:581319345416:web:777247342fffc94989d8bd"
-};
+// Utils
+import { safeString, removeUndefined } from './utils/string';
+import { safeDate } from './utils/date';
+import { sanitizeEntry } from './utils/entries';
 
-const app = initializeApp(firebaseConfig);
-const auth = getAuth(app);
-const db = getFirestore(app);
+// Services
+import { callGemini, callOpenAI, generateEmbedding, cosineSimilarity, findRelevantMemories, transcribeAudio } from './services/ai';
+import {
+  classifyEntry, analyzeEntry, generateInsight, extractEnhancedContext,
+  computeMoodTrajectory, detectCyclicalPatterns, askJournalAI
+} from './services/analysis';
+import { checkCrisisKeywords, checkWarningIndicators, checkLongitudinalRisk, analyzeLongitudinalPatterns } from './services/safety';
+import { retrofitEntriesInBackground } from './services/entries';
 
-const APP_COLLECTION_ID = 'echo-vault-v5-fresh';
-// FIX: Use environment variable instead of hardcoded key
-const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY;
-const OPENAI_API_KEY = import.meta.env.VITE_OPENAI_API_KEY;
+// Hooks
+import { useIOSMeta } from './hooks/useIOSMeta';
+import { useNotifications } from './hooks/useNotifications';
 
-// --- AI MODEL CONFIGURATION ---
-const AI_CONFIG = {
-  classification: {
-    primary: 'gemini-1.5-flash',
-    fallback: 'gpt-4o-mini'
-  },
-  analysis: {
-    primary: 'gemini-2.0-flash',
-    fallback: 'gpt-4o'
-  },
-  chat: {
-    primary: 'gpt-4o-mini',
-    fallback: 'gemini-1.5-flash'
-  },
-  embedding: {
-    primary: 'text-embedding-004',
-    fallback: null
-  },
-  transcription: {
-    primary: 'whisper-1',
-    fallback: null
-  }
-};
-
-// --- SAFETY CONSTANTS (Phase 0) ---
-const CRISIS_KEYWORDS = /suicide|kill myself|hurt myself|end my life|want to die|better off dead|no reason to live|end it all|don't want to wake up|better off without me/i;
-const WARNING_INDICATORS = /hopeless|worthless|no point|can't go on|trapped|burden|no way out|give up|falling apart/i;
-
-const DEFAULT_SAFETY_PLAN = {
-  copingStrategies: [
-    { activity: "Box Breathing (4-4-4-4)", notes: "Breathe in 4 sec, hold 4, out 4, hold 4" },
-    { activity: "Splash cold water on face", notes: "Activates dive reflex, slows heart rate" },
-    { activity: "Hold an ice cube", notes: "Sensory grounding technique" }
-  ],
-  professionalContacts: [
-    { name: "988 Suicide & Crisis Lifeline", phone: "988", type: "crisis" },
-    { name: "Crisis Text Line", phone: "741741", type: "crisis" }
-  ],
-  reasonsForLiving: [],
-  supportContacts: [],
-  warningSignsPersonal: [],
-  warningSignsPhysical: []
-};
-
-// --- PROMPT BANKS (Phase 2) ---
-const PERSONAL_PROMPTS = [
-  { id: 'p1', text: "What are you grateful for today?" },
-  { id: 'p2', text: "What is one thing you accomplished today that you're proud of?" },
-  { id: 'p3', text: "What was the highlight of your day?" },
-  { id: 'p4', text: "What did you learn about yourself today?" },
-  { id: 'p5', text: "What are three things that went well today, and why?" },
-  { id: 'p6', text: "What is your daily affirmation?" },
-  { id: 'p7', text: "What is your intention for today?" },
-  { id: 'p8', text: "What is one personal goal you want to focus on this week?" },
-  { id: 'p9', text: "What would make today feel like a success?" },
-  { id: 'p10', text: "What challenges did you face today, and how did you handle them?" },
-  { id: 'p11', text: "How did you take care of yourself today?" },
-  { id: 'p12', text: "What made you smile today?" },
-  { id: 'p13', text: "What did you do to help someone else today?" },
-  { id: 'p14', text: "What's on your mind right now?" }
-];
-
-const WORK_PROMPTS = [
-  { id: 'w1', text: "What was your biggest win at work today?" },
-  { id: 'w2', text: "What progress did you make on your key priorities?" },
-  { id: 'w3', text: "What's one thing you did today that moved the needle?" },
-  { id: 'w4', text: "What feedback did you receive today, and how did it land?" },
-  { id: 'w5', text: "What was the hardest part of your workday?" },
-  { id: 'w6', text: "What's one thing you want to improve in your workflow?" },
-  { id: 'w7', text: "What did you learn from a mistake or setback today?" },
-  { id: 'w8', text: "What conversation do you need to have that you've been avoiding?" },
-  { id: 'w9', text: "What are your top 3 priorities for tomorrow?" },
-  { id: 'w10', text: "What's blocking you right now, and what would unblock it?" },
-  { id: 'w11', text: "What would make this week a success?" },
-  { id: 'w12', text: "Who do you need to connect with this week?" }
-];
-
-// --- SAFETY CHECK FUNCTIONS ---
-const checkCrisisKeywords = (text) => CRISIS_KEYWORDS.test(text);
-const checkWarningIndicators = (text) => WARNING_INDICATORS.test(text);
-
-const checkLongitudinalRisk = (recentEntries) => {
-  const last7Days = recentEntries.filter(e => 
-    e.createdAt > new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
-  );
-  
-  if (last7Days.length < 3) {
-    console.log('Longitudinal risk check skipped: insufficient data', {
-      entriesInWindow: last7Days.length,
-      requiredMinimum: 3
-    });
-    return false;
-  }
-  
-  const avgMood = last7Days.reduce((sum, e) => 
-    sum + (e.analysis?.mood_score || 0.5), 0) / last7Days.length;
-  
-  const moodScores = last7Days.map(e => e.analysis?.mood_score || 0.5);
-  const n = moodScores.length;
-  const sumX = (n * (n - 1)) / 2;
-  const sumY = moodScores.reduce((a, b) => a + b, 0);
-  const sumXY = moodScores.reduce((sum, y, x) => sum + x * y, 0);
-  const sumX2 = (n * (n - 1) * (2 * n - 1)) / 6;
-  const slope = (n * sumXY - sumX * sumY) / (n * sumX2 - sumX * sumX);
-  
-  return avgMood < 0.25 || slope < -0.05;
-};
-
-const analyzeLongitudinalPatterns = (entries) => {
-  const patterns = [];
-  const moodEntries = entries.filter(e => e.entry_type !== 'task' && typeof e.analysis?.mood_score === 'number');
-  
-  if (moodEntries.length < 7) return patterns;
-  
-  const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-  const moodByDay = {};
-  dayNames.forEach(d => { moodByDay[d] = []; });
-  
-  moodEntries.forEach(e => {
-    const day = dayNames[e.createdAt.getDay()];
-    moodByDay[day].push(e.analysis.mood_score);
-  });
-  
-  const dayAverages = {};
-  dayNames.forEach(day => {
-    if (moodByDay[day].length >= 2) {
-      dayAverages[day] = moodByDay[day].reduce((a, b) => a + b, 0) / moodByDay[day].length;
-    }
-  });
-  
-  const avgMood = moodEntries.reduce((sum, e) => sum + e.analysis.mood_score, 0) / moodEntries.length;
-  
-  Object.entries(dayAverages).forEach(([day, avg]) => {
-    const diff = avg - avgMood;
-    if (diff < -0.15) {
-      patterns.push({
-        type: 'weekly_low',
-        day,
-        avgMood: avg,
-        overallAvg: avgMood,
-        message: `Your mood tends to dip on ${day}s (${Math.round(avg * 100)}% vs ${Math.round(avgMood * 100)}% average)`
-      });
-    } else if (diff > 0.15) {
-      patterns.push({
-        type: 'weekly_high',
-        day,
-        avgMood: avg,
-        overallAvg: avgMood,
-        message: `${day}s tend to be your best days (${Math.round(avg * 100)}% mood)`
-      });
-    }
-  });
-  
-  const triggerWords = ['deadline', 'meeting', 'presentation', 'conflict', 'argument', 'stress', 'anxiety', 'tired', 'exhausted', 'overwhelmed'];
-  triggerWords.forEach(trigger => {
-    const withTrigger = moodEntries.filter(e => e.text.toLowerCase().includes(trigger));
-    const withoutTrigger = moodEntries.filter(e => !e.text.toLowerCase().includes(trigger));
-    
-    if (withTrigger.length >= 3 && withoutTrigger.length >= 3) {
-      const avgWith = withTrigger.reduce((sum, e) => sum + e.analysis.mood_score, 0) / withTrigger.length;
-      const avgWithout = withoutTrigger.reduce((sum, e) => sum + e.analysis.mood_score, 0) / withoutTrigger.length;
-      const diff = ((avgWithout - avgWith) / avgWithout) * 100;
-      
-      if (diff > 10) {
-        patterns.push({
-          type: 'trigger_correlation',
-          trigger,
-          avgWith,
-          avgWithout,
-          percentDiff: diff,
-          message: `Entries mentioning "${trigger}" correlate with ${Math.round(diff)}% lower mood`
-        });
-      }
-    }
-  });
-  
-  const sortedByDate = [...moodEntries].sort((a, b) => a.createdAt - b.createdAt);
-  let recoveryDays = [];
-  
-  for (let i = 0; i < sortedByDate.length - 1; i++) {
-    if (sortedByDate[i].analysis.mood_score < 0.3) {
-      for (let j = i + 1; j < sortedByDate.length; j++) {
-        if (sortedByDate[j].analysis.mood_score >= 0.5) {
-          const daysDiff = Math.round((sortedByDate[j].createdAt - sortedByDate[i].createdAt) / (1000 * 60 * 60 * 24));
-          if (daysDiff <= 7) {
-            recoveryDays.push(daysDiff);
-          }
-          break;
-        }
-      }
-    }
-  }
-  
-  if (recoveryDays.length >= 3) {
-    const avgRecovery = recoveryDays.reduce((a, b) => a + b, 0) / recoveryDays.length;
-    patterns.push({
-      type: 'recovery_pattern',
-      avgDays: avgRecovery,
-      samples: recoveryDays.length,
-      message: `You typically recover from low moods within ${Math.round(avgRecovery)} days`
-    });
-  }
-  
-  const last30Days = moodEntries.filter(e => e.createdAt > new Date(Date.now() - 30 * 24 * 60 * 60 * 1000));
-  const last7Days = moodEntries.filter(e => e.createdAt > new Date(Date.now() - 7 * 24 * 60 * 60 * 1000));
-  
-  if (last30Days.length >= 5) {
-    const monthAvg = last30Days.reduce((sum, e) => sum + e.analysis.mood_score, 0) / last30Days.length;
-    const weekAvg = last7Days.length >= 3 
-      ? last7Days.reduce((sum, e) => sum + e.analysis.mood_score, 0) / last7Days.length 
-      : null;
-    
-    patterns.push({
-      type: 'monthly_summary',
-      monthAvg,
-      weekAvg,
-      entryCount: last30Days.length,
-      message: `This month: ${Math.round(monthAvg * 100)}% average mood across ${last30Days.length} entries${weekAvg ? ` (this week: ${Math.round(weekAvg * 100)}%)` : ''}`
-    });
-  }
-  
-  return patterns;
-};
+// --- Remaining App-specific functions ---
 
 const shuffleArray = (array) => {
   const shuffled = [...array];
@@ -290,156 +72,6 @@ const getPromptsForSession = (category, smartReflections) => {
   ].slice(0, 10)));
   
   return { type: 'standard', prompts: selected.map(p => p.text) };
-};
-
-// --- iOS Meta Injection ---
-const useIOSMeta = () => {
-  useEffect(() => {
-    if (typeof document === 'undefined') return;
-    const meta = document.createElement('meta');
-    meta.name = 'apple-mobile-web-app-capable';
-    meta.content = 'yes';
-    document.head.appendChild(meta);
-    const style = document.createElement('meta');
-    style.name = 'apple-mobile-web-app-status-bar-style';
-    style.content = 'black-translucent';
-    document.head.appendChild(style);
-    return () => {
-      if (document.head.contains(meta)) document.head.removeChild(meta);
-      if (document.head.contains(style)) document.head.removeChild(style);
-    };
-  }, []);
-};
-
-// --- NOTIFICATION MANAGER ---
-const useNotifications = () => {
-  // FIX: Check if Notification API is available before accessing it
-  const [permission, setPermission] = useState(() => {
-    if (typeof window !== 'undefined' && 'Notification' in window) {
-      return Notification.permission;
-    }
-    return 'default';
-  });
-
-  const requestPermission = async () => {
-    // FIX: Check if Notification API exists
-    if (typeof window === 'undefined' || !('Notification' in window)) {
-      console.warn('Notification API not available');
-      return;
-    }
-
-    try {
-      const result = await Notification.requestPermission();
-      setPermission(result);
-      if (result === 'granted') {
-        new Notification("EchoVault", { body: "Notifications enabled! We'll remind you to journal." });
-      }
-    } catch (error) {
-      console.error('Notification permission error:', error);
-    }
-  };
-
-  useEffect(() => {
-    if (typeof window === 'undefined' || !('Notification' in window)) return;
-    if (permission !== 'granted') return;
-
-    const sendNotification = (key, title, body) => {
-      const today = new Date().toDateString();
-      const lastSent = localStorage.getItem(`notif_${key}`);
-
-      if (lastSent !== today) {
-        try {
-          new Notification(title, { body, icon: '/icon-192.png' });
-          localStorage.setItem(`notif_${key}`, today);
-        } catch (error) {
-          console.error('Notification error:', error);
-        }
-      }
-    };
-
-    const checkTime = () => {
-      const now = new Date();
-      const hour = now.getHours();
-
-      // Morning notification (9 AM - 11 AM window)
-      if (hour >= 9 && hour < 11) {
-        sendNotification('morning', 'EchoVault: Morning Plan', 'What are you planning to do today? Record a quick thought.');
-      }
-
-      // Evening notification (8 PM - 10 PM window)
-      if (hour >= 20 && hour < 22) {
-        sendNotification('evening', 'EchoVault: End of Day', 'How did it go? Close your loops for the day.');
-      }
-    };
-
-    // Check immediately on load
-    checkTime();
-
-    // Check every 30 minutes
-    const interval = setInterval(checkTime, 30 * 60 * 1000);
-    return () => clearInterval(interval);
-  }, [permission]);
-
-  return { permission, requestPermission };
-};
-
-// --- SAFETY HELPERS ---
-// FIX: Remove all undefined values from an object (Firebase doesn't allow them)
-const removeUndefined = (obj) => {
-  if (obj === null || obj === undefined) return obj;
-  if (typeof obj !== 'object') return obj;
-  if (Array.isArray(obj)) {
-    return obj
-      .map(removeUndefined)
-      .filter(item => item !== undefined);
-  }
-
-  const cleaned = {};
-  Object.keys(obj).forEach(key => {
-    const value = obj[key];
-    if (value !== undefined) {
-      if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
-        cleaned[key] = removeUndefined(value);
-      } else if (Array.isArray(value)) {
-        cleaned[key] = removeUndefined(value);
-      } else {
-        cleaned[key] = value;
-      }
-    }
-  });
-  return cleaned;
-};
-
-const safeString = (val) => {
-  if (typeof val === 'string') return val;
-  if (typeof val === 'number') return String(val);
-  if (typeof val === 'object' && val !== null) return JSON.stringify(val);
-  return "";
-};
-
-const safeDate = (val) => {
-  try {
-    if (!val) return new Date();
-    if (val.toDate) return val.toDate();
-    if (val instanceof Date) return val;
-    if (typeof val === 'string' || typeof val === 'number') return new Date(val);
-    return new Date();
-  } catch (e) { return new Date(); }
-};
-
-const sanitizeEntry = (id, data) => {
-  return {
-    id: id,
-    text: safeString(data.text),
-    category: safeString(data.category) || 'personal',
-    tags: Array.isArray(data.tags) ? data.tags : [],
-    title: safeString(data.title) || safeString(data.analysis?.summary) || "Untitled Memory",
-    analysis: data.analysis || { mood_score: 0.5 },
-    analysisStatus: data.analysisStatus || 'complete',
-    embedding: data.embedding || null,
-    contextualInsight: data.contextualInsight || null,
-    createdAt: safeDate(data.createdAt)
-  };
 };
 
 // --- PDF LOADER (lazy-loads jsPDF from CDN) ---
@@ -477,233 +109,6 @@ const loadJsPDF = () => {
   return jsPDFPromise;
 };
 
-// --- VECTOR MATH ---
-const cosineSimilarity = (vecA, vecB) => {
-  if (!vecA || !vecB || vecA.length !== vecB.length) return 0;
-  let dot = 0, magA = 0, magB = 0;
-  for (let i = 0; i < vecA.length; i++) {
-    dot += vecA[i] * vecB[i];
-    magA += vecA[i] * vecA[i];
-    magB += vecB[i] * vecB[i];
-  }
-  return magA && magB ? dot / (Math.sqrt(magA) * Math.sqrt(magB)) : 0;
-};
-
-const findRelevantMemories = (targetVector, allEntries, category, topK = 5) => {
-  if (!targetVector) return [];
-  const contextEntries = allEntries.filter(e => e.category === category);
-  const scored = contextEntries.map(e => ({
-    ...e,
-    score: e.embedding ? cosineSimilarity(targetVector, e.embedding) : -1
-  }));
-  return scored.filter(e => e.score > 0.35).sort((a, b) => b.score - a.score).slice(0, topK);
-};
-
-// --- GEMINI API ---
-const callGemini = async (systemPrompt, userPrompt, model = AI_CONFIG.analysis.primary) => {
-  try {
-    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_API_KEY}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [{ parts: [{ text: userPrompt }] }],
-        systemInstruction: { parts: [{ text: systemPrompt }] }
-      })
-    });
-
-    // FIX: Check HTTP status
-    if (!res.ok) {
-      const errorData = await res.json().catch(() => ({}));
-      console.error('Gemini API error:', res.status, errorData);
-      return null;
-    }
-
-    const data = await res.json();
-    const result = data.candidates?.[0]?.content?.parts?.[0]?.text || null;
-
-    // FIX: Log if no result returned
-    if (!result) {
-      console.error('Gemini API returned no content:', data);
-    }
-
-    return result;
-  } catch (e) {
-    console.error('Gemini API exception:', e);
-    return null;
-  }
-};
-
-// --- OPENAI GPT API ---
-const callOpenAI = async (systemPrompt, userPrompt) => {
-  try {
-    if (!OPENAI_API_KEY || OPENAI_API_KEY === 'your_openai_api_key_here') {
-      console.error('OpenAI API key not configured');
-      return null;
-    }
-
-    const res = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${OPENAI_API_KEY}`
-      },
-      body: JSON.stringify({
-        model: 'gpt-4o-mini',
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: userPrompt }
-        ],
-        temperature: 0.7,
-        max_tokens: 500
-      })
-    });
-
-    if (!res.ok) {
-      const errorData = await res.json().catch(() => ({}));
-      console.error('OpenAI API error:', res.status, errorData);
-      return null;
-    }
-
-    const data = await res.json();
-    const result = data.choices?.[0]?.message?.content || null;
-
-    if (!result) {
-      console.error('OpenAI API returned no content:', data);
-    }
-
-    return result;
-  } catch (e) {
-    console.error('OpenAI API exception:', e);
-    return null;
-  }
-};
-
-const generateEmbedding = async (text, retryCount = 0) => {
-  try {
-    if (!GEMINI_API_KEY || GEMINI_API_KEY === 'your_gemini_api_key_here') {
-      console.error('Gemini API key not configured - embeddings will not be generated');
-      return null;
-    }
-
-    if (!text || typeof text !== 'string' || text.trim().length === 0) {
-      console.error('generateEmbedding: Invalid or empty text provided');
-      return null;
-    }
-
-    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/text-embedding-004:embedContent?key=${GEMINI_API_KEY}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ content: { parts: [{ text: text }] } })
-    });
-
-    if (!res.ok) {
-      const errorData = await res.json().catch(() => ({}));
-      console.error('Embedding API error:', res.status, errorData);
-
-      if (retryCount < 1 && res.status >= 500) {
-        console.log('Retrying embedding generation after server error...');
-        await new Promise(resolve => setTimeout(resolve, 1000));
-        return generateEmbedding(text, retryCount + 1);
-      }
-
-      return null;
-    }
-
-    const data = await res.json();
-    const embedding = data.embedding?.values || null;
-
-    if (!embedding) {
-      console.error('Embedding API returned no embedding values:', data);
-    }
-
-    return embedding;
-  } catch (e) {
-    console.error('generateEmbedding exception:', e);
-
-    if (retryCount < 1) {
-      console.log('Retrying embedding generation after exception...');
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      return generateEmbedding(text, retryCount + 1);
-    }
-
-    return null;
-  }
-};
-
-const transcribeAudio = async (base64, mimeType) => {
-  try {
-    console.log('Whisper transcription request:', {
-      mimeType,
-      audioLength: base64.length,
-      model: 'whisper-1'
-    });
-
-    // Check API key
-    if (!OPENAI_API_KEY || OPENAI_API_KEY === 'your_openai_api_key_here') {
-      console.error('OpenAI API key not configured');
-      return 'API_AUTH_ERROR';
-    }
-
-    // Convert base64 to Blob
-    const binaryString = atob(base64);
-    const bytes = new Uint8Array(binaryString.length);
-    for (let i = 0; i < binaryString.length; i++) {
-      bytes[i] = binaryString.charCodeAt(i);
-    }
-    const audioBlob = new Blob([bytes], { type: mimeType });
-
-    // Create FormData for Whisper API
-    const formData = new FormData();
-    // Determine file extension from mimeType
-    const fileExt = mimeType.includes('webm') ? 'webm' : mimeType.includes('mp4') ? 'mp4' : 'wav';
-    formData.append('file', audioBlob, `audio.${fileExt}`);
-    formData.append('model', 'whisper-1');
-
-    const res = await fetch('https://api.openai.com/v1/audio/transcriptions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${OPENAI_API_KEY}`
-      },
-      body: formData
-    });
-
-    if (!res.ok) {
-      const errorData = await res.json().catch(() => ({}));
-      console.error('Whisper API error:', res.status, errorData);
-      console.error('Full error details:', {
-        status: res.status,
-        statusText: res.statusText,
-        error: errorData,
-        mimeType,
-        audioSizeBytes: base64.length
-      });
-
-      if (res.status === 429) return 'API_RATE_LIMIT';
-      if (res.status === 401) return 'API_AUTH_ERROR';
-      if (res.status === 400) return 'API_BAD_REQUEST';
-      return 'API_ERROR';
-    }
-
-    const data = await res.json();
-    let transcript = data.text || null;
-
-    if (!transcript) {
-      console.error('Whisper API returned no content:', data);
-      return 'API_NO_CONTENT';
-    }
-
-    // Remove filler words (um, uh, like, etc.)
-    const fillerWords = /\b(um|uh|uhm|like|you know|so|well|actually|basically|literally)\b/gi;
-    transcript = transcript.replace(fillerWords, ' ').replace(/\s+/g, ' ').trim();
-
-    console.log('Whisper transcription result:', transcript);
-    return transcript;
-  } catch (e) {
-    console.error('Whisper API exception:', e);
-    return 'API_EXCEPTION';
-  }
-};
-
 // --- OpenAI Text-to-Speech ---
 const synthesizeSpeech = async (text, voice = 'nova') => {
   if (!OPENAI_API_KEY) {
@@ -739,331 +144,8 @@ const synthesizeSpeech = async (text, voice = 'nova') => {
   }
 };
 
-// --- ENTRY CLASSIFICATION (Phase 1) ---
-// Fast classification using gemini-flash to determine entry type
-const classifyEntry = async (text) => {
-  const prompt = `
-    Classify this journal entry into ONE of these types:
-    - "task": Pure task/todo list, no emotional content (e.g., "Need to buy groceries, call mom")
-    - "mixed": Contains both tasks AND emotional reflection (e.g., "Feeling stressed about the deadline, need to finish report")
-    - "reflection": Emotional processing, self-reflection, no tasks (e.g., "I've been thinking about my relationship...")
-    - "vent": Emotional release, dysregulated state, needs validation not advice (e.g., "I can't take this anymore, everything is falling apart")
+// Analysis functions (classifyEntry, analyzeEntry, generateInsight, etc.) imported from services/analysis
 
-    Return JSON only:
-    {
-      "entry_type": "task" | "mixed" | "reflection" | "vent",
-      "confidence": 0.0-1.0,
-      "extracted_tasks": [{ "text": "Buy milk", "completed": false }]
-    }
-    
-    TASK EXTRACTION RULES (only for task/mixed types):
-    - Extract ONLY explicit tasks/to-dos
-    - Keep text concise (verb + object)
-    - SKIP vague intentions ("I should exercise more" → NOT a task)
-    - SKIP emotional statements ("I need to feel better" → NOT a task)
-    - If no clear tasks, return empty array
-  `;
-  
-  try {
-    const raw = await callGemini(prompt, text, AI_CONFIG.classification.primary);
-    if (!raw) {
-      return { entry_type: 'reflection', confidence: 0.5, extracted_tasks: [] };
-    }
-    
-    const jsonStr = raw.replace(/```json|```/g, '').trim();
-    const parsed = JSON.parse(jsonStr);
-    
-    return {
-      entry_type: parsed.entry_type || 'reflection',
-      confidence: typeof parsed.confidence === 'number' ? parsed.confidence : 0.5,
-      extracted_tasks: Array.isArray(parsed.extracted_tasks) ? parsed.extracted_tasks : []
-    };
-  } catch (e) {
-    console.error('classifyEntry error:', e);
-    return { entry_type: 'reflection', confidence: 0.5, extracted_tasks: [] };
-  }
-};
-
-// --- THE AI ROUTER (The new Brain) ---
-// This function decides WHICH therapeutic framework to apply based on entry type.
-const analyzeEntry = async (text, entryType = 'reflection') => {
-  if (entryType === 'task') {
-    return {
-      title: text.substring(0, 50) + (text.length > 50 ? '...' : ''),
-      tags: ['task'],
-      mood_score: null,
-      framework: 'general',
-      entry_type: 'task'
-    };
-  }
-  
-  if (entryType === 'vent') {
-    // Get current hour for time-aware cooldown suggestions
-    const currentHour = new Date().getHours();
-    const isLateNight = currentHour >= 22 || currentHour < 5;
-
-    const ventPrompt = `
-      This person is venting and needs validation, NOT advice.
-      ${isLateNight ? 'CONTEXT: It is late night/early morning. Favor gentle, sleep-compatible techniques.' : ''}
-
-      CRITICAL RULES:
-      - DO NOT challenge their thoughts
-      - DO NOT offer solutions or advice
-      - DO NOT minimize ("at least...", "it could be worse...")
-      - DO NOT use "have you considered..."
-
-      Goal: Lower physiological arousal through validation and grounding.
-
-      COOLDOWN TECHNIQUES (choose the most appropriate):
-      - "grounding": 5-4-3-2-1 senses, name objects in room, feel feet on floor
-      - "breathing": Box breathing, 4-7-8 technique, slow exhales
-      - "sensory": Cold water on wrists, hold ice, splash face
-      - "movement": Shake hands vigorously, walk to another room, stretch
-      - "temperature": Hold something cold, step outside briefly, cool washcloth
-      - "bilateral": Tap alternating knees, cross-body movements, butterfly hug
-      - "vocalization": Hum, sigh loudly, low "voo" sound, humming exhale
-      ${isLateNight ? '(Prefer: breathing, grounding, bilateral, vocalization - avoid movement/temperature at night)' : ''}
-
-      Return JSON:
-      {
-        "title": "Short empathetic title (max 6 words)",
-        "tags": ["Tag1", "Tag2"],
-        "mood_score": 0.0-1.0 (0.0=very distressed, 1.0=calm),
-        "validation": "A warm, empathetic validation of their feelings (2-3 sentences)",
-        "cooldown": {
-          "technique": "grounding" | "breathing" | "sensory" | "movement" | "temperature" | "bilateral" | "vocalization",
-          "instruction": "Simple 1-2 sentence instruction appropriate for ${isLateNight ? 'late night' : 'this time of day'}"
-        }
-      }
-    `;
-    
-    try {
-      const raw = await callGemini(ventPrompt, text);
-      if (!raw) {
-        return {
-          title: text.substring(0, 50) + (text.length > 50 ? '...' : ''),
-          tags: [],
-          mood_score: 0.3,
-          framework: 'support',
-          entry_type: 'vent'
-        };
-      }
-      
-      const jsonStr = raw.replace(/```json|```/g, '').trim();
-      const parsed = JSON.parse(jsonStr);
-      
-      return {
-        title: parsed.title || text.substring(0, 50) + (text.length > 50 ? '...' : ''),
-        tags: Array.isArray(parsed.tags) ? parsed.tags : [],
-        mood_score: typeof parsed.mood_score === 'number' ? parsed.mood_score : 0.3,
-        framework: 'support',
-        entry_type: 'vent',
-        vent_support: {
-          validation: parsed.validation || "It's okay to feel this way. Your feelings are valid.",
-          cooldown: parsed.cooldown || { technique: 'breathing', instruction: 'Take a slow, deep breath.' }
-        }
-      };
-    } catch (e) {
-      console.error('analyzeEntry (vent) error:', e);
-      return {
-        title: text.substring(0, 50) + (text.length > 50 ? '...' : ''),
-        tags: [],
-        mood_score: 0.3,
-        framework: 'support',
-        entry_type: 'vent'
-      };
-    }
-  }
-
-  // Get current hour for time-aware responses
-  const currentHour = new Date().getHours();
-  const timeContext = currentHour >= 22 || currentHour < 5 ? 'late_night'
-    : currentHour < 12 ? 'morning'
-    : currentHour < 17 ? 'afternoon'
-    : 'evening';
-
-  const prompt = `
-    Analyze this journal entry and route to the appropriate therapeutic framework.
-
-    CONTEXT: Entry submitted during ${timeContext} (${currentHour}:00)
-    ${entryType === 'mixed' ? 'NOTE: This entry contains both tasks AND emotional content. Acknowledge the emotional weight of their to-do list.' : ''}
-
-    ROUTING LOGIC (choose ONE framework):
-    1. "cbt" - IF text shows anxiety, negative self-talk, or cognitive distortion
-    2. "celebration" - IF text describes wins, accomplishments, gratitude, joy, or positive experiences
-    3. "general" - For neutral observations, casual updates, or mixed content without strong emotion
-
-    RESPONSE DEPTH (based on emotional intensity):
-    - mood_score 0.6+ (positive/neutral): Light response - validation or affirmation only
-    - mood_score 0.4-0.6 (mixed): Medium response - add perspective if helpful
-    - mood_score 0.2-0.4 (struggling): Full response - include behavioral suggestions
-    - mood_score <0.2 (distressed): Full response + always include behavioral_activation
-
-    TIME-AWARE SUGGESTIONS:
-    - late_night: Favor sleep hygiene, gentle grounding, avoid "go for a walk" type suggestions
-    - morning: Can suggest movement, planning, fresh starts
-    - afternoon/evening: Standard suggestions appropriate
-
-    Return JSON:
-    {
-      "title": "Short creative title (max 6 words)",
-      "tags": ["Tag1", "Tag2"],
-      "mood_score": 0.5 (0.0=bad, 1.0=good),
-      "framework": "cbt" | "celebration" | "general",
-
-      // Include ONLY IF framework == 'cbt' AND warranted by mood_score depth rules
-      "cbt_breakdown": {
-        "automatic_thought": "The negative thought pattern identified (or null if not clear)",
-        "distortion": "Cognitive distortion label (or null if minor/not worth highlighting)",
-        "validation": "Empathetic acknowledgment (1-2 sentences) - ALWAYS include for cbt",
-        "perspective": "Question to consider: [question] — Alternative view: [reframe] (or null if mood > 0.5)",
-        "behavioral_activation": {
-          "activity": "A simple activity under 5 minutes, appropriate for ${timeContext}",
-          "rationale": "Why this helps (1 sentence)"
-        }
-      },
-
-      // Include ONLY IF framework == 'celebration'
-      "celebration": {
-        "affirmation": "Warm acknowledgment of their positive moment (1-2 sentences)",
-        "amplify": "Optional prompt to savor or deepen the positive feeling (or null if not needed)"
-      },
-
-      // Include ONLY IF entryType is 'mixed' - acknowledge task load
-      "task_acknowledgment": "Brief empathetic note about their to-do list load (or null)"
-    }
-
-    IMPORTANT: Return null for any field that isn't genuinely useful. Less is more.
-  `;
-  try {
-    const raw = await callGemini(prompt, text);
-
-    if (!raw) {
-      console.error('analyzeEntry: No response from Gemini API');
-      return {
-        title: text.substring(0, 50) + (text.length > 50 ? '...' : ''),
-        tags: [],
-        mood_score: 0.5,
-        framework: 'general',
-        entry_type: entryType
-      };
-    }
-
-    const jsonStr = raw.replace(/```json|```/g, '').trim();
-    const parsed = JSON.parse(jsonStr);
-
-    const result = {
-      title: parsed.title || text.substring(0, 50) + (text.length > 50 ? '...' : ''),
-      tags: Array.isArray(parsed.tags) ? parsed.tags : [],
-      mood_score: typeof parsed.mood_score === 'number' ? parsed.mood_score : 0.5,
-      framework: parsed.framework || 'general',
-      entry_type: entryType
-    };
-
-    if (parsed.cbt_breakdown && typeof parsed.cbt_breakdown === 'object' && Object.keys(parsed.cbt_breakdown).length > 0) {
-      result.cbt_breakdown = parsed.cbt_breakdown;
-    }
-
-    // Capture celebration framework response
-    if (parsed.celebration && typeof parsed.celebration === 'object') {
-      result.celebration = parsed.celebration;
-    }
-
-    // Capture task acknowledgment for mixed entries
-    if (parsed.task_acknowledgment) {
-      result.task_acknowledgment = parsed.task_acknowledgment;
-    }
-
-    console.log('analyzeEntry result:', result);
-
-    return result;
-  } catch (e) {
-    console.error('analyzeEntry error:', e);
-    return {
-      title: text.substring(0, 50) + (text.length > 50 ? '...' : ''),
-      tags: [],
-      mood_score: 0.5,
-      framework: 'general',
-      entry_type: entryType
-    };
-  }
-};
-
-const generateInsight = async (current, relevantHistory, recentHistory) => {
-  const historyMap = new Map();
-  [...recentHistory, ...relevantHistory].forEach(e => historyMap.set(e.id, e));
-  const uniqueHistory = Array.from(historyMap.values());
-
-  if (uniqueHistory.length === 0) return null;
-
-  // Add date context for time-boxing
-  const today = new Date();
-  const context = uniqueHistory.map(e => {
-    const entryDate = e.createdAt instanceof Date ? e.createdAt : e.createdAt.toDate();
-    const daysAgo = Math.floor((today - entryDate) / (1000 * 60 * 60 * 24));
-    return `[${entryDate.toLocaleDateString()} - ${daysAgo} days ago] ${e.text}`;
-  }).join('\n');
-
-  const prompt = `
-    You are a proactive memory assistant analyzing journal entries.
-    Today's date: ${today.toLocaleDateString()}
-
-    INSIGHT TYPES (choose the most appropriate):
-    - "warning": Negative pattern recurring (same trigger → same negative outcome)
-    - "encouragement": User showing resilience or growth compared to past
-    - "pattern": Neutral observation of recurring theme
-    - "reminder": Direct callback to something user mentioned before
-    - "progress": Positive trend or improvement over time
-    - "streak": Consistent positive behavior (3+ occurrences)
-    - "absence": Something negative that used to appear frequently but hasn't lately
-
-    TIME-BOXING RULES (CRITICAL - respect these windows):
-    - "Recurring theme" requires 3+ mentions within 14 days (not spread over months)
-    - "Warning" patterns should be within 7 days to be relevant
-    - "Progress/streak" should compare against 30 days ago
-    - "Absence" means something appeared 3+ times in the past 30-60 days but not in the last 14 days
-    - Don't flag patterns from entries older than 60 days unless truly significant
-
-    RETURN found: true ONLY IF you identify:
-    - A recurring theme (3+ mentions within 14 days)
-    - A direct contradiction or progress from recent entries (within 7 days)
-    - A trigger pattern (similar situation → similar mood)
-    - Genuine progress compared to 30 days ago
-    - A notable absence of a previously frequent concern
-
-    If the connection feels forced, weak, or the entries are too old, return { "found": false }.
-
-    Output JSON:
-    {
-      "found": true,
-      "type": "warning" | "encouragement" | "pattern" | "reminder" | "progress" | "streak" | "absence",
-      "message": "Concise, insightful observation (1-2 sentences max)",
-      "followUpQuestions": ["Relevant question 1?", "Relevant question 2?"]
-    }
-  `;
-
-  try {
-    const raw = await callGemini(prompt, `HISTORY:\n${context}\n\nCURRENT ENTRY:\n${current}`);
-
-    // FIX: Handle null response
-    if (!raw) {
-      console.error('generateInsight: No response from Gemini API');
-      return null;
-    }
-
-    const jsonStr = raw.replace(/```json|```/g, '').trim();
-    return JSON.parse(jsonStr);
-  } catch (e) {
-    console.error('generateInsight error:', e);
-    return null;
-  }
-};
-
-const askJournalAI = async (entries, question) => {
-  const context = entries.slice(0, 30).map(e => `[${e.createdAt.toLocaleDateString()}] [${e.title}] ${e.text}`).join('\n');
-  const systemPrompt = `Answer based ONLY on journal entries. Use ### headers and * bullets. CONTEXT:\n${context}`;
-  return await callGemini(systemPrompt, question);
-};
 
 const generateSynthesisAI = async (entries) => {
   const context = entries.slice(0, 20).map(e => e.text).join('\n---\n');
@@ -2273,7 +1355,23 @@ const EntryCard = ({ entry, onDelete, onUpdate }) => {
               {entryType}
             </span>
           )}
-          {entry.tags.map((t, i) => <span key={i} className="text-[10px] font-semibold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded">#{safeString(t)}</span>)}
+          {entry.tags.map((t, i) => {
+            const tag = safeString(t);
+            // Different styling for structured tags
+            if (tag.startsWith('@person:')) {
+              return <span key={i} className="text-[10px] font-semibold text-blue-600 bg-blue-50 px-2 py-0.5 rounded">{tag.replace('@person:', '👤 ')}</span>;
+            } else if (tag.startsWith('@place:')) {
+              return <span key={i} className="text-[10px] font-semibold text-green-600 bg-green-50 px-2 py-0.5 rounded">{tag.replace('@place:', '📍 ')}</span>;
+            } else if (tag.startsWith('@goal:')) {
+              return <span key={i} className="text-[10px] font-semibold text-amber-600 bg-amber-50 px-2 py-0.5 rounded">{tag.replace('@goal:', '🎯 ')}</span>;
+            } else if (tag.startsWith('@situation:')) {
+              return <span key={i} className="text-[10px] font-semibold text-purple-600 bg-purple-50 px-2 py-0.5 rounded">{tag.replace('@situation:', '📌 ')}</span>;
+            } else if (tag.startsWith('@self:')) {
+              return <span key={i} className="text-[10px] font-semibold text-rose-600 bg-rose-50 px-2 py-0.5 rounded">{tag.replace('@self:', '💭 ')}</span>;
+            }
+            // Regular topic tags
+            return <span key={i} className="text-[10px] font-semibold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded">#{tag}</span>;
+          })}
         </div>
         <div className="flex items-center gap-2">
           {typeof entry.analysis?.mood_score === 'number' && entry.analysis.mood_score !== null && (
@@ -3411,6 +2509,38 @@ export default function App() {
     });
   }, [user]);
 
+  // Background retrofit for enhanced context extraction
+  const retrofitStarted = useRef(false);
+  const [retrofitProgress, setRetrofitProgress] = useState(null);
+
+  useEffect(() => {
+    if (!user || entries.length === 0 || retrofitStarted.current) return;
+
+    // Check if any entries need retrofitting
+    const needsRetrofit = entries.some(e => (e.context_version || 0) < CURRENT_CONTEXT_VERSION);
+    if (!needsRetrofit) return;
+
+    retrofitStarted.current = true;
+
+    // Start retrofit in background after a short delay to let UI settle
+    const timeoutId = setTimeout(() => {
+      console.log('Starting background retrofit of entries...');
+      retrofitEntriesInBackground(
+        entries,
+        user.uid,
+        db,
+        (processed, total) => setRetrofitProgress({ processed, total })
+      ).then(() => {
+        setRetrofitProgress(null);
+      }).catch(err => {
+        console.error('Retrofit failed:', err);
+        setRetrofitProgress(null);
+      });
+    }, 3000); // Wait 3 seconds before starting
+
+    return () => clearTimeout(timeoutId);
+  }, [user, entries]);
+
   // Load Safety Plan (Phase 0)
   useEffect(() => {
     if (!user) return;
@@ -3589,25 +2719,44 @@ export default function App() {
         try {
           const classification = await classifyEntry(finalTex);
           console.log('Entry classification:', classification);
-          
-          const [analysis, insight] = await Promise.all([
+
+          // Run analysis, insight generation, and enhanced context extraction in parallel
+          const [analysis, insight, enhancedContext] = await Promise.all([
             analyzeEntry(finalTex, classification.entry_type),
-            classification.entry_type !== 'task' ? generateInsight(finalTex, related, recent) : Promise.resolve(null)
+            classification.entry_type !== 'task' ? generateInsight(finalTex, related, recent, entries) : Promise.resolve(null),
+            classification.entry_type !== 'task' ? extractEnhancedContext(finalTex, recent) : Promise.resolve(null)
           ]);
-          
-          console.log('Analysis complete:', { analysis, insight, classification });
+
+          console.log('Analysis complete:', { analysis, insight, classification, enhancedContext });
 
           if (analysis && analysis.mood_score !== null && analysis.mood_score < 0.35) {
             setShowDecompression(true);
           }
 
+          // Merge topic tags from analysis with structured tags from enhanced context
+          const topicTags = analysis?.tags || [];
+          const structuredTags = enhancedContext?.structured_tags || [];
+          const contextTopicTags = enhancedContext?.topic_tags || [];
+          const allTags = [...new Set([...topicTags, ...structuredTags, ...contextTopicTags])];
+
           const updateData = {
             title: analysis?.title || "New Memory",
-            tags: analysis?.tags || [],
+            tags: allTags,
             analysisStatus: 'complete',
             entry_type: classification.entry_type,
-            classification_confidence: classification.confidence
+            classification_confidence: classification.confidence,
+            context_version: CURRENT_CONTEXT_VERSION
           };
+
+          // Store situation continuation info if detected
+          if (enhancedContext?.continues_situation) {
+            updateData.continues_situation = enhancedContext.continues_situation;
+          }
+
+          // Store goal update info if detected
+          if (enhancedContext?.goal_update?.tag) {
+            updateData.goal_update = enhancedContext.goal_update;
+          }
           
           if (classification.extracted_tasks && classification.extracted_tasks.length > 0) {
             updateData.extracted_tasks = classification.extracted_tasks.map(t => ({ text: t, completed: false }));
@@ -3766,7 +2915,17 @@ export default function App() {
   return (
     <div className="min-h-screen bg-gray-50 pb-40 pt-[env(safe-area-inset-top)]">
       {showDecompression && <DecompressionScreen onClose={() => setShowDecompression(false)} />}
-      
+
+      {/* Retrofit Progress Indicator */}
+      {retrofitProgress && (
+        <div className="fixed bottom-24 left-4 right-4 z-30 flex justify-center pointer-events-none">
+          <div className="bg-gray-800 text-white px-4 py-2 rounded-full shadow-lg text-sm flex items-center gap-2 animate-in fade-in slide-in-from-bottom-2">
+            <Loader2 className="animate-spin" size={14} />
+            <span>Enhancing entries... {retrofitProgress.processed}/{retrofitProgress.total}</span>
+          </div>
+        </div>
+      )}
+
       {crisisModal && (
         <CrisisSoftBlockModal 
           onResponse={handleCrisisResponse}
