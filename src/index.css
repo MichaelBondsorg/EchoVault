@@ -1,3 +1,324 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* ============================================
+   EchoVault Design System
+   ============================================ */
+
+@layer base {
+  /* Typography defaults */
+  html {
+    @apply text-warm-900;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    @apply font-display font-bold tracking-tight;
+  }
+
+  h1 {
+    @apply text-3xl;
+  }
+
+  h2 {
+    @apply text-2xl;
+  }
+
+  h3 {
+    @apply text-xl;
+  }
+
+  p {
+    @apply font-body leading-relaxed;
+  }
+
+  /* Focus styles for accessibility */
+  :focus-visible {
+    @apply outline-none ring-2 ring-primary-500 ring-offset-2 ring-offset-white rounded-lg;
+  }
+
+  /* Selection color */
+  ::selection {
+    @apply bg-primary-200 text-primary-900;
+  }
+}
+
+@layer components {
+  /* ============================================
+     Button Styles
+     ============================================ */
+
+  .btn {
+    @apply inline-flex items-center justify-center gap-2
+           font-semibold rounded-2xl
+           transition-all duration-200
+           focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2;
+  }
+
+  .btn-primary {
+    @apply btn px-6 py-3
+           bg-gradient-to-r from-primary-500 to-primary-600
+           text-white shadow-soft
+           hover:shadow-glow hover:scale-[1.02]
+           active:scale-[0.98]
+           focus-visible:ring-primary-500;
+  }
+
+  .btn-secondary {
+    @apply btn px-6 py-3
+           bg-white/10 backdrop-blur-sm
+           text-white border border-white/20
+           hover:bg-white/20 hover:border-white/30
+           active:scale-[0.98];
+  }
+
+  .btn-ghost {
+    @apply btn px-4 py-2
+           text-warm-600 hover:text-warm-800
+           hover:bg-warm-100 rounded-xl;
+  }
+
+  .btn-danger {
+    @apply btn px-6 py-3
+           bg-gradient-to-r from-red-500 to-red-600
+           text-white shadow-soft
+           hover:shadow-lg hover:scale-[1.02]
+           active:scale-[0.98];
+  }
+
+  /* ============================================
+     Card Styles
+     ============================================ */
+
+  .card {
+    @apply bg-white/95 backdrop-blur-sm
+           rounded-3xl p-6
+           border border-white/50
+           shadow-soft
+           transition-all duration-300;
+  }
+
+  .card-interactive {
+    @apply card
+           hover:shadow-soft-lg hover:-translate-y-1
+           cursor-pointer;
+  }
+
+  .card-glass {
+    @apply bg-white/10 backdrop-blur-md
+           rounded-3xl p-6
+           border border-white/20
+           shadow-soft;
+  }
+
+  /* ============================================
+     Modal Styles
+     ============================================ */
+
+  .modal-backdrop {
+    @apply fixed inset-0 z-50
+           bg-gradient-to-br from-warm-900/80 to-primary-900/80
+           backdrop-blur-md
+           animate-fade-in;
+  }
+
+  .modal-content {
+    @apply bg-white rounded-3xl
+           shadow-soft-xl
+           max-w-md w-full mx-4
+           animate-scale-in;
+  }
+
+  /* ============================================
+     Input Styles
+     ============================================ */
+
+  .input {
+    @apply w-full px-4 py-3
+           bg-warm-50 border-2 border-warm-200
+           rounded-2xl
+           font-body text-warm-800
+           placeholder:text-warm-400
+           transition-all duration-200
+           focus:border-primary-400 focus:bg-white
+           focus:shadow-soft focus:outline-none;
+  }
+
+  .input-lg {
+    @apply input px-5 py-4 text-lg rounded-2xl;
+  }
+
+  .textarea {
+    @apply input min-h-[120px] resize-none;
+  }
+
+  /* ============================================
+     Badge Styles
+     ============================================ */
+
+  .badge {
+    @apply inline-flex items-center gap-1
+           px-3 py-1 rounded-full
+           text-xs font-semibold;
+  }
+
+  .badge-primary {
+    @apply badge bg-primary-100 text-primary-700;
+  }
+
+  .badge-secondary {
+    @apply badge bg-secondary-100 text-secondary-700;
+  }
+
+  .badge-accent {
+    @apply badge bg-accent-light text-accent-dark;
+  }
+
+  .badge-mood-great {
+    @apply badge bg-mood-great/20 text-mood-great;
+  }
+
+  .badge-mood-low {
+    @apply badge bg-mood-low/20 text-blue-700;
+  }
+
+  /* ============================================
+     Mood Indicator
+     ============================================ */
+
+  .mood-bar {
+    @apply h-1 rounded-full transition-all duration-500;
+  }
+
+  .mood-great { @apply bg-mood-great; }
+  .mood-good { @apply bg-mood-good; }
+  .mood-neutral { @apply bg-mood-neutral; }
+  .mood-low { @apply bg-mood-low; }
+  .mood-struggling { @apply bg-mood-struggling; }
+
+  /* ============================================
+     Loading States
+     ============================================ */
+
+  .breathing-loader {
+    @apply w-16 h-16 rounded-full
+           bg-gradient-to-br from-primary-400 to-primary-600
+           animate-breathe shadow-glow;
+  }
+
+  .shimmer {
+    @apply bg-gradient-to-r from-warm-200 via-warm-100 to-warm-200
+           bg-[length:200%_100%]
+           animate-shimmer;
+  }
+
+  /* ============================================
+     Celebration Effects
+     ============================================ */
+
+  .celebration-glow {
+    @apply animate-glow;
+  }
+
+  .floating {
+    @apply animate-float;
+  }
+
+  /* ============================================
+     Safe Area Insets (for notch devices)
+     ============================================ */
+
+  .safe-top {
+    padding-top: env(safe-area-inset-top);
+  }
+
+  .safe-bottom {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+
+  .safe-left {
+    padding-left: env(safe-area-inset-left);
+  }
+
+  .safe-right {
+    padding-right: env(safe-area-inset-right);
+  }
+
+  /* ============================================
+     Entry Card Accent Border
+     ============================================ */
+
+  .entry-card {
+    @apply card relative overflow-hidden;
+  }
+
+  .entry-card::before {
+    @apply absolute left-0 top-0 bottom-0 w-1 rounded-l-3xl
+           bg-gradient-to-b from-primary-400 to-primary-600;
+    content: '';
+  }
+
+  .entry-card-great::before {
+    @apply bg-gradient-to-b from-mood-great to-emerald-600;
+  }
+
+  .entry-card-low::before {
+    @apply bg-gradient-to-b from-mood-low to-blue-600;
+  }
+
+  /* ============================================
+     Recording Animation
+     ============================================ */
+
+  .recording-ring {
+    @apply absolute inset-0 rounded-full
+           border-4 border-red-400
+           animate-ping opacity-75;
+  }
+
+  .recording-pulse {
+    @apply w-20 h-20 rounded-full
+           bg-gradient-to-br from-red-400 to-red-600
+           shadow-lg animate-pulse-soft;
+  }
+}
+
+@layer utilities {
+  /* Text gradient utility */
+  .text-gradient {
+    @apply bg-gradient-to-r from-primary-500 to-secondary-500
+           bg-clip-text text-transparent;
+  }
+
+  /* Glass effect */
+  .glass {
+    @apply bg-white/10 backdrop-blur-md border border-white/20;
+  }
+
+  /* Soft inset shadow */
+  .inset-soft {
+    @apply shadow-inner-soft;
+  }
+
+  /* Hide scrollbar but keep functionality */
+  .scrollbar-hide {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;
+  }
+
+  /* Line clamp utilities */
+  .line-clamp-3 {
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  /* Tap highlight removal for mobile */
+  .tap-transparent {
+    -webkit-tap-highlight-color: transparent;
+  }
+}
