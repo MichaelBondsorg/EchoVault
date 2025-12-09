@@ -3205,26 +3205,61 @@ export default function App() {
   };
 
   if (!user) return (
-    <div className="min-h-screen flex flex-col items-center justify-center p-4 bg-gray-50">
-      <div className="h-16 w-16 bg-indigo-600 rounded-2xl flex items-center justify-center mb-4 shadow-lg rotate-3"><Activity className="text-white"/></div>
-      <h1 className="text-2xl font-bold mb-6">EchoVault</h1>
-      <button onClick={() => signInWithPopup(auth, new GoogleAuthProvider())} className="flex gap-2 bg-white px-6 py-3 rounded-lg shadow border font-medium text-gray-700 hover:bg-gray-50"><LogIn/> Sign in with Google</button>
+    <div className="min-h-screen flex flex-col items-center justify-center p-4 bg-gradient-to-br from-warm-50 to-primary-50">
+      <motion.div
+        className="h-16 w-16 bg-gradient-to-br from-primary-600 to-primary-700 rounded-3xl flex items-center justify-center mb-4 shadow-soft-lg rotate-3"
+        initial={{ scale: 0, rotate: -10 }}
+        animate={{ scale: 1, rotate: 3 }}
+        transition={{ type: "spring", damping: 15 }}
+      >
+        <Activity className="text-white"/>
+      </motion.div>
+      <motion.h1
+        className="text-2xl font-display font-bold mb-6 text-warm-800"
+        initial={{ opacity: 0, y: 10 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.2 }}
+      >
+        EchoVault
+      </motion.h1>
+      <motion.div
+        initial={{ opacity: 0, y: 10 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.3 }}
+      >
+        <Button
+          variant="secondary"
+          onClick={() => signInWithPopup(auth, new GoogleAuthProvider())}
+          className="flex gap-2 items-center"
+        >
+          <LogIn size={18}/> Sign in with Google
+        </Button>
+      </motion.div>
     </div>
   );
 
   return (
-    <div className="min-h-screen bg-gray-50 pb-40 pt-[env(safe-area-inset-top)]">
-      {showDecompression && <DecompressionScreen onClose={() => setShowDecompression(false)} />}
+    <div className="min-h-screen bg-gradient-to-b from-warm-50 to-white pb-40 pt-[env(safe-area-inset-top)]">
+      <AnimatePresence>
+        {showDecompression && <DecompressionScreen onClose={() => setShowDecompression(false)} />}
+      </AnimatePresence>
 
       {/* Retrofit Progress Indicator */}
-      {retrofitProgress && (
-        <div className="fixed bottom-24 left-4 right-4 z-30 flex justify-center pointer-events-none">
-          <div className="bg-gray-800 text-white px-4 py-2 rounded-full shadow-lg text-sm flex items-center gap-2 animate-in fade-in slide-in-from-bottom-2">
-            <Loader2 className="animate-spin" size={14} />
-            <span>Enhancing entries... {retrofitProgress.processed}/{retrofitProgress.total}</span>
-          </div>
-        </div>
-      )}
+      <AnimatePresence>
+        {retrofitProgress && (
+          <motion.div
+            className="fixed bottom-24 left-4 right-4 z-30 flex justify-center pointer-events-none"
+            initial={{ y: 20, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            exit={{ y: 20, opacity: 0 }}
+          >
+            <div className="bg-warm-800 text-white px-4 py-2 rounded-full shadow-soft-lg text-sm flex items-center gap-2">
+              <Loader2 className="animate-spin" size={14} />
+              <span className="font-body">Enhancing entries... {retrofitProgress.processed}/{retrofitProgress.total}</span>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {crisisModal && (
         <CrisisSoftBlockModal 
@@ -3279,9 +3314,19 @@ export default function App() {
         />
       )}
 
-      <div className="bg-white border-b p-4 sticky top-0 z-20 shadow-sm">
+      <motion.div
+        className="bg-white/95 backdrop-blur-sm border-b border-warm-100 p-4 sticky top-0 z-20 shadow-soft"
+        initial={{ y: -20, opacity: 0 }}
+        animate={{ y: 0, opacity: 1 }}
+      >
         <div className="flex justify-between items-center mb-4">
-          <h1 className="font-bold text-lg flex gap-2 text-gray-800"><Brain className="text-indigo-600"/> EchoVault</h1>
+          <motion.h1
+            className="font-display font-bold text-lg flex gap-2 text-warm-800"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+          >
+            <Brain className="text-primary-600"/> EchoVault
+          </motion.h1>
           <div className="flex gap-2">
             <GetHelpButton onClick={() => setShowSafetyPlan(true)} />
             <HamburgerMenu
@@ -3295,37 +3340,85 @@ export default function App() {
             />
           </div>
         </div>
-        <div className="flex bg-gray-100 p-1 rounded-lg">
-          <button onClick={() => setCat('personal')} className={`flex-1 flex justify-center items-center gap-2 py-1.5 text-xs font-bold rounded transition-all ${cat === 'personal' ? 'bg-white shadow text-indigo-600' : 'text-gray-500'}`}><UserIcon size={14}/> Personal</button>
-          <button onClick={() => setCat('work')} className={`flex-1 flex justify-center items-center gap-2 py-1.5 text-xs font-bold rounded transition-all ${cat === 'work' ? 'bg-white shadow text-indigo-600' : 'text-gray-500'}`}><Briefcase size={14}/> Work</button>
+        <div className="flex bg-warm-100 p-1 rounded-2xl">
+          <motion.button
+            onClick={() => setCat('personal')}
+            className={`flex-1 flex justify-center items-center gap-2 py-2 text-xs font-bold rounded-xl transition-all ${cat === 'personal' ? 'bg-white shadow-soft text-primary-600' : 'text-warm-500'}`}
+            whileHover={{ scale: 1.02 }}
+            whileTap={{ scale: 0.98 }}
+          >
+            <UserIcon size={14}/> Personal
+          </motion.button>
+          <motion.button
+            onClick={() => setCat('work')}
+            className={`flex-1 flex justify-center items-center gap-2 py-2 text-xs font-bold rounded-xl transition-all ${cat === 'work' ? 'bg-white shadow-soft text-primary-600' : 'text-warm-500'}`}
+            whileHover={{ scale: 1.02 }}
+            whileTap={{ scale: 0.98 }}
+          >
+            <Briefcase size={14}/> Work
+          </motion.button>
         </div>
-      </div>
+      </motion.div>
 
       <div className="max-w-md mx-auto p-4">
         {visible.length > 0 && <MoodHeatmap entries={visible} onDayClick={(date, dayData) => setDailySummaryModal({ date, dayData })} />}
-        <div className="space-y-4">
-          {visible.map(e => <EntryCard key={e.id} entry={e} onDelete={id => deleteDoc(doc(db, 'artifacts', APP_COLLECTION_ID, 'users', user.uid, 'entries', id))} onUpdate={(id, d) => updateDoc(doc(db, 'artifacts', APP_COLLECTION_ID, 'users', user.uid, 'entries', id), d)} />)}
-        </div>
+        <AnimatePresence mode="popLayout">
+          <div className="space-y-4">
+            {visible.map(e => <EntryCard key={e.id} entry={e} onDelete={id => deleteDoc(doc(db, 'artifacts', APP_COLLECTION_ID, 'users', user.uid, 'entries', id))} onUpdate={(id, d) => updateDoc(doc(db, 'artifacts', APP_COLLECTION_ID, 'users', user.uid, 'entries', id), d)} />)}
+          </div>
+        </AnimatePresence>
 
         {visible.length === 0 && (
-          <div className="text-center py-12">
-            <div className="h-24 w-24 bg-indigo-50 rounded-full flex items-center justify-center mx-auto mb-4 text-indigo-300"><Mic size={40}/></div>
-            <h3 className="text-lg font-medium text-gray-900">No {cat} memories yet</h3>
-            <p className="text-gray-500 mt-2 text-sm">Switch categories or record your first entry.</p>
-            <div className="mt-8 p-4 bg-blue-50 rounded-xl text-sm text-blue-800 text-left"><p className="font-bold mb-1 flex items-center gap-2"><Share size={14}/> Install on iPhone</p><p>Tap <strong>Share</strong> → <strong>Add to Home Screen</strong>.</p></div>
-          </div>
+          <motion.div
+            className="text-center py-12"
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+          >
+            <motion.div
+              className="h-24 w-24 bg-primary-50 rounded-full flex items-center justify-center mx-auto mb-4 text-primary-300"
+              animate={{ scale: [1, 1.05, 1] }}
+              transition={{ repeat: Infinity, duration: 3, ease: "easeInOut" }}
+            >
+              <Mic size={40}/>
+            </motion.div>
+            <h3 className="text-lg font-display font-medium text-warm-900">No {cat} memories yet</h3>
+            <p className="text-warm-500 mt-2 text-sm font-body">Switch categories or record your first entry.</p>
+            <motion.div
+              className="mt-8 p-4 bg-primary-50 rounded-2xl text-sm text-primary-800 text-left border border-primary-100"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ delay: 0.3 }}
+            >
+              <p className="font-bold mb-1 flex items-center gap-2"><Share size={14}/> Install on iPhone</p>
+              <p className="font-body">Tap <strong>Share</strong> → <strong>Add to Home Screen</strong>.</p>
+            </motion.div>
+          </motion.div>
         )}
       </div>
 
-      {replyContext && !showPrompts && (
-        <div className="fixed bottom-24 left-4 right-4 bg-indigo-900 text-white p-3 rounded-lg z-30 flex justify-between items-center shadow-lg animate-in slide-in-from-bottom-2">
-          <div className="text-xs">
-            <span className="opacity-70 block text-[10px] uppercase font-bold">Replying to:</span>
-            "{replyContext}"
-          </div>
-          <button onClick={() => setReplyContext(null)} className="p-1 hover:bg-white/20 rounded"><X size={16}/></button>
-        </div>
-      )}
+      <AnimatePresence>
+        {replyContext && !showPrompts && (
+          <motion.div
+            className="fixed bottom-24 left-4 right-4 bg-primary-900 text-white p-3 rounded-2xl z-30 flex justify-between items-center shadow-soft-lg"
+            initial={{ y: 100, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            exit={{ y: 100, opacity: 0 }}
+          >
+            <div className="text-xs">
+              <span className="opacity-70 block text-[10px] uppercase font-bold">Replying to:</span>
+              "{replyContext}"
+            </div>
+            <motion.button
+              onClick={() => setReplyContext(null)}
+              className="p-1 hover:bg-white/20 rounded-lg"
+              whileHover={{ scale: 1.1 }}
+              whileTap={{ scale: 0.9 }}
+            >
+              <X size={16}/>
+            </motion.button>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {showPrompts ? (
         <PromptScreen
