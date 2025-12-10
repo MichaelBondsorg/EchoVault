@@ -422,6 +422,13 @@ export default function App() {
       ? temporalContext.effectiveDate
       : now;
 
+    console.log('Saving entry with:', {
+      hasTemporalContext: !!temporalContext,
+      temporalDetected: temporalContext?.detected,
+      effectiveDate: effectiveDate.toDateString(),
+      isBackdated: effectiveDate.toDateString() !== now.toDateString()
+    });
+
     try {
       const entryData = {
         text: finalTex,
@@ -596,7 +603,16 @@ export default function App() {
     // Detect temporal context (Phase 2)
     try {
       const temporal = await detectTemporalContext(textInput);
-      console.log('Temporal detection:', temporal);
+      console.log('Temporal detection result:', {
+        detected: temporal.detected,
+        effectiveDate: temporal.effectiveDate,
+        reference: temporal.reference,
+        confidence: temporal.confidence,
+        futureMentions: temporal.futureMentions?.length || 0,
+        needsConfirm: temporal.detected ? (temporal.confidence >= 0.5 && temporal.confidence <= 0.8) : false,
+        willAutoBackdate: temporal.detected && temporal.confidence > 0.8,
+        reasoning: temporal.reasoning
+      });
 
       if (temporal.detected) {
         if (needsConfirmation(temporal)) {
