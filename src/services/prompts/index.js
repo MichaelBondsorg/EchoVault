@@ -140,7 +140,7 @@ Rules:
 - Examples: "How did that meeting go?", "Any updates on the apartment search?"`;
 
   try {
-    const raw = await callGemini(prompt, '', 'gemini-1.5-flash');
+    const raw = await callGemini(prompt, '', 'gemini-2.0-flash');
     if (!raw) return [];
     const jsonStr = raw.replace(/```json|```/g, '').trim();
     return JSON.parse(jsonStr);
@@ -183,7 +183,7 @@ Rules:
 - Examples: "Still planning on that morning run?", "Any progress on speaking up at meetings?"`;
 
   try {
-    const raw = await callGemini(prompt, '', 'gemini-1.5-flash');
+    const raw = await callGemini(prompt, '', 'gemini-2.0-flash');
     if (!raw) return [];
     const jsonStr = raw.replace(/```json|```/g, '').trim();
     return JSON.parse(jsonStr);
@@ -393,7 +393,7 @@ Return JSON only:
 If truly ambiguous, default to "personal".`;
 
   try {
-    const raw = await callGemini(prompt, '', 'gemini-1.5-flash');
+    const raw = await callGemini(prompt, '', 'gemini-2.0-flash');
     if (!raw) return { category: 'personal', confidence: 0.5 };
 
     const jsonStr = raw.replace(/```json|```/g, '').trim();

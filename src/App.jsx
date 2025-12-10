@@ -436,10 +436,7 @@ export default function App() {
       const ref = await addDoc(collection(db, 'artifacts', APP_COLLECTION_ID, 'users', user.uid, 'entries'), entryData);
 
       setProcessing(false);
-      setMode('idle');
       setReplyContext(null);
-      setShowPrompts(false);
-      setPromptMode(null);
 
       (async () => {
         try {

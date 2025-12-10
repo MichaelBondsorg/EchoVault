@@ -5,7 +5,7 @@ export const OPENAI_API_KEY = import.meta.env.VITE_OPENAI_API_KEY;
 // AI Model Configuration
 export const AI_CONFIG = {
   classification: {
-    primary: 'gemini-1.5-flash',
+    primary: 'gemini-2.0-flash',
     fallback: 'gpt-4o-mini'
   },
   analysis: {
@@ -14,7 +14,7 @@ export const AI_CONFIG = {
   },
   chat: {
     primary: 'gpt-4o-mini',
-    fallback: 'gemini-1.5-flash'
+    fallback: 'gemini-2.0-flash'
   },
   embedding: {
     primary: 'text-embedding-004',
