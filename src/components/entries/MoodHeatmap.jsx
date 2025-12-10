@@ -8,11 +8,16 @@ const MoodHeatmap = ({ entries, onDayClick }) => {
   }), []);
 
   const getDayData = (d) => {
-    const dayEntries = entries.filter(e =>
-      e.createdAt.getDate() === d.getDate() &&
-      e.createdAt.getMonth() === d.getMonth() &&
-      e.createdAt.getFullYear() === d.getFullYear()
-    );
+    const dayEntries = entries.filter(e => {
+      // Use effectiveDate if available (for backdated entries), otherwise createdAt
+      const dateField = e.effectiveDate || e.createdAt;
+      const entryDate = dateField instanceof Date
+        ? dateField
+        : dateField?.toDate?.() || new Date();
+      return entryDate.getDate() === d.getDate() &&
+        entryDate.getMonth() === d.getMonth() &&
+        entryDate.getFullYear() === d.getFullYear();
+    });
     const moodEntries = dayEntries.filter(e => e.entry_type !== 'task' && typeof e.analysis?.mood_score === 'number');
     const avgMood = moodEntries.length > 0
       ? moodEntries.reduce((sum, e) => sum + e.analysis.mood_score, 0) / moodEntries.length
