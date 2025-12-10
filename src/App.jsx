@@ -433,8 +433,8 @@ export default function App() {
         userId: user.uid
       };
 
-      // Store temporal context if detected
-      if (temporalContext?.detected) {
+      // Store temporal context if detected (past reference)
+      if (temporalContext?.detected && temporalContext?.reference) {
         entryData.temporalContext = {
           detected: true,
           reference: temporalContext.reference,
@@ -442,6 +442,19 @@ export default function App() {
           confidence: temporalContext.confidence,
           backdated: effectiveDate.toDateString() !== now.toDateString()
         };
+      }
+
+      // Store future mentions for follow-up prompts
+      if (temporalContext?.futureMentions?.length > 0) {
+        entryData.futureMentions = temporalContext.futureMentions.map(mention => ({
+          targetDate: Timestamp.fromDate(mention.targetDate),
+          event: mention.event,
+          sentiment: mention.sentiment,
+          phrase: mention.phrase,
+          confidence: mention.confidence,
+          isRecurring: mention.isRecurring || false,
+          recurringPattern: mention.recurringPattern || null
+        }));
       }
 
       if (safetyFlagged) {

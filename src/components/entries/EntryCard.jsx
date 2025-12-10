@@ -214,16 +214,32 @@ const EntryCard = ({ entry, onDelete, onUpdate }) => {
           )}
           {entry.tags.map((t, i) => {
             const tag = safeString(t);
+            // Helper to format entity names (replace underscores with spaces, title case)
+            const formatName = (prefix) => tag.replace(prefix, '').replace(/_/g, ' ');
+
             if (tag.startsWith('@person:')) {
-              return <span key={i} className="text-[10px] font-semibold text-primary-600 bg-primary-50 px-2 py-0.5 rounded-full">{tag.replace('@person:', '👤 ')}</span>;
+              return <span key={i} className="text-[10px] font-semibold text-primary-600 bg-primary-50 px-2 py-0.5 rounded-full">👤 {formatName('@person:')}</span>;
             } else if (tag.startsWith('@place:')) {
-              return <span key={i} className="text-[10px] font-semibold text-green-600 bg-green-50 px-2 py-0.5 rounded-full">{tag.replace('@place:', '📍 ')}</span>;
+              return <span key={i} className="text-[10px] font-semibold text-green-600 bg-green-50 px-2 py-0.5 rounded-full">📍 {formatName('@place:')}</span>;
             } else if (tag.startsWith('@goal:')) {
-              return <span key={i} className="text-[10px] font-semibold text-amber-600 bg-amber-50 px-2 py-0.5 rounded-full">{tag.replace('@goal:', '🎯 ')}</span>;
+              return <span key={i} className="text-[10px] font-semibold text-amber-600 bg-amber-50 px-2 py-0.5 rounded-full">🎯 {formatName('@goal:')}</span>;
             } else if (tag.startsWith('@situation:')) {
-              return <span key={i} className="text-[10px] font-semibold text-secondary-600 bg-secondary-50 px-2 py-0.5 rounded-full">{tag.replace('@situation:', '📌 ')}</span>;
+              return <span key={i} className="text-[10px] font-semibold text-secondary-600 bg-secondary-50 px-2 py-0.5 rounded-full">📌 {formatName('@situation:')}</span>;
             } else if (tag.startsWith('@self:')) {
-              return <span key={i} className="text-[10px] font-semibold text-rose-600 bg-rose-50 px-2 py-0.5 rounded-full">{tag.replace('@self:', '💭 ')}</span>;
+              return <span key={i} className="text-[10px] font-semibold text-rose-600 bg-rose-50 px-2 py-0.5 rounded-full">💭 {formatName('@self:')}</span>;
+            } else if (tag.startsWith('@activity:')) {
+              return <span key={i} className="text-[10px] font-semibold text-blue-600 bg-blue-50 px-2 py-0.5 rounded-full">🏃 {formatName('@activity:')}</span>;
+            } else if (tag.startsWith('@media:')) {
+              return <span key={i} className="text-[10px] font-semibold text-purple-600 bg-purple-50 px-2 py-0.5 rounded-full">🎬 {formatName('@media:')}</span>;
+            } else if (tag.startsWith('@event:')) {
+              return <span key={i} className="text-[10px] font-semibold text-orange-600 bg-orange-50 px-2 py-0.5 rounded-full">📅 {formatName('@event:')}</span>;
+            } else if (tag.startsWith('@food:')) {
+              return <span key={i} className="text-[10px] font-semibold text-red-600 bg-red-50 px-2 py-0.5 rounded-full">🍽️ {formatName('@food:')}</span>;
+            } else if (tag.startsWith('@topic:')) {
+              return <span key={i} className="text-[10px] font-semibold text-slate-600 bg-slate-50 px-2 py-0.5 rounded-full">💬 {formatName('@topic:')}</span>;
+            } else if (tag.startsWith('@')) {
+              // Unknown @ tag - show without prefix
+              return <span key={i} className="text-[10px] font-semibold text-warm-600 bg-warm-50 px-2 py-0.5 rounded-full">{tag.split(':')[1]?.replace(/_/g, ' ') || tag}</span>;
             }
             return <span key={i} className="text-[10px] font-semibold text-primary-600 bg-primary-50 px-2 py-0.5 rounded-full">#{tag}</span>;
           })}

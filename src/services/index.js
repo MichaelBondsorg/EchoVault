@@ -24,3 +24,6 @@ export * from './rag';
 
 // Pattern Services
 export * from './patterns';
+
+// Vector Search Services (Phase 3)
+export * from './vectorSearch';

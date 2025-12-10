@@ -4,13 +4,106 @@ import { generateProactiveContext, computeActivitySentiment } from '../patterns'
 
 /**
  * Prompt Priority Hierarchy:
- * 1. Proactive context - Entity history, pattern triggers (NEW - highest value)
- * 2. Open situations - "How did that meeting go?" (continuity)
- * 3. Goal check-ins - "Still planning to hit the gym?" (accountability)
- * 4. Pattern-based - "You usually feel anxious on Mondays. How are you feeling?"
- * 5. Mood trajectory - "You've been in a low stretch. What's one small win today?"
- * 6. Generic journaling - "What's on your mind?" (fallback)
+ * 1. Future follow-ups - "You mentioned being nervous about your interview. How did it go?" (HIGHEST)
+ * 2. Proactive context - Entity history, pattern triggers
+ * 3. Open situations - "How did that meeting go?" (continuity)
+ * 4. Goal check-ins - "Still planning to hit the gym?" (accountability)
+ * 5. Pattern-based - "You usually feel anxious on Mondays. How are you feeling?"
+ * 6. Mood trajectory - "You've been in a low stretch. What's one small win today?"
+ * 7. Generic journaling - "What's on your mind?" (fallback)
  */
+
+/**
+ * Get future mentions that target today (for follow-up prompts)
+ * These are events the user mentioned being nervous/excited about
+ */
+const extractTodayFollowUps = (entries) => {
+  const followUps = [];
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const todayEnd = new Date(today);
+  todayEnd.setHours(23, 59, 59, 999);
+
+  const seenEvents = new Set(); // Dedupe across entries
+
+  entries.forEach(entry => {
+    if (!entry.futureMentions || !Array.isArray(entry.futureMentions)) return;
+
+    entry.futureMentions.forEach(mention => {
+      // Get target date
+      const targetDate = mention.targetDate instanceof Date
+        ? mention.targetDate
+        : mention.targetDate?.toDate?.();
+
+      if (!targetDate) return;
+
+      // Check if target date is today
+      if (targetDate >= today && targetDate <= todayEnd) {
+        // Get entry date for context
+        const entryDate = entry.effectiveDate instanceof Date
+          ? entry.effectiveDate
+          : entry.effectiveDate?.toDate?.() || entry.createdAt?.toDate?.();
+
+        // Dedupe by event name
+        const dedupeKey = mention.event.toLowerCase();
+        if (seenEvents.has(dedupeKey)) return;
+        seenEvents.add(dedupeKey);
+
+        followUps.push({
+          event: mention.event,
+          sentiment: mention.sentiment,
+          phrase: mention.phrase,
+          entryDate,
+          isRecurring: mention.isRecurring || false,
+          confidence: mention.confidence || 0.7
+        });
+      }
+    });
+  });
+
+  // Sort by confidence, take top 3
+  return followUps
+    .sort((a, b) => (b.confidence || 0) - (a.confidence || 0))
+    .slice(0, 3);
+};
+
+/**
+ * Generate follow-up prompts for events the user mentioned
+ */
+const generateFollowUpPrompts = async (followUps) => {
+  if (followUps.length === 0) return [];
+
+  const prompt = `Generate personalized follow-up questions for events the user previously mentioned.
+The user mentioned these upcoming events with emotions - today is the day they happen.
+
+EVENTS:
+${followUps.map((f, i) => `${i + 1}. Event: "${f.event}", Feeling: ${f.sentiment}, Original: "${f.phrase || 'N/A'}"`).join('\n')}
+
+Return JSON array of follow-up questions (1 per event):
+["Question 1?", "Question 2?"]
+
+Rules:
+- Reference how they were feeling: "You mentioned feeling nervous about..."
+- Ask how it went or how they're feeling now
+- Be warm and curious, not pushy
+- Keep under 20 words
+- For recurring events, acknowledge the pattern: "Monday standup day - how'd it go this week?"
+
+Examples:
+- Nervous about interview → "You mentioned being nervous about your interview. How did it go?"
+- Excited about concert → "Did you enjoy the concert you were looking forward to?"
+- Dreading meeting → "That meeting you were dreading - was it as bad as you expected?"`;
+
+  try {
+    const raw = await callGemini(prompt, '', 'gemini-2.0-flash');
+    if (!raw) return [];
+    const jsonStr = raw.replace(/```json|```/g, '').trim();
+    return JSON.parse(jsonStr);
+  } catch (e) {
+    console.error('generateFollowUpPrompts error:', e);
+    return [];
+  }
+};
 
 const GENERIC_PROMPTS = [
   "What's on your mind today?",
@@ -315,13 +408,27 @@ export const generateDashboardPrompts = async (entries, category = 'personal') =
   const categoryEntries = entries.filter(e => e.category === category);
   const allPrompts = [];
 
-  // Priority 1: Proactive context (NEW - pattern-based, entity history)
-  const proactivePrompts = generateProactivePrompts(categoryEntries, category);
-  if (proactivePrompts.length > 0) {
-    allPrompts.push(...proactivePrompts);
+  // Priority 1: Future follow-ups (HIGHEST - user mentioned being nervous/excited about today's events)
+  const todayFollowUps = extractTodayFollowUps(categoryEntries);
+  if (todayFollowUps.length > 0) {
+    const followUpPrompts = await generateFollowUpPrompts(todayFollowUps);
+    allPrompts.push(...followUpPrompts.map((p, i) => ({
+      type: 'followup',
+      prompt: p,
+      event: todayFollowUps[i]?.event,
+      sentiment: todayFollowUps[i]?.sentiment
+    })));
   }
 
-  // Priority 2: Open situations
+  // Priority 2: Proactive context (pattern-based, entity history)
+  if (allPrompts.length < 2) {
+    const proactivePrompts = generateProactivePrompts(categoryEntries, category);
+    if (proactivePrompts.length > 0) {
+      allPrompts.push(...proactivePrompts);
+    }
+  }
+
+  // Priority 3: Open situations
   if (allPrompts.length < 2) {
     const situations = extractOpenSituations(categoryEntries);
     if (situations.length > 0) {
@@ -330,7 +437,7 @@ export const generateDashboardPrompts = async (entries, category = 'personal') =
     }
   }
 
-  // Priority 3: Goal check-ins
+  // Priority 4: Goal check-ins
   if (allPrompts.length < 2) {
     const goals = extractActiveGoals(categoryEntries);
     if (goals.length > 0) {
@@ -339,19 +446,19 @@ export const generateDashboardPrompts = async (entries, category = 'personal') =
     }
   }
 
-  // Priority 4: Pattern-based (day of week)
+  // Priority 5: Pattern-based (day of week)
   if (allPrompts.length < 2) {
     const patternPrompts = generatePatternPrompts(categoryEntries);
     allPrompts.push(...patternPrompts.map(p => ({ type: 'pattern', prompt: p })));
   }
 
-  // Priority 5: Mood trajectory
+  // Priority 6: Mood trajectory
   if (allPrompts.length < 2) {
     const moodPrompts = generateMoodPrompts(categoryEntries);
     allPrompts.push(...moodPrompts.map(p => ({ type: 'mood', prompt: p })));
   }
 
-  // Priority 6: Generic fallback
+  // Priority 7: Generic fallback
   if (allPrompts.length === 0) {
     const genericPool = category === 'work' ? WORK_GENERIC_PROMPTS : GENERIC_PROMPTS;
     const shuffled = [...genericPool].sort(() => Math.random() - 0.5);
