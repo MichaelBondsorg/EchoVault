@@ -854,6 +854,8 @@ export default function App() {
       {showInsights && (
         <InsightsPanel
           entries={entries}
+          userId={user?.uid}
+          category={category}
           onClose={() => setShowInsights(false)}
         />
       )}
@@ -925,6 +927,7 @@ export default function App() {
           onToggleTask={(task, source, index) => {
             console.log('Toggle task:', task, source, index);
           }}
+          onShowInsights={() => setShowInsights(true)}
         />
 
         {/* Install Prompt for new users */}

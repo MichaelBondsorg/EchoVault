@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   Sun, Cloud, CloudRain, Sparkles, Target, AlertCircle,
   CheckCircle2, Circle, TrendingUp, Loader2, RefreshCw,
-  ChevronRight, Lightbulb
+  ChevronRight, Lightbulb, AlertOctagon, BarChart3
 } from 'lucide-react';
 import { generateDashboardPrompts, generateDaySummary } from '../../services/prompts';
 import {
@@ -13,6 +13,7 @@ import {
   getTodayStart,
   getMillisecondsUntilMidnight
 } from '../../services/dashboard';
+import { getPatternSummary, getContradictions } from '../../services/patterns/cached';
 
 /**
  * DayDashboard - The main dashboard view showing today's summary
@@ -182,6 +183,36 @@ const PatternsSection = ({ patterns }) => {
   );
 };
 
+// Inline pattern hints from cached patterns (contradictions, key insights)
+const PatternHintsSection = ({ hints, onShowMore }) => {
+  if (!hints || hints.length === 0) return null;
+
+  return (
+    <motion.div
+      className="bg-gradient-to-br from-orange-50 to-amber-50 rounded-2xl p-4 border border-orange-100"
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ delay: 0.35 }}
+    >
+      <SectionHeader icon={AlertOctagon} title="Worth Reflecting On" iconColor="text-orange-500" />
+      <ul className="space-y-2">
+        {hints.slice(0, 2).map((hint, i) => (
+          <li key={i} className="text-sm text-orange-800 font-body">{hint.message}</li>
+        ))}
+      </ul>
+      {onShowMore && hints.length > 0 && (
+        <button
+          onClick={onShowMore}
+          className="mt-3 flex items-center gap-1 text-xs text-orange-600 font-medium hover:text-orange-800 transition-colors"
+        >
+          <BarChart3 size={12} />
+          View all patterns
+        </button>
+      )}
+    </motion.div>
+  );
+};
+
 const MoodIndicator = ({ mood }) => {
   if (mood === null || mood === undefined) return null;
 
@@ -208,13 +239,15 @@ const DayDashboard = ({
   category,
   userId,
   onPromptClick,
-  onToggleTask
+  onToggleTask,
+  onShowInsights
 }) => {
   const [prompts, setPrompts] = useState([]);
   const [summary, setSummary] = useState(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [carryForwardItems, setCarryForwardItems] = useState([]);
+  const [patternHints, setPatternHints] = useState([]);
   const midnightTimeoutRef = useRef(null);
   const lastEntryCountRef = useRef(0);
 
@@ -274,6 +307,31 @@ const DayDashboard = ({
 
     loadCarryForward();
   }, [userId, category]);
+
+  // Load cached pattern hints (contradictions & key insights)
+  useEffect(() => {
+    if (!userId) return;
+
+    const loadPatternHints = async () => {
+      try {
+        // Load contradictions as the primary hints
+        const contradictions = await getContradictions(userId);
+        if (contradictions?.data?.length > 0) {
+          setPatternHints(contradictions.data);
+        } else {
+          // Fallback to summary insights if no contradictions
+          const summary = await getPatternSummary(userId);
+          if (summary?.data?.length > 0) {
+            setPatternHints(summary.data.slice(0, 2));
+          }
+        }
+      } catch (error) {
+        console.log('Pattern hints not available:', error.message);
+      }
+    };
+
+    loadPatternHints();
+  }, [userId]);
 
   // Generate content with caching
   const generateAndCacheContent = useCallback(async (useCache = true) => {
@@ -465,6 +523,10 @@ const DayDashboard = ({
               onToggleTask={onToggleTask}
             />
             <PatternsSection patterns={summary?.patterns} />
+            <PatternHintsSection
+              hints={patternHints}
+              onShowMore={onShowInsights}
+            />
 
             {/* Entry count */}
             <p className="text-xs text-warm-400 text-center font-body pt-2">
