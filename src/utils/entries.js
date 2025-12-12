@@ -24,6 +24,8 @@ export const sanitizeEntry = (id, data) => {
     continues_situation: data.continues_situation || null,
     goal_update: data.goal_update || null,
     entry_type: data.entry_type || 'reflection',
+    // Extracted tasks for mixed entries
+    extracted_tasks: Array.isArray(data.extracted_tasks) ? data.extracted_tasks : null,
     // Context version for retrofit tracking (v1 = enhanced context extracted)
     context_version: data.context_version || 0
   };
