@@ -45,7 +45,13 @@ export const checkLongitudinalRisk = (recentEntries) => {
  */
 export const analyzeLongitudinalPatterns = (entries) => {
   const patterns = [];
-  const moodEntries = entries.filter(e => e.entry_type !== 'task' && typeof e.analysis?.mood_score === 'number');
+  // Filter for valid entries with mood scores and text
+  const moodEntries = entries.filter(e =>
+    e.entry_type !== 'task' &&
+    typeof e.analysis?.mood_score === 'number' &&
+    typeof e.text === 'string' &&
+    e.createdAt
+  );
 
   if (moodEntries.length < 7) return patterns;
 

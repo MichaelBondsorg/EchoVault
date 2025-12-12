@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>EchoVault Privacy Policy</title>
+  <style>
+    :root {
+      --bg-primary: #1a1a2e;
+      --bg-secondary: #16213e;
+      --text-primary: #ffffff;
+      --text-secondary: rgba(255, 255, 255, 0.7);
+      --accent: #a855f7;
+    }
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: linear-gradient(135deg, var(--bg-primary) 0%, var(--bg-secondary) 100%);
+      color: var(--text-primary);
+      min-height: 100vh;
+      line-height: 1.6;
+    }
+    .container {
+      max-width: 800px;
+      margin: 0 auto;
+      padding: 40px 20px;
+    }
+    h1 {
+      font-size: 2.5rem;
+      margin-bottom: 0.5rem;
+      background: linear-gradient(135deg, #a855f7, #6366f1);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+    .updated {
+      color: var(--text-secondary);
+      margin-bottom: 2rem;
+    }
+    h2 {
+      color: var(--accent);
+      margin-top: 2rem;
+      margin-bottom: 1rem;
+      font-size: 1.5rem;
+    }
+    h3 {
+      margin-top: 1.5rem;
+      margin-bottom: 0.75rem;
+      font-size: 1.1rem;
+    }
+    p, li {
+      color: var(--text-secondary);
+      margin-bottom: 1rem;
+    }
+    ul {
+      padding-left: 1.5rem;
+      margin-bottom: 1rem;
+    }
+    li {
+      margin-bottom: 0.5rem;
+    }
+    strong {
+      color: var(--text-primary);
+    }
+    .highlight {
+      background: rgba(168, 85, 247, 0.1);
+      border-left: 3px solid var(--accent);
+      padding: 1rem;
+      margin: 1rem 0;
+      border-radius: 0 8px 8px 0;
+    }
+    .crisis-box {
+      background: rgba(239, 68, 68, 0.1);
+      border: 1px solid rgba(239, 68, 68, 0.3);
+      padding: 1.5rem;
+      border-radius: 8px;
+      margin: 1.5rem 0;
+    }
+    .crisis-box h3 {
+      color: #ef4444;
+      margin-top: 0;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 1rem 0;
+    }
+    th, td {
+      padding: 0.75rem;
+      text-align: left;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    }
+    th {
+      color: var(--accent);
+    }
+    td {
+      color: var(--text-secondary);
+    }
+    a {
+      color: var(--accent);
+      text-decoration: none;
+    }
+    a:hover {
+      text-decoration: underline;
+    }
+    .back-link {
+      display: inline-block;
+      margin-bottom: 2rem;
+      color: var(--text-secondary);
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <a href="/" class="back-link">&larr; Back to EchoVault</a>
+
+    <h1>Privacy Policy</h1>
+    <p class="updated">Last Updated: December 2024</p>
+
+    <h2>Introduction</h2>
+    <p>EchoVault ("we", "our", or "us") is committed to protecting your privacy. This Privacy Policy explains how we collect, use, disclose, and safeguard your information when you use our mobile application and related services.</p>
+
+    <div class="highlight">
+      <strong>EchoVault is a personal mental health journaling application. We take the privacy of your mental health data extremely seriously.</strong>
+    </div>
+
+    <h2>Information We Collect</h2>
+
+    <h3>Information You Provide</h3>
+    <ul>
+      <li><strong>Journal Entries</strong>: Text entries, voice recordings, and transcriptions you create</li>
+      <li><strong>Account Information</strong>: Email address and authentication data when you sign in with Google</li>
+      <li><strong>Mood Data</strong>: Mood ratings and emotional context you provide with entries</li>
+      <li><strong>Safety Plans</strong>: Personal safety information, coping strategies, and emergency contacts you choose to store</li>
+    </ul>
+
+    <h3>Information Collected Automatically</h3>
+    <ul>
+      <li><strong>Usage Data</strong>: Features used, interaction patterns (stored locally and in your private Firebase account)</li>
+      <li><strong>Device Information</strong>: Device type, operating system version (for compatibility purposes only)</li>
+    </ul>
+
+    <h3>Information Processed by Third-Party AI Services</h3>
+    <p>To provide AI-powered features, certain data is processed by third-party services:</p>
+    <ul>
+      <li><strong>Voice Transcription</strong>: Audio recordings are sent to OpenAI's Whisper API for transcription</li>
+      <li><strong>Entry Analysis</strong>: Journal entry text is sent to Google Gemini API for mood analysis and insights</li>
+      <li><strong>Smart Search</strong>: Entry embeddings are generated using AI services for semantic search</li>
+    </ul>
+
+    <div class="highlight">
+      <strong>Important</strong>: We do not store your data on third-party AI servers beyond the time needed to process your request.
+    </div>
+
+    <h2>How We Use Your Information</h2>
+    <p>We use your information to:</p>
+    <ul>
+      <li>Provide and maintain the EchoVault service</li>
+      <li>Transcribe your voice recordings into text</li>
+      <li>Generate AI-powered insights and mood analysis</li>
+      <li>Enable smart search across your journal entries</li>
+      <li>Detect potential crisis situations and provide safety resources</li>
+      <li>Improve and optimize the application</li>
+    </ul>
+
+    <h2>Data Storage and Security</h2>
+
+    <h3>Where Your Data Is Stored</h3>
+    <ul>
+      <li><strong>Firebase Cloud Firestore</strong>: Your journal entries, mood data, and account preferences are stored in Google Firebase, isolated to your user account</li>
+      <li><strong>Local Device</strong>: Some data may be cached locally for offline access</li>
+    </ul>
+
+    <h3>Security Measures</h3>
+    <ul>
+      <li>All data is encrypted in transit (HTTPS/TLS)</li>
+      <li>Firebase provides encryption at rest</li>
+      <li>Authentication is handled securely through Google Sign-In</li>
+      <li>Your data is isolated by your unique user ID</li>
+    </ul>
+
+    <h2>Data Sharing and Disclosure</h2>
+    <p><strong>We do not sell your personal information.</strong></p>
+    <p>We may share your information only in these circumstances:</p>
+    <ul>
+      <li><strong>Service Providers</strong>: With AI service providers (OpenAI, Google) solely to provide transcription and analysis features</li>
+      <li><strong>Legal Requirements</strong>: If required by law or to protect our rights</li>
+      <li><strong>With Your Consent</strong>: When you explicitly authorize sharing</li>
+    </ul>
+
+    <h2>Your Rights and Choices</h2>
+    <p>You have the right to:</p>
+    <ul>
+      <li><strong>Access</strong>: View all your stored journal entries and data within the app</li>
+      <li><strong>Delete</strong>: Delete individual entries or your entire account</li>
+      <li><strong>Export</strong>: Export your journal entries (PDF export feature)</li>
+      <li><strong>Opt-Out</strong>: Stop using voice recording or AI features at any time</li>
+    </ul>
+
+    <h2>Data Retention</h2>
+    <ul>
+      <li>Your data is retained as long as you maintain an active account</li>
+      <li>You can delete your data at any time through the app</li>
+      <li>Upon account deletion, your data is permanently removed from our systems</li>
+    </ul>
+
+    <h2>Children's Privacy</h2>
+    <p>EchoVault is not intended for children under 13. We do not knowingly collect information from children under 13. If you believe we have collected such information, please contact us immediately.</p>
+
+    <div class="crisis-box">
+      <h3>Mental Health Disclaimer</h3>
+      <p>EchoVault is a journaling tool and is <strong>not a substitute for professional mental health care</strong>. If you are experiencing a mental health crisis:</p>
+      <ul>
+        <li><strong>United States</strong>: Call or text <strong>988</strong> (Suicide &amp; Crisis Lifeline)</li>
+        <li><strong>Crisis Text Line</strong>: Text HOME to <strong>741741</strong></li>
+        <li><strong>Emergency</strong>: Call <strong>911</strong> or your local emergency number</li>
+      </ul>
+    </div>
+
+    <h2>Third-Party Services</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Service</th>
+          <th>Purpose</th>
+          <th>Privacy Policy</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Google Firebase</td>
+          <td>Authentication &amp; Database</td>
+          <td><a href="https://firebase.google.com/support/privacy" target="_blank">Firebase Privacy</a></td>
+        </tr>
+        <tr>
+          <td>Google Gemini</td>
+          <td>AI Analysis</td>
+          <td><a href="https://policies.google.com/privacy" target="_blank">Google Privacy</a></td>
+        </tr>
+        <tr>
+          <td>OpenAI</td>
+          <td>Voice Transcription</td>
+          <td><a href="https://openai.com/privacy" target="_blank">OpenAI Privacy</a></td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h2>Changes to This Policy</h2>
+    <p>We may update this Privacy Policy from time to time. We will notify you of any changes by posting the new Privacy Policy in the app and updating the "Last Updated" date.</p>
+
+    <h2>Contact Us</h2>
+    <p>If you have questions about this Privacy Policy or our data practices, please contact us.</p>
+
+    <hr style="margin: 2rem 0; border: none; border-top: 1px solid rgba(255,255,255,0.1);">
+
+    <p style="font-size: 0.9rem;">By using EchoVault, you agree to the collection and use of information in accordance with this Privacy Policy.</p>
+  </div>
+</body>
+</html>
