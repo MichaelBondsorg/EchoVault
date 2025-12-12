@@ -276,10 +276,16 @@ const EntryCard = ({ entry, onDelete, onUpdate }) => {
             <Clipboard size={12} /> Tasks
           </div>
           <div className="space-y-1">
-            {entry.extracted_tasks.map((task, i) => {
+            {entry.extracted_tasks.map((rawTask, i) => {
+              // Handle both object tasks and legacy string tasks
+              const task = typeof rawTask === 'string'
+                ? { text: rawTask, completed: false, recurrence: null }
+                : rawTask;
+              const taskText = task?.text || (typeof rawTask === 'string' ? rawTask : JSON.stringify(rawTask));
+
               // For recurring tasks, check if waiting for next due date
-              const isWaitingForNextDue = task.recurrence && task.nextDueDate && new Date(task.nextDueDate) > new Date();
-              const displayAsCompleted = task.completed || isWaitingForNextDue;
+              const isWaitingForNextDue = task?.recurrence && task?.nextDueDate && new Date(task.nextDueDate) > new Date();
+              const displayAsCompleted = task?.completed || isWaitingForNextDue;
 
               // Helper to calculate next due date
               const calculateNextDueDate = (recurrence) => {
@@ -329,9 +335,9 @@ const EntryCard = ({ entry, onDelete, onUpdate }) => {
                     className="rounded border-warm-300 text-primary-600 focus:ring-primary-500"
                   />
                   <span className={displayAsCompleted ? 'line-through text-warm-400' : 'text-warm-700'}>
-                    {task.text}
+                    {taskText}
                   </span>
-                  {task.recurrence && (
+                  {task?.recurrence && (
                     <span className="badge-recurring">
                       <RefreshCw size={10} className="inline mr-1" />
                       {task.recurrence.description || task.recurrence.pattern}

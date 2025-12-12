@@ -30,7 +30,11 @@ const JournalScreen = ({
       filtered = filtered.filter(e =>
         e.text?.toLowerCase().includes(query) ||
         e.title?.toLowerCase().includes(query) ||
-        e.tags?.some(t => t.toLowerCase().includes(query))
+        e.tags?.some(t => {
+          // Handle both string tags and object tags (legacy data)
+          const tagStr = typeof t === 'string' ? t : (t?.text || '');
+          return tagStr.toLowerCase().includes(query);
+        })
       );
     }
 
