@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { X, Phone, MessageCircle, TrendingUp, Heart, Sparkles, Brain, Clipboard } from 'lucide-react';
-import { OPENAI_API_KEY } from '../../config/ai';
+import { X, Phone, MessageCircle, TrendingUp, Heart, Sparkles, Brain, Clipboard, AlertCircle } from 'lucide-react';
+
+// Note: Realtime API requires secure server-side implementation
+// The API key has been moved to Cloud Functions for security
 
 const RealtimeConversation = ({ entries, onClose, category }) => {
   const [status, setStatus] = useState('disconnected');
@@ -113,171 +115,10 @@ Move through each step naturally, spending time on areas they want to explore de
   };
 
   // Start realtime conversation
+  // NOTE: Realtime voice API requires secure server-side relay for API key security
+  // This feature has been temporarily disabled pending secure WebSocket relay implementation
   const startConversation = async () => {
-    if (!OPENAI_API_KEY) {
-      setError('OpenAI API key required');
-      return;
-    }
-
-    setStatus('connecting');
-    setError(null);
-
-    const audioReady = await initAudio();
-    if (!audioReady) return;
-
-    try {
-      const ws = new WebSocket('wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-12-17', [
-        'realtime',
-        `openai-insecure-api-key.${OPENAI_API_KEY}`,
-        'openai-beta.realtime-v1'
-      ]);
-
-      ws.onopen = () => {
-        console.log('Realtime WebSocket connected');
-        setStatus('connected');
-
-        const sessionConfig = {
-          type: 'session.update',
-          session: {
-            modalities: ['text', 'audio'],
-            instructions: `You are a warm, empathetic journal companion for ${category} journaling. ${getThemePrompt()}
-
-PERSONALITY:
-- Be conversational and natural, like a supportive friend
-- Ask thoughtful follow-up questions to deepen reflection
-- Notice patterns and gently point them out
-- Validate emotions before offering perspective
-- Keep responses concise (1-3 sentences for voice)
-
-USER'S RECENT JOURNAL ENTRIES:
-${getJournalContext()}
-
-Start with a warm greeting and invitation to share.`,
-            voice: 'nova',
-            input_audio_format: 'pcm16',
-            output_audio_format: 'pcm16',
-            input_audio_transcription: { model: 'whisper-1' },
-            turn_detection: {
-              type: 'server_vad',
-              threshold: 0.5,
-              prefix_padding_ms: 300,
-              silence_duration_ms: 500
-            }
-          }
-        };
-        ws.send(JSON.stringify(sessionConfig));
-
-        setTimeout(() => {
-          const responseCreate = {
-            type: 'response.create',
-            response: {
-              modalities: ['text', 'audio'],
-              instructions: getConversationStarter()
-            }
-          };
-          ws.send(JSON.stringify(responseCreate));
-        }, 500);
-      };
-
-      ws.onmessage = (event) => {
-        const data = JSON.parse(event.data);
-
-        switch (data.type) {
-          case 'session.created':
-            console.log('Session created:', data.session?.id);
-            break;
-
-          case 'response.audio.delta':
-            if (data.delta) {
-              setStatus('speaking');
-              playAudio(data.delta);
-            }
-            break;
-
-          case 'response.audio_transcript.delta':
-            if (data.delta) {
-              setTranscript(prev => {
-                const last = prev[prev.length - 1];
-                if (last?.role === 'assistant' && !last.complete) {
-                  return [...prev.slice(0, -1), { ...last, text: last.text + data.delta }];
-                }
-                return [...prev, { role: 'assistant', text: data.delta, complete: false }];
-              });
-            }
-            break;
-
-          case 'response.audio_transcript.done':
-            setTranscript(prev => {
-              const last = prev[prev.length - 1];
-              if (last?.role === 'assistant') {
-                return [...prev.slice(0, -1), { ...last, complete: true }];
-              }
-              return prev;
-            });
-            break;
-
-          case 'response.done':
-            setStatus('listening');
-            break;
-
-          case 'input_audio_buffer.speech_started':
-            setStatus('listening');
-            break;
-
-          case 'conversation.item.input_audio_transcription.completed':
-            if (data.transcript) {
-              setTranscript(prev => [...prev, { role: 'user', text: data.transcript, complete: true }]);
-            }
-            break;
-
-          case 'error':
-            console.error('Realtime API error:', data.error);
-            setError(data.error?.message || 'Connection error');
-            break;
-        }
-      };
-
-      ws.onerror = (error) => {
-        console.error('WebSocket error:', error);
-        setError('Connection failed. Please try again.');
-        setStatus('disconnected');
-      };
-
-      ws.onclose = () => {
-        console.log('WebSocket closed');
-        setStatus('disconnected');
-      };
-
-      wsRef.current = ws;
-
-      // Start capturing and sending audio
-      const audioContext = audioContextRef.current;
-      const source = audioContext.createMediaStreamSource(mediaStreamRef.current);
-      const processor = audioContext.createScriptProcessor(4096, 1, 1);
-
-      processor.onaudioprocess = (e) => {
-        if (wsRef.current?.readyState === WebSocket.OPEN) {
-          const inputData = e.inputBuffer.getChannelData(0);
-          const pcm16 = new Int16Array(inputData.length);
-          for (let i = 0; i < inputData.length; i++) {
-            pcm16[i] = Math.max(-32768, Math.min(32767, Math.floor(inputData[i] * 32768)));
-          }
-          const base64 = btoa(String.fromCharCode(...new Uint8Array(pcm16.buffer)));
-          wsRef.current.send(JSON.stringify({
-            type: 'input_audio_buffer.append',
-            audio: base64
-          }));
-        }
-      };
-
-      source.connect(processor);
-      processor.connect(audioContext.destination);
-
-    } catch (err) {
-      console.error('Connection error:', err);
-      setError('Failed to start conversation');
-      setStatus('disconnected');
-    }
+    setError('Voice conversations temporarily unavailable. A secure server relay is required for API key protection. Please use text chat instead.');
   };
 
   // End conversation
