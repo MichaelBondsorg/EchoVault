@@ -166,3 +166,57 @@ export const getMillisecondsUntilMidnight = () => {
   midnight.setHours(0, 0, 0, 0);
   return midnight - now;
 };
+
+/**
+ * Complete an action item by removing it from the cached summary
+ * @param {string} userId - User ID
+ * @param {string} category - 'personal' or 'work'
+ * @param {string} source - 'today', 'carried_forward', or 'suggested'
+ * @param {number} index - Index of the item in the source array
+ * @returns {object|null} Updated summary or null on failure
+ */
+export const completeActionItem = async (userId, category, source, index) => {
+  try {
+    const cacheRef = getDashboardCacheRef(userId, category);
+    const cacheSnap = await getDoc(cacheRef);
+
+    if (!cacheSnap.exists()) {
+      console.log('No dashboard cache to update');
+      return null;
+    }
+
+    const cache = cacheSnap.data();
+    const summary = cache.summary;
+
+    if (!summary?.action_items?.[source]) {
+      console.log('No action items found for source:', source);
+      return null;
+    }
+
+    // Remove the item at the given index
+    const updatedItems = [...summary.action_items[source]];
+    updatedItems.splice(index, 1);
+
+    // Update the summary
+    const updatedSummary = {
+      ...summary,
+      action_items: {
+        ...summary.action_items,
+        [source]: updatedItems
+      }
+    };
+
+    // Save back to cache
+    await setDoc(cacheRef, {
+      ...cache,
+      summary: updatedSummary,
+      lastUpdated: Timestamp.now()
+    });
+
+    console.log('Action item completed and removed from cache');
+    return updatedSummary;
+  } catch (e) {
+    console.error('Failed to complete action item:', e);
+    return null;
+  }
+};
