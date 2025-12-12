@@ -556,7 +556,23 @@ const DayDashboard = ({
             <ChallengesSection challenges={summary?.challenges} />
             <ActionItemsSection
               actionItems={summary?.action_items}
-              onToggleTask={onToggleTask}
+              onToggleTask={(task, source, index) => {
+                // Update local state immediately for responsive UI
+                setSummary(prev => {
+                  if (!prev?.action_items?.[source]) return prev;
+                  const updatedItems = [...prev.action_items[source]];
+                  updatedItems.splice(index, 1);
+                  return {
+                    ...prev,
+                    action_items: {
+                      ...prev.action_items,
+                      [source]: updatedItems
+                    }
+                  };
+                });
+                // Also call the external handler to persist to cache
+                onToggleTask?.(task, source, index);
+              }}
             />
             <PatternsSection patterns={summary?.patterns} />
             <PatternHintsSection

@@ -35,6 +35,7 @@ import { checkCrisisKeywords, checkWarningIndicators, checkLongitudinalRisk } fr
 import { retrofitEntriesInBackground } from './services/entries';
 import { inferCategory } from './services/prompts';
 import { detectTemporalContext, needsConfirmation, formatEffectiveDate } from './services/temporal';
+import { completeActionItem } from './services/dashboard';
 
 // Hooks
 import { useIOSMeta } from './hooks/useIOSMeta';
@@ -924,8 +925,11 @@ export default function App() {
           onPromptClick={(prompt) => {
             setReplyContext(prompt);
           }}
-          onToggleTask={(task, source, index) => {
-            console.log('Toggle task:', task, source, index);
+          onToggleTask={async (task, source, index) => {
+            console.log('Completing task:', task, source, index);
+            if (user?.uid) {
+              await completeActionItem(user.uid, cat, source, index);
+            }
           }}
           onShowInsights={() => setShowInsights(true)}
         />
