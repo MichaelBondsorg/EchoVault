@@ -70,7 +70,7 @@ const WinsSection = ({ wins }) => {
         {wins.items.map((item, i) => (
           <li key={i} className="flex items-start gap-2 text-sm text-green-800">
             <CheckCircle2 size={14} className="mt-0.5 text-green-500 flex-shrink-0" />
-            <span className="font-body">{item}</span>
+            <span className="font-body">{typeof item === 'string' ? item : item.text || JSON.stringify(item)}</span>
           </li>
         ))}
       </ul>
@@ -93,7 +93,7 @@ const ChallengesSection = ({ challenges }) => {
         {challenges.items.map((item, i) => (
           <li key={i} className="flex items-start gap-2 text-sm text-amber-900">
             <AlertCircle size={14} className="mt-0.5 text-amber-500 flex-shrink-0" />
-            <span className="font-body">{item}</span>
+            <span className="font-body">{typeof item === 'string' ? item : item.text || JSON.stringify(item)}</span>
           </li>
         ))}
       </ul>
@@ -188,7 +188,7 @@ const ActionItemsSection = ({ actionItems, onToggleTask }) => {
         {actionItems.suggested?.map((item, i) => (
           <li key={`sug-${i}`} className="flex items-start gap-2 text-sm text-blue-600 opacity-75">
             <Lightbulb size={14} className="mt-0.5 text-blue-400 flex-shrink-0" />
-            <span className="font-body italic">{item}</span>
+            <span className="font-body italic">{typeof item === 'string' ? item : item.text}</span>
           </li>
         ))}
       </ul>
@@ -209,7 +209,7 @@ const PatternsSection = ({ patterns }) => {
       <SectionHeader icon={TrendingUp} title="Patterns & Insights" iconColor="text-purple-500" />
       <ul className="space-y-2">
         {patterns.observations.map((item, i) => (
-          <li key={i} className="text-sm text-purple-800 font-body">{item}</li>
+          <li key={i} className="text-sm text-purple-800 font-body">{typeof item === 'string' ? item : item.text || JSON.stringify(item)}</li>
         ))}
       </ul>
       {patterns.mood_note && (
