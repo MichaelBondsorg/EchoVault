@@ -106,10 +106,11 @@ export const analyzeLongitudinalPatterns = (entries) => {
 
       if (avgWithout - avgWith > 0.15) {
         patterns.push({
-          type: 'trigger',
+          type: 'trigger_correlation',
           trigger,
           avgWith,
           avgWithout,
+          percentDiff: (avgWithout - avgWith) * 100,
           message: `"${trigger}" appears in entries with lower mood (${Math.round(avgWith * 100)}% vs ${Math.round(avgWithout * 100)}%)`
         });
       }
