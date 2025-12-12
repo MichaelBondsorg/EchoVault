@@ -40,6 +40,7 @@ import { completeActionItem } from './services/dashboard';
 // Hooks
 import { useIOSMeta } from './hooks/useIOSMeta';
 import { useNotifications } from './hooks/useNotifications';
+import { useNetworkStatus } from './hooks/useNetworkStatus';
 
 // Components
 import {
@@ -61,7 +62,7 @@ const loadJsPDF = () => {
     return Promise.resolve(window.jspdf.jsPDF);
   }
   if (jsPDFPromise) return jsPDFPromise;
-  
+
   jsPDFPromise = new Promise((resolve, reject) => {
     const existing = document.querySelector('script[data-jspdf]');
     if (existing) {
@@ -86,130 +87,12 @@ const loadJsPDF = () => {
   return jsPDFPromise;
 };
 
-// --- OpenAI Text-to-Speech ---
-const synthesizeSpeech = async (text, voice = 'nova') => {
-  if (!OPENAI_API_KEY) {
-    console.warn('OpenAI API key not available for TTS');
-    return null;
-  }
-
-  try {
-    const response = await fetch('https://api.openai.com/v1/audio/speech', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${OPENAI_API_KEY}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        model: 'tts-1',
-        input: text,
-        voice: voice, // alloy, echo, fable, onyx, nova, shimmer
-        response_format: 'mp3'
-      })
-    });
-
-    if (!response.ok) {
-      console.error('TTS API error:', response.status);
-      return null;
-    }
-
-    const audioBlob = await response.blob();
-    return URL.createObjectURL(audioBlob);
-  } catch (e) {
-    console.error('TTS synthesis error:', e);
-    return null;
-  }
-};
-
 // Analysis functions (classifyEntry, analyzeEntry, generateInsight, etc.) imported from services/analysis
-
-
-const generateSynthesisAI = async (entries) => {
-  const context = entries.slice(0, 20).map(e => e.text).join('\n---\n');
-  const systemPrompt = `Analyze these entries. Format with ### Headers and * Bullets. 1. Theme 2. Topics 3. Summary.`;
-  return await callGemini(systemPrompt, context);
-};
-
-const generateDailySynthesis = async (dayEntries) => {
-  const reflectionEntries = dayEntries.filter(e => e.entry_type !== 'task');
-  if (reflectionEntries.length === 0) return null;
-  
-  const context = reflectionEntries.map((e, i) => `Entry ${i + 1} [${e.createdAt.toLocaleTimeString()}]: ${e.text}`).join('\n---\n');
-  const prompt = `
-    You are summarizing journal entries from a single day.
-
-    1. Write a 2-3 sentence summary that captures:
-       - The emotional arc of the day (how feelings evolved)
-       - Key themes/events
-       - Any significant mood shifts
-
-    2. Then identify the key factors that most contributed to the person's overall mood.
-       Think in terms of specific events, thoughts, or situations.
-
-    Return a JSON object ONLY, no markdown, no extra text:
-
-    {
-      "summary": "2-3 sentence prose summary here",
-      "bullets": [
-        "Concise factor 1 (e.g. Morning anxiety about job search after email)",
-        "Concise factor 2",
-        "Concise factor 3"
-      ]
-    }
-
-    Rules:
-    - 3-6 bullets max.
-    - Each bullet should be 1 short sentence (max 15 words).
-    - Each bullet should clearly point to what was driving the mood (event/thought/situation).
-    - Do NOT include bullet characters like '-', '*', or '•' in the text.
-  `;
-  
-  try {
-    const result = await callGemini(prompt, context);
-    if (!result) return null;
-
-    try {
-      // Try multiple approaches to extract JSON from the response
-      let jsonStr = result;
-
-      // Approach 1: Extract content from markdown code blocks (handles ```json ... ``` or ``` ... ```)
-      const codeBlockMatch = result.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
-      if (codeBlockMatch) {
-        jsonStr = codeBlockMatch[1];
-      } else {
-        // Approach 2: Simple strip of markdown markers
-        jsonStr = result.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
-      }
-
-      // Approach 3: If still not valid JSON, try to find JSON object in the string
-      if (!jsonStr.startsWith('{')) {
-        const jsonMatch = jsonStr.match(/\{[\s\S]*\}/);
-        if (jsonMatch) {
-          jsonStr = jsonMatch[0];
-        }
-      }
-
-      const parsed = JSON.parse(jsonStr.trim());
-      if (parsed && typeof parsed.summary === 'string' && Array.isArray(parsed.bullets)) {
-        return parsed;
-      }
-    } catch (parseErr) {
-      console.error('generateDailySynthesis JSON parse error:', parseErr, 'Raw result:', result);
-    }
-
-    // Fallback: try to display something readable if we can't parse JSON
-    // Strip any markdown code blocks for display
-    const cleanedResult = result.replace(/```(?:json)?\s*/g, '').replace(/```\s*/g, '').trim();
-    return { summary: cleanedResult, bullets: [] };
-  } catch (e) {
-    console.error('generateDailySynthesis error:', e);
-    return null;
-  }
-};
 
 export default function App() {
   useIOSMeta();
   const { permission, requestPermission } = useNotifications();
+  const { isOnline, wasOffline, clearWasOffline } = useNetworkStatus();
   const [user, setUser] = useState(null);
   const [entries, setEntries] = useState([]);
   const [view, setView] = useState('feed');
@@ -217,6 +100,7 @@ export default function App() {
   const [processing, setProcessing] = useState(false);
   const [replyContext, setReplyContext] = useState(null);
   const [showDecompression, setShowDecompression] = useState(false);
+  const [offlineQueue, setOfflineQueue] = useState([]);
 
   // Safety features (Phase 0)
   const [safetyPlan, setSafetyPlan] = useState(DEFAULT_SAFETY_PLAN);
@@ -239,6 +123,120 @@ export default function App() {
 
   // Temporal Context (Phase 2) - for backdating entries
   const [pendingTemporalEntry, setPendingTemporalEntry] = useState(null);
+
+  // Process offline queue when back online
+  useEffect(() => {
+    const processOfflineQueue = async () => {
+      if (!isOnline || !wasOffline || offlineQueue.length === 0 || !user) return;
+
+      console.log(`Processing ${offlineQueue.length} offline entries...`);
+      clearWasOffline();
+
+      for (const offlineEntry of offlineQueue) {
+        try {
+          // Generate embedding for the entry
+          const embedding = await generateEmbedding(offlineEntry.text);
+
+          // Prepare entry data for Firestore
+          const entryData = {
+            text: offlineEntry.text,
+            category: offlineEntry.category,
+            analysisStatus: 'pending',
+            embedding,
+            createdAt: Timestamp.fromDate(offlineEntry.createdAt),
+            effectiveDate: Timestamp.fromDate(offlineEntry.effectiveDate || offlineEntry.createdAt),
+            userId: user.uid
+          };
+
+          if (offlineEntry.safety_flagged) {
+            entryData.safety_flagged = true;
+            if (offlineEntry.safety_user_response) {
+              entryData.safety_user_response = offlineEntry.safety_user_response;
+            }
+          }
+
+          if (offlineEntry.has_warning_indicators) {
+            entryData.has_warning_indicators = true;
+          }
+
+          // Save to Firestore
+          const ref = await addDoc(
+            collection(db, 'artifacts', APP_COLLECTION_ID, 'users', user.uid, 'entries'),
+            entryData
+          );
+
+          console.log(`Saved offline entry: ${offlineEntry.offlineId}`);
+
+          // Run analysis in background (same as online flow)
+          (async () => {
+            try {
+              const recent = entries.slice(0, 5);
+              const related = findRelevantMemories(embedding, entries, offlineEntry.category);
+
+              const classification = await classifyEntry(offlineEntry.text);
+              const [analysis, insight, enhancedContext] = await Promise.all([
+                analyzeEntry(offlineEntry.text, classification.entry_type),
+                classification.entry_type !== 'task' ? generateInsight(offlineEntry.text, related, recent, entries) : Promise.resolve(null),
+                classification.entry_type !== 'task' ? extractEnhancedContext(offlineEntry.text, recent) : Promise.resolve(null)
+              ]);
+
+              const topicTags = analysis?.tags || [];
+              const structuredTags = enhancedContext?.structured_tags || [];
+              const contextTopicTags = enhancedContext?.topic_tags || [];
+              const allTags = [...new Set([...topicTags, ...structuredTags, ...contextTopicTags])];
+
+              const updateData = {
+                title: analysis?.title || "New Memory",
+                tags: allTags,
+                analysisStatus: 'complete',
+                entry_type: classification.entry_type,
+                classification_confidence: classification.confidence,
+                context_version: CURRENT_CONTEXT_VERSION,
+                analysis: {
+                  mood_score: analysis?.mood_score,
+                  framework: analysis?.framework || 'general'
+                }
+              };
+
+              if (enhancedContext?.continues_situation) {
+                updateData.continues_situation = enhancedContext.continues_situation;
+              }
+              if (enhancedContext?.goal_update?.tag) {
+                updateData.goal_update = enhancedContext.goal_update;
+              }
+              if (classification.extracted_tasks?.length > 0) {
+                // extracted_tasks already comes as [{text: "...", completed: false}] from Cloud Function
+                updateData.extracted_tasks = classification.extracted_tasks;
+              }
+              if (analysis?.cbt_breakdown) updateData.analysis.cbt_breakdown = analysis.cbt_breakdown;
+              if (analysis?.vent_support) updateData.analysis.vent_support = analysis.vent_support;
+              if (analysis?.celebration) updateData.analysis.celebration = analysis.celebration;
+              if (analysis?.task_acknowledgment) updateData.analysis.task_acknowledgment = analysis.task_acknowledgment;
+              if (insight?.found) updateData.contextualInsight = insight;
+
+              await updateDoc(ref, removeUndefined(updateData));
+            } catch (error) {
+              console.error('Analysis failed for offline entry:', error);
+              await updateDoc(ref, {
+                title: offlineEntry.text.substring(0, 50) + (offlineEntry.text.length > 50 ? '...' : ''),
+                tags: [],
+                analysisStatus: 'complete',
+                entry_type: 'reflection',
+                analysis: { mood_score: 0.5, framework: 'general' }
+              });
+            }
+          })();
+        } catch (error) {
+          console.error('Failed to save offline entry:', error);
+        }
+      }
+
+      // Clear the offline queue
+      setOfflineQueue([]);
+    };
+
+    processOfflineQueue();
+  }, [isOnline, wasOffline, offlineQueue, user, entries, clearWasOffline]);
 
   // Auth
   useEffect(() => {
@@ -411,10 +409,6 @@ export default function App() {
       finalTex = `[Replying to: "${replyContext}"]\n\n${textInput}`;
     }
 
-    const embedding = await generateEmbedding(finalTex);
-    const related = findRelevantMemories(embedding, entries, cat);
-    const recent = entries.slice(0, 5);
-
     const hasWarning = checkWarningIndicators(finalTex);
 
     // Calculate effectiveDate - either from temporal detection or current time
@@ -429,6 +423,30 @@ export default function App() {
       effectiveDate: effectiveDate.toDateString(),
       isBackdated: effectiveDate.toDateString() !== now.toDateString()
     });
+
+    // If offline, queue the entry for later processing
+    if (!isOnline) {
+      console.log('Offline: queuing entry for later processing');
+      const offlineEntry = {
+        text: finalTex,
+        category: cat,
+        offlineId: Date.now().toString(),
+        createdAt: now,
+        effectiveDate: effectiveDate,
+        safety_flagged: safetyFlagged || undefined,
+        safety_user_response: safetyUserResponse || undefined,
+        has_warning_indicators: hasWarning || undefined
+      };
+      setOfflineQueue(prev => [...prev, offlineEntry]);
+      setProcessing(false);
+      setReplyContext(null);
+      return;
+    }
+
+    // Online: generate embedding and save
+    const embedding = await generateEmbedding(finalTex);
+    const related = findRelevantMemories(embedding, entries, cat);
+    const recent = entries.slice(0, 5);
 
     try {
       const entryData = {
@@ -521,7 +539,8 @@ export default function App() {
           }
 
           if (classification.extracted_tasks && classification.extracted_tasks.length > 0) {
-            updateData.extracted_tasks = classification.extracted_tasks.map(t => ({ text: t, completed: false }));
+            // extracted_tasks already comes as [{text: "...", completed: false}] from Cloud Function
+            updateData.extracted_tasks = classification.extracted_tasks;
           }
 
           updateData.analysis = {
@@ -758,6 +777,14 @@ export default function App() {
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* Offline Indicator */}
+      {!isOnline && (
+        <div className="fixed top-[env(safe-area-inset-top)] left-0 right-0 z-50 bg-amber-500 text-white px-4 py-2 text-center text-sm font-medium">
+          You're offline. Entries will be saved locally and synced when you're back online.
+          {offlineQueue.length > 0 && ` (${offlineQueue.length} pending)`}
+        </div>
+      )}
 
       {crisisModal && (
         <CrisisSoftBlockModal

@@ -1,4 +1,4 @@
-import { GEMINI_API_KEY } from '../../config';
+import { generateEmbeddingFn } from '../../config';
 
 /**
  * Calculate cosine similarity between two vectors
@@ -28,50 +28,30 @@ export const findRelevantMemories = (targetVector, allEntries, category, topK = 
 };
 
 /**
- * Generate an embedding vector for text using Google's text-embedding-004
+ * Generate an embedding vector for text using Cloud Function
+ * @param {string} text - The text to generate an embedding for
+ * @param {number} retryCount - Internal retry counter
+ * @returns {Promise<number[]|null>} The embedding vector or null on failure
  */
 export const generateEmbedding = async (text, retryCount = 0) => {
   try {
-    if (!GEMINI_API_KEY || GEMINI_API_KEY === 'your_gemini_api_key_here') {
-      console.error('Gemini API key not configured - embeddings will not be generated');
-      return null;
-    }
-
     if (!text || typeof text !== 'string' || text.trim().length === 0) {
       console.error('generateEmbedding: Invalid or empty text provided');
       return null;
     }
 
-    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/text-embedding-004:embedContent?key=${GEMINI_API_KEY}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ content: { parts: [{ text: text }] } })
-    });
-
-    if (!res.ok) {
-      const errorData = await res.json().catch(() => ({}));
-      console.error('Embedding API error:', res.status, errorData);
-
-      if (retryCount < 1 && res.status >= 500) {
-        console.log('Retrying embedding generation after server error...');
-        await new Promise(resolve => setTimeout(resolve, 1000));
-        return generateEmbedding(text, retryCount + 1);
-      }
-
-      return null;
-    }
-
-    const data = await res.json();
-    const embedding = data.embedding?.values || null;
+    const result = await generateEmbeddingFn({ text });
+    const embedding = result.data?.embedding || null;
 
     if (!embedding) {
-      console.error('Embedding API returned no embedding values:', data);
+      console.error('Embedding Cloud Function returned no embedding values');
     }
 
     return embedding;
   } catch (e) {
     console.error('generateEmbedding exception:', e);
 
+    // Retry once on failure
     if (retryCount < 1) {
       console.log('Retrying embedding generation after exception...');
       await new Promise(resolve => setTimeout(resolve, 1000));

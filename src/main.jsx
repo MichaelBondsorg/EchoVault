@@ -4,6 +4,7 @@ import { SplashScreen } from '@capacitor/splash-screen';
 import { StatusBar, Style } from '@capacitor/status-bar';
 import { Capacitor } from '@capacitor/core';
 import App from './App.jsx';
+import { ErrorBoundary } from './components';
 import './index.css';
 
 // Initialize native features when running on a native platform
@@ -24,7 +25,9 @@ const initializeApp = async () => {
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
-    <App />
+    <ErrorBoundary>
+      <App />
+    </ErrorBoundary>
   </React.StrictMode>
 );
 

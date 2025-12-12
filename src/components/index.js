@@ -1,3 +1,6 @@
+// Error Boundary
+export { default as ErrorBoundary } from './ErrorBoundary';
+
 // Modals
 export { CrisisSoftBlockModal, DailySummaryModal, WeeklyReport, InsightsPanel } from './modals';
 
