@@ -28,6 +28,7 @@ export const analyzeJournalEntryFn = httpsCallable(functions, 'analyzeJournalEnt
 export const generateEmbeddingFn = httpsCallable(functions, 'generateEmbedding');
 export const transcribeAudioFn = httpsCallable(functions, 'transcribeAudio');
 export const askJournalAIFn = httpsCallable(functions, 'askJournalAI');
+export const executePromptFn = httpsCallable(functions, 'executePrompt');
 
 // Re-export Firebase utilities for convenience
 export {
