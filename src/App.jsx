@@ -5,7 +5,7 @@ import {
   Database, Briefcase, User as UserIcon, Keyboard, RefreshCw, Calendar, MessageSquarePlus,
   Brain, Volume2, StopCircle, Bell, Headphones, Shield, Phone, Heart, Plus, ChevronRight,
   FileText, Clipboard, Info, Wind, Droplets, Hand, Footprints, Download, CheckSquare, BarChart3,
-  Menu
+  Menu, ChevronLeft, Target, Trophy, Zap
 } from 'lucide-react';
 
 // Config
@@ -711,6 +711,187 @@ const MoodHeatmap = ({ entries, onDayClick }) => {
   );
 };
 
+// CBT Insights Carousel - Consolidated swipeable widget for patterns, goals, wins, and activations
+const CBTInsightsCarousel = ({ entries }) => {
+  const [currentIndex, setCurrentIndex] = useState(0);
+  const carouselRef = useRef(null);
+
+  // Gather all insight cards from various sources
+  const insightCards = useMemo(() => {
+    const cards = [];
+    if (!entries || entries.length === 0) return cards;
+
+    // 1. Pattern Alerts from longitudinal analysis
+    try {
+      const patterns = analyzeLongitudinalPatterns(entries);
+      patterns.slice(0, 3).forEach(pattern => {
+        const isWarning = pattern.type === 'weekly_low' || pattern.type === 'trigger_correlation';
+        cards.push({
+          id: `pattern-${pattern.type}-${pattern.day || pattern.trigger || ''}`,
+          type: 'pattern',
+          priority: isWarning ? 1 : 3,
+          icon: isWarning ? AlertTriangle : TrendingUp,
+          iconColor: isWarning ? 'text-orange-500' : 'text-green-500',
+          bgGradient: isWarning ? 'from-orange-50 to-amber-50' : 'from-green-50 to-emerald-50',
+          borderColor: isWarning ? 'border-orange-200' : 'border-green-200',
+          label: isWarning ? 'Pattern Alert' : 'Positive Pattern',
+          title: pattern.message,
+          subtitle: pattern.type === 'trigger_correlation'
+            ? `${Math.round(pattern.percentDiff)}% mood difference`
+            : pattern.type === 'weekly_low'
+              ? 'Consider planning something uplifting'
+              : 'Keep it up!'
+        });
+      });
+    } catch (e) { console.error('Pattern analysis error:', e); }
+
+    // 2. Active Goals from @goal: tags
+    const goalEntries = entries.filter(e => e.tags?.some(t => t.startsWith('@goal:')));
+    const goalCounts = {};
+    goalEntries.forEach(e => {
+      e.tags.filter(t => t.startsWith('@goal:')).forEach(tag => {
+        const goal = tag.replace('@goal:', '').replace(/_/g, ' ');
+        goalCounts[goal] = (goalCounts[goal] || 0) + 1;
+      });
+    });
+    Object.entries(goalCounts).slice(0, 2).forEach(([goal, count]) => {
+      const recentGoalEntry = goalEntries.find(e => e.tags?.includes(`@goal:${goal.replace(/ /g, '_')}`));
+      const status = recentGoalEntry?.goal_update?.status;
+      const isProgress = status === 'progress' || status === 'achieved';
+      cards.push({
+        id: `goal-${goal}`,
+        type: 'goal',
+        priority: 2,
+        icon: Target,
+        iconColor: isProgress ? 'text-green-500' : 'text-amber-500',
+        bgGradient: isProgress ? 'from-green-50 to-teal-50' : 'from-amber-50 to-yellow-50',
+        borderColor: isProgress ? 'border-green-200' : 'border-amber-200',
+        label: 'Active Goal',
+        title: goal.charAt(0).toUpperCase() + goal.slice(1),
+        subtitle: `${count} ${count === 1 ? 'entry' : 'entries'} this month${status ? ` • ${status}` : ''}`
+      });
+    });
+
+    // 3. Quick Wins - Recent celebrations
+    const celebrations = entries
+      .filter(e => e.analysis?.framework === 'celebration' && e.analysis?.celebration?.affirmation)
+      .slice(0, 2);
+    celebrations.forEach(entry => {
+      cards.push({
+        id: `win-${entry.id}`,
+        type: 'win',
+        priority: 2,
+        icon: Trophy,
+        iconColor: 'text-yellow-500',
+        bgGradient: 'from-yellow-50 to-amber-50',
+        borderColor: 'border-yellow-200',
+        label: 'Recent Win',
+        title: entry.title || 'Celebration',
+        subtitle: entry.analysis.celebration.affirmation.slice(0, 80) + (entry.analysis.celebration.affirmation.length > 80 ? '...' : '')
+      });
+    });
+
+    // 4. Behavioral Activations - Suggested activities from recent CBT entries
+    const recentCBT = entries
+      .filter(e => e.analysis?.cbt_breakdown?.behavioral_activation?.activity)
+      .slice(0, 2);
+    recentCBT.forEach(entry => {
+      const ba = entry.analysis.cbt_breakdown.behavioral_activation;
+      cards.push({
+        id: `activation-${entry.id}`,
+        type: 'activation',
+        priority: 4,
+        icon: Zap,
+        iconColor: 'text-purple-500',
+        bgGradient: 'from-purple-50 to-indigo-50',
+        borderColor: 'border-purple-200',
+        label: 'Try This',
+        title: ba.activity,
+        subtitle: ba.rationale?.slice(0, 80) + (ba.rationale?.length > 80 ? '...' : '') || 'Quick 5-minute activity'
+      });
+    });
+
+    // 5. Mood Drivers - Top trigger correlations (already in patterns, but can highlight top one)
+    // Already handled above in patterns
+
+    // Sort by priority and limit total cards
+    return cards.sort((a, b) => a.priority - b.priority).slice(0, 5);
+  }, [entries]);
+
+  // Handle swipe navigation
+  const handleScroll = useCallback(() => {
+    if (carouselRef.current) {
+      const scrollLeft = carouselRef.current.scrollLeft;
+      const cardWidth = carouselRef.current.offsetWidth;
+      const newIndex = Math.round(scrollLeft / cardWidth);
+      setCurrentIndex(newIndex);
+    }
+  }, []);
+
+  const scrollToCard = (index) => {
+    if (carouselRef.current) {
+      const cardWidth = carouselRef.current.offsetWidth;
+      carouselRef.current.scrollTo({ left: index * cardWidth, behavior: 'smooth' });
+    }
+  };
+
+  if (insightCards.length === 0) return null;
+
+  return (
+    <div className="mb-6">
+      <div className="flex items-center justify-between mb-3">
+        <div className="flex items-center gap-2 text-gray-700 font-semibold text-xs uppercase tracking-wide">
+          <Sparkles size={14} /> Insights For You
+        </div>
+        <div className="flex items-center gap-1">
+          {insightCards.map((_, i) => (
+            <button
+              key={i}
+              onClick={() => scrollToCard(i)}
+              className={`w-2 h-2 rounded-full transition-all ${
+                i === currentIndex ? 'bg-indigo-500 w-4' : 'bg-gray-300'
+              }`}
+            />
+          ))}
+        </div>
+      </div>
+
+      <div
+        ref={carouselRef}
+        onScroll={handleScroll}
+        className="flex overflow-x-auto snap-x snap-mandatory scrollbar-hide -mx-4 px-4"
+        style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
+      >
+        {insightCards.map((card, i) => (
+          <div
+            key={card.id}
+            className="flex-shrink-0 w-full snap-center pr-3 last:pr-0"
+          >
+            <div className={`bg-gradient-to-br ${card.bgGradient} rounded-xl p-4 border ${card.borderColor} shadow-sm`}>
+              <div className="flex items-start gap-3">
+                <div className={`p-2 rounded-lg bg-white/60 ${card.iconColor}`}>
+                  <card.icon size={20} />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="text-[10px] font-bold uppercase tracking-wider text-gray-500 mb-1">
+                    {card.label}
+                  </div>
+                  <h3 className="font-semibold text-gray-800 text-sm leading-tight mb-1">
+                    {card.title}
+                  </h3>
+                  <p className="text-xs text-gray-600 leading-relaxed">
+                    {card.subtitle}
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+};
+
 const DailySummaryModal = ({ date, dayData, onClose, onDelete, onUpdate }) => {
   const [synthesis, setSynthesis] = useState(null);
   const [loadingSynthesis, setLoadingSynthesis] = useState(true);
@@ -1084,7 +1265,15 @@ const TherapistExportScreen = ({ entries, onClose }) => {
 };
 
 const InsightsPanel = ({ entries, onClose }) => {
-  const patterns = useMemo(() => analyzeLongitudinalPatterns(entries), [entries]);
+  const patterns = useMemo(() => {
+    try {
+      if (!entries || entries.length === 0) return [];
+      return analyzeLongitudinalPatterns(entries);
+    } catch (error) {
+      console.error('Error analyzing patterns:', error);
+      return [];
+    }
+  }, [entries]);
   
   const getPatternIcon = (type) => {
     switch (type) {
@@ -3003,6 +3192,7 @@ export default function App() {
 
       <div className="max-w-md mx-auto p-4">
         {visible.length > 0 && <MoodHeatmap entries={visible} onDayClick={(date, dayData) => setDailySummaryModal({ date, dayData })} />}
+        {visible.length > 0 && <CBTInsightsCarousel entries={visible} />}
         <div className="space-y-4">
           {visible.map(e => <EntryCard key={e.id} entry={e} onDelete={id => deleteDoc(doc(db, 'artifacts', APP_COLLECTION_ID, 'users', user.uid, 'entries', id))} onUpdate={(id, d) => updateDoc(doc(db, 'artifacts', APP_COLLECTION_ID, 'users', user.uid, 'entries', id), d)} />)}
         </div>
