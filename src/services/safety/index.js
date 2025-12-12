@@ -45,7 +45,13 @@ export const checkLongitudinalRisk = (recentEntries) => {
  */
 export const analyzeLongitudinalPatterns = (entries) => {
   const patterns = [];
-  const moodEntries = entries.filter(e => e.entry_type !== 'task' && typeof e.analysis?.mood_score === 'number');
+  // Filter for valid entries with mood scores and text
+  const moodEntries = entries.filter(e =>
+    e.entry_type !== 'task' &&
+    typeof e.analysis?.mood_score === 'number' &&
+    typeof e.text === 'string' &&
+    e.createdAt
+  );
 
   if (moodEntries.length < 7) return patterns;
 
@@ -100,10 +106,11 @@ export const analyzeLongitudinalPatterns = (entries) => {
 
       if (avgWithout - avgWith > 0.15) {
         patterns.push({
-          type: 'trigger',
+          type: 'trigger_correlation',
           trigger,
           avgWith,
           avgWithout,
+          percentDiff: (avgWithout - avgWith) * 100,
           message: `"${trigger}" appears in entries with lower mood (${Math.round(avgWith * 100)}% vs ${Math.round(avgWithout * 100)}%)`
         });
       }

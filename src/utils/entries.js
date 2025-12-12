@@ -16,10 +16,16 @@ export const sanitizeEntry = (id, data) => {
     embedding: data.embedding || null,
     contextualInsight: data.contextualInsight || null,
     createdAt: safeDate(data.createdAt),
+    // Phase 2: Temporal context fields
+    effectiveDate: data.effectiveDate ? safeDate(data.effectiveDate) : null,
+    temporalContext: data.temporalContext || null,
+    futureMentions: Array.isArray(data.futureMentions) ? data.futureMentions : [],
     // Enhanced context fields
     continues_situation: data.continues_situation || null,
     goal_update: data.goal_update || null,
     entry_type: data.entry_type || 'reflection',
+    // Extracted tasks for mixed entries
+    extracted_tasks: Array.isArray(data.extracted_tasks) ? data.extracted_tasks : null,
     // Context version for retrofit tracking (v1 = enhanced context extracted)
     context_version: data.context_version || 0
   };

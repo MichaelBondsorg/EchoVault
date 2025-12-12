@@ -1,9 +1,31 @@
+/**
+ * EchoVault Cloud Functions
+ *
+ * Combines:
+ * - AI Processing Functions (analyzeJournalEntry, generateEmbedding, transcribeAudio, askJournalAI)
+ * - Pattern Index Functions (onEntryCreate, onEntryUpdate, dailyPatternRefresh, refreshPatterns)
+ */
+
 import { onCall, HttpsError } from 'firebase-functions/v2/https';
+import { onDocumentCreated, onDocumentUpdated } from 'firebase-functions/v2/firestore';
+import { onSchedule } from 'firebase-functions/v2/scheduler';
 import { defineSecret } from 'firebase-functions/params';
+import { initializeApp, getApps } from 'firebase-admin/app';
+import { getFirestore, FieldValue } from 'firebase-admin/firestore';
+
+// Initialize Firebase Admin
+if (getApps().length === 0) {
+  initializeApp();
+}
+const db = getFirestore();
 
 // Define secrets (set these with: firebase functions:secrets:set SECRET_NAME)
 const geminiApiKey = defineSecret('GEMINI_API_KEY');
 const openaiApiKey = defineSecret('OPENAI_API_KEY');
+
+// Constants
+const APP_COLLECTION_ID = 'echo-vault-v5-fresh';
+const PATTERN_VERSION = 1;
 
 // AI Model Configuration
 const AI_CONFIG = {
@@ -13,6 +35,10 @@ const AI_CONFIG = {
   embedding: { primary: 'text-embedding-004', fallback: null },
   transcription: { primary: 'whisper-1', fallback: null }
 };
+
+// ============================================
+// AI HELPER FUNCTIONS
+// ============================================
 
 /**
  * Call the Gemini API
@@ -98,7 +124,16 @@ async function classifyEntry(apiKey, text) {
     {
       "entry_type": "task" | "mixed" | "reflection" | "vent",
       "confidence": 0.0-1.0,
-      "extracted_tasks": [{ "text": "Buy milk", "completed": false }]
+      "extracted_tasks": [{
+        "text": "Buy milk",
+        "completed": false,
+        "recurrence": null | {
+          "pattern": "daily" | "weekly" | "biweekly" | "monthly" | "custom",
+          "interval": 1,
+          "unit": "days" | "weeks" | "months",
+          "description": "every two weeks"
+        }
+      }]
     }
 
     TASK EXTRACTION RULES (only for task/mixed types):
@@ -107,6 +142,14 @@ async function classifyEntry(apiKey, text) {
     - SKIP vague intentions ("I should exercise more" → NOT a task)
     - SKIP emotional statements ("I need to feel better" → NOT a task)
     - If no clear tasks, return empty array
+
+    RECURRENCE DETECTION:
+    - Look for patterns like "every day", "weekly", "every two weeks", "biweekly", "monthly", "every X days/weeks/months"
+    - Examples:
+      - "Water plants every two weeks" → pattern: "biweekly", interval: 2, unit: "weeks"
+      - "Take medication daily" → pattern: "daily", interval: 1, unit: "days"
+      - "Weekly team meeting" → pattern: "weekly", interval: 1, unit: "weeks"
+    - If no recurrence pattern is found, set recurrence to null
   `;
 
   try {
@@ -118,10 +161,21 @@ async function classifyEntry(apiKey, text) {
     const jsonStr = raw.replace(/```json|```/g, '').trim();
     const parsed = JSON.parse(jsonStr);
 
+    // Normalize tasks to ensure they have all required fields
+    const normalizedTasks = Array.isArray(parsed.extracted_tasks)
+      ? parsed.extracted_tasks.map(task => ({
+          text: task.text || '',
+          completed: task.completed || false,
+          recurrence: task.recurrence || null,
+          completedAt: null,
+          nextDueDate: task.recurrence ? new Date().toISOString() : null
+        }))
+      : [];
+
     return {
       entry_type: parsed.entry_type || 'reflection',
       confidence: typeof parsed.confidence === 'number' ? parsed.confidence : 0.5,
-      extracted_tasks: Array.isArray(parsed.extracted_tasks) ? parsed.extracted_tasks : []
+      extracted_tasks: normalizedTasks
     };
   } catch (e) {
     console.error('classifyEntry error:', e);
@@ -337,55 +391,82 @@ async function extractEnhancedContext(apiKey, text, recentEntriesContext = '') {
     EXISTING CONTEXT FROM RECENT ENTRIES:
     ${recentEntriesContext || 'No recent entries'}
 
-    EXTRACTION RULES:
+    EXTRACTION RULES (use lowercase, underscore-separated names):
 
-    1. PEOPLE (@person:name) - Extract mentioned people with lowercase, underscore-separated names
-       - Only real people with names or clear identifiers (mom, dad, boss, therapist)
+    1. PEOPLE (@person:name)
+       - Real people with names or clear identifiers (mom, dad, boss, therapist)
        - Skip generic references ("someone", "people", "they")
        - Examples: @person:sarah, @person:mom, @person:dr_smith
 
-    2. PLACES (@place:name) - Significant locations
-       - Specific places that might recur: @place:office, @place:gym, @place:home
-       - Skip generic locations ("somewhere", "outside")
+    2. PLACES (@place:name)
+       - Specific locations that might recur
+       - Examples: @place:office, @place:gym, @place:coffee_shop
 
-    3. GOALS/INTENTIONS (@goal:description) - Things the user wants to do or change
+    3. ACTIVITIES (@activity:name)
+       - Hobbies, exercises, regular activities
+       - Examples: @activity:yoga, @activity:hiking, @activity:cooking, @activity:gaming
+
+    4. MEDIA (@media:name)
+       - Shows, movies, books, podcasts, games being consumed
+       - Examples: @media:succession, @media:oppenheimer, @media:atomic_habits
+
+    5. EVENTS (@event:name)
+       - Specific one-time or recurring events
+       - Examples: @event:job_interview, @event:dinner_party, @event:doctors_appointment
+
+    6. FOOD/RESTAURANTS (@food:name)
+       - Specific restaurants, cuisines, or food experiences
+       - Examples: @food:sushi_place, @food:italian_restaurant, @food:new_thai_spot
+
+    7. TOPICS (@topic:name)
+       - Main discussion themes/concerns
+       - Examples: @topic:work_stress, @topic:relationship, @topic:health, @topic:finances
+
+    8. GOALS/INTENTIONS (@goal:description)
        - Explicit goals: "I want to...", "I need to...", "I'm going to..."
        - Examples: @goal:exercise_more, @goal:speak_up_at_work
 
-    4. ONGOING SITUATIONS (@situation:description) - Multi-day events or circumstances
-       - Job searches, health issues, relationship conflicts, projects
-       - Examples: @situation:job_interview_process, @situation:apartment_hunting
+    9. ONGOING SITUATIONS (@situation:description)
+       - Multi-day events or circumstances
+       - Examples: @situation:job_search, @situation:apartment_hunting
 
-    5. SELF-STATEMENTS (@self:statement) - How user describes themselves
-       - "I always...", "I never...", "I'm the kind of person who..."
-       - Examples: @self:always_late, @self:never_asks_for_help
-
-    6. TOPIC TAGS (regular tags without @) - General themes
-       - Examples: anxiety, work, family, health, gratitude
+    10. SELF-STATEMENTS (@self:statement)
+        - "I always...", "I never...", "I'm the kind of person who..."
+        - Examples: @self:always_late, @self:overthinks
 
     Return JSON:
     {
-      "structured_tags": ["@person:name", "@place:location", "@goal:description", "@situation:context", "@self:statement"],
+      "structured_tags": ["@type:name", ...],
       "topic_tags": ["general", "topic", "tags"],
       "continues_situation": "@situation:tag_from_recent_entries_if_this_continues_it" or null,
       "goal_update": {
         "tag": "@goal:tag_if_this_updates_a_previous_goal",
         "status": "progress" | "achieved" | "abandoned" | "struggling" | null
-      } or null
+      } or null,
+      "sentiment_by_entity": {
+        "@entity:name": "positive" | "negative" | "neutral" | "mixed"
+      }
     }
 
-    Be conservative - only extract what's clearly present. Empty arrays are fine.
+    Be conservative - only extract what's clearly present. Empty arrays/objects are fine.
   `;
 
   try {
     const raw = await callGemini(apiKey, prompt, text, AI_CONFIG.classification.primary);
-    if (!raw) return { structured_tags: [], topic_tags: [], continues_situation: null, goal_update: null };
+    if (!raw) return { structured_tags: [], topic_tags: [], continues_situation: null, goal_update: null, sentiment_by_entity: {} };
 
     const jsonStr = raw.replace(/```json|```/g, '').trim();
-    return JSON.parse(jsonStr);
+    const parsed = JSON.parse(jsonStr);
+    return {
+      structured_tags: parsed.structured_tags || [],
+      topic_tags: parsed.topic_tags || [],
+      continues_situation: parsed.continues_situation || null,
+      goal_update: parsed.goal_update || null,
+      sentiment_by_entity: parsed.sentiment_by_entity || {}
+    };
   } catch (e) {
     console.error('extractEnhancedContext error:', e);
-    return { structured_tags: [], topic_tags: [], continues_situation: null, goal_update: null };
+    return { structured_tags: [], topic_tags: [], continues_situation: null, goal_update: null, sentiment_by_entity: {} };
   }
 }
 
@@ -464,6 +545,10 @@ async function generateInsight(apiKey, currentText, historyContext, moodTrajecto
     return null;
   }
 }
+
+// ============================================
+// AI CLOUD FUNCTIONS
+// ============================================
 
 /**
  * Main Cloud Function: Analyze a journal entry
@@ -699,6 +784,541 @@ INSTRUCTIONS:
     } catch (error) {
       console.error('askJournalAI error:', error);
       throw new HttpsError('internal', 'Chat failed');
+    }
+  }
+);
+
+// ============================================
+// PATTERN COMPUTATION FUNCTIONS
+// ============================================
+
+/**
+ * Compute activity sentiment patterns
+ * Which entities correlate with mood changes?
+ */
+function computeActivitySentiment(entries) {
+  const entityMoods = new Map();
+
+  entries.forEach(entry => {
+    const mood = entry.analysis?.mood_score;
+    if (mood === null || mood === undefined) return;
+
+    const tags = (entry.tags || []).filter(t =>
+      t.startsWith('@activity:') ||
+      t.startsWith('@place:') ||
+      t.startsWith('@person:') ||
+      t.startsWith('@event:') ||
+      t.startsWith('@media:') ||
+      t.startsWith('@food:')
+    );
+
+    tags.forEach(tag => {
+      if (!entityMoods.has(tag)) {
+        entityMoods.set(tag, { moods: [], dates: [] });
+      }
+      entityMoods.get(tag).moods.push(mood);
+      entityMoods.get(tag).dates.push(entry.effectiveDate || entry.createdAt);
+    });
+  });
+
+  // Calculate baseline
+  const allMoods = entries
+    .filter(e => e.analysis?.mood_score !== null && e.analysis?.mood_score !== undefined)
+    .map(e => e.analysis.mood_score);
+  const baselineMood = allMoods.length > 0
+    ? allMoods.reduce((a, b) => a + b, 0) / allMoods.length
+    : 0.5;
+
+  // Build patterns
+  const patterns = [];
+  entityMoods.forEach((data, tag) => {
+    if (data.moods.length < 2) return;
+
+    const avgMood = data.moods.reduce((a, b) => a + b, 0) / data.moods.length;
+    const moodDelta = avgMood - baselineMood;
+    const moodDeltaPercent = Math.round(moodDelta * 100);
+
+    let sentiment = 'neutral';
+    if (moodDelta > 0.1) sentiment = 'positive';
+    else if (moodDelta < -0.1) sentiment = 'negative';
+
+    const entityName = tag.split(':')[1]?.replace(/_/g, ' ') || tag;
+    const entityType = tag.split(':')[0].replace('@', '');
+
+    let insight = null;
+    if (sentiment === 'positive' && moodDeltaPercent > 10) {
+      insight = `${entityName} boosts your mood by ${moodDeltaPercent}%`;
+    } else if (sentiment === 'negative' && moodDeltaPercent < -10) {
+      insight = `Your mood dips ${Math.abs(moodDeltaPercent)}% around ${entityName}`;
+    }
+
+    patterns.push({
+      entity: tag,
+      entityName,
+      entityType,
+      avgMood: Number(avgMood.toFixed(2)),
+      baselineMood: Number(baselineMood.toFixed(2)),
+      moodDelta: Number(moodDelta.toFixed(2)),
+      moodDeltaPercent,
+      entryCount: data.moods.length,
+      sentiment,
+      insight,
+      lastMentioned: data.dates[data.dates.length - 1]
+    });
+  });
+
+  return patterns.sort((a, b) => Math.abs(b.moodDelta) - Math.abs(a.moodDelta));
+}
+
+/**
+ * Compute temporal patterns (day-of-week, time-of-day)
+ */
+function computeTemporalPatterns(entries) {
+  const dayOfWeekMoods = { 0: [], 1: [], 2: [], 3: [], 4: [], 5: [], 6: [] };
+  const timeOfDayMoods = { morning: [], afternoon: [], evening: [], night: [] };
+  const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+  entries.forEach(entry => {
+    const mood = entry.analysis?.mood_score;
+    if (mood === null || mood === undefined) return;
+
+    const dateField = entry.effectiveDate || entry.createdAt;
+    const date = dateField?.toDate ? dateField.toDate() : new Date(dateField);
+
+    dayOfWeekMoods[date.getDay()].push(mood);
+
+    const hour = date.getHours();
+    const timeBlock = hour < 6 ? 'night' : hour < 12 ? 'morning' : hour < 17 ? 'afternoon' : 'evening';
+    timeOfDayMoods[timeBlock].push(mood);
+  });
+
+  // Calculate day patterns
+  const dayPatterns = [];
+  for (let day = 0; day < 7; day++) {
+    const moods = dayOfWeekMoods[day];
+    if (moods.length < 2) continue;
+
+    const avg = moods.reduce((a, b) => a + b, 0) / moods.length;
+    dayPatterns.push({
+      day,
+      dayName: dayNames[day],
+      avgMood: Number(avg.toFixed(2)),
+      entryCount: moods.length
+    });
+  }
+
+  // Find extremes
+  const sortedDays = [...dayPatterns].sort((a, b) => a.avgMood - b.avgMood);
+  const worstDay = sortedDays[0];
+  const bestDay = sortedDays[sortedDays.length - 1];
+
+  // Calculate time patterns
+  const timePatterns = Object.entries(timeOfDayMoods)
+    .filter(([_, moods]) => moods.length >= 2)
+    .map(([time, moods]) => ({
+      time,
+      avgMood: Number((moods.reduce((a, b) => a + b, 0) / moods.length).toFixed(2)),
+      entryCount: moods.length
+    }));
+
+  return {
+    dayOfWeek: dayPatterns,
+    timeOfDay: timePatterns,
+    insights: {
+      worstDay: worstDay && worstDay.avgMood < 0.45 ? {
+        day: worstDay.dayName,
+        mood: worstDay.avgMood,
+        insight: `${worstDay.dayName}s tend to be tougher (${Math.round(worstDay.avgMood * 100)}% avg mood)`
+      } : null,
+      bestDay: bestDay && bestDay.avgMood > 0.6 ? {
+        day: bestDay.dayName,
+        mood: bestDay.avgMood,
+        insight: `${bestDay.dayName}s are your best days (${Math.round(bestDay.avgMood * 100)}% avg mood)`
+      } : null
+    }
+  };
+}
+
+/**
+ * Detect contradictions between stated intentions and actual behavior
+ */
+function detectContradictions(entries, activityPatterns) {
+  const contradictions = [];
+  const now = new Date();
+  const twoWeeksAgo = new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000);
+
+  // Find goal-related entries
+  const goalEntries = entries.filter(e =>
+    e.tags?.some(t => t.startsWith('@goal:')) ||
+    e.text?.toLowerCase().match(/\b(want to|going to|need to|should|plan to|trying to)\b.*\b(more|less|start|stop|better)\b/)
+  );
+
+  // Type 1: Goal abandonment detection
+  goalEntries.forEach(entry => {
+    const goalTags = (entry.tags || []).filter(t => t.startsWith('@goal:'));
+
+    goalTags.forEach(goalTag => {
+      const goalName = goalTag.replace('@goal:', '').replace(/_/g, ' ');
+
+      // Find related activity mentions
+      const relatedActivity = `@activity:${goalTag.replace('@goal:', '')}`;
+      const recentMentions = entries.filter(e => {
+        const entryDate = e.effectiveDate?.toDate?.() || e.createdAt?.toDate?.() || new Date(e.effectiveDate || e.createdAt);
+        return entryDate >= twoWeeksAgo && e.tags?.includes(relatedActivity);
+      });
+
+      if (recentMentions.length === 0) {
+        const entryDate = entry.effectiveDate?.toDate?.() || entry.createdAt?.toDate?.() || new Date(entry.effectiveDate || entry.createdAt);
+        const daysSince = Math.floor((now - entryDate) / (1000 * 60 * 60 * 24));
+
+        if (daysSince > 7) {
+          contradictions.push({
+            type: 'goal_abandonment',
+            goalTag,
+            goalName,
+            message: `You mentioned wanting to "${goalName}" ${daysSince} days ago but haven't mentioned it since`,
+            severity: daysSince > 21 ? 'high' : 'medium',
+            originalEntry: {
+              date: entryDate,
+              snippet: entry.text?.substring(0, 100)
+            }
+          });
+        }
+      }
+    });
+  });
+
+  // Type 2: Sentiment contradiction
+  const negativeStatements = entries.filter(e =>
+    e.text?.toLowerCase().match(/\b(hate|dread|can't stand|annoying|terrible|worst)\b/)
+  );
+
+  negativeStatements.forEach(entry => {
+    const entities = (entry.tags || []).filter(t => t.startsWith('@'));
+
+    entities.forEach(entity => {
+      const pattern = activityPatterns.find(p => p.entity === entity);
+
+      if (pattern && pattern.sentiment === 'positive' && pattern.entryCount >= 3) {
+        contradictions.push({
+          type: 'sentiment_contradiction',
+          entity,
+          entityName: pattern.entityName,
+          message: `You've said negative things about ${pattern.entityName}, but your mood is actually ${pattern.moodDeltaPercent}% higher when you mention it`,
+          severity: 'low',
+          pattern: {
+            avgMood: pattern.avgMood,
+            moodDeltaPercent: pattern.moodDeltaPercent,
+            entryCount: pattern.entryCount
+          }
+        });
+      }
+    });
+  });
+
+  // Type 3: Avoidance contradiction
+  const avoidanceStatements = entries.filter(e =>
+    e.text?.toLowerCase().match(/\b(avoid|cut back|quit|stop|less)\b/)
+  );
+
+  avoidanceStatements.forEach(entry => {
+    const entryDate = entry.effectiveDate?.toDate?.() || entry.createdAt?.toDate?.() || new Date(entry.effectiveDate || entry.createdAt);
+
+    const entities = (entry.tags || []).filter(t =>
+      t.startsWith('@food:') || t.startsWith('@activity:') || t.startsWith('@media:')
+    );
+
+    entities.forEach(entity => {
+      const laterPositiveMentions = entries.filter(e => {
+        const eDate = e.effectiveDate?.toDate?.() || e.createdAt?.toDate?.() || new Date(e.effectiveDate || e.createdAt);
+        return eDate > entryDate &&
+               e.tags?.includes(entity) &&
+               e.analysis?.mood_score > 0.6;
+      });
+
+      if (laterPositiveMentions.length >= 2) {
+        const entityName = entity.split(':')[1]?.replace(/_/g, ' ');
+        contradictions.push({
+          type: 'avoidance_contradiction',
+          entity,
+          entityName,
+          message: `You said you'd cut back on ${entityName}, but you've mentioned it positively ${laterPositiveMentions.length} times since`,
+          severity: 'medium',
+          mentionCount: laterPositiveMentions.length
+        });
+      }
+    });
+  });
+
+  return contradictions;
+}
+
+/**
+ * Generate top insights summary for quick display
+ */
+function generateInsightsSummary(activityPatterns, temporalPatterns, contradictions) {
+  const insights = [];
+
+  // Top positive activity
+  const topPositive = activityPatterns.find(p => p.sentiment === 'positive' && p.insight);
+  if (topPositive) {
+    insights.push({
+      type: 'positive_activity',
+      icon: 'trending-up',
+      message: topPositive.insight,
+      entity: topPositive.entity
+    });
+  }
+
+  // Top negative activity
+  const topNegative = activityPatterns.find(p => p.sentiment === 'negative' && p.insight);
+  if (topNegative) {
+    insights.push({
+      type: 'negative_activity',
+      icon: 'trending-down',
+      message: topNegative.insight,
+      entity: topNegative.entity
+    });
+  }
+
+  // Best/worst day
+  if (temporalPatterns.insights.bestDay) {
+    insights.push({
+      type: 'best_day',
+      icon: 'sun',
+      message: temporalPatterns.insights.bestDay.insight
+    });
+  }
+  if (temporalPatterns.insights.worstDay) {
+    insights.push({
+      type: 'worst_day',
+      icon: 'cloud',
+      message: temporalPatterns.insights.worstDay.insight
+    });
+  }
+
+  // Top contradiction
+  const topContradiction = contradictions[0];
+  if (topContradiction) {
+    insights.push({
+      type: 'contradiction',
+      icon: 'alert-circle',
+      message: topContradiction.message,
+      contradictionType: topContradiction.type
+    });
+  }
+
+  return insights.slice(0, 5);
+}
+
+/**
+ * Main pattern computation function
+ */
+async function computeAllPatterns(userId, category = null) {
+  // Fetch all entries
+  const entriesRef = db.collection('artifacts')
+    .doc(APP_COLLECTION_ID)
+    .collection('users')
+    .doc(userId)
+    .collection('entries');
+
+  let query = entriesRef.orderBy('createdAt', 'desc').limit(200);
+  if (category) {
+    query = entriesRef.where('category', '==', category).orderBy('createdAt', 'desc').limit(200);
+  }
+
+  const snapshot = await query.get();
+  const entries = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+
+  if (entries.length < 5) {
+    console.log(`Not enough entries for user ${userId} (${entries.length})`);
+    return null;
+  }
+
+  // Compute patterns
+  const activitySentiment = computeActivitySentiment(entries);
+  const temporalPatterns = computeTemporalPatterns(entries);
+  const contradictions = detectContradictions(entries, activitySentiment);
+  const summary = generateInsightsSummary(activitySentiment, temporalPatterns, contradictions);
+
+  const timestamp = FieldValue.serverTimestamp();
+  const patternBase = {
+    updatedAt: timestamp,
+    entryCount: entries.length,
+    version: PATTERN_VERSION
+  };
+
+  // Store patterns
+  const patternsRef = db.collection('artifacts')
+    .doc(APP_COLLECTION_ID)
+    .collection('users')
+    .doc(userId)
+    .collection('patterns');
+
+  const batch = db.batch();
+
+  batch.set(patternsRef.doc('activity_sentiment'), {
+    ...patternBase,
+    data: activitySentiment.slice(0, 50) // Top 50 entities
+  });
+
+  batch.set(patternsRef.doc('temporal'), {
+    ...patternBase,
+    data: temporalPatterns
+  });
+
+  batch.set(patternsRef.doc('contradictions'), {
+    ...patternBase,
+    data: contradictions
+  });
+
+  batch.set(patternsRef.doc('summary'), {
+    ...patternBase,
+    data: summary,
+    topPositive: activitySentiment.find(p => p.sentiment === 'positive')?.insight || null,
+    topNegative: activitySentiment.find(p => p.sentiment === 'negative')?.insight || null,
+    bestDay: temporalPatterns.insights.bestDay?.insight || null,
+    worstDay: temporalPatterns.insights.worstDay?.insight || null,
+    hasContradictions: contradictions.length > 0
+  });
+
+  await batch.commit();
+
+  console.log(`Computed patterns for user ${userId}: ${activitySentiment.length} activities, ${contradictions.length} contradictions`);
+  return { activitySentiment, temporalPatterns, contradictions, summary };
+}
+
+// ============================================
+// PATTERN TRIGGER FUNCTIONS
+// ============================================
+
+/**
+ * Trigger: On new entry creation
+ * Incrementally update patterns when a new entry is created
+ */
+export const onEntryCreate = onDocumentCreated(
+  'artifacts/{appId}/users/{userId}/entries/{entryId}',
+  async (event) => {
+    const { userId, appId } = event.params;
+
+    if (appId !== APP_COLLECTION_ID) {
+      console.log(`Skipping pattern update for app ${appId}`);
+      return null;
+    }
+
+    console.log(`New entry created for user ${userId}, recomputing patterns...`);
+
+    try {
+      await computeAllPatterns(userId);
+      return { success: true };
+    } catch (error) {
+      console.error(`Error computing patterns for user ${userId}:`, error);
+      return { success: false, error: error.message };
+    }
+  }
+);
+
+/**
+ * Trigger: On entry update (mood analysis complete)
+ * Recompute when entry gets mood score
+ */
+export const onEntryUpdate = onDocumentUpdated(
+  'artifacts/{appId}/users/{userId}/entries/{entryId}',
+  async (event) => {
+    const { userId, appId } = event.params;
+
+    if (appId !== APP_COLLECTION_ID) return null;
+
+    const before = event.data.before.data();
+    const after = event.data.after.data();
+
+    // Only recompute if mood score was just added
+    const hadMood = before.analysis?.mood_score !== undefined;
+    const hasMood = after.analysis?.mood_score !== undefined;
+
+    if (!hadMood && hasMood) {
+      console.log(`Mood score added for user ${userId}, recomputing patterns...`);
+      try {
+        await computeAllPatterns(userId);
+      } catch (error) {
+        console.error(`Error computing patterns for user ${userId}:`, error);
+      }
+    }
+
+    return null;
+  }
+);
+
+/**
+ * Scheduled: Daily pattern refresh
+ * Full recomputation for all active users
+ */
+export const dailyPatternRefresh = onSchedule(
+  {
+    schedule: 'every day 03:00',
+    timeZone: 'America/Los_Angeles'
+  },
+  async (event) => {
+    console.log('Starting daily pattern refresh...');
+
+    try {
+      // Get all users with entries
+      const usersRef = db.collection('artifacts')
+        .doc(APP_COLLECTION_ID)
+        .collection('users');
+
+      const usersSnapshot = await usersRef.listDocuments();
+
+      let successCount = 0;
+      let errorCount = 0;
+
+      for (const userDoc of usersSnapshot) {
+        try {
+          await computeAllPatterns(userDoc.id);
+          successCount++;
+        } catch (error) {
+          console.error(`Error refreshing patterns for user ${userDoc.id}:`, error);
+          errorCount++;
+        }
+
+        // Small delay to avoid overwhelming the database
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+
+      console.log(`Daily refresh complete: ${successCount} success, ${errorCount} errors`);
+      return { success: true, successCount, errorCount };
+    } catch (error) {
+      console.error('Daily pattern refresh failed:', error);
+      return { success: false, error: error.message };
+    }
+  }
+);
+
+/**
+ * HTTP Callable: Manual pattern refresh
+ * Allow users to trigger a refresh from the app
+ */
+export const refreshPatterns = onCall(
+  {
+    cors: true,
+    maxInstances: 5
+  },
+  async (request) => {
+    if (!request.auth) {
+      throw new HttpsError('unauthenticated', 'Must be logged in');
+    }
+
+    const userId = request.auth.uid;
+    const { category } = request.data || {};
+
+    console.log(`Manual pattern refresh requested for user ${userId}`);
+
+    try {
+      const result = await computeAllPatterns(userId, category);
+      return { success: true, insightCount: result?.summary?.length || 0 };
+    } catch (error) {
+      console.error(`Error refreshing patterns for user ${userId}:`, error);
+      throw new HttpsError('internal', 'Failed to refresh patterns');
     }
   }
 );

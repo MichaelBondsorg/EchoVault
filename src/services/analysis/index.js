@@ -1,10 +1,10 @@
 import { analyzeJournalEntryCloud } from '../ai/gemini';
 import { cosineSimilarity } from '../ai/embeddings';
-import { askJournalAIFn } from '../../config';
+import { askJournalAIFn } from '../../config/firebase';
 
 /**
  * Classify entry into type: task, mixed, reflection, or vent
- * Now uses Cloud Function
+ * Now uses Cloud Function (which handles recurrence detection)
  */
 export const classifyEntry = async (text) => {
   try {
@@ -201,6 +201,18 @@ export const generateInsight = async (current, relevantHistory, recentHistory, a
 /**
  * Extract enhanced context (entities, goals, situations) from entry
  * Now uses Cloud Function
+ *
+ * Entity Types supported:
+ * - @person:name - People mentioned (sarah, mom, dr_smith)
+ * - @place:name - Locations (office, gym, home)
+ * - @activity:name - Activities/hobbies (yoga, hiking, cooking)
+ * - @media:name - Shows/movies/books (succession, oppenheimer)
+ * - @event:name - Specific events (job_interview, dinner_party)
+ * - @food:name - Restaurants/food (sushi_place, pizza_joint)
+ * - @topic:name - Discussion topics (work_stress, relationship)
+ * - @goal:description - Goals/intentions (exercise_more, speak_up_at_work)
+ * - @situation:description - Multi-day events (job_interview_process)
+ * - @self:statement - Self-descriptions (always_late, never_asks_for_help)
  */
 export const extractEnhancedContext = async (text, recentEntries = []) => {
   const recentContext = recentEntries.slice(0, 10).map(e => {
@@ -215,10 +227,10 @@ export const extractEnhancedContext = async (text, recentEntries = []) => {
       operations: ['extractContext']
     });
 
-    return result?.enhancedContext || { structured_tags: [], topic_tags: [], continues_situation: null, goal_update: null };
+    return result?.enhancedContext || { structured_tags: [], topic_tags: [], continues_situation: null, goal_update: null, sentiment_by_entity: {} };
   } catch (e) {
     console.error('extractEnhancedContext error:', e);
-    return { structured_tags: [], topic_tags: [], continues_situation: null, goal_update: null };
+    return { structured_tags: [], topic_tags: [], continues_situation: null, goal_update: null, sentiment_by_entity: {} };
   }
 };
 
