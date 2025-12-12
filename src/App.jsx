@@ -856,7 +856,7 @@ export default function App() {
         <InsightsPanel
           entries={entries}
           userId={user?.uid}
-          category={category}
+          category={cat}
           onClose={() => setShowInsights(false)}
         />
       )}
