@@ -43,7 +43,7 @@ const PromptCard = ({ prompt, type, onClick }) => {
         <div className="mt-0.5 opacity-70 group-hover:opacity-100 transition-opacity">
           {typeIcons[type] || typeIcons.generic}
         </div>
-        <p className="text-warm-700 font-body text-sm leading-relaxed">{prompt}</p>
+        <p className="text-warm-700 font-body text-sm leading-relaxed">{typeof prompt === 'string' ? prompt : prompt.text || JSON.stringify(prompt)}</p>
       </div>
     </motion.button>
   );

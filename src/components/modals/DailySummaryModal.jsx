@@ -83,7 +83,7 @@ const DailySummaryModal = ({ date, dayData, onClose, onDelete, onUpdate }) => {
                   </p>
                   <ul className="list-disc list-inside space-y-1 text-sm text-primary-900/90 font-body">
                     {synthesis.bullets.map((bullet, idx) => (
-                      <li key={idx}>{bullet}</li>
+                      <li key={idx}>{typeof bullet === 'string' ? bullet : bullet.text || JSON.stringify(bullet)}</li>
                     ))}
                   </ul>
                 </div>

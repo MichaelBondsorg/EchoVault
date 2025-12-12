@@ -744,6 +744,39 @@ export const transcribeAudio = onCall(
 );
 
 /**
+ * Cloud Function: Execute a raw prompt (for day summaries, etc.)
+ * This function takes a prompt and returns the AI response directly
+ */
+export const executePrompt = onCall(
+  {
+    secrets: [geminiApiKey],
+    cors: true,
+    maxInstances: 10
+  },
+  async (request) => {
+    if (!request.auth) {
+      throw new HttpsError('unauthenticated', 'User must be authenticated');
+    }
+
+    const { prompt, systemPrompt } = request.data;
+
+    if (!prompt || typeof prompt !== 'string') {
+      throw new HttpsError('invalid-argument', 'Prompt is required');
+    }
+
+    const apiKey = geminiApiKey.value();
+
+    try {
+      const response = await callGemini(apiKey, systemPrompt || '', prompt);
+      return { response };
+    } catch (error) {
+      console.error('executePrompt error:', error);
+      throw new HttpsError('internal', 'Prompt execution failed');
+    }
+  }
+);
+
+/**
  * Cloud Function: Ask the journal AI a question
  */
 export const askJournalAI = onCall(

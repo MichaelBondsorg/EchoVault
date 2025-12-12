@@ -1,16 +1,16 @@
-import { analyzeJournalEntryFn, askJournalAIFn } from '../../config';
+import { analyzeJournalEntryFn, executePromptFn } from '../../config';
 
 /**
  * Call the Gemini API via Cloud Function for journal analysis
  * This function is kept for backwards compatibility but now uses Cloud Functions
  */
 export const callGemini = async (systemPrompt, userPrompt) => {
-  // For direct callGemini usage (like askJournalAI), use the askJournalAI Cloud Function
-  // This is a simplified wrapper - most analysis now goes through analyzeJournalEntry
+  // Use executePrompt Cloud Function for raw prompt execution
+  // systemPrompt is typically the full prompt, userPrompt can be additional context or empty
   try {
-    const result = await askJournalAIFn({
-      question: userPrompt,
-      entriesContext: systemPrompt
+    const result = await executePromptFn({
+      prompt: systemPrompt,
+      systemPrompt: userPrompt || ''
     });
     return result.data.response;
   } catch (e) {
