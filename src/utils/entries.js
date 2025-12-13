@@ -1,8 +1,8 @@
 diff --git a/src/utils/entries.js b/src/utils/entries.js
-index ab6d7d8fd152ec09321714fce81e8d664436830d..bb5968f7ecc4067d65fd1c940a7a393f0040175d 100644
+index ab6d7d8fd152ec09321714fce81e8d664436830d..ae8c488e3a1b67451d13542d429386ef7702e335 100644
 --- a/src/utils/entries.js
 +++ b/src/utils/entries.js
-@@ -1,34 +1,50 @@
+@@ -1,34 +1,54 @@
  import { safeString } from './string';
  import { safeDate } from './date';
  
@@ -20,18 +20,29 @@ index ab6d7d8fd152ec09321714fce81e8d664436830d..bb5968f7ecc4067d65fd1c940a7a393f
 +      completed: Boolean(task?.completed),
 +      recurrence: task?.recurrence || null,
 +      nextDueDate: task?.nextDueDate || null,
-+      lastCompletedAt: task?.lastCompletedAt || null
++      lastCompletedAt: task?.lastCompletedAt || null,
 +    };
 +  };
 +
++  const tags = Array.isArray(data.tags)
++    ? data.tags.map((t) => (typeof t === 'string' ? t : (t?.text || safeString(t))))
++    : [];
++
++  const extractedTasks = Array.isArray(data.extracted_tasks)
++    ? data.extracted_tasks.map(normalizeTask)
++    : [];
++
    return {
-     id: id,
+-    id: id,
++    id,
      text: safeString(data.text),
      category: safeString(data.category) || 'personal',
-     tags: Array.isArray(data.tags)
-       ? data.tags.map(t => typeof t === 'string' ? t : (t?.text || safeString(t)))
-       : [],
-     title: safeString(data.title) || safeString(data.analysis?.summary) || "Untitled Memory",
+-    tags: Array.isArray(data.tags)
+-      ? data.tags.map(t => typeof t === 'string' ? t : (t?.text || safeString(t)))
+-      : [],
+-    title: safeString(data.title) || safeString(data.analysis?.summary) || "Untitled Memory",
++    tags,
++    title: safeString(data.title) || safeString(data.analysis?.summary) || 'Untitled Memory',
      analysis: data.analysis || { mood_score: 0.5 },
      analysisStatus: data.analysisStatus || 'complete',
      embedding: data.embedding || null,
@@ -48,10 +59,9 @@ index ab6d7d8fd152ec09321714fce81e8d664436830d..bb5968f7ecc4067d65fd1c940a7a393f
 -    // Extracted tasks for mixed entries
 -    extracted_tasks: Array.isArray(data.extracted_tasks) ? data.extracted_tasks : null,
 +    // Extracted tasks for mixed entries (ensure consistent structure)
-+    extracted_tasks: Array.isArray(data.extracted_tasks)
-+      ? data.extracted_tasks.map(normalizeTask)
-+      : [],
++    extracted_tasks: extractedTasks,
      // Context version for retrofit tracking (v1 = enhanced context extracted)
-     context_version: data.context_version || 0
+-    context_version: data.context_version || 0
++    context_version: data.context_version || 0,
    };
  };
