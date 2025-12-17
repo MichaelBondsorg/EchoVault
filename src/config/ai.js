@@ -1,11 +1,7 @@
-// API Keys from environment
-export const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY;
-export const OPENAI_API_KEY = import.meta.env.VITE_OPENAI_API_KEY;
-
-// AI Model Configuration
+// AI Model Configuration (for reference - actual API calls are now handled by Cloud Functions)
 export const AI_CONFIG = {
   classification: {
-    primary: 'gemini-1.5-flash',
+    primary: 'gemini-2.0-flash',
     fallback: 'gpt-4o-mini'
   },
   analysis: {
@@ -14,7 +10,7 @@ export const AI_CONFIG = {
   },
   chat: {
     primary: 'gpt-4o-mini',
-    fallback: 'gemini-1.5-flash'
+    fallback: 'gemini-2.0-flash'
   },
   embedding: {
     primary: 'text-embedding-004',
@@ -25,3 +21,6 @@ export const AI_CONFIG = {
     fallback: null
   }
 };
+
+// Note: API keys are now securely stored in Firebase Cloud Functions
+// and are no longer exposed in the frontend code

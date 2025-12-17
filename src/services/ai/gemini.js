@@ -1,35 +1,48 @@
-import { GEMINI_API_KEY, AI_CONFIG } from '../../config';
+import { analyzeJournalEntryFn, executePromptFn } from '../../config';
 
 /**
- * Call the Gemini API with a system prompt and user prompt
+ * Call the Gemini API via Cloud Function for journal analysis
+ * This function is kept for backwards compatibility but now uses Cloud Functions
  */
-export const callGemini = async (systemPrompt, userPrompt, model = AI_CONFIG.analysis.primary) => {
+export const callGemini = async (systemPrompt, userPrompt) => {
+  // Use executePrompt Cloud Function for raw prompt execution
+  // systemPrompt is typically the full prompt, userPrompt can be additional context or empty
   try {
-    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_API_KEY}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [{ parts: [{ text: userPrompt }] }],
-        systemInstruction: { parts: [{ text: systemPrompt }] }
-      })
+    const result = await executePromptFn({
+      prompt: systemPrompt,
+      systemPrompt: userPrompt || ''
     });
-
-    if (!res.ok) {
-      const errorData = await res.json().catch(() => ({}));
-      console.error('Gemini API error:', res.status, errorData);
-      return null;
-    }
-
-    const data = await res.json();
-    const result = data.candidates?.[0]?.content?.parts?.[0]?.text || null;
-
-    if (!result) {
-      console.error('Gemini API returned no content:', data);
-    }
-
-    return result;
+    return result.data.response;
   } catch (e) {
-    console.error('Gemini API exception:', e);
+    console.error('callGemini (via Cloud Function) error:', e);
+    return null;
+  }
+};
+
+/**
+ * Analyze a journal entry using Cloud Functions
+ * @param {string} text - The journal entry text
+ * @param {Object} options - Analysis options
+ * @param {string} options.recentEntriesContext - Context from recent entries for enhanced extraction
+ * @param {string} options.historyContext - History context for insight generation
+ * @param {Object} options.moodTrajectory - Mood trajectory data
+ * @param {Object} options.cyclicalPatterns - Cyclical pattern data
+ * @param {string[]} options.operations - Which operations to run: ['classify', 'analyze', 'extractContext', 'generateInsight']
+ * @returns {Promise<Object>} Analysis results
+ */
+export const analyzeJournalEntryCloud = async (text, options = {}) => {
+  try {
+    const result = await analyzeJournalEntryFn({
+      text,
+      recentEntriesContext: options.recentEntriesContext || '',
+      historyContext: options.historyContext || '',
+      moodTrajectory: options.moodTrajectory || null,
+      cyclicalPatterns: options.cyclicalPatterns || null,
+      operations: options.operations || ['classify', 'analyze', 'extractContext', 'generateInsight']
+    });
+    return result.data;
+  } catch (e) {
+    console.error('analyzeJournalEntryCloud error:', e);
     return null;
   }
 };
