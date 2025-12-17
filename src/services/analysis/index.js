@@ -396,8 +396,22 @@ export const generateInsight = async (current, relevantHistory, recentHistory, a
     - "streak": Consistent positive behavior (3+ occurrences)
     - "absence": Something negative that used to appear frequently but hasn't lately
     - "contradiction": User's current behavior contradicts their self-statement (use gently!)
-    - "goal_check": Follow-up on a previously stated goal
+    - "goal_check": Follow-up on a previously stated goal (ONLY if goal is still active/ongoing)
     - "cyclical": Day-of-week or time-based pattern observation
+
+    OUTCOME AWARENESS (CRITICAL):
+    - Discussing a topic with ANY outcome (positive, negative, or neutral) counts as mentioning it
+    - "Didn't get the job" = MENTIONED the job (negative outcome), NOT "didn't mention the job"
+    - "Got rejected" = MENTIONED the application/opportunity (closure)
+    - Do NOT suggest "goal_check" for goals that have been resolved (achieved, rejected, abandoned)
+    - Do NOT suggest "reminder" for topics already discussed with a definitive outcome within 24-48 hours
+    - A negative outcome IS a resolution - don't ask follow-ups about resolved situations
+
+    RESOLVED SITUATIONS (do not follow up on these):
+    - Job rejections: "didn't get it", "they said no", "wasn't selected"
+    - Cancelled plans: "got cancelled", "not happening", "fell through"
+    - Completed tasks: "finished", "done", "completed"
+    - Ended relationships/conflicts: "broke up", "resolved", "made up"
 
     TEMPORAL REFERENCE RESOLUTION (CRITICAL):
     Entries use relative time references like "yesterday", "last night", "tomorrow", "tonight", etc.
@@ -419,8 +433,10 @@ export const generateInsight = async (current, relevantHistory, recentHistory, a
     - "Warning" patterns should be within 7 days
     - "Progress/streak" should compare against 30 days ago
     - Don't flag patterns from entries older than 60 days unless truly significant
+    - Recent entries (within 24-48 hours) that discuss a topic with closure don't need follow-up
 
     If the connection feels forced, weak, or the entries are too old, return { "found": false }.
+    If a recent entry already resolved/closed the topic being analyzed, return { "found": false }.
 
     Output JSON:
     {

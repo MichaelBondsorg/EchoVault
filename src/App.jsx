@@ -2164,17 +2164,41 @@ const WeeklyReport = ({ text, onClose }) => (
   </div>
 );
 
-const PromptScreen = ({ prompts, mode, onModeChange, onSave, onClose, loading, category, onRefreshPrompts }) => {
+const PromptScreen = ({ prompts, allSmartPrompts = [], mode, onModeChange, onSave, onClose, loading, category, onRefreshPrompts }) => {
   const [textValue, setTextValue] = useState('');
   const [recording, setRecording] = useState(false);
   const [mediaRecorder, setMediaRecorder] = useState(null);
   const [recordSeconds, setRecordSeconds] = useState(0);
-  const [displayPrompts, setDisplayPrompts] = useState(prompts);
+  const [displayPrompts, setDisplayPrompts] = useState([]);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [promptSource, setPromptSource] = useState('smart'); // 'smart' or 'template'
   const timerRef = useRef(null);
+  const shownSmartPromptsRef = useRef(new Set());
 
+  // Initialize with smart prompts on mount, prioritizing bespoke reflections
   useEffect(() => {
-    setDisplayPrompts(prompts);
+    if (prompts.length > 0) {
+      // Start with up to 3 smart prompts
+      const initialPrompts = prompts.slice(0, 3);
+      initialPrompts.forEach(p => shownSmartPromptsRef.current.add(p));
+      setDisplayPrompts(initialPrompts);
+      setPromptSource('smart');
+    } else {
+      // No smart prompts available, fall back to templates
+      const result = getPromptsForSession(category, []);
+      setDisplayPrompts(result.prompts);
+      setPromptSource('template');
+    }
+  }, []); // Only run on mount
+
+  // Update if prompts change significantly (e.g., category switch)
+  useEffect(() => {
+    if (prompts.length > 0 && displayPrompts.length === 0) {
+      const initialPrompts = prompts.slice(0, 3);
+      initialPrompts.forEach(p => shownSmartPromptsRef.current.add(p));
+      setDisplayPrompts(initialPrompts);
+      setPromptSource('smart');
+    }
   }, [prompts]);
 
   useEffect(() => {
@@ -2182,12 +2206,29 @@ const PromptScreen = ({ prompts, mode, onModeChange, onSave, onClose, loading, c
       if (timerRef.current) clearInterval(timerRef.current);
     };
   }, []);
-  
+
   const handleRefresh = () => {
     setIsRefreshing(true);
-    const result = getPromptsForSession(category, []);
-    setDisplayPrompts(result.prompts);
-    if (onRefreshPrompts) onRefreshPrompts(result.prompts);
+
+    // Get smart prompts that haven't been shown yet
+    const allSmart = allSmartPrompts.length > 0 ? allSmartPrompts : prompts;
+    const unshownSmartPrompts = allSmart.filter(p => !shownSmartPromptsRef.current.has(p));
+
+    if (unshownSmartPrompts.length > 0) {
+      // Show next batch of smart prompts
+      const nextBatch = unshownSmartPrompts.slice(0, 3);
+      nextBatch.forEach(p => shownSmartPromptsRef.current.add(p));
+      setDisplayPrompts(nextBatch);
+      setPromptSource('smart');
+      if (onRefreshPrompts) onRefreshPrompts(nextBatch);
+    } else {
+      // All smart prompts exhausted, fall back to templates
+      const result = getPromptsForSession(category, []);
+      setDisplayPrompts(result.prompts);
+      setPromptSource('template');
+      if (onRefreshPrompts) onRefreshPrompts(result.prompts);
+    }
+
     setTimeout(() => setIsRefreshing(false), 300);
   };
 
@@ -2242,22 +2283,37 @@ const PromptScreen = ({ prompts, mode, onModeChange, onSave, onClose, loading, c
           <div className="mb-4">
             <div className="flex justify-between items-center mb-2">
               <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wide flex items-center gap-2">
-                <Sparkles size={12}/> Reflect on these
+                {promptSource === 'smart' ? (
+                  <>
+                    <Brain size={12} className="text-purple-500"/> Your Reflections
+                  </>
+                ) : (
+                  <>
+                    <Sparkles size={12}/> Prompts to Consider
+                  </>
+                )}
               </h3>
-              <button 
+              <button
                 onClick={handleRefresh}
                 className={`text-xs text-indigo-600 hover:text-indigo-800 flex items-center gap-1 transition-transform ${isRefreshing ? 'animate-spin' : ''}`}
-                title="Get new prompts"
+                title={promptSource === 'smart' ? "See more personal reflections" : "Get new prompts"}
               >
                 <RefreshCw size={14} />
-                Refresh
+                {promptSource === 'smart' ? 'More' : 'Refresh'}
               </button>
             </div>
-            <div className={`bg-white rounded-xl p-4 border border-gray-200 shadow-sm transition-opacity ${isRefreshing ? 'opacity-50' : ''}`}>
+            <div className={`rounded-xl p-4 border shadow-sm transition-opacity ${isRefreshing ? 'opacity-50' : ''} ${
+              promptSource === 'smart'
+                ? 'bg-gradient-to-br from-purple-50 to-indigo-50 border-purple-100'
+                : 'bg-white border-gray-200'
+            }`}>
+              {promptSource === 'smart' && (
+                <p className="text-[10px] text-purple-600 font-medium mb-2 uppercase tracking-wider">Based on your recent entries</p>
+              )}
               <div className="space-y-2">
                 {displayPrompts.map((prompt, i) => (
                   <div key={i} className="flex items-start gap-2">
-                    <span className="text-indigo-500 text-xs mt-0.5">•</span>
+                    <span className={`text-xs mt-0.5 ${promptSource === 'smart' ? 'text-purple-500' : 'text-indigo-500'}`}>•</span>
                     <p className="text-sm text-gray-700 italic">"{prompt}"</p>
                   </div>
                 ))}
@@ -2625,10 +2681,10 @@ export default function App() {
 
   const visible = useMemo(() => entries.filter(e => e.category === cat), [entries, cat]);
 
-  // Collect all follow-up questions from recent entries
+  // Collect all follow-up questions from recent entries (bespoke reflections)
   const availablePrompts = useMemo(() => {
     const prompts = [];
-    const recentEntries = visible.slice(0, 10); // Look at last 10 entries
+    const recentEntries = visible.slice(0, 20); // Look at last 20 entries for more variety
 
     recentEntries.forEach(entry => {
       if (entry.contextualInsight?.found && entry.contextualInsight.followUpQuestions) {
@@ -2645,7 +2701,7 @@ export default function App() {
       }
     });
 
-    return prompts.slice(0, 5); // Return max 5 prompts
+    return prompts.slice(0, 15); // Return max 15 prompts for cycling through
   }, [visible]);
 
   const handleCrisisResponse = useCallback(async (response) => {
@@ -3029,7 +3085,8 @@ export default function App() {
 
       {showPrompts ? (
         <PromptScreen
-          prompts={availablePrompts}
+          prompts={availablePrompts.slice(0, 3)}
+          allSmartPrompts={availablePrompts}
           mode={promptMode}
           onModeChange={setPromptMode}
           onSave={handlePromptSave}
