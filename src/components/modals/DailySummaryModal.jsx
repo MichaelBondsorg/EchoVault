@@ -8,14 +8,25 @@ const DailySummaryModal = ({ date, dayData, onClose, onDelete, onUpdate }) => {
   const [loadingSynthesis, setLoadingSynthesis] = useState(true);
 
   useEffect(() => {
+    let isMounted = true;
+
     const loadSynthesis = async () => {
       if (dayData.entries.length > 0) {
         const result = await generateDailySynthesis(dayData.entries);
-        setSynthesis(result);
+        if (isMounted) {
+          setSynthesis(result);
+        }
       }
-      setLoadingSynthesis(false);
+      if (isMounted) {
+        setLoadingSynthesis(false);
+      }
     };
+
     loadSynthesis();
+
+    return () => {
+      isMounted = false;
+    };
   }, [dayData.entries]);
 
   const sortedEntries = [...dayData.entries].sort((a, b) => a.createdAt - b.createdAt);
