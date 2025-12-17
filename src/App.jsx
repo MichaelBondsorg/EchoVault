@@ -1164,6 +1164,7 @@ const EntryCard = ({ entry, onDelete, onUpdate }) => {
   const [editing, setEditing] = useState(false);
   const [title, setTitle] = useState(entry.title);
   const isPending = entry.analysisStatus === 'pending';
+  const isFailed = entry.analysisStatus === 'analysis_failed';
   const entryType = entry.entry_type || 'reflection';
   const isTask = entryType === 'task';
   const isMixed = entryType === 'mixed';
@@ -1189,6 +1190,7 @@ const EntryCard = ({ entry, onDelete, onUpdate }) => {
   return (
     <div className={`rounded-xl p-5 shadow-sm border hover:shadow-md transition-shadow mb-4 relative overflow-hidden ${cardStyle}`}>
       {isPending && <div className="absolute top-0 left-0 right-0 h-1 bg-gray-100"><div className="h-full bg-indigo-500 animate-progress-indeterminate"></div></div>}
+      {isFailed && <div className="absolute top-0 left-0 right-0 h-1 bg-amber-100"><div className="h-full bg-amber-500 animate-pulse"></div></div>}
 
       {/* Insight Box - now includes validation when both exist */}
       {entry.contextualInsight?.found && insightMsg && !isTask && (() => {
@@ -2623,6 +2625,74 @@ export default function App() {
     return () => clearTimeout(timeoutId);
   }, [user, entries.length]);
 
+  // Retry failed entry analyses in the background
+  useEffect(() => {
+    if (!user || entries.length === 0) return;
+
+    const retryFailedAnalyses = async () => {
+      // Find entries that failed analysis
+      const failedEntries = entries.filter(
+        e => e.analysisStatus === 'analysis_failed' && e.text && e.text.trim().length > 0
+      );
+
+      if (failedEntries.length === 0) return;
+
+      console.log(`Found ${failedEntries.length} failed entries, retrying analysis...`);
+
+      // Retry one at a time with delays to avoid overwhelming the API
+      for (const entry of failedEntries.slice(0, 3)) { // Limit to 3 per session
+        try {
+          console.log(`Retrying analysis for entry: ${entry.id}`);
+
+          const related = findRelevantMemories(entry.embedding, entries, entry.category);
+          const recent = entries.slice(0, 5);
+
+          // Run classification and analysis
+          const [classification, analysis, insight, enhancedContext] = await Promise.all([
+            classifyEntry(entry.text),
+            analyzeEntry(entry.text, 'reflection'), // Start with reflection, will be updated
+            generateInsight(entry.text, related, recent, entries),
+            extractEnhancedContext(entry.text, recent)
+          ]);
+
+          // Update with proper analysis
+          const updateData = {
+            title: analysis?.title || entry.text.substring(0, 50) + '...',
+            tags: [...(analysis?.tags || []), ...(enhancedContext?.structured_tags || [])],
+            analysisStatus: 'complete',
+            entry_type: classification?.entry_type || 'reflection',
+            analysis: {
+              mood_score: analysis?.mood_score ?? 0.5,
+              framework: analysis?.framework || 'general'
+            }
+          };
+
+          if (analysis?.cbt_breakdown) updateData.analysis.cbt_breakdown = analysis.cbt_breakdown;
+          if (analysis?.vent_support) updateData.analysis.vent_support = analysis.vent_support;
+          if (analysis?.celebration) updateData.analysis.celebration = analysis.celebration;
+          if (insight?.found) updateData.contextualInsight = insight;
+          if (enhancedContext?.continues_situation) updateData.continues_situation = enhancedContext.continues_situation;
+          if (enhancedContext?.goal_update?.tag) updateData.goal_update = enhancedContext.goal_update;
+
+          const cleanedUpdateData = removeUndefined(updateData);
+          await updateDoc(doc(db, 'artifacts', APP_COLLECTION_ID, 'users', user.uid, 'entries', entry.id), cleanedUpdateData);
+
+          console.log(`Successfully retried analysis for entry: ${entry.id}`);
+
+          // Wait between retries to avoid rate limits
+          await new Promise(resolve => setTimeout(resolve, 3000));
+        } catch (error) {
+          console.error(`Failed to retry analysis for entry ${entry.id}:`, error);
+          // Entry will remain as 'analysis_failed' and be retried on next session
+        }
+      }
+    };
+
+    // Start retrying after a delay to let the UI settle
+    const timeoutId = setTimeout(retryFailedAnalyses, 5000);
+    return () => clearTimeout(timeoutId);
+  }, [user, entries.length]);
+
   const visible = useMemo(() => entries.filter(e => e.category === cat), [entries, cat]);
 
   // Collect all follow-up questions from recent entries
@@ -2800,18 +2870,20 @@ export default function App() {
             throw updateError;
           }
         } catch (error) {
-          console.error('Analysis failed, marking entry as complete with fallback values:', error);
+          console.error('Analysis failed after retries, marking for later retry:', error);
 
           try {
+            // Mark as failed so we can retry later, but provide fallback values for display
             const fallbackData = {
               analysis: {
                 mood_score: 0.5,
                 framework: 'general'
               },
               title: finalTex.substring(0, 50) + (finalTex.length > 50 ? '...' : ''),
-              tags: [],
-              analysisStatus: 'complete',
-              entry_type: 'reflection'
+              tags: ['needs-analysis'],
+              analysisStatus: 'analysis_failed',
+              entry_type: 'reflection',
+              failedAt: Timestamp.now()
             };
 
             const cleanedFallbackData = removeUndefined(fallbackData);
