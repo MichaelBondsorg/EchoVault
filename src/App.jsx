@@ -714,16 +714,27 @@ const MoodHeatmap = ({ entries, onDayClick }) => {
 const DailySummaryModal = ({ date, dayData, onClose, onDelete, onUpdate }) => {
   const [synthesis, setSynthesis] = useState(null);
   const [loadingSynthesis, setLoadingSynthesis] = useState(true);
-  
+
   useEffect(() => {
+    let isMounted = true;
+
     const loadSynthesis = async () => {
       if (dayData.entries.length > 0) {
         const result = await generateDailySynthesis(dayData.entries);
-        setSynthesis(result);
+        if (isMounted) {
+          setSynthesis(result);
+        }
       }
-      setLoadingSynthesis(false);
+      if (isMounted) {
+        setLoadingSynthesis(false);
+      }
     };
+
     loadSynthesis();
+
+    return () => {
+      isMounted = false;
+    };
   }, [dayData.entries]);
   
   const sortedEntries = [...dayData.entries].sort((a, b) => a.createdAt - b.createdAt);
@@ -1793,12 +1804,15 @@ Move through each step naturally, spending time on areas they want to explore de
 
     if (!entries.length) return "Hi! I'm here to chat with you. What's on your mind today?";
 
-    const recentMoods = entries.slice(0, 5).map(e => e.mood).filter(Boolean);
-    const avgMood = recentMoods.length ? recentMoods.reduce((a, b) => a + b, 0) / recentMoods.length : 3;
+    const recentMoods = entries.slice(0, 5)
+      .map(e => e.analysis?.mood_score)
+      .filter(score => typeof score === 'number');
+    const avgMood = recentMoods.length ? recentMoods.reduce((a, b) => a + b, 0) / recentMoods.length : 0.5;
 
-    if (avgMood < 2.5) {
+    // mood_score is 0-1, convert to percentage for comparison
+    if (avgMood < 0.35) {
       return "Hey, I've noticed you've been going through a tough time lately. Would you like to talk about what's been weighing on you?";
-    } else if (avgMood > 3.5) {
+    } else if (avgMood > 0.65) {
       return "Hi! It seems like things have been going well for you lately. What's been bringing you joy?";
     }
 
