@@ -15,7 +15,9 @@ import confetti from 'canvas-confetti';
  *
  * Props:
  * - task: { text, recurrence?, completed? }
- * - onComplete: (task) => void - Called when task is completed
+ * - onComplete: (task, source, index) => void - Called when task is completed
+ * - source: 'today' | 'carried_forward' - Which list this task is from
+ * - index: number - Position in the source array
  * - isCarriedForward: boolean - Show "from yesterday" badge
  * - disabled: boolean
  */
@@ -23,6 +25,8 @@ import confetti from 'canvas-confetti';
 const FeedbackLoop = ({
   task,
   onComplete,
+  source = 'today',
+  index = 0,
   isCarriedForward = false,
   disabled = false
 }) => {
@@ -64,12 +68,12 @@ const FeedbackLoop = ({
       setShowToast(true);
     }, 300);
 
-    // Call completion handler after animation
+    // Call completion handler after animation with source and index
     setTimeout(() => {
-      onComplete?.(task);
+      onComplete?.(task, source, index);
       setShowToast(false);
     }, 1500);
-  }, [task, onComplete, triggerConfetti, isCompleting, disabled]);
+  }, [task, source, index, onComplete, triggerConfetti, isCompleting, disabled]);
 
   return (
     <div className="relative">
@@ -163,6 +167,9 @@ const FeedbackLoop = ({
 
 /**
  * TaskList - Wrapper for multiple tasks with FeedbackLoop
+ *
+ * Properly tracks source (carried_forward vs today) and original index
+ * for each task to ensure correct persistence when completing.
  */
 export const TaskList = ({
   tasks = [],
@@ -170,19 +177,32 @@ export const TaskList = ({
   onComplete,
   maxDisplay = 5
 }) => {
+  // Build task list with source and original index preserved
   const allTasks = [
-    ...carriedForward.map(t => ({ task: t, isCarriedForward: true })),
-    ...tasks.map(t => ({ task: t, isCarriedForward: false }))
+    ...carriedForward.map((t, i) => ({
+      task: t,
+      source: 'carried_forward',
+      originalIndex: i,
+      isCarriedForward: true
+    })),
+    ...tasks.map((t, i) => ({
+      task: t,
+      source: 'today',
+      originalIndex: i,
+      isCarriedForward: false
+    }))
   ].slice(0, maxDisplay);
 
   if (allTasks.length === 0) return null;
 
   return (
     <div className="space-y-2">
-      {allTasks.map(({ task, isCarriedForward }, index) => (
+      {allTasks.map(({ task, source, originalIndex, isCarriedForward }, displayIndex) => (
         <FeedbackLoop
-          key={`${isCarriedForward ? 'cf' : 't'}-${index}`}
+          key={`${source}-${originalIndex}`}
           task={task}
+          source={source}
+          index={originalIndex}
           isCarriedForward={isCarriedForward}
           onComplete={onComplete}
         />

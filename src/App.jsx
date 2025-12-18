@@ -949,6 +949,7 @@ export default function App() {
           entries={entries}
           category={cat}
           userId={user?.uid}
+          user={user}
           onPromptClick={(prompt) => {
             setReplyContext(prompt);
           }}
@@ -959,6 +960,14 @@ export default function App() {
             }
           }}
           onShowInsights={() => setShowInsights(true)}
+          onStartRecording={() => {
+            // Set a supportive prompt that triggers the entry bar
+            setReplyContext("Let it out - I'm here to listen.");
+          }}
+          onStartTextEntry={() => {
+            // Set a supportive prompt for text entry
+            setReplyContext("Write what's on your mind...");
+          }}
         />
 
         {/* Install Prompt for new users */}
