@@ -88,8 +88,8 @@ const MidDayCheckIn = ({
           </div>
 
           <TaskList
-            tasks={todayTasks.slice(0, 2 - carriedForward.length)}
-            carriedForward={carriedForward.slice(0, 2)}
+            tasks={todayTasks}
+            carriedForward={carriedForward}
             onComplete={onTaskComplete}
             maxDisplay={2}
           />
