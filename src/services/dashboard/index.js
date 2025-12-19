@@ -14,11 +14,25 @@ import { APP_COLLECTION_ID } from '../../config/constants';
 import { getDoc } from 'firebase/firestore';
 
 /**
- * Get today's date string in YYYY-MM-DD format
+ * Get today's date string in YYYY-MM-DD format (LOCAL timezone)
+ * Important: Use local time to match user's "day" perspective
  */
 export const getTodayDateString = () => {
   const today = new Date();
-  return today.toISOString().split('T')[0];
+  const year = today.getFullYear();
+  const month = String(today.getMonth() + 1).padStart(2, '0');
+  const day = String(today.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
+/**
+ * Get a date string in YYYY-MM-DD format (LOCAL timezone)
+ */
+export const getLocalDateString = (date) => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
 };
 
 /**
@@ -55,8 +69,13 @@ const getDashboardCacheRef = (userId, category, dateString = null) => {
 /**
  * Load cached dashboard state from Firestore
  * Returns null if no cache exists or cache is stale
+ *
+ * @param {string} userId - User ID
+ * @param {string} category - 'personal' or 'work'
+ * @param {number} currentEntryCount - Current count of today's entries
+ * @param {number} latestEntryTimestamp - Timestamp of most recently modified entry (optional)
  */
-export const loadDashboardCache = async (userId, category, currentEntryCount) => {
+export const loadDashboardCache = async (userId, category, currentEntryCount, latestEntryTimestamp = null) => {
   try {
     const cacheRef = getDashboardCacheRef(userId, category);
     const cacheSnap = await getDoc(cacheRef);
@@ -71,6 +90,19 @@ export const loadDashboardCache = async (userId, category, currentEntryCount) =>
     if (cache.entryCount !== currentEntryCount) {
       console.log('Dashboard cache stale - entry count changed');
       return null;
+    }
+
+    // Check if any entry was modified after the cache was saved
+    // This catches edits to existing entries
+    if (latestEntryTimestamp && cache.lastUpdated) {
+      const cacheTime = cache.lastUpdated instanceof Date
+        ? cache.lastUpdated.getTime()
+        : cache.lastUpdated.toDate?.()?.getTime() || 0;
+
+      if (latestEntryTimestamp > cacheTime) {
+        console.log('Dashboard cache stale - entry modified after cache');
+        return null;
+      }
     }
 
     // Check if cache has crossed midnight
@@ -138,7 +170,7 @@ export const loadYesterdayCarryForward = async (userId, category) => {
   try {
     const yesterday = new Date();
     yesterday.setDate(yesterday.getDate() - 1);
-    const yesterdayString = yesterday.toISOString().split('T')[0];
+    const yesterdayString = getLocalDateString(yesterday);
 
     const cacheRef = getDashboardCacheRef(userId, category, yesterdayString);
     const cacheSnap = await getDoc(cacheRef);

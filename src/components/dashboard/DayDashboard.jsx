@@ -64,6 +64,34 @@ const DayDashboard = ({
     });
   }, [entries, category]);
 
+  // Calculate the latest modification timestamp for cache invalidation
+  // This catches edits to existing entries (not just new entries)
+  const latestEntryTimestamp = useMemo(() => {
+    if (todayEntries.length === 0) return null;
+
+    let maxTimestamp = 0;
+    for (const entry of todayEntries) {
+      // Check updatedAt first (for edits), then createdAt
+      const updatedAt = entry.updatedAt;
+      const createdAt = entry.createdAt;
+
+      const updateTime = updatedAt instanceof Date
+        ? updatedAt.getTime()
+        : updatedAt?.toDate?.()?.getTime() || 0;
+
+      const createTime = createdAt instanceof Date
+        ? createdAt.getTime()
+        : createdAt?.toDate?.()?.getTime() || 0;
+
+      const entryTime = Math.max(updateTime, createTime);
+      if (entryTime > maxTimestamp) {
+        maxTimestamp = entryTime;
+      }
+    }
+
+    return maxTimestamp > 0 ? maxTimestamp : null;
+  }, [todayEntries]);
+
   // Dashboard mode from hook
   const { timePhase, moodState, isLowMood } = useDashboardMode({
     entries,
@@ -112,7 +140,8 @@ const DayDashboard = ({
   // Generate content with caching
   const generateAndCacheContent = useCallback(async (useCache = true) => {
     if (useCache && userId) {
-      const cached = await loadDashboardCache(userId, category, todayEntries.length);
+      // Pass latestEntryTimestamp to detect edits to existing entries
+      const cached = await loadDashboardCache(userId, category, todayEntries.length, latestEntryTimestamp);
       if (cached?.summary) {
         setSummary(cached.summary);
         return;
@@ -128,17 +157,26 @@ const DayDashboard = ({
     } else {
       setSummary(null);
     }
-  }, [userId, category, todayEntries, entries]);
+  }, [userId, category, todayEntries, entries, latestEntryTimestamp]);
 
-  // Load content
+  // Track last processed timestamp to detect edits
+  const lastTimestampRef = useRef(0);
+
+  // Load content - triggers on entry count change OR entry modification
   useEffect(() => {
-    if (lastEntryCountRef.current === todayEntries.length && summary) return;
+    const countChanged = lastEntryCountRef.current !== todayEntries.length;
+    const entryModified = latestEntryTimestamp && latestEntryTimestamp > lastTimestampRef.current;
+
+    // Skip if nothing changed and we have a summary
+    if (!countChanged && !entryModified && summary) return;
+
     setLoading(true);
     generateAndCacheContent(true).finally(() => {
       setLoading(false);
       lastEntryCountRef.current = todayEntries.length;
+      lastTimestampRef.current = latestEntryTimestamp || 0;
     });
-  }, [todayEntries.length, generateAndCacheContent]);
+  }, [todayEntries.length, latestEntryTimestamp, generateAndCacheContent, summary]);
 
   // Handlers
   const handleTaskComplete = useCallback(async (task, source, index) => {
