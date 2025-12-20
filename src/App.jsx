@@ -25,7 +25,7 @@ import {
 
 // Utils
 import { safeString, removeUndefined } from './utils/string';
-import { safeDate } from './utils/date';
+import { safeDate, formatDateForInput, getTodayForInput, parseDateInput, getDateString, getISOYearWeek } from './utils/date';
 import { sanitizeEntry } from './utils/entries';
 
 // Services
@@ -36,6 +36,7 @@ import {
 } from './services/analysis';
 import { checkCrisisKeywords, checkWarningIndicators, checkLongitudinalRisk, analyzeLongitudinalPatterns } from './services/safety';
 import { retrofitEntriesInBackground } from './services/entries';
+import { handleEntryDateChange, calculateStreak } from './services/dashboard';
 
 // Hooks
 import { useIOSMeta } from './hooks/useIOSMeta';
@@ -1163,6 +1164,10 @@ const InsightsPanel = ({ entries, onClose }) => {
 const EntryCard = ({ entry, onDelete, onUpdate }) => {
   const [editing, setEditing] = useState(false);
   const [title, setTitle] = useState(entry.title);
+  // Use effectiveDate if set, otherwise fall back to createdAt
+  const [editDate, setEditDate] = useState(
+    formatDateForInput(entry.effectiveDate || entry.createdAt)
+  );
   const isPending = entry.analysisStatus === 'pending';
   const entryType = entry.entry_type || 'reflection';
   const isTask = entryType === 'task';
@@ -1170,6 +1175,9 @@ const EntryCard = ({ entry, onDelete, onUpdate }) => {
   const isVent = entryType === 'vent';
 
   useEffect(() => { setTitle(entry.title); }, [entry.title]);
+  useEffect(() => {
+    setEditDate(formatDateForInput(entry.effectiveDate || entry.createdAt));
+  }, [entry.effectiveDate, entry.createdAt]);
 
   const insightMsg = entry.contextualInsight?.message ? safeString(entry.contextualInsight.message) : null;
   const cbt = entry.analysis?.cbt_breakdown;
@@ -1381,21 +1389,77 @@ const EntryCard = ({ entry, onDelete, onUpdate }) => {
         </div>
       </div>
 
-      <div className="mb-2 flex items-center gap-2">
+      <div className="mb-2">
         {editing ? (
-          <div className="flex-1 flex gap-2">
-            <input value={title} onChange={e => setTitle(e.target.value)} className="flex-1 font-bold text-lg border-b-2 border-indigo-500 focus:outline-none bg-transparent" autoFocus />
-            <button onClick={() => { onUpdate(entry.id, { title }); setEditing(false); }} className="text-green-600"><Check size={18}/></button>
+          <div className="space-y-2">
+            <div className="flex gap-2">
+              <input
+                value={title}
+                onChange={e => setTitle(e.target.value)}
+                className="flex-1 font-bold text-lg border-b-2 border-indigo-500 focus:outline-none bg-transparent"
+                placeholder="Entry title"
+                autoFocus
+              />
+            </div>
+            <div className="flex items-center gap-2">
+              <label className="text-xs text-gray-500 font-medium flex items-center gap-1">
+                <Calendar size={12} />
+                Entry Date:
+              </label>
+              <input
+                type="date"
+                value={editDate}
+                onChange={e => setEditDate(e.target.value)}
+                max={getTodayForInput()}
+                className="text-sm border border-gray-200 rounded px-2 py-1 focus:outline-none focus:border-indigo-500"
+              />
+              <button
+                onClick={() => {
+                  const newDate = parseDateInput(editDate);
+                  const updates = { title };
+                  // Only include effectiveDate if it differs from original
+                  const originalDate = entry.effectiveDate || entry.createdAt;
+                  if (getDateString(newDate) !== getDateString(originalDate)) {
+                    updates.effectiveDate = newDate;
+                    updates._dateChanged = {
+                      oldDate: originalDate,
+                      newDate: newDate
+                    };
+                  }
+                  onUpdate(entry.id, updates);
+                  setEditing(false);
+                }}
+                className="text-green-600 hover:text-green-700"
+              >
+                <Check size={18}/>
+              </button>
+              <button
+                onClick={() => {
+                  setTitle(entry.title);
+                  setEditDate(formatDateForInput(entry.effectiveDate || entry.createdAt));
+                  setEditing(false);
+                }}
+                className="text-gray-400 hover:text-gray-600"
+              >
+                <X size={18}/>
+              </button>
+            </div>
           </div>
         ) : (
-          <>
+          <div className="flex items-center gap-2">
             <h3 className={`text-lg font-bold text-gray-800 ${isPending ? 'animate-pulse' : ''}`}>{isPending ? "Processing..." : title}</h3>
             {!isPending && <button onClick={() => setEditing(true)} className="text-gray-300 hover:text-indigo-500 opacity-50 hover:opacity-100"><Edit2 size={14}/></button>}
-          </>
+          </div>
         )}
       </div>
 
-      <div className="text-xs text-gray-400 mb-4 flex items-center gap-1 font-medium"><Calendar size={12}/> {entry.createdAt.toLocaleDateString()}</div>
+      <div className="text-xs text-gray-400 mb-4 flex items-center gap-1 font-medium">
+        <Calendar size={12}/>
+        {(entry.effectiveDate || entry.createdAt).toLocaleDateString()}
+        {entry.effectiveDate && getDateString(entry.effectiveDate) !== getDateString(entry.createdAt) && (
+          <span className="text-gray-300 ml-1">(edited)</span>
+        )}
+      </div>
       <p className="text-gray-600 text-sm whitespace-pre-wrap leading-relaxed">{entry.text}</p>
       
       {/* Extracted Tasks for mixed entries */}
@@ -2623,7 +2687,48 @@ export default function App() {
     return () => clearTimeout(timeoutId);
   }, [user, entries.length]);
 
-  const visible = useMemo(() => entries.filter(e => e.category === cat), [entries, cat]);
+  // Filter and sort entries by effectiveDate (or createdAt if not set)
+  const visible = useMemo(() => {
+    const filtered = entries.filter(e => e.category === cat);
+    // Sort by effectiveDate if available, otherwise createdAt (descending - newest first)
+    return filtered.sort((a, b) => {
+      const dateA = a.effectiveDate || a.createdAt;
+      const dateB = b.effectiveDate || b.createdAt;
+      return dateB - dateA;
+    });
+  }, [entries, cat]);
+
+  // Handle entry update with date change cache invalidation
+  const handleEntryUpdate = useCallback(async (entryId, updates) => {
+    if (!user) return;
+
+    const entryRef = doc(db, 'artifacts', APP_COLLECTION_ID, 'users', user.uid, 'entries', entryId);
+
+    // Check if this is a date change that needs cache invalidation
+    if (updates._dateChanged) {
+      const { oldDate, newDate } = updates._dateChanged;
+      const entry = entries.find(e => e.id === entryId);
+      const category = entry?.category || cat;
+
+      // Remove the _dateChanged metadata before saving to Firestore
+      const { _dateChanged, ...cleanUpdates } = updates;
+
+      // Perform the update first
+      await updateDoc(entryRef, cleanUpdates);
+
+      // Then invalidate caches in the background
+      handleEntryDateChange(user.uid, entryId, oldDate, newDate, category)
+        .then(result => {
+          console.log('Cache invalidation complete:', result);
+        })
+        .catch(err => {
+          console.error('Cache invalidation failed:', err);
+        });
+    } else {
+      // Regular update without date change
+      await updateDoc(entryRef, updates);
+    }
+  }, [user, entries, cat]);
 
   // Collect all follow-up questions from recent entries
   const availablePrompts = useMemo(() => {
@@ -2961,7 +3066,7 @@ export default function App() {
           dayData={dailySummaryModal.dayData}
           onClose={() => setDailySummaryModal(null)}
           onDelete={id => deleteDoc(doc(db, 'artifacts', APP_COLLECTION_ID, 'users', user.uid, 'entries', id))}
-          onUpdate={(id, d) => updateDoc(doc(db, 'artifacts', APP_COLLECTION_ID, 'users', user.uid, 'entries', id), d)}
+          onUpdate={handleEntryUpdate}
         />
       )}
       
@@ -3004,7 +3109,7 @@ export default function App() {
       <div className="max-w-md mx-auto p-4">
         {visible.length > 0 && <MoodHeatmap entries={visible} onDayClick={(date, dayData) => setDailySummaryModal({ date, dayData })} />}
         <div className="space-y-4">
-          {visible.map(e => <EntryCard key={e.id} entry={e} onDelete={id => deleteDoc(doc(db, 'artifacts', APP_COLLECTION_ID, 'users', user.uid, 'entries', id))} onUpdate={(id, d) => updateDoc(doc(db, 'artifacts', APP_COLLECTION_ID, 'users', user.uid, 'entries', id), d)} />)}
+          {visible.map(e => <EntryCard key={e.id} entry={e} onDelete={id => deleteDoc(doc(db, 'artifacts', APP_COLLECTION_ID, 'users', user.uid, 'entries', id))} onUpdate={handleEntryUpdate} />)}
         </div>
 
         {visible.length === 0 && (

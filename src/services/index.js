@@ -9,3 +9,6 @@ export * from './safety';
 
 // Entry Services
 export * from './entries';
+
+// Dashboard Services
+export * from './dashboard';
