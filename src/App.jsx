@@ -261,7 +261,14 @@ export default function App() {
     if (!user) return;
     const q = query(collection(db, 'artifacts', APP_COLLECTION_ID, 'users', user.uid, 'entries'), orderBy('createdAt', 'desc'), limit(100));
     return onSnapshot(q, snap => {
-      const safeData = snap.docs.map(doc => sanitizeEntry(doc.id, doc.data()));
+      const safeData = snap.docs.map(doc => {
+        try {
+          return sanitizeEntry(doc.id, doc.data());
+        } catch (error) {
+          console.error('Failed to sanitize entry:', doc.id, error);
+          return null;
+        }
+      }).filter(Boolean);
       setEntries(safeData);
     });
   }, [user]);
@@ -542,8 +549,12 @@ export default function App() {
           }
 
           if (classification.extracted_tasks && classification.extracted_tasks.length > 0) {
-            // extracted_tasks already comes as [{text: "...", completed: false}] from Cloud Function
-            updateData.extracted_tasks = classification.extracted_tasks;
+            // Cloud Function returns tasks as [{text: "...", completed: false}]
+            // But apply defensive normalization to ensure correct structure
+            updateData.extracted_tasks = classification.extracted_tasks.map(t => ({
+              text: typeof t === 'string' ? t : (t.text || t),
+              completed: t.completed ?? false
+            }));
           }
 
           updateData.analysis = {
