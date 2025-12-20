@@ -287,15 +287,16 @@ async function analyzeEntry(apiKey, text, entryType = 'reflection') {
     ${entryType === 'mixed' ? 'NOTE: This entry contains both tasks AND emotional content. Acknowledge the emotional weight of their to-do list.' : ''}
 
     ROUTING LOGIC (choose ONE framework):
-    1. "cbt" - IF text shows anxiety, negative self-talk, or cognitive distortion
-    2. "celebration" - IF text describes wins, accomplishments, gratitude, joy, or positive experiences
-    3. "general" - For neutral observations, casual updates, or mixed content without strong emotion
+    1. "cbt" (Cognitive Behavioral): Use when user has specific "glitchy" logic, cognitive distortions (all-or-nothing thinking, catastrophizing, mind-reading), or requires fact-checking their thoughts.
+    2. "act" (Acceptance & Commitment): Use when user is struggling with difficult *feelings* (grief, shame, anxiety, loss) where "fighting" the feeling makes it worse. Focus on unhooking from thoughts and connecting to values. Signs: rumination, self-fusion ("I AM a failure" vs "I made a mistake"), avoidance of emotions.
+    3. "celebration" - IF text describes wins, accomplishments, gratitude, joy, or positive experiences.
+    4. "general" - For neutral observations, casual updates, or mixed content without strong emotion.
 
     RESPONSE DEPTH (based on emotional intensity):
     - mood_score 0.6+ (positive/neutral): Light response - validation or affirmation only
     - mood_score 0.4-0.6 (mixed): Medium response - add perspective if helpful
-    - mood_score 0.2-0.4 (struggling): Full response - include behavioral suggestions
-    - mood_score <0.2 (distressed): Full response + always include behavioral_activation
+    - mood_score 0.2-0.4 (struggling): Full response - include behavioral suggestions or committed action
+    - mood_score <0.2 (distressed): Full response + always include behavioral_activation or committed_action
 
     TIME-AWARE SUGGESTIONS:
     - late_night: Favor sleep hygiene, gentle grounding, avoid "go for a walk" type suggestions
@@ -307,8 +308,9 @@ async function analyzeEntry(apiKey, text, entryType = 'reflection') {
       "title": "Short creative title (max 6 words)",
       "tags": ["Tag1", "Tag2"],
       "mood_score": 0.5 (0.0=bad, 1.0=good),
-      "framework": "cbt" | "celebration" | "general",
+      "framework": "cbt" | "act" | "celebration" | "general",
 
+      // INCLUDE IF FRAMEWORK == 'cbt'
       "cbt_breakdown": {
         "automatic_thought": "The negative thought pattern identified (or null if not clear)",
         "distortion": "Cognitive distortion label (or null if minor/not worth highlighting)",
@@ -320,6 +322,16 @@ async function analyzeEntry(apiKey, text, entryType = 'reflection') {
         }
       },
 
+      // INCLUDE IF FRAMEWORK == 'act'
+      "act_analysis": {
+        "fusion_thought": "The thought the user is 'fused' with - taking as absolute truth about themselves or reality",
+        "defusion_technique": "labeling" | "visualization" | "thanking_mind",
+        "defusion_phrase": "A phrase to create psychological distance. For labeling: 'I notice I'm having the thought that...'. For visualization: 'Imagine placing this thought on a leaf floating down a stream...'. For thanking_mind: 'Thanks, mind, for that thought...'",
+        "values_context": "The core value at stake (e.g., Connection, Growth, Creativity, Health, Family)",
+        "committed_action": "A tiny, concrete step (under 5 min) aligned with their values - NOT controlled by whether they feel like it"
+      },
+
+      // INCLUDE IF FRAMEWORK == 'celebration'
       "celebration": {
         "affirmation": "Warm acknowledgment of their positive moment (1-2 sentences)",
         "amplify": "Optional prompt to savor or deepen the positive feeling (or null if not needed)"
@@ -328,7 +340,7 @@ async function analyzeEntry(apiKey, text, entryType = 'reflection') {
       "task_acknowledgment": "Brief empathetic note about their to-do list load (or null)"
     }
 
-    IMPORTANT: Return null for any field that isn't genuinely useful. Less is more.
+    IMPORTANT: Return null for any field that isn't genuinely useful. Less is more. Only include the analysis object for the chosen framework.
   `;
 
   try {
@@ -358,6 +370,10 @@ async function analyzeEntry(apiKey, text, entryType = 'reflection') {
 
     if (parsed.cbt_breakdown && typeof parsed.cbt_breakdown === 'object' && Object.keys(parsed.cbt_breakdown).length > 0) {
       result.cbt_breakdown = parsed.cbt_breakdown;
+    }
+
+    if (parsed.act_analysis && typeof parsed.act_analysis === 'object' && Object.keys(parsed.act_analysis).length > 0) {
+      result.act_analysis = parsed.act_analysis;
     }
 
     if (parsed.celebration && typeof parsed.celebration === 'object') {

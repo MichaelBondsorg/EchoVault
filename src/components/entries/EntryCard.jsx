@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import {
   Trash2, Calendar, Edit2, Check, RefreshCw, Lightbulb, Wind, Sparkles,
-  Brain, Info, Footprints, Clipboard, X
+  Brain, Info, Footprints, Clipboard, X, Compass
 } from 'lucide-react';
 import { safeString } from '../../utils/string';
 import { formatDateForInput, getTodayForInput, parseDateInput, getDateString } from '../../utils/date';
@@ -37,9 +37,13 @@ const EntryCard = ({ entry, onDelete, onUpdate }) => {
 
   const insightMsg = entry.contextualInsight?.message ? safeString(entry.contextualInsight.message) : null;
   const cbt = entry.analysis?.cbt_breakdown;
+  const actAnalysis = entry.analysis?.act_analysis;
   const ventSupport = entry.analysis?.vent_support;
   const celebration = entry.analysis?.celebration;
   const taskAcknowledgment = entry.analysis?.task_acknowledgment;
+
+  // Determine framework with backwards compatibility for legacy entries
+  const framework = entry.analysis?.framework || (cbt ? 'cbt' : 'general');
 
   const toggleCategory = () => {
     const newCategory = entry.category === 'work' ? 'personal' : 'work';
@@ -106,7 +110,7 @@ const EntryCard = ({ entry, onDelete, onUpdate }) => {
       )}
 
       {/* Celebration Display */}
-      {entry.analysis?.framework === 'celebration' && celebration && (
+      {framework === 'celebration' && celebration && (
         <div className="mb-4 space-y-3">
           {celebration.affirmation && (
             <div className="bg-gradient-to-r from-green-50 to-emerald-50 p-3 rounded-xl border border-green-100">
@@ -122,13 +126,69 @@ const EntryCard = ({ entry, onDelete, onUpdate }) => {
         </div>
       )}
 
+      {/* ACT (Acceptance & Commitment) Display */}
+      {framework === 'act' && actAnalysis && (
+        <div className="mb-4 space-y-3">
+          <div className="bg-teal-50 rounded-xl p-4 border border-teal-100">
+            {/* Header with technique badge */}
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-2">
+                <Wind className="text-teal-600" size={16} />
+                <span className="text-xs font-bold text-teal-700 uppercase">Defusion</span>
+              </div>
+              {actAnalysis.defusion_technique && (
+                <span className="text-[10px] font-semibold text-teal-600 bg-teal-100 px-2 py-0.5 rounded-full">
+                  {actAnalysis.defusion_technique.replace('_', ' ')}
+                </span>
+              )}
+            </div>
+
+            {/* Fusion thought (the "hook") */}
+            {actAnalysis.fusion_thought && (
+              <div className="text-teal-900 text-sm mb-2">
+                <span className="opacity-75">Instead of: </span>
+                <span className="line-through decoration-teal-300">"{actAnalysis.fusion_thought}"</span>
+              </div>
+            )}
+
+            {/* Defusion phrase */}
+            {actAnalysis.defusion_phrase && (
+              <div className="text-teal-800 font-medium text-sm bg-white/50 p-2 rounded-lg">
+                Try: "{actAnalysis.defusion_phrase}"
+              </div>
+            )}
+
+            {/* Values context */}
+            {actAnalysis.values_context && (
+              <div className="mt-3 pt-3 border-t border-teal-100 flex items-center gap-2">
+                <Compass size={14} className="text-amber-600" />
+                <span className="text-xs text-amber-800">
+                  <span className="font-semibold">Value:</span> {actAnalysis.values_context}
+                </span>
+              </div>
+            )}
+          </div>
+
+          {/* Committed Action */}
+          {actAnalysis.committed_action && (
+            <div className="bg-amber-50 p-3 rounded-xl border border-amber-100">
+              <div className="flex items-center gap-2 text-amber-700 font-display font-semibold text-xs uppercase mb-2">
+                <Footprints size={14} /> Committed Action
+              </div>
+              <p className="text-sm text-amber-800 font-medium font-body">{actAnalysis.committed_action}</p>
+              <p className="text-xs text-amber-600 mt-1 italic">Do this regardless of how you feel right now.</p>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Task Acknowledgment */}
       {isMixed && taskAcknowledgment && (
         <p className="text-warm-500 italic text-sm mb-4">{taskAcknowledgment}</p>
       )}
 
       {/* Enhanced CBT Breakdown */}
-      {entry.analysis?.framework === 'cbt' && cbt && (
+      {framework === 'cbt' && cbt && (
         <div className="mb-4 space-y-3">
           {cbt.validation && !entry.contextualInsight?.found && (
             <p className="text-warm-500 italic text-sm">{cbt.validation}</p>
@@ -190,7 +250,7 @@ const EntryCard = ({ entry, onDelete, onUpdate }) => {
       )}
 
       {/* Legacy CBT Breakdown */}
-      {entry.analysis?.framework === 'cbt' && cbt && !cbt.validation && !cbt.socratic_question && cbt.challenge && !cbt.suggested_reframe && (
+      {framework === 'cbt' && cbt && !cbt.validation && !cbt.socratic_question && cbt.challenge && !cbt.suggested_reframe && (
         <div className="mb-4 bg-primary-50 p-3 rounded-xl border border-primary-100 text-sm space-y-2">
           <div className="flex items-center gap-2 text-primary-700 font-display font-bold text-xs uppercase"><Brain size={12}/> Cognitive Restructuring</div>
           <div className="grid gap-2 font-body">
