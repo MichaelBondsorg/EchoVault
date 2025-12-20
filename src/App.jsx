@@ -1402,11 +1402,15 @@ const EntryCard = ({ entry, onDelete, onUpdate }) => {
               />
             </div>
             <div className="flex items-center gap-2">
-              <label className="text-xs text-gray-500 font-medium flex items-center gap-1">
+              <label
+                htmlFor={`entry-date-${entry.id}`}
+                className="text-xs text-gray-500 font-medium flex items-center gap-1"
+              >
                 <Calendar size={12} />
                 Entry Date:
               </label>
               <input
+                id={`entry-date-${entry.id}`}
                 type="date"
                 value={editDate}
                 onChange={e => setEditDate(e.target.value)}
@@ -1416,17 +1420,29 @@ const EntryCard = ({ entry, onDelete, onUpdate }) => {
               <button
                 onClick={() => {
                   const newDate = parseDateInput(editDate);
+
+                  // Validate: prevent future dates (Fix E: max attribute can be bypassed via DevTools)
+                  const today = new Date();
+                  today.setHours(23, 59, 59, 999);
+                  if (newDate > today) {
+                    alert('Cannot select future dates');
+                    return;
+                  }
+
                   const updates = { title };
+                  const options = {};
+
                   // Only include effectiveDate if it differs from original
                   const originalDate = entry.effectiveDate || entry.createdAt;
                   if (getDateString(newDate) !== getDateString(originalDate)) {
                     updates.effectiveDate = newDate;
-                    updates._dateChanged = {
+                    // Pass date change info via options, not in updates (Fix A: Control Coupling)
+                    options.dateChanged = {
                       oldDate: originalDate,
                       newDate: newDate
                     };
                   }
-                  onUpdate(entry.id, updates);
+                  onUpdate(entry.id, updates, options);
                   setEditing(false);
                 }}
                 className="text-green-600 hover:text-green-700"
@@ -2699,24 +2715,22 @@ export default function App() {
   }, [entries, cat]);
 
   // Handle entry update with date change cache invalidation
-  const handleEntryUpdate = useCallback(async (entryId, updates) => {
+  // Options parameter keeps control logic separate from data (Fix A: Control Coupling)
+  const handleEntryUpdate = useCallback(async (entryId, updates, options = {}) => {
     if (!user) return;
 
     const entryRef = doc(db, 'artifacts', APP_COLLECTION_ID, 'users', user.uid, 'entries', entryId);
 
+    // Perform the update
+    await updateDoc(entryRef, updates);
+
     // Check if this is a date change that needs cache invalidation
-    if (updates._dateChanged) {
-      const { oldDate, newDate } = updates._dateChanged;
+    if (options.dateChanged) {
+      const { oldDate, newDate } = options.dateChanged;
       const entry = entries.find(e => e.id === entryId);
       const category = entry?.category || cat;
 
-      // Remove the _dateChanged metadata before saving to Firestore
-      const { _dateChanged, ...cleanUpdates } = updates;
-
-      // Perform the update first
-      await updateDoc(entryRef, cleanUpdates);
-
-      // Then invalidate caches in the background
+      // Invalidate caches in the background
       handleEntryDateChange(user.uid, entryId, oldDate, newDate, category)
         .then(result => {
           console.log('Cache invalidation complete:', result);
@@ -2724,9 +2738,6 @@ export default function App() {
         .catch(err => {
           console.error('Cache invalidation failed:', err);
         });
-    } else {
-      // Regular update without date change
-      await updateDoc(entryRef, updates);
     }
   }, [user, entries, cat]);
 
