@@ -2,9 +2,10 @@ import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import {
   Trash2, Calendar, Edit2, Check, RefreshCw, Lightbulb, Wind, Sparkles,
-  Brain, Info, Footprints, Clipboard
+  Brain, Info, Footprints, Clipboard, X
 } from 'lucide-react';
 import { safeString } from '../../utils/string';
+import { formatDateForInput, getTodayForInput, parseDateInput, getDateString } from '../../utils/date';
 
 // Mood color utility
 const getMoodColor = (score) => {
@@ -19,6 +20,10 @@ const getMoodColor = (score) => {
 const EntryCard = ({ entry, onDelete, onUpdate }) => {
   const [editing, setEditing] = useState(false);
   const [title, setTitle] = useState(entry.title);
+  // Use effectiveDate if set, otherwise fall back to createdAt
+  const [editDate, setEditDate] = useState(
+    formatDateForInput(entry.effectiveDate || entry.createdAt)
+  );
   const isPending = entry.analysisStatus === 'pending';
   const entryType = entry.entry_type || 'reflection';
   const isTask = entryType === 'task';
@@ -26,6 +31,9 @@ const EntryCard = ({ entry, onDelete, onUpdate }) => {
   const isVent = entryType === 'vent';
 
   useEffect(() => { setTitle(entry.title); }, [entry.title]);
+  useEffect(() => {
+    setEditDate(formatDateForInput(entry.effectiveDate || entry.createdAt));
+  }, [entry.effectiveDate, entry.createdAt]);
 
   const insightMsg = entry.contextualInsight?.message ? safeString(entry.contextualInsight.message) : null;
   const cbt = entry.analysis?.cbt_breakdown;
@@ -252,21 +260,93 @@ const EntryCard = ({ entry, onDelete, onUpdate }) => {
         </div>
       </div>
 
-      <div className="mb-2 flex items-center gap-2">
+      <div className="mb-2">
         {editing ? (
-          <div className="flex-1 flex gap-2">
-            <input value={title} onChange={e => setTitle(e.target.value)} className="flex-1 font-display font-bold text-lg border-b-2 border-primary-500 focus:outline-none bg-transparent" autoFocus />
-            <button onClick={() => { onUpdate(entry.id, { title }); setEditing(false); }} className="text-green-600"><Check size={18}/></button>
+          <div className="space-y-2">
+            <div className="flex gap-2">
+              <input
+                value={title}
+                onChange={e => setTitle(e.target.value)}
+                className="flex-1 font-display font-bold text-lg border-b-2 border-primary-500 focus:outline-none bg-transparent"
+                placeholder="Entry title"
+                autoFocus
+              />
+            </div>
+            <div className="flex items-center gap-2">
+              <label
+                htmlFor={`entry-date-${entry.id}`}
+                className="text-xs text-warm-500 font-medium flex items-center gap-1"
+              >
+                <Calendar size={12} />
+                Entry Date:
+              </label>
+              <input
+                id={`entry-date-${entry.id}`}
+                type="date"
+                value={editDate}
+                onChange={e => setEditDate(e.target.value)}
+                max={getTodayForInput()}
+                className="text-sm border border-warm-200 rounded-lg px-2 py-1 focus:outline-none focus:border-primary-500"
+              />
+              <button
+                onClick={() => {
+                  const newDate = parseDateInput(editDate);
+
+                  // Validate: prevent future dates
+                  const today = new Date();
+                  today.setHours(23, 59, 59, 999);
+                  if (newDate > today) {
+                    alert('Cannot select future dates');
+                    return;
+                  }
+
+                  const updates = { title };
+                  const options = {};
+
+                  // Only include effectiveDate if it differs from original
+                  const originalDate = entry.effectiveDate || entry.createdAt;
+                  if (getDateString(newDate) !== getDateString(originalDate)) {
+                    updates.effectiveDate = newDate;
+                    // Pass date change info via options
+                    options.dateChanged = {
+                      oldDate: originalDate,
+                      newDate: newDate
+                    };
+                  }
+                  onUpdate(entry.id, updates, options);
+                  setEditing(false);
+                }}
+                className="text-green-600 hover:text-green-700"
+              >
+                <Check size={18}/>
+              </button>
+              <button
+                onClick={() => {
+                  setTitle(entry.title);
+                  setEditDate(formatDateForInput(entry.effectiveDate || entry.createdAt));
+                  setEditing(false);
+                }}
+                className="text-warm-400 hover:text-warm-600"
+              >
+                <X size={18}/>
+              </button>
+            </div>
           </div>
         ) : (
-          <>
+          <div className="flex items-center gap-2">
             <h3 className={`text-lg font-display font-bold text-warm-800 ${isPending ? 'animate-pulse' : ''}`}>{isPending ? "Processing..." : title}</h3>
             {!isPending && <button onClick={() => setEditing(true)} className="text-warm-300 hover:text-primary-500 opacity-50 hover:opacity-100"><Edit2 size={14}/></button>}
-          </>
+          </div>
         )}
       </div>
 
-      <div className="text-xs text-warm-400 mb-4 flex items-center gap-1 font-medium"><Calendar size={12}/> {entry.createdAt.toLocaleDateString()}</div>
+      <div className="text-xs text-warm-400 mb-4 flex items-center gap-1 font-medium">
+        <Calendar size={12}/>
+        {(entry.effectiveDate || entry.createdAt).toLocaleDateString()}
+        {entry.effectiveDate && getDateString(entry.effectiveDate) !== getDateString(entry.createdAt) && (
+          <span className="text-warm-300 ml-1">(edited)</span>
+        )}
+      </div>
       <p className="text-warm-600 text-sm whitespace-pre-wrap leading-relaxed font-body">{entry.text}</p>
 
       {/* Extracted Tasks for mixed entries */}

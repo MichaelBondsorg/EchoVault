@@ -23,7 +23,7 @@ import {
 
 // Utils
 import { safeString, removeUndefined, formatMentions } from './utils/string';
-import { safeDate } from './utils/date';
+import { safeDate, formatDateForInput, getTodayForInput, parseDateInput, getDateString, getISOYearWeek } from './utils/date';
 import { sanitizeEntry } from './utils/entries';
 
 // Services
@@ -35,7 +35,7 @@ import { checkCrisisKeywords, checkWarningIndicators, checkLongitudinalRisk } fr
 import { retrofitEntriesInBackground } from './services/entries';
 import { inferCategory } from './services/prompts';
 import { detectTemporalContext, needsConfirmation, formatEffectiveDate } from './services/temporal';
-import { completeActionItem } from './services/dashboard';
+import { completeActionItem, handleEntryDateChange, calculateStreak } from './services/dashboard';
 
 // Hooks
 import { useIOSMeta } from './hooks/useIOSMeta';
@@ -91,6 +91,7 @@ const loadJsPDF = () => {
 };
 
 // Analysis functions (classifyEntry, analyzeEntry, generateInsight, etc.) imported from services/analysis
+
 
 export default function App() {
   useIOSMeta();
@@ -385,7 +386,43 @@ export default function App() {
     return () => clearTimeout(timeoutId);
   }, [user, entries.length]);
 
-  const visible = useMemo(() => entries.filter(e => e.category === cat), [entries, cat]);
+  // Filter and sort entries by effectiveDate (or createdAt if not set)
+  const visible = useMemo(() => {
+    const filtered = entries.filter(e => e.category === cat);
+    // Sort by effectiveDate if available, otherwise createdAt (descending - newest first)
+    return filtered.sort((a, b) => {
+      const dateA = a.effectiveDate || a.createdAt;
+      const dateB = b.effectiveDate || b.createdAt;
+      return dateB - dateA;
+    });
+  }, [entries, cat]);
+
+  // Handle entry update with date change cache invalidation
+  // Options parameter keeps control logic separate from data (Fix A: Control Coupling)
+  const handleEntryUpdate = useCallback(async (entryId, updates, options = {}) => {
+    if (!user) return;
+
+    const entryRef = doc(db, 'artifacts', APP_COLLECTION_ID, 'users', user.uid, 'entries', entryId);
+
+    // Perform the update
+    await updateDoc(entryRef, updates);
+
+    // Check if this is a date change that needs cache invalidation
+    if (options.dateChanged) {
+      const { oldDate, newDate } = options.dateChanged;
+      const entry = entries.find(e => e.id === entryId);
+      const category = entry?.category || cat;
+
+      // Invalidate caches in the background
+      handleEntryDateChange(user.uid, entryId, oldDate, newDate, category)
+        .then(result => {
+          console.log('Cache invalidation complete:', result);
+        })
+        .catch(err => {
+          console.error('Cache invalidation failed:', err);
+        });
+    }
+  }, [user, entries, cat]);
 
   const handleCrisisResponse = useCallback(async (response) => {
     setCrisisModal(null);
@@ -882,7 +919,7 @@ export default function App() {
           dayData={dailySummaryModal.dayData}
           onClose={() => setDailySummaryModal(null)}
           onDelete={id => deleteDoc(doc(db, 'artifacts', APP_COLLECTION_ID, 'users', user.uid, 'entries', id))}
-          onUpdate={(id, d) => updateDoc(doc(db, 'artifacts', APP_COLLECTION_ID, 'users', user.uid, 'entries', id), d)}
+          onUpdate={handleEntryUpdate}
         />
       )}
 
@@ -1054,7 +1091,7 @@ export default function App() {
             category={cat}
             onClose={() => setShowJournal(false)}
             onDelete={id => deleteDoc(doc(db, 'artifacts', APP_COLLECTION_ID, 'users', user.uid, 'entries', id))}
-            onUpdate={(id, d) => updateDoc(doc(db, 'artifacts', APP_COLLECTION_ID, 'users', user.uid, 'entries', id), d)}
+            onUpdate={handleEntryUpdate}
           />
         )}
       </AnimatePresence>
