@@ -94,6 +94,7 @@ const loadJsPDF = () => {
 
 
 export default function App() {
+  console.log('[EchoVault] App component rendering...');
   useIOSMeta();
   const { permission, requestPermission } = useNotifications();
   const { isOnline, wasOffline, clearWasOffline } = useNetworkStatus();
@@ -244,17 +245,22 @@ export default function App() {
 
   // Auth
   useEffect(() => {
+    console.log('[EchoVault] Setting up auth listener...');
     const init = async () => {
       if (typeof window !== 'undefined' && typeof window.__initial_auth_token !== 'undefined' && window.__initial_auth_token) {
         try {
+          console.log('[EchoVault] Found initial auth token, signing in...');
           await signInWithCustomToken(auth, window.__initial_auth_token);
         } catch (error) {
-          console.error('Auth error:', error);
+          console.error('[EchoVault] Auth error:', error);
         }
       }
     };
     init();
-    return onAuthStateChanged(auth, setUser);
+    return onAuthStateChanged(auth, (user) => {
+      console.log('[EchoVault] Auth state changed:', user ? `User: ${user.uid}` : 'No user');
+      setUser(user);
+    });
   }, []);
 
   // Data Feed
@@ -796,27 +802,29 @@ export default function App() {
     await saveEntry(transcript);
   };
 
-  if (!user) return (
-    <div className="min-h-screen flex flex-col items-center justify-center p-4 bg-gradient-to-br from-warm-50 to-primary-50">
-      <motion.div
-        className="h-16 w-16 bg-gradient-to-br from-primary-600 to-primary-700 rounded-3xl flex items-center justify-center mb-4 shadow-soft-lg rotate-3"
-        initial={{ scale: 0, rotate: -10 }}
-        animate={{ scale: 1, rotate: 3 }}
-        transition={{ type: "spring", damping: 15 }}
-      >
-        <Activity className="text-white"/>
-      </motion.div>
-      <motion.h1
-        className="text-2xl font-display font-bold mb-6 text-warm-800"
-        initial={{ opacity: 0, y: 10 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.2 }}
-      >
-        EchoVault
-      </motion.h1>
-      <motion.div
-        initial={{ opacity: 0, y: 10 }}
-        animate={{ opacity: 1, y: 0 }}
+  if (!user) {
+    console.log('[EchoVault] Rendering login screen (no user)');
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center p-4 bg-gradient-to-br from-warm-50 to-primary-50">
+        <motion.div
+          className="h-16 w-16 bg-gradient-to-br from-primary-600 to-primary-700 rounded-3xl flex items-center justify-center mb-4 shadow-soft-lg rotate-3"
+          initial={{ scale: 0, rotate: -10 }}
+          animate={{ scale: 1, rotate: 3 }}
+          transition={{ type: "spring", damping: 15 }}
+        >
+          <Activity className="text-white"/>
+        </motion.div>
+        <motion.h1
+          className="text-2xl font-display font-bold mb-6 text-warm-800"
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.2 }}
+        >
+          EchoVault
+        </motion.h1>
+        <motion.div
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.3 }}
       >
         <Button
@@ -828,7 +836,10 @@ export default function App() {
         </Button>
       </motion.div>
     </div>
-  );
+    );
+  }
+
+  console.log('[EchoVault] Rendering main app (user logged in)');
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-warm-50 to-white pb-40 pt-[env(safe-area-inset-top)]">
