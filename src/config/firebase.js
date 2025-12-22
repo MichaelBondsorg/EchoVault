@@ -23,12 +23,12 @@ export const auth = getAuth(app);
 export const db = getFirestore(app);
 export const functions = getFunctions(app);
 
-// Cloud Function callable references
-export const analyzeJournalEntryFn = httpsCallable(functions, 'analyzeJournalEntry');
-export const generateEmbeddingFn = httpsCallable(functions, 'generateEmbedding');
-export const transcribeAudioFn = httpsCallable(functions, 'transcribeAudio');
-export const askJournalAIFn = httpsCallable(functions, 'askJournalAI');
-export const executePromptFn = httpsCallable(functions, 'executePrompt');
+// Cloud Function callable references with extended timeouts for mobile reliability
+export const analyzeJournalEntryFn = httpsCallable(functions, 'analyzeJournalEntry', { timeout: 120000 }); // 2 min
+export const generateEmbeddingFn = httpsCallable(functions, 'generateEmbedding', { timeout: 60000 }); // 1 min
+export const transcribeAudioFn = httpsCallable(functions, 'transcribeAudio', { timeout: 540000 }); // 9 min - matches server
+export const askJournalAIFn = httpsCallable(functions, 'askJournalAI', { timeout: 120000 }); // 2 min
+export const executePromptFn = httpsCallable(functions, 'executePrompt', { timeout: 120000 }); // 2 min
 
 // Re-export Firebase utilities for convenience
 export {
