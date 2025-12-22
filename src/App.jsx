@@ -491,8 +491,21 @@ export default function App() {
     }
 
     // Online: generate embedding and save
-    const embedding = await generateEmbedding(finalTex);
-    const related = findRelevantMemories(embedding, entries, cat);
+    // Wrap embedding generation with timeout for mobile reliability
+    let embedding = null;
+    try {
+      // Set a 15-second timeout for embedding generation (mobile connections can be slow)
+      const embeddingPromise = generateEmbedding(finalTex);
+      const timeoutPromise = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('Embedding timeout')), 15000)
+      );
+      embedding = await Promise.race([embeddingPromise, timeoutPromise]);
+    } catch (embeddingError) {
+      // Log but continue - we'll save the entry without embedding and backfill later
+      console.warn('Embedding generation failed, will backfill later:', embeddingError.message);
+    }
+
+    const related = embedding ? findRelevantMemories(embedding, entries, cat) : [];
     const recent = entries.slice(0, 5);
 
     try {
@@ -653,7 +666,13 @@ export default function App() {
       })();
     } catch (e) {
       console.error('Save failed:', e);
-      alert("Save failed");
+      // Provide more helpful error message based on error type
+      const errorMessage = e.code === 'permission-denied'
+        ? 'Save failed: Permission denied. Please sign in again.'
+        : e.code === 'unavailable' || e.message?.includes('network')
+        ? 'Save failed: Network error. Please check your connection and try again.'
+        : 'Save failed. Please try again.';
+      alert(errorMessage);
       setProcessing(false);
     }
   };
@@ -672,8 +691,13 @@ export default function App() {
     }
 
     // Detect temporal context (Phase 2)
+    // Add timeout for mobile reliability
     try {
-      const temporal = await detectTemporalContext(textInput);
+      const temporalPromise = detectTemporalContext(textInput);
+      const timeoutPromise = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('Temporal detection timeout')), 10000)
+      );
+      const temporal = await Promise.race([temporalPromise, timeoutPromise]);
       console.log('Temporal detection result:', {
         detected: temporal.detected,
         effectiveDate: temporal.effectiveDate,
