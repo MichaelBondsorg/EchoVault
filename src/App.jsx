@@ -802,6 +802,27 @@ export default function App() {
     await saveEntry(transcript);
   };
 
+  // Handle sign-in with logging
+  const handleSignIn = async () => {
+    console.log('[EchoVault] Sign-in button clicked, attempting Google sign-in...');
+    try {
+      const result = await signInWithPopup(auth, new GoogleAuthProvider());
+      console.log('[EchoVault] Sign-in successful:', result.user?.uid);
+    } catch (error) {
+      console.error('[EchoVault] Sign-in error:', error.code, error.message);
+      if (error.code === 'auth/popup-blocked') {
+        alert('Sign-in popup was blocked. Please allow popups for this site.');
+      } else if (error.code === 'auth/popup-closed-by-user') {
+        console.log('[EchoVault] User closed the popup');
+      } else if (error.code === 'auth/unauthorized-domain') {
+        alert('This domain is not authorized for sign-in. Please contact support.');
+        console.error('[EchoVault] Domain not authorized. Add this domain to Firebase Console > Authentication > Settings > Authorized domains');
+      } else {
+        alert(`Sign-in failed: ${error.message}`);
+      }
+    }
+  };
+
   if (!user) {
     console.log('[EchoVault] Rendering login screen (no user)');
     return (
@@ -829,7 +850,7 @@ export default function App() {
       >
         <Button
           variant="secondary"
-          onClick={() => signInWithPopup(auth, new GoogleAuthProvider())}
+          onClick={handleSignIn}
           className="flex gap-2 items-center"
         >
           <LogIn size={18}/> Sign in with Google
