@@ -839,7 +839,7 @@ export default function App() {
           EchoVault
         </h1>
         <Button
-          variant="secondary"
+          variant="primary"
           onClick={handleSignIn}
           className="flex gap-2 items-center"
         >
