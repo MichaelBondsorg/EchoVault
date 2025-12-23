@@ -7,7 +7,7 @@
  */
 
 import { onCall, HttpsError } from 'firebase-functions/v2/https';
-import { onDocumentCreated, onDocumentUpdated } from 'firebase-functions/v2/firestore';
+import { onDocumentCreated, onDocumentUpdated, onDocumentWritten } from 'firebase-functions/v2/firestore';
 import { onSchedule } from 'firebase-functions/v2/scheduler';
 import { defineSecret } from 'firebase-functions/params';
 import { initializeApp, getApps } from 'firebase-admin/app';
@@ -1372,5 +1372,209 @@ export const refreshPatterns = onCall(
       console.error(`Error refreshing patterns for user ${userId}:`, error);
       throw new HttpsError('internal', 'Failed to refresh patterns');
     }
+  }
+);
+
+// ============================================
+// SIGNAL AGGREGATION FUNCTIONS
+// ============================================
+
+/**
+ * Helper: Format a Date to YYYY-MM-DD string for day_summaries key
+ */
+function formatDateKey(date) {
+  const d = date instanceof Date ? date : date.toDate();
+  return d.toISOString().split('T')[0];
+}
+
+/**
+ * Helper: Get start of day for a date key
+ */
+function startOfDay(dateKey) {
+  const d = new Date(dateKey + 'T00:00:00.000Z');
+  return d;
+}
+
+/**
+ * Helper: Get end of day for a date key
+ */
+function endOfDay(dateKey) {
+  const d = new Date(dateKey + 'T23:59:59.999Z');
+  return d;
+}
+
+/**
+ * Helper: Calculate average sentiment from signals (returns 0-1 scale to match entry mood_score)
+ */
+function calculateAvgSentiment(signals) {
+  if (signals.length === 0) return null;
+
+  // Map sentiment to -1 to 1 scale first
+  const sentimentValues = {
+    positive: 1,
+    excited: 0.8,
+    hopeful: 0.6,
+    neutral: 0,
+    anxious: -0.3,
+    negative: -0.5,
+    dreading: -0.7
+  };
+
+  const total = signals.reduce((sum, s) => {
+    return sum + (sentimentValues[s.sentiment] || 0);
+  }, 0);
+
+  const rawAvg = total / signals.length;  // -1 to 1 scale
+
+  // Convert to 0-1 scale to match entry mood_score
+  return (rawAvg + 1) / 2;
+}
+
+/**
+ * Helper: Calculate average entry mood (0-1 scale)
+ */
+function calculateAvgEntryMood(entries) {
+  const validMoods = entries
+    .map(e => e.analysis?.mood_score)
+    .filter(score => typeof score === 'number' && !isNaN(score));
+
+  if (validMoods.length === 0) return null;
+  return validMoods.reduce((a, b) => a + b, 0) / validMoods.length;
+}
+
+/**
+ * Recalculate day summary for a specific date
+ * Called by onSignalWrite trigger
+ *
+ * Dynamic day scoring:
+ * - If entries exist: Entry mood 60% + Signal sentiment 40%
+ * - If no entries (only forward-referenced signals): Signal sentiment 100%
+ * - Plans have weight 0 (excluded from avgSentiment)
+ */
+async function recalculateDaySummary(userId, dateKey) {
+  console.log(`Recalculating day summary for user ${userId}, date ${dateKey}`);
+
+  const userRef = db.collection('artifacts')
+    .doc(APP_COLLECTION_ID)
+    .collection('users')
+    .doc(userId);
+
+  // Query active/verified signals using 'in' (Firestore-friendly with ranges)
+  const signalsSnap = await userRef
+    .collection('signals')
+    .where('targetDate', '>=', startOfDay(dateKey))
+    .where('targetDate', '<=', endOfDay(dateKey))
+    .where('status', 'in', ['active', 'verified'])
+    .get();
+
+  const signals = signalsSnap.docs.map(d => d.data());
+
+  // Separate scoring signals (exclude plans - they have weight 0)
+  const scoringSignals = signals.filter(s => s.type !== 'plan');
+  const signalSentiment = calculateAvgSentiment(scoringSignals);
+
+  // Query entries recorded on this date
+  const entriesSnap = await userRef
+    .collection('entries')
+    .where('createdAt', '>=', startOfDay(dateKey))
+    .where('createdAt', '<=', endOfDay(dateKey))
+    .get();
+
+  const entries = entriesSnap.docs.map(d => d.data());
+  const entryMood = calculateAvgEntryMood(entries);
+
+  // Dynamic weighting for combined day score (0-1 scale)
+  // If entries exist: Entry 60% + Signal 40%
+  // If no entries: Signal 100%
+  let dayScore = null;
+  let scoreSource = 'none';
+
+  if (entryMood !== null && signalSentiment !== null) {
+    // Both sources available - weighted blend
+    dayScore = (entryMood * 0.6) + (signalSentiment * 0.4);
+    scoreSource = 'blended';
+  } else if (entryMood !== null) {
+    // Only entries
+    dayScore = entryMood;
+    scoreSource = 'entries_only';
+  } else if (signalSentiment !== null) {
+    // Only signals (forward-referenced day)
+    dayScore = signalSentiment;
+    scoreSource = 'signals_only';
+  }
+
+  // Calculate aggregates
+  const summary = {
+    date: dateKey,
+    signalCount: signals.length,
+    scoringSignalCount: scoringSignals.length,
+    signalSentiment,      // Raw signal sentiment (0-1 scale)
+    entryMood,            // Raw entry mood (0-1 scale)
+    dayScore,             // Combined dynamic score (0-1 scale)
+    scoreSource,          // How the score was calculated
+    entryCount: entries.length,
+    hasEvents: signals.some(s => s.type === 'event'),
+    hasPlans: signals.some(s => s.type === 'plan'),
+    hasFeelings: signals.some(s => s.type === 'feeling'),
+    hasReflections: signals.some(s => s.type === 'reflection'),
+    breakdown: {
+      positive: signals.filter(s => ['positive', 'excited', 'hopeful'].includes(s.sentiment)).length,
+      negative: signals.filter(s => ['negative', 'anxious', 'dreading'].includes(s.sentiment)).length,
+      neutral: signals.filter(s => s.sentiment === 'neutral').length
+    },
+    updatedAt: FieldValue.serverTimestamp()
+  };
+
+  // Write summary (upsert)
+  await userRef.collection('day_summaries').doc(dateKey).set(summary, { merge: true });
+
+  console.log(`Day summary updated for ${dateKey}: dayScore=${dayScore?.toFixed(2)} (${scoreSource}), ${signals.length} signals, ${entries.length} entries`);
+}
+
+/**
+ * Trigger: Fires whenever a signal is created, updated, or deleted
+ * Action: Recalculates day_summary for the affected targetDate(s)
+ *
+ * This ensures data integrity - even if the client crashes after saving signals,
+ * the day_summaries will be correctly updated.
+ */
+export const onSignalWrite = onDocumentWritten(
+  'artifacts/{appId}/users/{userId}/signals/{signalId}',
+  async (event) => {
+    const { userId, appId } = event.params;
+
+    if (appId !== APP_COLLECTION_ID) {
+      console.log(`Skipping signal aggregation for app ${appId}`);
+      return null;
+    }
+
+    // Get the targetDate from before/after (handle deletes and updates that change date)
+    const beforeData = event.data.before.exists ? event.data.before.data() : null;
+    const afterData = event.data.after.exists ? event.data.after.data() : null;
+
+    const affectedDates = new Set();
+
+    if (beforeData?.targetDate) {
+      affectedDates.add(formatDateKey(beforeData.targetDate));
+    }
+    if (afterData?.targetDate) {
+      affectedDates.add(formatDateKey(afterData.targetDate));
+    }
+
+    if (affectedDates.size === 0) {
+      console.log('No targetDate found in signal, skipping aggregation');
+      return null;
+    }
+
+    // Recalculate summary for each affected date
+    for (const dateKey of affectedDates) {
+      try {
+        await recalculateDaySummary(userId, dateKey);
+      } catch (error) {
+        console.error(`Error recalculating day summary for ${dateKey}:`, error);
+      }
+    }
+
+    return { success: true, datesUpdated: Array.from(affectedDates) };
   }
 );

@@ -36,6 +36,8 @@ import { retrofitEntriesInBackground } from './services/entries';
 import { inferCategory } from './services/prompts';
 import { detectTemporalContext, needsConfirmation, formatEffectiveDate } from './services/temporal';
 import { completeActionItem, handleEntryDateChange, calculateStreak } from './services/dashboard';
+import { processEntrySignals } from './services/signals/processEntrySignals';
+import { updateSignalStatus, batchUpdateSignalStatus } from './services/signals';
 
 // Hooks
 import { useIOSMeta } from './hooks/useIOSMeta';
@@ -55,6 +57,7 @@ import {
 
 // Dashboard Enhancement Components
 import { QuickStatsBar, GoalsProgress, WeeklyDigest, SituationTimeline } from './components/dashboard/shared';
+import DetectedStrip from './components/entries/DetectedStrip';
 
 // --- PDF LOADER (lazy-loads jsPDF from CDN) ---
 let jsPDFPromise = null;
@@ -129,7 +132,13 @@ export default function App() {
   const [showJournal, setShowJournal] = useState(false);
 
   // Temporal Context (Phase 2) - for backdating entries
-  const [pendingTemporalEntry, setPendingTemporalEntry] = useState(null);
+  // DEPRECATED: Old temporal confirmation modal state - replaced by signal extraction (DetectedStrip)
+  // const [pendingTemporalEntry, setPendingTemporalEntry] = useState(null);
+
+  // Signal extraction (temporal redesign) - detected signals for confirmation
+  const [detectedSignals, setDetectedSignals] = useState([]);
+  const [showDetectedStrip, setShowDetectedStrip] = useState(false);
+  const [signalExtractionEntryId, setSignalExtractionEntryId] = useState(null);
 
   // Cleanup stale audio backups on app startup (older than 24 hours)
   useEffect(() => {
@@ -208,6 +217,24 @@ export default function App() {
           );
 
           console.log(`Saved offline entry: ${offlineEntry.offlineId}`);
+
+          // Generate signals for offline entry (non-blocking)
+          // Note: We don't show DetectedStrip for offline entries since user may have
+          // recorded this entry hours/days ago - signals are just saved for calendar view
+          (async () => {
+            try {
+              const result = await processEntrySignals(
+                { id: ref.id, userId: user.uid, createdAt: offlineEntry.createdAt },
+                offlineEntry.text,
+                1  // Initial extraction version
+              );
+              if (result?.signals?.length > 0) {
+                console.log(`[Signals] Generated ${result.signals.length} signals for offline entry: ${ref.id}`);
+              }
+            } catch (signalError) {
+              console.error('[Signals] Failed to generate signals for offline entry:', signalError);
+            }
+          })();
 
           // Run analysis in background (same as online flow)
           (async () => {
@@ -440,12 +467,63 @@ export default function App() {
     });
   }, [entries, cat]);
 
+  /**
+   * Check if text has meaningfully changed (not just typos/punctuation/whitespace)
+   * Only triggers re-extraction if the semantic content is different
+   */
+  const hasTextMeaningfullyChanged = useCallback((oldText, newText) => {
+    if (!oldText || !newText) return true;
+
+    // Normalize: lowercase, collapse whitespace, remove punctuation
+    const normalize = (text) => text
+      .toLowerCase()
+      .replace(/[^\w\s]/g, ' ')  // Remove punctuation
+      .replace(/\s+/g, ' ')       // Collapse whitespace
+      .trim();
+
+    const oldNorm = normalize(oldText);
+    const newNorm = normalize(newText);
+
+    // Exact match after normalization = no meaningful change
+    if (oldNorm === newNorm) return false;
+
+    // Calculate word-level difference
+    const oldWords = oldNorm.split(' ').filter(w => w.length > 0);
+    const newWords = newNorm.split(' ').filter(w => w.length > 0);
+
+    // If word counts differ by more than 2, meaningful
+    if (Math.abs(oldWords.length - newWords.length) > 2) return true;
+
+    // Count words that are different
+    const oldSet = new Set(oldWords);
+    const newSet = new Set(newWords);
+    const addedWords = [...newSet].filter(w => !oldSet.has(w));
+    const removedWords = [...oldSet].filter(w => !newSet.has(w));
+
+    // More than 2 words added or removed = meaningful
+    return (addedWords.length + removedWords.length) > 2;
+  }, []);
+
   // Handle entry update with date change cache invalidation
   // Options parameter keeps control logic separate from data (Fix A: Control Coupling)
   const handleEntryUpdate = useCallback(async (entryId, updates, options = {}) => {
     if (!user) return;
 
     const entryRef = doc(db, 'artifacts', APP_COLLECTION_ID, 'users', user.uid, 'entries', entryId);
+
+    // Only increment signalExtractionVersion if text has meaningfully changed
+    // This prevents re-extraction on typo fixes, tag edits, or punctuation changes
+    if (updates.text !== undefined) {
+      const entry = entries.find(e => e.id === entryId);
+      const oldText = entry?.text || '';
+      if (hasTextMeaningfullyChanged(oldText, updates.text)) {
+        const currentVersion = entry?.signalExtractionVersion || 1;
+        updates.signalExtractionVersion = currentVersion + 1;
+        console.log(`Text meaningfully changed, triggering re-extraction (version ${currentVersion + 1})`);
+      } else {
+        console.log('Text change is minor (typo/punctuation), skipping re-extraction');
+      }
+    }
 
     // Perform the update
     await updateDoc(entryRef, updates);
@@ -465,7 +543,7 @@ export default function App() {
           console.error('Cache invalidation failed:', err);
         });
     }
-  }, [user, entries, cat]);
+  }, [user, entries, cat, hasTextMeaningfullyChanged]);
 
   const handleCrisisResponse = useCallback(async (response) => {
     setCrisisModal(null);
@@ -501,17 +579,17 @@ export default function App() {
 
     const hasWarning = checkWarningIndicators(finalTex);
 
-    // Calculate effectiveDate - either from temporal detection or current time
+    // TEMPORAL REDESIGN: Always use current date for effectiveDate.
+    // Temporal attribution is now handled by signals, not by backdating entries.
+    // effectiveDate is kept for backwards compatibility with old entries.
     const now = new Date();
-    const effectiveDate = temporalContext?.detected && temporalContext?.effectiveDate
-      ? temporalContext.effectiveDate
-      : now;
+    const effectiveDate = now;  // Always current date - signals handle temporal attribution
 
     console.log('Saving entry with:', {
       hasTemporalContext: !!temporalContext,
       temporalDetected: temporalContext?.detected,
       effectiveDate: effectiveDate.toDateString(),
-      isBackdated: effectiveDate.toDateString() !== now.toDateString()
+      note: 'effectiveDate is always current date now - signals handle temporal attribution'
     });
 
     // If offline, queue the entry for later processing
@@ -559,7 +637,9 @@ export default function App() {
         embedding,
         createdAt: Timestamp.now(),
         effectiveDate: Timestamp.fromDate(effectiveDate),
-        userId: user.uid
+        userId: user.uid,
+        // Signal extraction version - increments on each edit for race condition handling
+        signalExtractionVersion: 1
       };
 
       // Store temporal context if detected (past reference)
@@ -602,6 +682,36 @@ export default function App() {
       setProcessing(false);
       setReplyContext(null);
 
+      // Signal extraction (non-blocking, parallel to analysis)
+      // This extracts temporal signals for the DetectedStrip UI
+      (async () => {
+        try {
+          console.log('[Signals] Starting signal extraction for entry:', ref.id);
+          const result = await processEntrySignals(
+            { id: ref.id, userId: user.uid, createdAt: now },
+            finalTex,
+            1  // Initial extraction version
+          );
+
+          if (result && result.signals && result.signals.length > 0) {
+            console.log('[Signals] Extracted signals:', result.signals.length, 'hasTemporalContent:', result.hasTemporalContent);
+
+            // If signals with temporal content (not just "today"), show the DetectedStrip
+            if (result.hasTemporalContent) {
+              setDetectedSignals(result.signals);
+              setSignalExtractionEntryId(ref.id);
+              setShowDetectedStrip(true);
+            }
+          } else {
+            console.log('[Signals] No signals extracted or simple entry');
+          }
+        } catch (signalError) {
+          // Signal extraction failure shouldn't break the app - log and continue
+          console.error('[Signals] Signal extraction failed:', signalError);
+        }
+      })();
+
+      // Analysis pipeline (existing logic)
       (async () => {
         try {
           const classification = await classifyEntry(finalTex);
@@ -754,70 +864,85 @@ export default function App() {
         reasoning: temporal.reasoning
       });
 
+      // TEMPORAL REDESIGN: No longer backdate entries or show confirmation modal.
+      // All entries are saved with current date (recordedAt).
+      // Temporal attribution is now handled by signal extraction (DetectedStrip UI).
+      // The temporal context is still passed to doSaveEntry for backwards compat,
+      // but effectiveDate is now always set to current date.
+
       if (temporal.detected) {
-        // Check if effectiveDate is actually different from today
-        const now = new Date();
-        const effectiveDate = temporal.effectiveDate instanceof Date ? temporal.effectiveDate : new Date(temporal.effectiveDate);
-        const isToday = effectiveDate.toDateString() === now.toDateString();
-
-        console.log('[SaveEntry] Date comparison:', {
-          effectiveDate: effectiveDate.toDateString(),
-          today: now.toDateString(),
-          isToday
-        });
-
-        // If the detected date is today, skip confirmation - no backdating needed
-        if (isToday) {
-          console.log('[SaveEntry] Detected date is today, saving normally without backdating');
-          await doSaveEntry(textInput, false, null, temporal);
-          return;
-        }
-
-        if (needsConfirmation(temporal)) {
-          // Medium confidence - ask user to confirm
-          console.log('[SaveEntry] Needs confirmation, showing temporal modal');
-          console.log('[SaveEntry] Setting pendingTemporalEntry state...');
-          setPendingTemporalEntry({
-            text: textInput,
-            temporal
-          });
-          setProcessing(false);
-          console.log('[SaveEntry] Modal should now be visible. Entry will save after user confirms.');
-          return;
-        }
-
-        // High confidence - auto-apply backdating
-        if (temporal.confidence > 0.8) {
-          console.log(`[SaveEntry] Auto-backdating entry to ${formatEffectiveDate(temporal.effectiveDate)}`);
-          await doSaveEntry(textInput, false, null, temporal);
-          return;
-        }
+        console.log('[SaveEntry] Temporal content detected - signals will handle attribution');
+        console.log('[SaveEntry] Skipping backdate modal (deprecated) - using signal extraction instead');
       }
 
-      // No temporal context or low confidence - save with current date
-      await doSaveEntry(textInput);
+      // Always save with current date - signals handle temporal attribution
+      await doSaveEntry(textInput, false, null, temporal.detected ? temporal : null);
     } catch (e) {
       console.error('Temporal detection failed, saving normally:', e);
       await doSaveEntry(textInput);
     }
   };
 
-  // Handle temporal confirmation response
-  const handleTemporalConfirm = async (confirmed) => {
-    if (!pendingTemporalEntry) return;
+  // DEPRECATED: Old temporal confirmation modal handler - replaced by signal extraction (DetectedStrip)
+  // The backdating flow is now handled via signal extraction where users confirm/dismiss
+  // detected temporal signals rather than choosing to backdate the entire entry.
+  // const handleTemporalConfirm = async (confirmed) => {
+  //   if (!pendingTemporalEntry) return;
+  //   const { text, temporal } = pendingTemporalEntry;
+  //   setPendingTemporalEntry(null);
+  //   setProcessing(true);
+  //   if (confirmed) {
+  //     await doSaveEntry(text, false, null, temporal);
+  //   } else {
+  //     await doSaveEntry(text, false, null, null);
+  //   }
+  // };
 
-    const { text, temporal } = pendingTemporalEntry;
-    setPendingTemporalEntry(null);
-    setProcessing(true);
+  // Handle signal confirmation (DetectedStrip)
+  const handleSignalConfirmAll = useCallback(async () => {
+    if (!user || detectedSignals.length === 0) return;
 
-    if (confirmed) {
-      // User confirmed - save with backdated date
-      await doSaveEntry(text, false, null, temporal);
-    } else {
-      // User declined - save with current date
-      await doSaveEntry(text, false, null, null);
+    try {
+      const signalIds = detectedSignals.map(s => s.id).filter(Boolean);
+      if (signalIds.length > 0) {
+        await batchUpdateSignalStatus(signalIds, user.uid, 'verified');
+        console.log('[Signals] Confirmed all signals:', signalIds.length);
+      }
+    } catch (error) {
+      console.error('[Signals] Failed to confirm signals:', error);
     }
-  };
+
+    setDetectedSignals([]);
+    setShowDetectedStrip(false);
+    setSignalExtractionEntryId(null);
+  }, [user, detectedSignals]);
+
+  const handleSignalDismiss = useCallback(async (signalId) => {
+    if (!user || !signalId) return;
+
+    try {
+      await updateSignalStatus(signalId, user.uid, 'dismissed');
+      console.log('[Signals] Dismissed signal:', signalId);
+
+      // Remove from local state
+      setDetectedSignals(prev => prev.filter(s => s.id !== signalId));
+
+      // If no signals left, close the strip
+      if (detectedSignals.length <= 1) {
+        setShowDetectedStrip(false);
+        setSignalExtractionEntryId(null);
+      }
+    } catch (error) {
+      console.error('[Signals] Failed to dismiss signal:', error);
+    }
+  }, [user, detectedSignals.length]);
+
+  const handleSignalStripClose = useCallback(() => {
+    // Close without confirming - signals remain as 'active'
+    setShowDetectedStrip(false);
+    setDetectedSignals([]);
+    setSignalExtractionEntryId(null);
+  }, []);
 
   const handleAudioWrapper = async (base64, mime) => {
     console.log('[Transcription] handleAudioWrapper called');
@@ -1002,6 +1127,27 @@ export default function App() {
         )}
       </AnimatePresence>
 
+      {/* Detected Signals Strip (temporal redesign) */}
+      <AnimatePresence>
+        {showDetectedStrip && detectedSignals.length > 0 && (
+          <motion.div
+            className="fixed bottom-24 left-4 right-4 z-40 flex justify-center"
+            initial={{ y: 50, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            exit={{ y: 50, opacity: 0 }}
+          >
+            <DetectedStrip
+              signals={detectedSignals}
+              recordedAt={new Date()}
+              onConfirmAll={handleSignalConfirmAll}
+              onDismiss={handleSignalDismiss}
+              onClose={handleSignalStripClose}
+              className="max-w-md w-full"
+            />
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* Offline Indicator */}
       {!isOnline && (
         <div className="fixed top-[env(safe-area-inset-top)] left-0 right-0 z-50 bg-amber-500 text-white px-4 py-2 text-center text-sm font-medium">
@@ -1020,7 +1166,11 @@ export default function App() {
         />
       )}
 
-      {/* Temporal Context Confirmation Modal */}
+      {/* DEPRECATED: Temporal Context Confirmation Modal
+          This modal has been replaced by the signal extraction system (DetectedStrip).
+          Instead of asking users to backdate entire entries, we now extract temporal
+          signals and let users confirm/dismiss them individually.
+
       {pendingTemporalEntry && (
         <Modal onClose={() => {
           setPendingTemporalEntry(null);
@@ -1066,6 +1216,7 @@ export default function App() {
           </ModalBody>
         </Modal>
       )}
+      */}
 
       {crisisResources && (
         <CrisisResourcesScreen
