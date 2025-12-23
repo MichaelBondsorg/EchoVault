@@ -8,6 +8,13 @@ const VoiceRecorder = ({ onSave, onSwitch, loading, minimal }) => {
   const [secs, setSecs] = useState(0);
   const timer = useRef(null);
 
+  // Use ref to always have the latest onSave callback
+  // This prevents stale closure issues during long recordings
+  const onSaveRef = useRef(onSave);
+  useEffect(() => {
+    onSaveRef.current = onSave;
+  }, [onSave]);
+
   useEffect(() => {
     return () => {
       if (timer.current) clearInterval(timer.current);
@@ -29,7 +36,8 @@ const VoiceRecorder = ({ onSave, onSwitch, loading, minimal }) => {
       r.onstop = () => {
         const reader = new FileReader();
         reader.readAsDataURL(new Blob(chunks, { type: mime }));
-        reader.onloadend = () => onSave(reader.result.split(',')[1], mime);
+        // Use ref to get the latest onSave callback, avoiding stale closure
+        reader.onloadend = () => onSaveRef.current(reader.result.split(',')[1], mime);
         stream.getTracks().forEach(t => t.stop());
       };
       r.start();

@@ -20,6 +20,15 @@ const EntryBar = ({ onVoiceSave, onTextSave, loading, disabled, promptContext, o
   const timerRef = useRef(null);
   const textInputRef = useRef(null);
 
+  // Use refs to always have the latest callbacks
+  // This prevents stale closure issues during long recordings
+  const onVoiceSaveRef = useRef(onVoiceSave);
+  const onTextSaveRef = useRef(onTextSave);
+  useEffect(() => {
+    onVoiceSaveRef.current = onVoiceSave;
+    onTextSaveRef.current = onTextSave;
+  }, [onVoiceSave, onTextSave]);
+
   // Cleanup on unmount
   useEffect(() => {
     return () => {
@@ -58,7 +67,8 @@ const EntryBar = ({ onVoiceSave, onTextSave, loading, disabled, promptContext, o
         const reader = new FileReader();
         reader.readAsDataURL(new Blob(chunks, { type: mime }));
         reader.onloadend = () => {
-          onVoiceSave(reader.result.split(',')[1], mime);
+          // Use ref to get the latest callback, avoiding stale closure
+          onVoiceSaveRef.current(reader.result.split(',')[1], mime);
           setMode('idle');
         };
         stream.getTracks().forEach(t => t.stop());
@@ -103,7 +113,8 @@ const EntryBar = ({ onVoiceSave, onTextSave, loading, disabled, promptContext, o
       const finalText = promptContext
         ? `[Responding to: "${promptContext}"]\n\n${textValue.trim()}`
         : textValue.trim();
-      onTextSave(finalText);
+      // Use ref to get the latest callback, avoiding stale closure
+      onTextSaveRef.current(finalText);
       setTextValue('');
       setMode('idle');
       if (onClearPrompt) onClearPrompt();
