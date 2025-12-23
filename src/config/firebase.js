@@ -5,7 +5,8 @@ import {
 } from 'firebase/auth';
 import {
   getFirestore, collection, addDoc, query, orderBy, onSnapshot,
-  Timestamp, deleteDoc, doc, updateDoc, limit, getDocs, setDoc, getDoc
+  Timestamp, deleteDoc, doc, updateDoc, limit, getDocs, setDoc, getDoc,
+  where, writeBatch
 } from 'firebase/firestore';
 import { getFunctions, httpsCallable } from 'firebase/functions';
 
@@ -49,5 +50,7 @@ export {
   limit,
   getDocs,
   setDoc,
-  getDoc
+  getDoc,
+  where,
+  writeBatch
 };

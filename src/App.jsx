@@ -447,6 +447,13 @@ export default function App() {
 
     const entryRef = doc(db, 'artifacts', APP_COLLECTION_ID, 'users', user.uid, 'entries', entryId);
 
+    // If text is being updated, increment signalExtractionVersion for race condition handling
+    if (updates.text !== undefined) {
+      const entry = entries.find(e => e.id === entryId);
+      const currentVersion = entry?.signalExtractionVersion || 1;
+      updates.signalExtractionVersion = currentVersion + 1;
+    }
+
     // Perform the update
     await updateDoc(entryRef, updates);
 
@@ -559,7 +566,9 @@ export default function App() {
         embedding,
         createdAt: Timestamp.now(),
         effectiveDate: Timestamp.fromDate(effectiveDate),
-        userId: user.uid
+        userId: user.uid,
+        // Signal extraction version - increments on each edit for race condition handling
+        signalExtractionVersion: 1
       };
 
       // Store temporal context if detected (past reference)
