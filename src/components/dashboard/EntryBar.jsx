@@ -57,32 +57,108 @@ const EntryBar = ({ onVoiceSave, onTextSave, loading, disabled, promptContext, o
     }
 
     try {
+      console.log('[Recording] Starting microphone capture...');
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       const mime = MediaRecorder.isTypeSupported("audio/webm") ? "audio/webm" : "audio/mp4";
+      console.log('[Recording] Using MIME type:', mime);
+
       const recorder = new MediaRecorder(stream, { mimeType: mime, audioBitsPerSecond: 16000 });
       const chunks = [];
 
-      recorder.ondataavailable = e => chunks.push(e.data);
-      recorder.onstop = () => {
-        const reader = new FileReader();
-        reader.readAsDataURL(new Blob(chunks, { type: mime }));
-        reader.onloadend = () => {
-          // Use ref to get the latest callback, avoiding stale closure
-          onVoiceSaveRef.current(reader.result.split(',')[1], mime);
-          setMode('idle');
-        };
+      recorder.ondataavailable = e => {
+        if (e.data && e.data.size > 0) {
+          chunks.push(e.data);
+          console.log('[Recording] Chunk received:', e.data.size, 'bytes, total chunks:', chunks.length);
+        }
+      };
+
+      recorder.onerror = (e) => {
+        console.error('[Recording] MediaRecorder error:', e);
+        alert('Recording error occurred. Please try again.');
+        setMode('idle');
+        setRecording(false);
+        clearInterval(timerRef.current);
         stream.getTracks().forEach(t => t.stop());
       };
 
-      recorder.start();
+      recorder.onstop = () => {
+        console.log('[Recording] Stopped. Total chunks:', chunks.length);
+
+        // Validate we have data
+        if (chunks.length === 0) {
+          console.error('[Recording] No audio data captured!');
+          alert('No audio was captured. Please try again.');
+          setMode('idle');
+          stream.getTracks().forEach(t => t.stop());
+          return;
+        }
+
+        const blob = new Blob(chunks, { type: mime });
+        console.log('[Recording] Created blob:', blob.size, 'bytes');
+
+        if (blob.size === 0) {
+          console.error('[Recording] Blob is empty!');
+          alert('Recording failed - no data. Please try again.');
+          setMode('idle');
+          stream.getTracks().forEach(t => t.stop());
+          return;
+        }
+
+        const reader = new FileReader();
+
+        reader.onerror = (e) => {
+          console.error('[Recording] FileReader error:', e);
+          alert('Failed to process recording. Please try again.');
+          setMode('idle');
+          stream.getTracks().forEach(t => t.stop());
+        };
+
+        reader.onloadend = () => {
+          console.log('[Recording] FileReader complete, result length:', reader.result?.length || 0);
+
+          if (!reader.result || reader.result.length < 100) {
+            console.error('[Recording] FileReader result is empty or too small');
+            alert('Recording processing failed. Please try again.');
+            setMode('idle');
+            stream.getTracks().forEach(t => t.stop());
+            return;
+          }
+
+          const base64 = reader.result.split(',')[1];
+          console.log('[Recording] Base64 length:', base64?.length || 0);
+
+          if (!base64 || base64.length < 100) {
+            console.error('[Recording] Base64 conversion failed');
+            alert('Recording processing failed. Please try again.');
+            setMode('idle');
+            stream.getTracks().forEach(t => t.stop());
+            return;
+          }
+
+          // Use ref to get the latest callback, avoiding stale closure
+          console.log('[Recording] Sending to transcription...');
+          onVoiceSaveRef.current(base64, mime);
+          setMode('idle');
+        };
+
+        reader.readAsDataURL(blob);
+        stream.getTracks().forEach(t => t.stop());
+      };
+
+      // Start recording with timeslice to capture data in chunks
+      // This is crucial for mobile - ensures data is captured incrementally
+      // rather than all at once when stopping (which can fail on mobile)
+      recorder.start(1000); // Capture chunk every 1 second
+      console.log('[Recording] MediaRecorder started with 1s timeslice');
+
       setMediaRecorder(recorder);
       setRecording(true);
       setMode('recording');
       setRecordingSeconds(0);
       timerRef.current = setInterval(() => setRecordingSeconds(s => s + 1), 1000);
     } catch (e) {
-      alert("Microphone access denied or error occurred");
-      console.error(e);
+      console.error('[Recording] Setup error:', e);
+      alert("Microphone access denied or error occurred: " + e.message);
     }
   };
 

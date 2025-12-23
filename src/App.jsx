@@ -797,10 +797,24 @@ export default function App() {
   };
 
   const handleAudioWrapper = async (base64, mime) => {
+    console.log('[Transcription] handleAudioWrapper called');
+    console.log('[Transcription] Audio data received:', {
+      base64Length: base64?.length || 0,
+      mime,
+      estimatedSizeKB: Math.round((base64?.length || 0) / 1024)
+    });
+
+    if (!base64 || base64.length < 100) {
+      console.error('[Transcription] Invalid audio data received');
+      alert('No audio data received. Please try recording again.');
+      return;
+    }
+
     setProcessing(true);
 
     // Request wake lock to prevent iOS from killing the request during long transcriptions
-    await requestWakeLock();
+    const wakeLockAcquired = await requestWakeLock();
+    console.log('[Transcription] Wake lock acquired:', wakeLockAcquired);
 
     // Save audio to localStorage as backup before attempting transcription
     // This prevents data loss if transcription fails
@@ -809,14 +823,20 @@ export default function App() {
       // Only backup if audio is not too large (< 10MB to avoid localStorage limits)
       if (base64.length < 10 * 1024 * 1024) {
         localStorage.setItem(audioBackupKey, JSON.stringify({ base64, mime, timestamp: Date.now() }));
-        console.log('Audio backed up to localStorage:', audioBackupKey);
+        console.log('[Transcription] Audio backed up to localStorage:', audioBackupKey);
+      } else {
+        console.log('[Transcription] Audio too large for localStorage backup:', base64.length);
       }
     } catch (backupError) {
-      console.warn('Could not backup audio to localStorage:', backupError.message);
+      console.warn('[Transcription] Could not backup audio to localStorage:', backupError.message);
     }
 
     try {
+      console.log('[Transcription] Starting transcription API call...');
+      const startTime = Date.now();
       const transcript = await transcribeAudio(base64, mime);
+      console.log('[Transcription] API call completed in', Date.now() - startTime, 'ms');
+      console.log('[Transcription] Result:', transcript?.substring?.(0, 100) || transcript);
 
       if (!transcript) {
         alert("Transcription failed - please try again. Your recording has been saved locally.");
@@ -865,14 +885,24 @@ export default function App() {
       }
 
       // Transcription successful - clear the backup
+      console.log('[Transcription] Success! Clearing backup and saving entry...');
       try { localStorage.removeItem(audioBackupKey); } catch (e) {}
 
+      console.log('[Transcription] Calling saveEntry with transcript length:', transcript.length);
       await saveEntry(transcript);
+      console.log('[Transcription] saveEntry completed');
     } catch (error) {
-      console.error('handleAudioWrapper error:', error);
+      console.error('[Transcription] handleAudioWrapper error:', error);
+      console.error('[Transcription] Error details:', {
+        name: error?.name,
+        message: error?.message,
+        code: error?.code,
+        stack: error?.stack?.substring?.(0, 500)
+      });
       alert("An error occurred during transcription. Your recording has been saved locally. Please try again.");
       setProcessing(false);
     } finally {
+      console.log('[Transcription] Releasing wake lock');
       releaseWakeLock();
     }
   };

@@ -28,26 +28,97 @@ const VoiceRecorder = ({ onSave, onSwitch, loading, minimal }) => {
     }
 
     try {
+      console.log('[VoiceRecorder] Starting microphone capture...');
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       const mime = MediaRecorder.isTypeSupported("audio/webm") ? "audio/webm" : "audio/mp4";
+      console.log('[VoiceRecorder] Using MIME type:', mime);
+
       const r = new MediaRecorder(stream, { mimeType: mime, audioBitsPerSecond: 16000 });
       const chunks = [];
-      r.ondataavailable = e => chunks.push(e.data);
-      r.onstop = () => {
-        const reader = new FileReader();
-        reader.readAsDataURL(new Blob(chunks, { type: mime }));
-        // Use ref to get the latest onSave callback, avoiding stale closure
-        reader.onloadend = () => onSaveRef.current(reader.result.split(',')[1], mime);
+
+      r.ondataavailable = e => {
+        if (e.data && e.data.size > 0) {
+          chunks.push(e.data);
+          console.log('[VoiceRecorder] Chunk received:', e.data.size, 'bytes');
+        }
+      };
+
+      r.onerror = (e) => {
+        console.error('[VoiceRecorder] MediaRecorder error:', e);
+        alert('Recording error occurred. Please try again.');
+        setRec(false);
+        clearInterval(timer.current);
         stream.getTracks().forEach(t => t.stop());
       };
-      r.start();
+
+      r.onstop = () => {
+        console.log('[VoiceRecorder] Stopped. Total chunks:', chunks.length);
+
+        if (chunks.length === 0) {
+          console.error('[VoiceRecorder] No audio data captured!');
+          alert('No audio was captured. Please try again.');
+          stream.getTracks().forEach(t => t.stop());
+          return;
+        }
+
+        const blob = new Blob(chunks, { type: mime });
+        console.log('[VoiceRecorder] Created blob:', blob.size, 'bytes');
+
+        if (blob.size === 0) {
+          console.error('[VoiceRecorder] Blob is empty!');
+          alert('Recording failed - no data. Please try again.');
+          stream.getTracks().forEach(t => t.stop());
+          return;
+        }
+
+        const reader = new FileReader();
+
+        reader.onerror = (e) => {
+          console.error('[VoiceRecorder] FileReader error:', e);
+          alert('Failed to process recording. Please try again.');
+          stream.getTracks().forEach(t => t.stop());
+        };
+
+        reader.onloadend = () => {
+          console.log('[VoiceRecorder] FileReader complete, result length:', reader.result?.length || 0);
+
+          if (!reader.result || reader.result.length < 100) {
+            console.error('[VoiceRecorder] FileReader result is empty');
+            alert('Recording processing failed. Please try again.');
+            stream.getTracks().forEach(t => t.stop());
+            return;
+          }
+
+          const base64 = reader.result.split(',')[1];
+          console.log('[VoiceRecorder] Base64 length:', base64?.length || 0);
+
+          if (!base64 || base64.length < 100) {
+            console.error('[VoiceRecorder] Base64 conversion failed');
+            alert('Recording processing failed. Please try again.');
+            stream.getTracks().forEach(t => t.stop());
+            return;
+          }
+
+          // Use ref to get the latest onSave callback, avoiding stale closure
+          console.log('[VoiceRecorder] Sending to transcription...');
+          onSaveRef.current(base64, mime);
+        };
+
+        reader.readAsDataURL(blob);
+        stream.getTracks().forEach(t => t.stop());
+      };
+
+      // Start with timeslice for incremental data capture (crucial for mobile)
+      r.start(1000);
+      console.log('[VoiceRecorder] MediaRecorder started with 1s timeslice');
+
       setMr(r);
       setRec(true);
       setSecs(0);
       timer.current = setInterval(() => setSecs(s => s + 1), 1000);
     } catch (e) {
-      alert("Microphone access denied or error occurred");
-      console.error(e);
+      console.error('[VoiceRecorder] Setup error:', e);
+      alert("Microphone access denied or error occurred: " + e.message);
     }
   };
 
