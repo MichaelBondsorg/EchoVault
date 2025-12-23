@@ -36,6 +36,8 @@ import { retrofitEntriesInBackground } from './services/entries';
 import { inferCategory } from './services/prompts';
 import { detectTemporalContext, needsConfirmation, formatEffectiveDate } from './services/temporal';
 import { completeActionItem, handleEntryDateChange, calculateStreak } from './services/dashboard';
+import { processEntrySignals } from './services/signals/processEntrySignals';
+import { updateSignalStatus, batchUpdateSignalStatus } from './services/signals';
 
 // Hooks
 import { useIOSMeta } from './hooks/useIOSMeta';
@@ -55,6 +57,7 @@ import {
 
 // Dashboard Enhancement Components
 import { QuickStatsBar, GoalsProgress, WeeklyDigest, SituationTimeline } from './components/dashboard/shared';
+import DetectedStrip from './components/entries/DetectedStrip';
 
 // --- PDF LOADER (lazy-loads jsPDF from CDN) ---
 let jsPDFPromise = null;
@@ -130,6 +133,11 @@ export default function App() {
 
   // Temporal Context (Phase 2) - for backdating entries
   const [pendingTemporalEntry, setPendingTemporalEntry] = useState(null);
+
+  // Signal extraction (temporal redesign) - detected signals for confirmation
+  const [detectedSignals, setDetectedSignals] = useState([]);
+  const [showDetectedStrip, setShowDetectedStrip] = useState(false);
+  const [signalExtractionEntryId, setSignalExtractionEntryId] = useState(null);
 
   // Cleanup stale audio backups on app startup (older than 24 hours)
   useEffect(() => {
@@ -655,6 +663,36 @@ export default function App() {
       setProcessing(false);
       setReplyContext(null);
 
+      // Signal extraction (non-blocking, parallel to analysis)
+      // This extracts temporal signals for the DetectedStrip UI
+      (async () => {
+        try {
+          console.log('[Signals] Starting signal extraction for entry:', ref.id);
+          const result = await processEntrySignals(
+            { id: ref.id, userId: user.uid, createdAt: now },
+            finalTex,
+            1  // Initial extraction version
+          );
+
+          if (result && result.signals && result.signals.length > 0) {
+            console.log('[Signals] Extracted signals:', result.signals.length, 'hasTemporalContent:', result.hasTemporalContent);
+
+            // If signals with temporal content (not just "today"), show the DetectedStrip
+            if (result.hasTemporalContent) {
+              setDetectedSignals(result.signals);
+              setSignalExtractionEntryId(ref.id);
+              setShowDetectedStrip(true);
+            }
+          } else {
+            console.log('[Signals] No signals extracted or simple entry');
+          }
+        } catch (signalError) {
+          // Signal extraction failure shouldn't break the app - log and continue
+          console.error('[Signals] Signal extraction failed:', signalError);
+        }
+      })();
+
+      // Analysis pipeline (existing logic)
       (async () => {
         try {
           const classification = await classifyEntry(finalTex);
@@ -872,6 +910,52 @@ export default function App() {
     }
   };
 
+  // Handle signal confirmation (DetectedStrip)
+  const handleSignalConfirmAll = useCallback(async () => {
+    if (!user || detectedSignals.length === 0) return;
+
+    try {
+      const signalIds = detectedSignals.map(s => s.id).filter(Boolean);
+      if (signalIds.length > 0) {
+        await batchUpdateSignalStatus(signalIds, user.uid, 'verified');
+        console.log('[Signals] Confirmed all signals:', signalIds.length);
+      }
+    } catch (error) {
+      console.error('[Signals] Failed to confirm signals:', error);
+    }
+
+    setDetectedSignals([]);
+    setShowDetectedStrip(false);
+    setSignalExtractionEntryId(null);
+  }, [user, detectedSignals]);
+
+  const handleSignalDismiss = useCallback(async (signalId) => {
+    if (!user || !signalId) return;
+
+    try {
+      await updateSignalStatus(signalId, user.uid, 'dismissed');
+      console.log('[Signals] Dismissed signal:', signalId);
+
+      // Remove from local state
+      setDetectedSignals(prev => prev.filter(s => s.id !== signalId));
+
+      // If no signals left, close the strip
+      if (detectedSignals.length <= 1) {
+        setShowDetectedStrip(false);
+        setSignalExtractionEntryId(null);
+      }
+    } catch (error) {
+      console.error('[Signals] Failed to dismiss signal:', error);
+    }
+  }, [user, detectedSignals.length]);
+
+  const handleSignalStripClose = useCallback(() => {
+    // Close without confirming - signals remain as 'active'
+    setShowDetectedStrip(false);
+    setDetectedSignals([]);
+    setSignalExtractionEntryId(null);
+  }, []);
+
   const handleAudioWrapper = async (base64, mime) => {
     console.log('[Transcription] handleAudioWrapper called');
     console.log('[Transcription] Audio data received:', {
@@ -1051,6 +1135,27 @@ export default function App() {
               <Loader2 className="animate-spin" size={14} />
               <span className="font-body">Enhancing entries... {retrofitProgress.processed}/{retrofitProgress.total}</span>
             </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Detected Signals Strip (temporal redesign) */}
+      <AnimatePresence>
+        {showDetectedStrip && detectedSignals.length > 0 && (
+          <motion.div
+            className="fixed bottom-24 left-4 right-4 z-40 flex justify-center"
+            initial={{ y: 50, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            exit={{ y: 50, opacity: 0 }}
+          >
+            <DetectedStrip
+              signals={detectedSignals}
+              recordedAt={new Date()}
+              onConfirmAll={handleSignalConfirmAll}
+              onDismiss={handleSignalDismiss}
+              onClose={handleSignalStripClose}
+              className="max-w-md w-full"
+            />
           </motion.div>
         )}
       </AnimatePresence>
