@@ -155,7 +155,9 @@ export const updateSignalStatus = async (signalId, userId, status) => {
 };
 
 /**
- * Batch update signal status (for auto-verify high confidence signals)
+ * Batch update signal status (for user bulk actions)
+ * Note: Auto-verify was intentionally removed - all signals require explicit user confirmation
+ * to prevent "ghost facts" from confident-but-wrong voice transcription extractions.
  */
 export const batchUpdateSignalStatus = async (signalIds, userId, status) => {
   const batch = writeBatch(db);
@@ -190,8 +192,9 @@ export const getSignalsForEntry = async (entryId, userId) => {
 
 /**
  * Get signals for a specific date
+ * Uses 'in' query instead of '!= dismissed' for better Firestore compatibility with ranges
  */
-export const getSignalsForDate = async (userId, targetDate) => {
+export const getSignalsForDate = async (userId, targetDate, includeActive = true) => {
   const signalsRef = getSignalsCollection(userId);
   const dateKey = formatDateKey(targetDate);
 
@@ -199,21 +202,25 @@ export const getSignalsForDate = async (userId, targetDate) => {
   const startOfDay = new Date(dateKey + 'T00:00:00.000Z');
   const endOfDay = new Date(dateKey + 'T23:59:59.999Z');
 
+  // Filter by status using 'in' (Firestore-friendly with ranges)
+  const statusFilter = includeActive
+    ? ['active', 'verified']  // Include unconfirmed AI-detected signals
+    : ['verified'];           // Only confirmed signals
+
   const q = query(
     signalsRef,
     where('targetDate', '>=', Timestamp.fromDate(startOfDay)),
-    where('targetDate', '<=', Timestamp.fromDate(endOfDay))
+    where('targetDate', '<=', Timestamp.fromDate(endOfDay)),
+    where('status', 'in', statusFilter)
   );
 
   const snapshot = await getDocs(q);
 
-  return snapshot.docs
-    .map(docSnap => ({
-      ...docSnap.data(),
-      id: docSnap.id,
-      targetDate: docSnap.data().targetDate?.toDate?.() || docSnap.data().targetDate
-    }))
-    .filter(s => s.status !== 'dismissed');
+  return snapshot.docs.map(docSnap => ({
+    ...docSnap.data(),
+    id: docSnap.id,
+    targetDate: docSnap.data().targetDate?.toDate?.() || docSnap.data().targetDate
+  }));
 };
 
 /**
@@ -253,13 +260,17 @@ export const getAllSignals = async (userId) => {
 
 /**
  * Get signals targeting future dates (for follow-ups)
+ * Note: Plans have weight 0 in scoring but are used for prompts/check-ins
  */
 export const getFutureSignals = async (userId, fromDate = new Date()) => {
   const signalsRef = getSignalsCollection(userId);
+
+  // Can't combine 'type' equality with 'status in' and 'targetDate >=',
+  // so we filter type in memory for simplicity
   const q = query(
     signalsRef,
     where('targetDate', '>=', Timestamp.fromDate(fromDate)),
-    where('type', '==', 'plan')
+    where('status', 'in', ['active', 'verified'])
   );
 
   const snapshot = await getDocs(q);
@@ -270,7 +281,7 @@ export const getFutureSignals = async (userId, fromDate = new Date()) => {
       id: docSnap.id,
       targetDate: docSnap.data().targetDate?.toDate?.() || docSnap.data().targetDate
     }))
-    .filter(s => s.status !== 'dismissed');
+    .filter(s => s.type === 'plan');
 };
 
 export default {

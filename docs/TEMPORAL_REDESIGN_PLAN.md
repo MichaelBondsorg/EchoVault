@@ -44,10 +44,14 @@ signal = {
   targetDate: Timestamp,         // The day this signal applies to
   recordedAt: Timestamp,         // When the entry was created (for audit)
 
-  // Signal content
-  type: 'event' | 'feeling' | 'plan',
+  // Signal content (4 types with different scoring weights)
+  type: 'feeling' | 'event' | 'plan' | 'reflection',
+  // - feeling: Emotions felt NOW (high weight, defaults to TODAY)
+  // - event: Things that happened (medium weight)
+  // - plan: Future scheduled items (ZERO weight - neutral facts)
+  // - reflection: General evaluations of past ("Yesterday was great") - high weight
   content: string,               // "Doctor appointment", "nervous", etc.
-  sentiment: 'positive' | 'negative' | 'neutral' | 'anxious' | 'excited',
+  sentiment: 'positive' | 'negative' | 'neutral' | 'anxious' | 'excited' | 'hopeful' | 'dreading',
   originalPhrase: string,        // The exact phrase from entry
 
   // Confidence & verification
@@ -891,13 +895,15 @@ export const saveSignalsWithVersionCheck = async (signals, entryId, userId, vers
 
 ## Implementation Order
 
-### Milestone 1: Foundation (No Breaking Changes)
-1. [ ] Add signals + day_summaries collection schema to Firestore rules
-2. [ ] Create signalExtractor.js with new AI prompt
-3. [ ] Create signals service (CRUD with version check)
-4. [ ] Create recurringGenerator.js for multi-instance generation
-5. [ ] Add signalExtractionVersion to entry schema
-6. [ ] Deploy Cloud Function for day_summary aggregation
+### Milestone 1: Foundation (No Breaking Changes) ✅ COMPLETE
+1. [x] Add signals + day_summaries collection schema to Firestore rules
+2. [x] Create signalExtractor.js with new AI prompt (4 types: feeling/event/plan/reflection)
+3. [x] Create signals service (CRUD with version check, `in ['active', 'verified']` queries)
+4. [x] Create recurringGenerator.js for multi-instance generation (4 occurrences)
+5. [x] Add signalExtractionVersion to entry schema
+6. [x] Deploy Cloud Function for day_summary aggregation (dynamic weighting: entry 60% + signal 40%)
+7. [x] Add text diff check - only re-extract when text meaningfully changes
+8. [x] Remove auto-accept - all signals require explicit user confirmation
 
 ### Milestone 2: Parallel System (Both systems run)
 7. [ ] Modify saveEntry to extract and store signals (non-blocking)
@@ -974,16 +980,19 @@ export const saveSignalsWithVersionCheck = async (signals, entryId, userId, vers
 
 | Question | Decision | Rationale |
 |----------|----------|-----------|
-| Signal persistence | **Soft-delete** with `status: 'dismissed'` | Training data for AI improvement; enables undo; filter with `where('status', '!=', 'dismissed')` |
+| Signal persistence | **Soft-delete** with `status: 'dismissed'` | Training data for AI improvement; enables undo; query with `where('status', 'in', ['active', 'verified'])` |
 | Life timeline view | **Integrate into JournalScreen Calendar** | No separate view; clicking a day shows entries + signals for that day |
 | Detected Strip timing | **Immediate toast/banner** after save | Closes cognitive loop ("system heard me"); fallback on EntryCard if missed |
-| Recurring horizon | **7 days for recurring, unlimited for one-off** | Prevents infinite generation for "every Monday"; allows "wedding in September" |
+| Recurring horizon | **4 occurrences** for recurring patterns | Prevents infinite generation for "every Monday"; generate N discrete signal docs |
 | Entry mood vs signals | **Keep both** | Entry `mood_score` = how user felt when speaking; signal `sentiment` = emotional context of the fact. They measure different things. |
-| Entry edit handling | **Wipe and replace** | Delete all signals for entry, re-extract from new text. Simpler than diffing. |
+| Entry edit handling | **Wipe and replace with diff check** | Only re-extract if text meaningfully changed (>2 words different). Prevents losing confirmations on typo fixes. |
 | Signal storage | **Single source of truth** in signals collection | No `pendingSignals` array on Entry; query signals by entryId. Eliminates sync issues. |
 | Aggregation | **Cloud Function trigger** on signal write | Guarantees day_summary integrity even if client crashes. Not optional. |
 | Recurring storage | **N discrete signal documents** | Generate 4 separate docs for "gym every Monday". Simplifies querying, each dismissable independently. |
 | Race conditions | **Extraction versioning** | Signal.extractionVersion must match entry.signalExtractionVersion. Stale results discarded. |
+| Auto-acceptance | **REMOVED - All signals require explicit confirmation** | Voice transcription can produce confident-but-wrong extractions. Auto-accept creates "ghost facts" users don't remember approving. |
+| Day scoring | **Dynamic weighting** | Entry 60% + Signal 40% when entries exist; Signal 100% when only forward-referenced signals. Plans always weight 0. |
+| Firestore queries | **Use `in` instead of `!=`** | `where('status', 'in', ['active', 'verified'])` is Firestore-friendly with range queries. |
 
 ---
 
@@ -1018,14 +1027,63 @@ This is a key architectural insight worth highlighting:
 - Keeping both lets the system say: "You often sound relieved when discussing difficult life changes"
 
 ```javascript
-// Day score uses BOTH
-const calculateDayScore = (entries, signals) => {
-  // Entry mood = primary baseline (direct measurement)
-  const entryMoodAvg = average(entries.map(e => e.analysis?.mood_score));
+// Dynamic day scoring (implemented in functions/index.js)
+async function recalculateDaySummary(userId, dateKey) {
+  const signals = await getSignalsForDate(userId, dateKey);
+  const entries = await getEntriesRecordedOn(userId, dateKey);
 
-  // Signals = adjustments (contextual layer)
-  const signalAdjustment = signals.reduce((sum, s) => sum + sentimentToScore(s), 0);
+  // Scoring signals exclude plans (weight 0)
+  const scoringSignals = signals.filter(s => s.type !== 'plan');
+  const signalSentiment = calculateAvgSentiment(scoringSignals);  // 0-1 scale
+  const entryMood = calculateAvgEntryMood(entries);  // 0-1 scale
 
-  return clamp(entryMoodAvg + signalAdjustment, 0, 1);
-};
+  // Dynamic weighting
+  let dayScore;
+  if (entryMood !== null && signalSentiment !== null) {
+    dayScore = (entryMood * 0.6) + (signalSentiment * 0.4);  // Blended
+  } else if (entryMood !== null) {
+    dayScore = entryMood;  // Entries only
+  } else if (signalSentiment !== null) {
+    dayScore = signalSentiment;  // Forward-referenced day (signals only)
+  }
+
+  // Save summary with both raw scores and combined dayScore
+  await saveDaySummary(userId, dateKey, {
+    signalSentiment, entryMood, dayScore, scoreSource: ...
+  });
+}
 ```
+
+---
+
+## Critical Refinement: Separating Feelings from Plans
+
+A key insight that emerged during implementation:
+
+**"I'm excited about tomorrow" produces TWO signals:**
+1. `feeling:excited` → TODAY (the emotion is felt NOW)
+2. `plan:event` → TOMORROW (the fact is scheduled THEN)
+
+This is critical because:
+- If we only create a plan signal on tomorrow, today's emotional state is lost
+- The user's excitement TODAY matters for today's score
+- Tomorrow shouldn't get a positive score bump just from having a scheduled event
+
+**Extraction Prompt Rules:**
+```
+CRITICAL: When emotions are expressed ABOUT future events, create TWO signals:
+- One feeling signal for TODAY (when the emotion is felt)
+- One plan signal for the TARGET day (when the event happens)
+
+Example: "I'm nervous about my interview tomorrow"
+→ feeling:nervous → TODAY (the nervousness is felt now)
+→ plan:interview → TOMORROW (the event happens then)
+
+The plan signal gets NEUTRAL sentiment and ZERO weight in scoring.
+Plans are facts, not feelings.
+```
+
+**Why Plans Have Weight 0:**
+- Plans are neutral facts about scheduled items
+- Their emotional impact is captured by the *current* feeling signal
+- This prevents "filling in" future days with assumed emotions

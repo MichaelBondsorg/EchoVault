@@ -4,10 +4,17 @@
  * Extracts temporal signals from journal entry text.
  * Replaces the old temporal detection that returned a single effectiveDate.
  *
- * Key concept: Each entry can produce MULTIPLE signals:
- * - Feelings (live on the day they're felt, usually today)
- * - Events (live on the day they happened/happen)
- * - Plans (live on the day they're scheduled)
+ * Key concepts:
+ * - Each entry can produce MULTIPLE signals
+ * - 4 signal types with different scoring weights:
+ *   - Feelings: emotions felt NOW (high weight, default to TODAY)
+ *   - Events: specific things that happened (medium weight)
+ *   - Plans: future scheduled items (ZERO weight - neutral facts)
+ *   - Reflections: general retrospective evaluations (high weight)
+ *
+ * Critical rule: "I'm excited about tomorrow" produces TWO signals:
+ *   - feeling:excited → TODAY (the emotion is felt now)
+ *   - plan:event → TOMORROW (the fact is scheduled then)
  */
 
 import { callGemini } from '../ai/gemini';
@@ -176,6 +183,12 @@ const calculateTargetDate = (reference, currentDate = new Date()) => {
 
 /**
  * Build the extraction prompt for Gemini
+ *
+ * Key design decisions:
+ * - 4 signal types: feeling, event, plan, reflection
+ * - Plans are NEUTRAL (weight 0 in scoring) - they're just scheduled things
+ * - Feelings about plans go to TODAY, the plan itself goes to the target day
+ * - Reflections are general evaluations ("yesterday was great") - high weight but different from events
  */
 const buildExtractionPrompt = (text, currentDate) => {
   const dateStr = currentDate.toLocaleDateString('en-US', {
@@ -193,15 +206,13 @@ The user recorded this entry NOW on ${dateStr} (${timeOfDay}).
 ENTRY:
 "${text}"
 
-Extract ALL signals - these are facts, feelings, or plans tied to specific days.
-
-Return JSON:
+Extract temporal signals. Return JSON:
 {
   "signals": [
     {
-      "type": "feeling" | "event" | "plan",
+      "type": "feeling" | "event" | "plan" | "reflection",
       "content": "brief description (3-5 words max)",
-      "target_day": "today" | "yesterday" | "tomorrow" | "two_days_ago" | "next_monday" | "this_weekend" | etc.,
+      "target_day": "today" | "yesterday" | "tomorrow" | "two_days_ago" | "next_monday" | etc.,
       "sentiment": "positive" | "negative" | "neutral" | "anxious" | "excited" | "hopeful" | "dreading",
       "original_phrase": "exact quote from entry (10-20 words max)",
       "confidence": 0.0-1.0
@@ -210,39 +221,50 @@ Return JSON:
   "reasoning": "brief explanation (1 sentence)"
 }
 
-RULES:
-1. FEELINGS live on the day they are FELT (usually today)
-   - "I'm nervous about tomorrow" → feeling:nervous on TODAY (felt now)
-   - "Yesterday I felt overwhelmed" → feeling:overwhelmed on YESTERDAY (explicitly past)
+SIGNAL TYPES:
+1. "feeling": Emotions felt NOW. Default target: TODAY. SCORE WEIGHT: High.
+   - "I am so stressed" → feeling on TODAY
+   - "I'm excited about the trip tomorrow" → feeling:excited on TODAY (NOT tomorrow)
 
-2. EVENTS/FACTS live on the day they HAPPENED/HAPPEN
-   - "Yesterday I went to the hairdresser" → event:hairdresser on YESTERDAY
-   - "I have a doctor appointment tomorrow" → plan:doctor_appointment on TOMORROW
+2. "event": Specific things that happened. Target: the day they occurred.
+   - "Went to the gym yesterday" → event on YESTERDAY
+   - "Had a great meeting" → event on TODAY (if no other day mentioned)
 
-3. When ambiguous, FEELINGS default to TODAY, EVENTS to the mentioned day
+3. "plan": Future scheduled items. Target: the future day. SCORE WEIGHT: 0 (neutral facts).
+   - "Doctor appointment tomorrow" → plan on TOMORROW
+   - Plans do NOT affect the target day's mood score until reflected on
 
-4. SUMMARY STATEMENTS about past days are EVENTS on that day
-   - "Yesterday was great" → event:great_day on YESTERDAY (summary, not current feeling)
-   - "Last week was exhausting" → event:exhausting_week on LAST_WEEK
+4. "reflection": General retrospective evaluation of a time period WITHOUT a specific anchor event.
+   - "Yesterday was a good day" → reflection on YESTERDAY
+   - "Last week was exhausting" → reflection on LAST_WEEK
+   - Reflections ARE different from events: "Yesterday was great" is NOT an event
 
-5. Extract MULTIPLE signals if the entry mentions multiple days or emotions
-   - "Yesterday was rough but I'm excited about tomorrow" →
-     event:rough_day on YESTERDAY + feeling:excited on TODAY + plan:[event] on TOMORROW
+CRITICAL RULES:
+- If a user says "I am excited about the trip tomorrow":
+  - Create a "feeling" (excited) targeting TODAY
+  - Create a "plan" (trip) targeting TOMORROW
+  - Do NOT combine them. Plans are neutral facts; feelings are today's reality.
 
-6. For recurring events (every Monday, weekly, etc.), extract as a single signal with the pattern noted
+- Feelings ALWAYS live on TODAY unless explicitly stated otherwise
+  - "I'm nervous about my interview" → feeling on TODAY (even though interview is future)
+  - "Yesterday I felt overwhelmed" → feeling on YESTERDAY (explicitly past)
+
+- When in doubt about event vs reflection:
+  - Specific activity → event ("went to gym", "had meeting")
+  - General evaluation → reflection ("was a good day", "felt long")
 
 EXAMPLES:
 Entry: "I'm so stressed about my presentation tomorrow"
-→ feeling:stressed on TODAY, plan:presentation on TOMORROW
+→ feeling:stressed on TODAY (current emotion), plan:presentation on TOMORROW (neutral scheduled item)
 
-Entry: "Had a great workout yesterday, feeling energized"
-→ event:great_workout on YESTERDAY, feeling:energized on TODAY
+Entry: "Yesterday was amazing, had a great workout"
+→ reflection:amazing_day on YESTERDAY (general evaluation), event:great_workout on YESTERDAY (specific activity)
 
-Entry: "The meeting on Monday went well"
-→ event:meeting_success on MONDAY (most recent past Monday)
+Entry: "Looking forward to the concert this weekend!"
+→ feeling:excited on TODAY, plan:concert on THIS_WEEKEND
 
-Entry: "Every Monday I dread the standup"
-→ Note as recurring pattern: every_monday, standup, dreading`;
+Entry: "The Monday meeting went well"
+→ event:meeting_success on MONDAY (most recent past Monday)`;
 };
 
 /**

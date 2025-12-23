@@ -440,6 +440,43 @@ export default function App() {
     });
   }, [entries, cat]);
 
+  /**
+   * Check if text has meaningfully changed (not just typos/punctuation/whitespace)
+   * Only triggers re-extraction if the semantic content is different
+   */
+  const hasTextMeaningfullyChanged = useCallback((oldText, newText) => {
+    if (!oldText || !newText) return true;
+
+    // Normalize: lowercase, collapse whitespace, remove punctuation
+    const normalize = (text) => text
+      .toLowerCase()
+      .replace(/[^\w\s]/g, ' ')  // Remove punctuation
+      .replace(/\s+/g, ' ')       // Collapse whitespace
+      .trim();
+
+    const oldNorm = normalize(oldText);
+    const newNorm = normalize(newText);
+
+    // Exact match after normalization = no meaningful change
+    if (oldNorm === newNorm) return false;
+
+    // Calculate word-level difference
+    const oldWords = oldNorm.split(' ').filter(w => w.length > 0);
+    const newWords = newNorm.split(' ').filter(w => w.length > 0);
+
+    // If word counts differ by more than 2, meaningful
+    if (Math.abs(oldWords.length - newWords.length) > 2) return true;
+
+    // Count words that are different
+    const oldSet = new Set(oldWords);
+    const newSet = new Set(newWords);
+    const addedWords = [...newSet].filter(w => !oldSet.has(w));
+    const removedWords = [...oldSet].filter(w => !newSet.has(w));
+
+    // More than 2 words added or removed = meaningful
+    return (addedWords.length + removedWords.length) > 2;
+  }, []);
+
   // Handle entry update with date change cache invalidation
   // Options parameter keeps control logic separate from data (Fix A: Control Coupling)
   const handleEntryUpdate = useCallback(async (entryId, updates, options = {}) => {
@@ -447,11 +484,18 @@ export default function App() {
 
     const entryRef = doc(db, 'artifacts', APP_COLLECTION_ID, 'users', user.uid, 'entries', entryId);
 
-    // If text is being updated, increment signalExtractionVersion for race condition handling
+    // Only increment signalExtractionVersion if text has meaningfully changed
+    // This prevents re-extraction on typo fixes, tag edits, or punctuation changes
     if (updates.text !== undefined) {
       const entry = entries.find(e => e.id === entryId);
-      const currentVersion = entry?.signalExtractionVersion || 1;
-      updates.signalExtractionVersion = currentVersion + 1;
+      const oldText = entry?.text || '';
+      if (hasTextMeaningfullyChanged(oldText, updates.text)) {
+        const currentVersion = entry?.signalExtractionVersion || 1;
+        updates.signalExtractionVersion = currentVersion + 1;
+        console.log(`Text meaningfully changed, triggering re-extraction (version ${currentVersion + 1})`);
+      } else {
+        console.log('Text change is minor (typo/punctuation), skipping re-extraction');
+      }
     }
 
     // Perform the update
@@ -472,7 +516,7 @@ export default function App() {
           console.error('Cache invalidation failed:', err);
         });
     }
-  }, [user, entries, cat]);
+  }, [user, entries, cat, hasTextMeaningfullyChanged]);
 
   const handleCrisisResponse = useCallback(async (response) => {
     setCrisisModal(null);

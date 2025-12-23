@@ -1404,11 +1404,12 @@ function endOfDay(dateKey) {
 }
 
 /**
- * Helper: Calculate average sentiment from signals (-1 to 1 scale)
+ * Helper: Calculate average sentiment from signals (returns 0-1 scale to match entry mood_score)
  */
 function calculateAvgSentiment(signals) {
-  if (signals.length === 0) return 0;
+  if (signals.length === 0) return null;
 
+  // Map sentiment to -1 to 1 scale first
   const sentimentValues = {
     positive: 1,
     excited: 0.8,
@@ -1423,12 +1424,32 @@ function calculateAvgSentiment(signals) {
     return sum + (sentimentValues[s.sentiment] || 0);
   }, 0);
 
-  return total / signals.length;
+  const rawAvg = total / signals.length;  // -1 to 1 scale
+
+  // Convert to 0-1 scale to match entry mood_score
+  return (rawAvg + 1) / 2;
+}
+
+/**
+ * Helper: Calculate average entry mood (0-1 scale)
+ */
+function calculateAvgEntryMood(entries) {
+  const validMoods = entries
+    .map(e => e.analysis?.mood_score)
+    .filter(score => typeof score === 'number' && !isNaN(score));
+
+  if (validMoods.length === 0) return null;
+  return validMoods.reduce((a, b) => a + b, 0) / validMoods.length;
 }
 
 /**
  * Recalculate day summary for a specific date
  * Called by onSignalWrite trigger
+ *
+ * Dynamic day scoring:
+ * - If entries exist: Entry mood 60% + Signal sentiment 40%
+ * - If no entries (only forward-referenced signals): Signal sentiment 100%
+ * - Plans have weight 0 (excluded from avgSentiment)
  */
 async function recalculateDaySummary(userId, dateKey) {
   console.log(`Recalculating day summary for user ${userId}, date ${dateKey}`);
@@ -1438,26 +1459,64 @@ async function recalculateDaySummary(userId, dateKey) {
     .collection('users')
     .doc(userId);
 
-  // Query all active signals for this date
+  // Query active/verified signals using 'in' (Firestore-friendly with ranges)
   const signalsSnap = await userRef
     .collection('signals')
     .where('targetDate', '>=', startOfDay(dateKey))
     .where('targetDate', '<=', endOfDay(dateKey))
+    .where('status', 'in', ['active', 'verified'])
     .get();
 
-  // Filter to non-dismissed signals in memory (Firestore doesn't support != with range queries well)
-  const signals = signalsSnap.docs
-    .map(d => d.data())
-    .filter(s => s.status !== 'dismissed');
+  const signals = signalsSnap.docs.map(d => d.data());
+
+  // Separate scoring signals (exclude plans - they have weight 0)
+  const scoringSignals = signals.filter(s => s.type !== 'plan');
+  const signalSentiment = calculateAvgSentiment(scoringSignals);
+
+  // Query entries recorded on this date
+  const entriesSnap = await userRef
+    .collection('entries')
+    .where('createdAt', '>=', startOfDay(dateKey))
+    .where('createdAt', '<=', endOfDay(dateKey))
+    .get();
+
+  const entries = entriesSnap.docs.map(d => d.data());
+  const entryMood = calculateAvgEntryMood(entries);
+
+  // Dynamic weighting for combined day score (0-1 scale)
+  // If entries exist: Entry 60% + Signal 40%
+  // If no entries: Signal 100%
+  let dayScore = null;
+  let scoreSource = 'none';
+
+  if (entryMood !== null && signalSentiment !== null) {
+    // Both sources available - weighted blend
+    dayScore = (entryMood * 0.6) + (signalSentiment * 0.4);
+    scoreSource = 'blended';
+  } else if (entryMood !== null) {
+    // Only entries
+    dayScore = entryMood;
+    scoreSource = 'entries_only';
+  } else if (signalSentiment !== null) {
+    // Only signals (forward-referenced day)
+    dayScore = signalSentiment;
+    scoreSource = 'signals_only';
+  }
 
   // Calculate aggregates
   const summary = {
     date: dateKey,
     signalCount: signals.length,
-    avgSentiment: calculateAvgSentiment(signals),
+    scoringSignalCount: scoringSignals.length,
+    signalSentiment,      // Raw signal sentiment (0-1 scale)
+    entryMood,            // Raw entry mood (0-1 scale)
+    dayScore,             // Combined dynamic score (0-1 scale)
+    scoreSource,          // How the score was calculated
+    entryCount: entries.length,
     hasEvents: signals.some(s => s.type === 'event'),
     hasPlans: signals.some(s => s.type === 'plan'),
     hasFeelings: signals.some(s => s.type === 'feeling'),
+    hasReflections: signals.some(s => s.type === 'reflection'),
     breakdown: {
       positive: signals.filter(s => ['positive', 'excited', 'hopeful'].includes(s.sentiment)).length,
       negative: signals.filter(s => ['negative', 'anxious', 'dreading'].includes(s.sentiment)).length,
@@ -1466,19 +1525,10 @@ async function recalculateDaySummary(userId, dateKey) {
     updatedAt: FieldValue.serverTimestamp()
   };
 
-  // Also count entries recorded on this date
-  const entriesSnap = await userRef
-    .collection('entries')
-    .where('createdAt', '>=', startOfDay(dateKey))
-    .where('createdAt', '<=', endOfDay(dateKey))
-    .get();
-
-  summary.entryCount = entriesSnap.size;
-
   // Write summary (upsert)
   await userRef.collection('day_summaries').doc(dateKey).set(summary, { merge: true });
 
-  console.log(`Day summary updated for ${dateKey}: ${signals.length} signals, ${summary.entryCount} entries`);
+  console.log(`Day summary updated for ${dateKey}: dayScore=${dayScore?.toFixed(2)} (${scoreSource}), ${signals.length} signals, ${entries.length} entries`);
 }
 
 /**
