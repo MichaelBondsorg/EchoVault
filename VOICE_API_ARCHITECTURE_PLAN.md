@@ -130,6 +130,27 @@ relay-server/
    - Concurrent session prevention
    - Audio duration limits
 
+5. **Token Refresh Handling**
+   ```typescript
+   // Firebase ID tokens expire after 1 hour
+   // Client must refresh before connecting to long sessions
+
+   // Client-side: Refresh token before WebSocket connection
+   const connectToRelay = async () => {
+     // Force token refresh if close to expiry
+     const token = await auth.currentUser.getIdToken(true);
+     const ws = new WebSocket(`wss://relay.echovault.app/voice?token=${token}`);
+
+     // Handle mid-session token refresh
+     const refreshInterval = setInterval(async () => {
+       const newToken = await auth.currentUser.getIdToken(true);
+       ws.send(JSON.stringify({ type: 'token_refresh', token: newToken }));
+     }, 50 * 60 * 1000);  // Refresh at 50 minutes
+
+     return { ws, cleanup: () => clearInterval(refreshInterval) };
+   };
+   ```
+
 #### Relay Protocol
 
 ```typescript
@@ -480,37 +501,128 @@ ${context.relevantEntries.map(e =>
 - Follow up on open situations: "How did that meeting go?"
 - Acknowledge patterns: "I notice you often feel this way on Mondays"
 - Be warm but not sycophantic
-- Keep responses concise for voice (2-3 sentences typically)
 - ${sessionType ? `This is a ${sessionType} session. Follow the structured flow.` :
                   'This is a free conversation. Let the user guide the direction.'}
+
+## CRITICAL: Voice-Specific Instructions
+- Keep responses SHORT: 2-3 sentences maximum unless asked for more
+- Do NOT use markdown formatting (no bullets, no headers, no **bold**)
+- Do NOT use lists - speak in flowing sentences
+- Speak conversationally, as if talking to a friend
+- Use contractions (don't, I'm, you're) - avoid formal language
+- Pause naturally between thoughts using commas and periods
+- Ask ONE question at a time, then wait for response
+- Avoid jargon and clinical terms unless the user uses them first
 `;
 };
 ```
 
-### Real-time RAG During Conversation
+### RAG via Function Calling (Recommended Approach)
+
+**Problem with Manual Injection**: Firestore + Vector Search takes 200-500ms. Synchronous RAG queries during conversation cause noticeable lag.
+
+**Solution**: Let the model decide when it needs memory via OpenAI Function Calling.
 
 ```typescript
-// When user mentions something, fetch related context
-const onUserUtterance = async (transcript: string, context: ConversationContext) => {
-  // Extract entities from current utterance
-  const entities = await extractEntities(transcript);
+// Define the get_memory tool for OpenAI
+const tools = [
+  {
+    type: 'function',
+    function: {
+      name: 'get_memory',
+      description: 'Retrieve relevant past journal entries when the user references something from their history. Use this when they mention past events, people, goals, or say things like "remember when" or "like last time".',
+      parameters: {
+        type: 'object',
+        properties: {
+          query: {
+            type: 'string',
+            description: 'What to search for in past entries',
+          },
+          date_hint: {
+            type: 'string',
+            description: 'Approximate date reference if mentioned (e.g., "last Tuesday", "two weeks ago")',
+          },
+          entity_type: {
+            type: 'string',
+            enum: ['person', 'goal', 'situation', 'event', 'place', 'any'],
+            description: 'Type of entity to search for',
+          },
+        },
+        required: ['query'],
+      },
+    },
+  },
+];
 
-  // If new entities mentioned, fetch related entries
-  for (const entity of entities) {
-    if (!context.mentionedEntities.includes(entity)) {
-      const related = await hybridRagSearch({
-        query: transcript,
-        entityFilter: entity,
-        limit: 3,
-      });
+// Handle tool calls in the Relay Server
+const handleToolCall = async (toolCall: ToolCall, userId: string): Promise<string> => {
+  if (toolCall.function.name === 'get_memory') {
+    const args = JSON.parse(toolCall.function.arguments);
 
-      // Inject into context for next response
-      context.relevantEntries.push(...related);
-      context.mentionedEntities.push(entity);
+    const results = await hybridRagSearch({
+      userId,
+      query: args.query,
+      entityFilter: args.entity_type !== 'any' ? `@${args.entity_type}:*` : undefined,
+      dateHint: args.date_hint,
+      limit: 3,
+    });
+
+    if (results.length === 0) {
+      return 'No relevant entries found.';
     }
+
+    return results.map(e =>
+      `[${e.effectiveDate}] ${e.title}: "${e.text.substring(0, 200)}..."`
+    ).join('\n\n');
   }
 
-  return context;
+  return 'Unknown tool';
+};
+```
+
+**Flow**:
+```
+User: "I'm feeling like I did last Tuesday."
+  ↓
+Model recognizes need for memory
+  ↓
+Model calls: get_memory(query: "how user felt", date_hint: "last Tuesday")
+  ↓
+Relay pauses audio output
+  ↓
+Relay queries Vector DB (200-500ms)
+  ↓
+Returns: "[2024-01-16] Rough day: 'Had that fight with mom...'"
+  ↓
+Model resumes with context: "Ah, that was the day you had the difficult conversation with your mom..."
+```
+
+**Benefits**:
+- No synchronous lag during normal conversation
+- Model decides when context is needed (smarter than keyword matching)
+- Cleaner architecture - no manual injection loops
+- Works with both Realtime API and Standard mode
+
+### Prefetching Strategy
+
+Still prefetch common context at session start to minimize tool calls:
+
+```typescript
+const prefetchSessionContext = async (userId: string, sessionType: GuidedSessionType) => {
+  const [recentEntries, activeGoals, openSituations, moodTrajectory] = await Promise.all([
+    getRecentEntries(userId, 5),
+    getActiveGoals(userId),
+    getOpenSituations(userId),
+    getMoodTrajectory(userId),
+  ]);
+
+  return {
+    recentEntries,
+    activeGoals,
+    openSituations,
+    moodTrajectory,
+    // Include in system prompt - model has this without needing tool calls
+  };
 };
 ```
 
@@ -735,6 +847,116 @@ const processVoiceEntry = async (
 
 ---
 
+## Resilience & State Management
+
+### The State Problem
+
+**Risk**: Cloud Run instances can scale down or be replaced during deployments. In-memory session state (transcript buffer, context) would be lost.
+
+**Scenario**: User talks for 10 minutes. Network drops at minute 9. They reconnect to a different instance. Buffer is gone.
+
+### Solution: Hybrid State with Client Persistence
+
+#### Phase 1 (MVP): In-Memory + Client Backup
+
+```typescript
+// Relay Server: Stream transcript deltas to client in real-time
+const onTranscriptUpdate = (delta: string) => {
+  session.transcriptBuffer += delta;
+
+  // CRITICAL: Send delta to client for local persistence
+  ws.send(JSON.stringify({
+    type: 'transcript_delta',
+    delta,
+    timestamp: Date.now(),
+    sequenceId: session.sequenceId++,
+  }));
+};
+```
+
+```typescript
+// Client: Persist transcript locally as backup
+const useTranscriptPersistence = (sessionId: string) => {
+  const [transcript, setTranscript] = useState('');
+
+  const handleDelta = (delta: string, sequenceId: number) => {
+    setTranscript(prev => prev + delta);
+
+    // Persist to IndexedDB/AsyncStorage
+    await localDB.transcripts.put({
+      sessionId,
+      content: transcript + delta,
+      sequenceId,
+      updatedAt: Date.now(),
+    });
+  };
+
+  // On reconnect, send local transcript to server
+  const handleReconnect = async (ws: WebSocket) => {
+    const local = await localDB.transcripts.get(sessionId);
+    if (local) {
+      ws.send(JSON.stringify({
+        type: 'restore_transcript',
+        content: local.content,
+        sequenceId: local.sequenceId,
+      }));
+    }
+  };
+
+  return { transcript, handleDelta, handleReconnect };
+};
+```
+
+#### Phase 2 (Production): Redis State Store
+
+```typescript
+// Add Redis for cross-instance state sharing
+import { createClient } from 'redis';
+
+const redis = createClient({ url: process.env.REDIS_URL });
+
+interface SessionState {
+  userId: string;
+  transcript: string;
+  context: ConversationContext;
+  sequenceId: number;
+  lastActivity: number;
+  mode: ProcessingMode;
+}
+
+const sessionStore = {
+  async save(sessionId: string, state: SessionState) {
+    await redis.setEx(
+      `session:${sessionId}`,
+      900,  // 15 min TTL
+      JSON.stringify(state)
+    );
+  },
+
+  async get(sessionId: string): Promise<SessionState | null> {
+    const data = await redis.get(`session:${sessionId}`);
+    return data ? JSON.parse(data) : null;
+  },
+
+  async delete(sessionId: string) {
+    await redis.del(`session:${sessionId}`);
+  },
+};
+```
+
+**Result**: If Cloud Run instance dies, user reconnects, new instance pulls state from Redis. If Redis is unavailable, fall back to client's local transcript.
+
+### Data Loss Prevention Checklist
+
+- [ ] Transcript streamed to client in real-time via `transcript_delta`
+- [ ] Client persists transcript to IndexedDB/AsyncStorage
+- [ ] Client can restore session from local backup on reconnect
+- [ ] Phase 2: Redis stores session state across instances
+- [ ] Sequence IDs prevent duplicate/out-of-order processing
+- [ ] 15-minute session TTL auto-cleans abandoned sessions
+
+---
+
 ## Security Checklist
 
 - [ ] API keys never leave server
@@ -747,19 +969,130 @@ const processVoiceEntry = async (
 - [ ] Audit logging for voice sessions
 - [ ] CORS properly configured
 - [ ] No PII in logs
+- [ ] Usage limits enforced (daily cost cap)
 
 ---
 
-## Cost Considerations
+## Cost Considerations & Hybrid Protocol
+
+### The Cost Reality
+
+| API | Input Cost | Output Cost | Total/min | Use Case |
+|-----|------------|-------------|-----------|----------|
+| **OpenAI Realtime** | ~$0.06/min | ~$0.24/min | **~$0.30/min** | Interactive conversation |
+| **Whisper + GPT-4o + TTS** | $0.006/min | ~$0.02/response | **~$0.03/min** | Dictation/reflection |
+
+**Critical Insight**: A 10-minute Morning Check-in via Realtime API costs $3-5. The same session via Standard Pipeline costs ~$0.30.
+
+### Hybrid Protocol Architecture
+
+The Relay Server MUST support two modes, selected by `sessionType`:
+
+```typescript
+type ProcessingMode = 'realtime' | 'standard';
+
+const getProcessingMode = (sessionType: GuidedSessionType | 'free'): ProcessingMode => {
+  // Use Realtime API only when interactivity matters
+  const realtimeSessions: GuidedSessionType[] = [
+    'emotional_processing',  // Needs back-and-forth for CBT/ACT
+    'situation_processing',  // Exploratory conversation
+    'stress_release',        // Real-time support needed
+  ];
+
+  if (sessionType === 'free') return 'realtime';  // User chose conversation
+  return realtimeSessions.includes(sessionType) ? 'realtime' : 'standard';
+};
+```
+
+### Standard Pipeline Flow (Default for Guided Sessions)
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    STANDARD MODE (Cost-Optimized)               │
+│                                                                 │
+│  Client records audio locally (chunked)                         │
+│  ↓                                                              │
+│  Send to Relay → Buffer complete utterance                      │
+│  ↓                                                              │
+│  Whisper API transcription ($0.006/min)                         │
+│  ↓                                                              │
+│  GPT-4o generates response (with RAG context)                   │
+│  ↓                                                              │
+│  TTS generates audio response                                   │
+│  ↓                                                              │
+│  Stream audio back to client                                    │
+│                                                                 │
+│  Latency: 2-4 seconds per turn (acceptable for guided prompts)  │
+│  Cost: ~10x cheaper than Realtime                               │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Realtime Mode Flow (For True Conversations)
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    REALTIME MODE (Interactive)                  │
+│                                                                 │
+│  Full duplex WebSocket to OpenAI Realtime API                   │
+│  ↓                                                              │
+│  Sub-second response latency                                    │
+│  ↓                                                              │
+│  Natural interruption support                                   │
+│  ↓                                                              │
+│  True conversational feel                                       │
+│                                                                 │
+│  Latency: <500ms                                                │
+│  Cost: ~$0.30/min                                               │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Cost Controls (CRITICAL)
+
+```typescript
+interface UsageLimits {
+  maxSessionDuration: 900,        // 15 min hard limit
+  maxDailyRealtimeMinutes: 10,    // ~$3/day max for Realtime
+  maxDailyStandardMinutes: 60,    // ~$1.80/day max for Standard
+  maxDailyCostUSD: 5.00,          // Absolute daily cap
+}
+
+// Track in Firestore per user
+interface UserUsage {
+  date: string;
+  realtimeMinutes: number;
+  standardMinutes: number;
+  estimatedCostUSD: number;
+}
+
+// Enforce in Relay Server
+const checkUsageLimits = async (userId: string, mode: ProcessingMode): Promise<boolean> => {
+  const usage = await getUsage(userId);
+
+  if (usage.estimatedCostUSD >= limits.maxDailyCostUSD) {
+    return false;  // Downgrade to text-only
+  }
+
+  if (mode === 'realtime' && usage.realtimeMinutes >= limits.maxDailyRealtimeMinutes) {
+    return false;  // Suggest Standard mode instead
+  }
+
+  return true;
+};
+```
+
+### Component Costs
 
 | Component | Estimated Cost |
 |-----------|---------------|
 | Cloud Run (WebSocket relay) | ~$5-20/mo based on usage |
-| OpenAI Realtime API | ~$0.06/min audio |
-| OpenAI Whisper (fallback) | ~$0.006/min |
+| OpenAI Realtime API | ~$0.30/min (use sparingly) |
+| OpenAI Whisper | ~$0.006/min (default) |
+| OpenAI GPT-4o | ~$0.01-0.03/response |
+| OpenAI TTS | ~$0.015/1K chars |
 | Firestore reads/writes | Existing quota |
+| Redis (Memorystore) | ~$25/mo for smallest instance |
 
-**Recommendation**: Start with 5-minute session limit, expand based on usage patterns.
+**Recommendation**: Default to Standard mode. Realtime only for explicitly interactive sessions.
 
 ---
 
@@ -781,6 +1114,119 @@ const processVoiceEntry = async (
 3. **Multi-language**: Support transcription in other languages?
 4. **Session Sharing**: Allow sharing guided session templates?
 5. **Therapist Mode**: Professional-guided sessions for therapy use cases?
+
+---
+
+## Implementation Notes & Best Practices
+
+### Relay Server Setup
+
+**Skip Docker for MVP** - Use source deployment:
+```bash
+# Deploy directly from source (Google builds container automatically)
+cd relay-server
+gcloud run deploy voice-relay \
+  --source . \
+  --platform managed \
+  --allow-unauthenticated \
+  --min-instances 0 \
+  --max-instances 10 \
+  --timeout 900 \
+  --memory 512Mi \
+  --set-secrets OPENAI_API_KEY=openai-api-key:latest
+```
+
+### WebSocket Library Choice
+
+Use `ws` over `socket.io` for the relay:
+- Lighter weight (~50KB vs ~300KB)
+- Direct WebSocket protocol (better for proxying to OpenAI)
+- No Socket.IO overhead/fallbacks needed
+
+```typescript
+// relay-server/package.json
+{
+  "dependencies": {
+    "ws": "^8.16.0",
+    "express": "^4.18.2",
+    "firebase-admin": "^12.0.0"
+  }
+}
+```
+
+### Schema Validation with Zod
+
+Use Zod for GuidedSessionDefinition validation:
+
+```typescript
+import { z } from 'zod';
+
+const GuidedPromptSchema = z.object({
+  id: z.string(),
+  type: z.enum(['open', 'rating', 'choice', 'reflection']),
+  prompt: z.string(),
+  contextInjection: z.object({
+    includeRecentMood: z.boolean().optional(),
+    includeOpenGoals: z.boolean().optional(),
+    includeYesterdayHighlight: z.boolean().optional(),
+    customRagQuery: z.string().optional(),
+  }).optional(),
+});
+
+const GuidedSessionDefinitionSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  description: z.string(),
+  icon: z.string(),
+  estimatedMinutes: z.number().positive(),
+  prompts: z.array(GuidedPromptSchema).min(1),
+  outputProcessing: z.object({
+    summaryPrompt: z.string(),
+    extractSignals: z.boolean(),
+    therapeuticFramework: z.enum(['cbt', 'act', 'general']).optional(),
+  }),
+});
+
+// Validate session definitions at build time
+export const validateSessionDefinition = (def: unknown) => {
+  return GuidedSessionDefinitionSchema.parse(def);
+};
+```
+
+### Environment Configuration
+
+```bash
+# .env.local (client)
+VITE_VOICE_RELAY_URL=wss://voice-relay-xxxxx-uc.a.run.app
+
+# Cloud Run secrets
+gcloud secrets create openai-api-key --data-file=./openai-key.txt
+gcloud secrets create firebase-service-account --data-file=./firebase-sa.json
+```
+
+### Testing Strategy
+
+1. **Unit Tests**: Session definitions, prompt rendering, transcript cleaning
+2. **Integration Tests**: Relay auth flow, OpenAI proxy, Firestore operations
+3. **E2E Tests**: Full voice session flow with mock audio
+4. **Load Tests**: Concurrent WebSocket connections, session limits
+
+```typescript
+// Example: Test session definition validity
+describe('GuidedSessionDefinitions', () => {
+  const definitions = [morningCheckin, eveningReflection, gratitudePractice];
+
+  definitions.forEach(def => {
+    it(`${def.id} should have valid schema`, () => {
+      expect(() => validateSessionDefinition(def)).not.toThrow();
+    });
+
+    it(`${def.id} should have at least one prompt`, () => {
+      expect(def.prompts.length).toBeGreaterThan(0);
+    });
+  });
+});
+```
 
 ---
 
