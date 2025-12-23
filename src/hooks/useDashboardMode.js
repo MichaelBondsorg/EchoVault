@@ -28,6 +28,25 @@ const calculateAverageMood = (entries) => {
 };
 
 /**
+ * Get the effective mood score using dynamic weighting
+ * - If daySummary has pre-computed dayScore, use it (includes signals)
+ * - Otherwise fall back to entry-based calculation
+ *
+ * @param {Object|null} daySummary - Pre-computed day summary from Cloud Function
+ * @param {Array} entries - Today's entries (fallback)
+ * @returns {number|null} Effective mood score
+ */
+const getEffectiveMood = (daySummary, entries) => {
+  // If we have a pre-computed dayScore from signals, use it
+  if (daySummary && typeof daySummary.dayScore === 'number') {
+    return daySummary.dayScore;
+  }
+
+  // Fallback to entry-based calculation
+  return calculateAverageMood(entries);
+};
+
+/**
  * Get the most recent entry's mood score
  * @param {Array} entries - Today's entries sorted by date (newest first expected)
  * @returns {number|null}
@@ -46,26 +65,32 @@ const getLastEntryMood = (entries) => {
 };
 
 /**
- * Determine mood state based on today's entries
+ * Determine mood state based on today's entries and signals
  * Uses the "Thermostat" logic from spec:
- * - If avg_mood < 0.35 OR last_entry.mood < 0.3 -> shelter
- * - If avg_mood > 0.75 -> cheerleader
+ * - If effective_mood < 0.35 OR last_entry.mood < 0.3 -> shelter
+ * - If effective_mood > 0.75 -> cheerleader
  * - Else -> neutral
+ *
+ * @param {Array} todayEntries - Today's entries
+ * @param {Object|null} daySummary - Pre-computed day summary (includes signals)
  */
-const determineMoodState = (todayEntries) => {
-  if (todayEntries.length === 0) return 'neutral';
+const determineMoodState = (todayEntries, daySummary = null) => {
+  // If no entries AND no signals, neutral
+  const hasSignals = daySummary && daySummary.signalCount > 0;
+  if (todayEntries.length === 0 && !hasSignals) return 'neutral';
 
-  const avgMood = calculateAverageMood(todayEntries);
+  // Get effective mood (uses signals if available, otherwise entries)
+  const effectiveMood = getEffectiveMood(daySummary, todayEntries);
   const lastMood = getLastEntryMood(todayEntries);
 
   // Shelter mode: low average OR very low last entry
-  if ((avgMood !== null && avgMood < MOOD_THRESHOLDS.shelter) ||
+  if ((effectiveMood !== null && effectiveMood < MOOD_THRESHOLDS.shelter) ||
       (lastMood !== null && lastMood < 0.3)) {
     return 'shelter';
   }
 
   // Cheerleader mode: high average
-  if (avgMood !== null && avgMood > MOOD_THRESHOLDS.cheerleader) {
+  if (effectiveMood !== null && effectiveMood > MOOD_THRESHOLDS.cheerleader) {
     return 'cheerleader';
   }
 
@@ -135,11 +160,13 @@ const generateHeroContent = (timePhase, moodState, summary, userName, carryForwa
  * Determines the dashboard mode based on:
  * 1. Time of Day (morning/midday/evening)
  * 2. User's Mood (neutral/shelter/cheerleader)
+ * 3. Signal-based scoring (when available)
  *
  * @param {Object} options
  * @param {Array} options.entries - All user entries
  * @param {Array} options.todayEntries - Today's filtered entries
- * @param {Object} options.summary - Current day summary
+ * @param {Object} options.summary - Current day summary (from synthesis)
+ * @param {Object} options.todaySummary - Today's day_summary from signals (from Cloud Function)
  * @param {Object} options.user - Current user object
  * @param {Array} options.carryForwardItems - Tasks carried from yesterday
  * @param {boolean} options.shelterOverride - Force exit shelter mode
@@ -150,6 +177,7 @@ export const useDashboardMode = ({
   entries = [],
   todayEntries = [],
   summary = null,
+  todaySummary = null,  // Signal-based day summary from Cloud Function
   user = null,
   carryForwardItems = [],
   shelterOverride = false

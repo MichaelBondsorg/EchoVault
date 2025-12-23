@@ -1,18 +1,42 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Activity, Wind, BookOpen, Zap } from 'lucide-react';
+import { Activity, Wind, BookOpen, Zap, Sparkles } from 'lucide-react';
+import { getDayScores, formatDateKey, getMoodColor, getMoodLabel } from '../../services/scoring/dayScore';
 
-const MoodHeatmap = ({ entries, onDayClick }) => {
+const MoodHeatmap = ({ entries, onDayClick, userId }) => {
   const [hoveredDay, setHoveredDay] = useState(null);
   const [tooltipPosition, setTooltipPosition] = useState({ x: 0, y: 0 });
+  const [daySummaries, setDaySummaries] = useState({});
+  const [summariesLoaded, setSummariesLoaded] = useState(false);
 
   const days = useMemo(() => new Array(30).fill(null).map((_, i) => {
     const d = new Date(); d.setDate(new Date().getDate() - (29 - i)); return d;
   }), []);
 
+  // Fetch day summaries on mount (efficient: 1 query for 30 days)
+  useEffect(() => {
+    if (!userId) return;
+
+    const loadSummaries = async () => {
+      try {
+        const summaries = await getDayScores(userId, 30);
+        setDaySummaries(summaries);
+        setSummariesLoaded(true);
+      } catch (error) {
+        console.error('Failed to load day summaries:', error);
+        setSummariesLoaded(true); // Still mark as loaded to use fallback
+      }
+    };
+
+    loadSummaries();
+  }, [userId]);
+
   const getDayData = (d) => {
+    const dateKey = formatDateKey(d);
+    const summary = daySummaries[dateKey];
+
+    // Get entries for this day (for fallback and additional data)
     const dayEntries = entries.filter(e => {
-      // Use effectiveDate if available (for backdated entries), otherwise createdAt
       const dateField = e.effectiveDate || e.createdAt;
       const entryDate = dateField instanceof Date
         ? dateField
@@ -21,11 +45,32 @@ const MoodHeatmap = ({ entries, onDayClick }) => {
         entryDate.getMonth() === d.getMonth() &&
         entryDate.getFullYear() === d.getFullYear();
     });
-    const moodEntries = dayEntries.filter(e => e.entry_type !== 'task' && typeof e.analysis?.mood_score === 'number');
-    const avgMood = moodEntries.length > 0
-      ? moodEntries.reduce((sum, e) => sum + e.analysis.mood_score, 0) / moodEntries.length
-      : null;
-    const moodScores = moodEntries.map(e => e.analysis.mood_score);
+
+    // Use pre-computed dayScore if available, otherwise fall back to entry calculation
+    let avgMood;
+    let hasSignals = false;
+    let signalCount = 0;
+    let scoreSource = 'entries_only';
+
+    if (summary && summary.dayScore !== null && summary.dayScore !== undefined) {
+      // Use pre-computed score from Cloud Function
+      avgMood = summary.dayScore;
+      hasSignals = summary.signalCount > 0;
+      signalCount = summary.signalCount || 0;
+      scoreSource = summary.scoreSource || 'unknown';
+    } else {
+      // Fallback: calculate from entries only
+      const moodEntries = dayEntries.filter(e =>
+        e.entry_type !== 'task' && typeof e.analysis?.mood_score === 'number'
+      );
+      avgMood = moodEntries.length > 0
+        ? moodEntries.reduce((sum, e) => sum + e.analysis.mood_score, 0) / moodEntries.length
+        : null;
+    }
+
+    const moodScores = dayEntries
+      .filter(e => e.entry_type !== 'task' && typeof e.analysis?.mood_score === 'number')
+      .map(e => e.analysis.mood_score);
     const volatility = moodScores.length > 1
       ? Math.max(...moodScores) - Math.min(...moodScores)
       : 0;
@@ -55,33 +100,21 @@ const MoodHeatmap = ({ entries, onDayClick }) => {
       avgMood,
       volatility,
       hasEntries: dayEntries.length > 0,
+      hasSignals,
+      signalCount,
+      scoreSource,
       typeCounts,
       dominantTheme,
-      hasVent: typeCounts.vent > 0
+      hasVent: typeCounts.vent > 0,
+      // Include signal breakdown if available
+      hasPlans: summary?.hasPlans || false,
+      hasFeelings: summary?.hasFeelings || false,
+      hasReflections: summary?.hasReflections || false
     };
   };
 
-  // Using the therapeutic mood colors
-  const getMoodColor = (score) => {
-    if (typeof score !== 'number') return 'var(--color-warm-200, #e7e5e4)';
-    if (score >= 0.75) return 'var(--color-mood-great, #22c55e)';
-    if (score >= 0.55) return 'var(--color-mood-good, #84cc16)';
-    if (score >= 0.45) return 'var(--color-mood-neutral, #eab308)';
-    if (score >= 0.25) return 'var(--color-mood-low, #3b82f6)';
-    return 'var(--color-mood-struggling, #8b5cf6)';
-  };
-
-  const getMoodLabel = (score) => {
-    if (typeof score !== 'number') return '';
-    if (score >= 0.75) return 'Great';
-    if (score >= 0.55) return 'Good';
-    if (score >= 0.45) return 'Okay';
-    if (score >= 0.25) return 'Low';
-    return 'Struggling';
-  };
-
   const handleMouseEnter = (e, d, dayData) => {
-    if (!dayData.hasEntries) return;
+    if (!dayData.hasEntries && !dayData.hasSignals) return;
     const rect = e.currentTarget.getBoundingClientRect();
     setTooltipPosition({
       x: rect.left + rect.width / 2,
@@ -102,15 +135,16 @@ const MoodHeatmap = ({ entries, onDayClick }) => {
       <div className="flex justify-between items-end gap-1">
         {days.map((d, i) => {
           const dayData = getDayData(d);
-          const { avgMood, hasEntries, hasVent } = dayData;
+          const { avgMood, hasEntries, hasVent, hasSignals } = dayData;
+          const isClickable = hasEntries || hasSignals;
           return (
             <motion.button
               key={i}
               initial={{ scaleY: 0 }}
               animate={{ scaleY: 1 }}
               transition={{ delay: i * 0.02, duration: 0.3 }}
-              whileHover={hasEntries ? { scale: 1.1 } : {}}
-              className={`flex-1 rounded-lg transition-all origin-bottom relative ${hasEntries ? 'cursor-pointer hover:opacity-80' : 'cursor-default'}`}
+              whileHover={isClickable ? { scale: 1.1 } : {}}
+              className={`flex-1 rounded-lg transition-all origin-bottom relative ${isClickable ? 'cursor-pointer hover:opacity-80' : 'cursor-default'}`}
               style={{
                 backgroundColor: getMoodColor(avgMood),
                 height: avgMood !== null ? `${Math.max(20, avgMood * 60)}px` : '20px',
@@ -118,12 +152,16 @@ const MoodHeatmap = ({ entries, onDayClick }) => {
               }}
               onMouseEnter={(e) => handleMouseEnter(e, d, dayData)}
               onMouseLeave={() => setHoveredDay(null)}
-              onClick={() => hasEntries && onDayClick && onDayClick(d, dayData)}
-              disabled={!hasEntries}
+              onClick={() => isClickable && onDayClick && onDayClick(d, dayData)}
+              disabled={!isClickable}
             >
               {/* Vent indicator dot */}
               {hasVent && (
                 <div className="absolute -top-1 left-1/2 -translate-x-1/2 w-1.5 h-1.5 rounded-full bg-rose-400 border border-white" />
+              )}
+              {/* Signal indicator (only for days with signals but no entries) */}
+              {hasSignals && !hasEntries && (
+                <div className="absolute -top-1 left-1/2 -translate-x-1/2 w-1.5 h-1.5 rounded-full bg-primary-400 border border-white" />
               )}
             </motion.button>
           );
@@ -163,33 +201,59 @@ const MoodHeatmap = ({ entries, onDayClick }) => {
                 </span>
               </div>
 
+              {/* Score source indicator */}
+              {hoveredDay.data.scoreSource === 'blended' && (
+                <div className="flex items-center gap-1 text-primary-300 text-[10px] mb-1">
+                  <Sparkles size={10} />
+                  <span>Entry + Signal blend</span>
+                </div>
+              )}
+              {hoveredDay.data.scoreSource === 'signals_only' && (
+                <div className="flex items-center gap-1 text-primary-300 text-[10px] mb-1">
+                  <Sparkles size={10} />
+                  <span>From signals</span>
+                </div>
+              )}
+
               {/* Entries count */}
-              <div className="flex items-center justify-between gap-2 mb-1">
-                <span className="text-warm-300">Entries</span>
-                <span>{hoveredDay.data.entries.length}</span>
-              </div>
+              {hoveredDay.data.entries.length > 0 && (
+                <div className="flex items-center justify-between gap-2 mb-1">
+                  <span className="text-warm-300">Entries</span>
+                  <span>{hoveredDay.data.entries.length}</span>
+                </div>
+              )}
+
+              {/* Signals count */}
+              {hoveredDay.data.signalCount > 0 && (
+                <div className="flex items-center justify-between gap-2 mb-1">
+                  <span className="text-warm-300">Signals</span>
+                  <span>{hoveredDay.data.signalCount}</span>
+                </div>
+              )}
 
               {/* Entry types */}
-              <div className="flex items-center gap-2 mt-1.5 pt-1.5 border-t border-warm-700">
-                {hoveredDay.data.typeCounts.reflection > 0 && (
-                  <div className="flex items-center gap-1 text-primary-300">
-                    <BookOpen size={10} />
-                    <span>{hoveredDay.data.typeCounts.reflection}</span>
-                  </div>
-                )}
-                {hoveredDay.data.typeCounts.vent > 0 && (
-                  <div className="flex items-center gap-1 text-rose-300">
-                    <Wind size={10} />
-                    <span>{hoveredDay.data.typeCounts.vent}</span>
-                  </div>
-                )}
-                {hoveredDay.data.typeCounts.mixed > 0 && (
-                  <div className="flex items-center gap-1 text-teal-300">
-                    <Zap size={10} />
-                    <span>{hoveredDay.data.typeCounts.mixed}</span>
-                  </div>
-                )}
-              </div>
+              {hoveredDay.data.hasEntries && (
+                <div className="flex items-center gap-2 mt-1.5 pt-1.5 border-t border-warm-700">
+                  {hoveredDay.data.typeCounts.reflection > 0 && (
+                    <div className="flex items-center gap-1 text-primary-300">
+                      <BookOpen size={10} />
+                      <span>{hoveredDay.data.typeCounts.reflection}</span>
+                    </div>
+                  )}
+                  {hoveredDay.data.typeCounts.vent > 0 && (
+                    <div className="flex items-center gap-1 text-rose-300">
+                      <Wind size={10} />
+                      <span>{hoveredDay.data.typeCounts.vent}</span>
+                    </div>
+                  )}
+                  {hoveredDay.data.typeCounts.mixed > 0 && (
+                    <div className="flex items-center gap-1 text-teal-300">
+                      <Zap size={10} />
+                      <span>{hoveredDay.data.typeCounts.mixed}</span>
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* Dominant theme */}
               {hoveredDay.data.dominantTheme && (
@@ -201,7 +265,7 @@ const MoodHeatmap = ({ entries, onDayClick }) => {
               {/* Volatility indicator */}
               {hoveredDay.data.volatility > 0.3 && (
                 <p className="mt-1 text-amber-300 text-[10px]">
-                  ⚡ High mood variation
+                  High mood variation
                 </p>
               )}
 
