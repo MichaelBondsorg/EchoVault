@@ -41,6 +41,7 @@ import { completeActionItem, handleEntryDateChange, calculateStreak } from './se
 import { useIOSMeta } from './hooks/useIOSMeta';
 import { useNotifications } from './hooks/useNotifications';
 import { useNetworkStatus } from './hooks/useNetworkStatus';
+import { useWakeLock } from './hooks/useWakeLock';
 
 // Components
 import {
@@ -98,6 +99,7 @@ export default function App() {
   useIOSMeta();
   const { permission, requestPermission } = useNotifications();
   const { isOnline, wasOffline, clearWasOffline } = useNetworkStatus();
+  const { requestWakeLock, releaseWakeLock } = useWakeLock();
   const [user, setUser] = useState(null);
   const [entries, setEntries] = useState([]);
   const [view, setView] = useState('feed');
@@ -128,6 +130,41 @@ export default function App() {
 
   // Temporal Context (Phase 2) - for backdating entries
   const [pendingTemporalEntry, setPendingTemporalEntry] = useState(null);
+
+  // Cleanup stale audio backups on app startup (older than 24 hours)
+  useEffect(() => {
+    try {
+      const now = Date.now();
+      const ONE_DAY = 24 * 60 * 60 * 1000;
+      const keysToRemove = [];
+
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key && key.startsWith('echov_audio_backup_')) {
+          try {
+            const data = JSON.parse(localStorage.getItem(key));
+            if (data.timestamp && (now - data.timestamp) > ONE_DAY) {
+              keysToRemove.push(key);
+            }
+          } catch (e) {
+            // Invalid data, remove it
+            keysToRemove.push(key);
+          }
+        }
+      }
+
+      keysToRemove.forEach(key => {
+        localStorage.removeItem(key);
+        console.log('Cleaned up stale audio backup:', key);
+      });
+
+      if (keysToRemove.length > 0) {
+        console.log(`Cleaned up ${keysToRemove.length} stale audio backup(s)`);
+      }
+    } catch (e) {
+      console.warn('Error cleaning up audio backups:', e);
+    }
+  }, []);
 
   // Process offline queue when back online
   useEffect(() => {
@@ -761,45 +798,83 @@ export default function App() {
 
   const handleAudioWrapper = async (base64, mime) => {
     setProcessing(true);
-    const transcript = await transcribeAudio(base64, mime);
 
-    if (!transcript) {
-      alert("Transcription failed - please try again");
-      setProcessing(false);
-      return;
+    // Request wake lock to prevent iOS from killing the request during long transcriptions
+    await requestWakeLock();
+
+    // Save audio to localStorage as backup before attempting transcription
+    // This prevents data loss if transcription fails
+    const audioBackupKey = `echov_audio_backup_${Date.now()}`;
+    try {
+      // Only backup if audio is not too large (< 10MB to avoid localStorage limits)
+      if (base64.length < 10 * 1024 * 1024) {
+        localStorage.setItem(audioBackupKey, JSON.stringify({ base64, mime, timestamp: Date.now() }));
+        console.log('Audio backed up to localStorage:', audioBackupKey);
+      }
+    } catch (backupError) {
+      console.warn('Could not backup audio to localStorage:', backupError.message);
     }
 
-    if (transcript === 'API_RATE_LIMIT') {
-      alert("Too many requests - please wait a moment and try again");
-      setProcessing(false);
-      return;
-    }
+    try {
+      const transcript = await transcribeAudio(base64, mime);
 
-    if (transcript === 'API_AUTH_ERROR') {
-      alert("API authentication error - please check settings");
-      setProcessing(false);
-      return;
-    }
+      if (!transcript) {
+        alert("Transcription failed - please try again. Your recording has been saved locally.");
+        setProcessing(false);
+        releaseWakeLock();
+        return;
+      }
 
-    if (transcript === 'API_BAD_REQUEST') {
-      alert("Audio format not supported - please try recording again");
-      setProcessing(false);
-      return;
-    }
+      if (transcript === 'API_RATE_LIMIT') {
+        alert("Too many requests - please wait a moment and try again");
+        setProcessing(false);
+        releaseWakeLock();
+        return;
+      }
 
-    if (transcript.startsWith('API_')) {
-      alert("Transcription service temporarily unavailable - please try again");
-      setProcessing(false);
-      return;
-    }
+      if (transcript === 'API_AUTH_ERROR') {
+        alert("API authentication error - please check settings");
+        setProcessing(false);
+        releaseWakeLock();
+        return;
+      }
 
-    if (transcript.includes("NO_SPEECH")) {
-      alert("No speech detected - please try speaking closer to the microphone");
-      setProcessing(false);
-      return;
-    }
+      if (transcript === 'API_BAD_REQUEST') {
+        alert("Audio format not supported - please try recording again");
+        setProcessing(false);
+        releaseWakeLock();
+        // Clear backup since audio format is invalid
+        try { localStorage.removeItem(audioBackupKey); } catch (e) {}
+        return;
+      }
 
-    await saveEntry(transcript);
+      if (transcript.startsWith('API_')) {
+        alert("Transcription failed after multiple attempts. Please check your network connection and try again. Your recording has been saved locally.");
+        setProcessing(false);
+        releaseWakeLock();
+        return;
+      }
+
+      if (transcript.includes("NO_SPEECH")) {
+        alert("No speech detected - please try speaking closer to the microphone");
+        setProcessing(false);
+        releaseWakeLock();
+        // Clear backup since no valid speech
+        try { localStorage.removeItem(audioBackupKey); } catch (e) {}
+        return;
+      }
+
+      // Transcription successful - clear the backup
+      try { localStorage.removeItem(audioBackupKey); } catch (e) {}
+
+      await saveEntry(transcript);
+    } catch (error) {
+      console.error('handleAudioWrapper error:', error);
+      alert("An error occurred during transcription. Your recording has been saved locally. Please try again.");
+      setProcessing(false);
+    } finally {
+      releaseWakeLock();
+    }
   };
 
   // Handle sign-in with logging
