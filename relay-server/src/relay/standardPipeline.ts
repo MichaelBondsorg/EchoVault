@@ -170,9 +170,10 @@ export const processStandardTurn = async (sessionId: string): Promise<void> => {
  * Transcribe audio using Whisper
  */
 const transcribeAudio = async (audioBuffer: Buffer): Promise<string> => {
-  // Create a File-like object for the API
-  const audioBlob = new Blob([audioBuffer], { type: 'audio/webm' });
-  const file = new File([audioBlob], 'audio.webm', { type: 'audio/webm' });
+  // Convert Buffer to File using OpenAI's toFile helper
+  const file = await openai.toFile(audioBuffer, 'audio.webm', {
+    type: 'audio/webm',
+  });
 
   const response = await openai.audio.transcriptions.create({
     file,
