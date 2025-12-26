@@ -171,7 +171,7 @@ export const processStandardTurn = async (sessionId: string): Promise<void> => {
  */
 const transcribeAudio = async (audioBuffer: Buffer): Promise<string> => {
   // Convert Buffer to File using OpenAI's toFile helper
-  const file = await openai.toFile(audioBuffer, 'audio.webm', {
+  const file = await OpenAI.toFile(audioBuffer, 'audio.webm', {
     type: 'audio/webm',
   });
 
