@@ -1,0 +1,41 @@
+/**
+ * Configuration and environment variables
+ * In Cloud Run, secrets are mounted as environment variables
+ */
+
+export const config = {
+  // Server
+  port: parseInt(process.env.PORT || '8080', 10),
+  nodeEnv: process.env.NODE_ENV || 'development',
+
+  // OpenAI
+  openaiApiKey: process.env.OPENAI_API_KEY || '',
+
+  // Firebase (optional - uses default credentials in Cloud Run)
+  firebaseServiceAccount: process.env.FIREBASE_SERVICE_ACCOUNT,
+
+  // Realtime API settings
+  realtimeModel: 'gpt-4o-realtime-preview-2024-12-17',
+  realtimeVoice: 'alloy', // Options: alloy, echo, fable, onyx, nova, shimmer
+
+  // Standard mode settings
+  whisperModel: 'whisper-1',
+  chatModel: 'gpt-4o',
+  ttsModel: 'tts-1',
+  ttsVoice: 'nova',
+
+  // Session settings
+  maxSessionDurationMs: 15 * 60 * 1000, // 15 minutes
+  sessionTimeoutMs: 5 * 60 * 1000, // 5 minutes inactivity
+} as const;
+
+export const validateConfig = (): void => {
+  const required = ['openaiApiKey'];
+  const missing = required.filter(
+    (key) => !config[key as keyof typeof config]
+  );
+
+  if (missing.length > 0) {
+    throw new Error(`Missing required config: ${missing.join(', ')}`);
+  }
+};

@@ -1,144 +1,110 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { X, Phone, MessageCircle, TrendingUp, Heart, Sparkles, Brain, Clipboard, AlertCircle } from 'lucide-react';
+import React, { useState, useEffect, useCallback } from 'react';
+import { X, Phone, MessageCircle, TrendingUp, Heart, Sparkles, Brain, Clipboard, Mic, MicOff, Save } from 'lucide-react';
+import { useVoiceRelay } from '../../hooks/useVoiceRelay';
 
-// Note: Realtime API requires secure server-side implementation
-// The API key has been moved to Cloud Functions for security
+// Map theme IDs to session types for the relay
+const themeToSessionType = {
+  null: 'free',
+  goals: 'goal_setting',
+  feelings: 'emotional_processing',
+  gratitude: 'gratitude_practice',
+  reflection: 'evening_reflection',
+  guided: 'morning_checkin',
+};
 
-const RealtimeConversation = ({ entries, onClose, category }) => {
-  const [status, setStatus] = useState('disconnected');
-  const [transcript, setTranscript] = useState([]);
-  const [error, setError] = useState(null);
+const RealtimeConversation = ({ entries, onClose, category, onSaveEntry }) => {
   const [conversationTheme, setConversationTheme] = useState(null);
+  const [isRecording, setIsRecording] = useState(false);
+  const [showSavePrompt, setShowSavePrompt] = useState(false);
 
-  const wsRef = useRef(null);
-  const audioContextRef = useRef(null);
-  const mediaStreamRef = useRef(null);
+  const {
+    status,
+    transcript,
+    error,
+    sessionId,
+    mode,
+    connect,
+    disconnect,
+    startRecording,
+    endTurn,
+    endSession,
+    clearError,
+    clearTranscript,
+  } = useVoiceRelay();
 
-  // Build context from journal entries
-  const getJournalContext = useCallback(() => {
-    const recentEntries = entries.slice(0, 10)
-      .map(e => `[${e.createdAt.toLocaleDateString()}] ${e.title || 'Entry'}: ${e.text.substring(0, 200)}`)
-      .join('\n');
-    return recentEntries;
-  }, [entries]);
-
-  // Get theme-specific prompts
-  const getThemePrompt = useCallback(() => {
-    const themes = {
-      goals: "Focus on helping the user explore their goals, aspirations, and what steps they might take. Ask about progress and obstacles.",
-      feelings: "Focus on emotional exploration. Help them identify and process their feelings. Be gentle and validating.",
-      gratitude: "Guide a gratitude practice. Help them notice positive things in their life, big and small.",
-      reflection: "Help them reflect on recent experiences, what they learned, and how they're growing.",
-      guided: `Guide a structured journaling session following these steps:
-1. Start by asking how they're feeling right now (1-10 scale and why)
-2. Ask about the highlight of their day or week
-3. Ask about any challenges they faced
-4. Ask what they learned or are grateful for
-5. End by asking about their intention for tomorrow
-
-Move through each step naturally, spending time on areas they want to explore deeper. Summarize key points at the end.`
-    };
-    return conversationTheme ? themes[conversationTheme] : "Have an open, supportive conversation about whatever is on their mind.";
-  }, [conversationTheme]);
-
-  // Proactive conversation starters based on journal patterns
-  const getConversationStarter = useCallback(() => {
-    if (conversationTheme === 'guided') {
-      return "Welcome to your guided journaling session! Let's take a few minutes to check in with yourself. To start, on a scale of 1 to 10, how are you feeling right now? And what's contributing to that number?";
-    }
-
-    if (conversationTheme === 'gratitude') {
-      return "Hi! Let's practice some gratitude together. What's something that made you smile recently, even if it was small?";
-    }
-
-    if (conversationTheme === 'goals') {
-      return "Hey! I'd love to hear about your goals. What's something you're working towards right now?";
-    }
-
-    if (conversationTheme === 'feelings') {
-      return "Hi there. I'm here to listen. How are you feeling in this moment?";
-    }
-
-    if (!entries.length) return "Hi! I'm here to chat with you. What's on your mind today?";
-
-    const recentMoods = entries.slice(0, 5).map(e => e.mood).filter(Boolean);
-    const avgMood = recentMoods.length ? recentMoods.reduce((a, b) => a + b, 0) / recentMoods.length : 3;
-
-    if (avgMood < 2.5) {
-      return "Hey, I've noticed you've been going through a tough time lately. Would you like to talk about what's been weighing on you?";
-    } else if (avgMood > 3.5) {
-      return "Hi! It seems like things have been going well for you lately. What's been bringing you joy?";
-    }
-
-    const starters = [
-      "Hey! How are you feeling right now?",
-      "Hi there! What's on your mind today?",
-      "Hello! I'd love to hear about your day.",
-      "Hey! Anything you'd like to reflect on together?"
-    ];
-    return starters[Math.floor(Math.random() * starters.length)];
-  }, [entries, conversationTheme]);
-
-  // Initialize audio context
-  const initAudio = async () => {
-    try {
-      audioContextRef.current = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 24000 });
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: { sampleRate: 24000, channelCount: 1 } });
-      mediaStreamRef.current = stream;
-      return true;
-    } catch (err) {
-      console.error('Audio init error:', err);
-      setError('Microphone access required for voice conversation');
-      return false;
-    }
-  };
-
-  // Play audio from base64
-  const playAudio = async (base64Audio) => {
-    if (!audioContextRef.current) return;
-
-    const binaryString = atob(base64Audio);
-    const bytes = new Uint8Array(binaryString.length);
-    for (let i = 0; i < binaryString.length; i++) {
-      bytes[i] = binaryString.charCodeAt(i);
-    }
-
-    try {
-      const audioBuffer = await audioContextRef.current.decodeAudioData(bytes.buffer);
-      const source = audioContextRef.current.createBufferSource();
-      source.buffer = audioBuffer;
-      source.connect(audioContextRef.current.destination);
-      source.start();
-    } catch (err) {
-      console.error('Audio playback error:', err);
-    }
-  };
-
-  // Start realtime conversation
-  // NOTE: Realtime voice API requires secure server-side relay for API key security
-  // This feature has been temporarily disabled pending secure WebSocket relay implementation
-  const startConversation = async () => {
-    setError('Voice conversations temporarily unavailable. A secure server relay is required for API key protection. Please use text chat instead.');
-  };
+  // Start conversation
+  const startConversation = useCallback(async () => {
+    clearError();
+    clearTranscript();
+    const sessionType = themeToSessionType[conversationTheme] || 'free';
+    // Use realtime for free/emotional, standard for structured guided sessions
+    const requestedMode = ['free', 'emotional_processing', 'stress_release'].includes(sessionType)
+      ? 'realtime'
+      : 'standard';
+    await connect(sessionType, requestedMode);
+  }, [conversationTheme, connect, clearError, clearTranscript]);
 
   // End conversation
-  const endConversation = () => {
-    if (wsRef.current) {
-      wsRef.current.close();
-      wsRef.current = null;
+  const handleEndConversation = useCallback(() => {
+    if (transcript.length > 0) {
+      setShowSavePrompt(true);
+    } else {
+      disconnect();
+      onClose();
     }
-    if (mediaStreamRef.current) {
-      mediaStreamRef.current.getTracks().forEach(track => track.stop());
+  }, [transcript, disconnect, onClose]);
+
+  // Handle save decision
+  const handleSaveDecision = useCallback(async (save) => {
+    const finalTranscript = await endSession(save);
+
+    if (save && onSaveEntry && finalTranscript) {
+      // Format transcript for entry
+      const entryText = transcript
+        .filter((msg) => msg.role === 'user')
+        .map((msg) => msg.text)
+        .join('\n\n');
+
+      onSaveEntry({
+        text: entryText,
+        source: 'voice',
+        voiceMetadata: {
+          fullTranscript: finalTranscript,
+          sessionType: themeToSessionType[conversationTheme] || 'free',
+          mode,
+        },
+      });
     }
-    if (audioContextRef.current) {
-      audioContextRef.current.close();
+
+    setShowSavePrompt(false);
+    onClose();
+  }, [endSession, onSaveEntry, transcript, conversationTheme, mode, onClose]);
+
+  // Toggle recording
+  const toggleRecording = useCallback(() => {
+    if (isRecording) {
+      setIsRecording(false);
+      endTurn();
+    } else {
+      setIsRecording(true);
+      startRecording();
     }
-    setStatus('disconnected');
-  };
+  }, [isRecording, startRecording, endTurn]);
+
+  // Auto-stop recording when status changes to speaking
+  useEffect(() => {
+    if (status === 'speaking' && isRecording) {
+      setIsRecording(false);
+    }
+  }, [status, isRecording]);
 
   // Cleanup on unmount
   useEffect(() => {
-    return () => endConversation();
+    return () => {
+      if (status !== 'disconnected') {
+        disconnect();
+      }
+    };
   }, []);
 
   const statusColors = {
@@ -146,15 +112,15 @@ Move through each step naturally, spending time on areas they want to explore de
     connecting: 'bg-yellow-400 animate-pulse',
     connected: 'bg-green-400',
     speaking: 'bg-indigo-500 animate-pulse',
-    listening: 'bg-green-500 animate-pulse'
+    listening: 'bg-green-500 animate-pulse',
   };
 
   const statusLabels = {
     disconnected: 'Ready to start',
     connecting: 'Connecting...',
     connected: 'Connected',
-    speaking: 'Speaking...',
-    listening: 'Listening...'
+    speaking: 'AI is speaking...',
+    listening: 'Listening...',
   };
 
   return (
@@ -164,16 +130,24 @@ Move through each step naturally, spending time on areas they want to explore de
         <div className="flex items-center gap-3">
           <div className={`w-3 h-3 rounded-full ${statusColors[status]}`} />
           <span className="text-white/80 text-sm">{statusLabels[status]}</span>
+          {mode && (
+            <span className="text-white/40 text-xs px-2 py-0.5 bg-white/10 rounded">
+              {mode === 'realtime' ? 'Interactive' : 'Guided'}
+            </span>
+          )}
         </div>
-        <button onClick={() => { endConversation(); onClose(); }} className="text-white/60 hover:text-white p-2">
+        <button
+          onClick={handleEndConversation}
+          className="text-white/60 hover:text-white p-2"
+        >
           <X size={24} />
         </button>
       </div>
 
-      {/* Theme selector */}
+      {/* Theme selector (only when disconnected) */}
       {status === 'disconnected' && (
         <div className="px-6 mb-4">
-          <p className="text-white/60 text-sm mb-3">Choose a conversation focus (optional):</p>
+          <p className="text-white/60 text-sm mb-3">Choose a conversation focus:</p>
           <div className="flex flex-wrap gap-2">
             {[
               { id: null, label: 'Open chat', icon: MessageCircle },
@@ -181,8 +155,8 @@ Move through each step naturally, spending time on areas they want to explore de
               { id: 'feelings', label: 'Feelings', icon: Heart },
               { id: 'gratitude', label: 'Gratitude', icon: Sparkles },
               { id: 'reflection', label: 'Reflection', icon: Brain },
-              { id: 'guided', label: 'Guided Session', icon: Clipboard }
-            ].map(theme => (
+              { id: 'guided', label: 'Guided Session', icon: Clipboard },
+            ].map((theme) => (
               <button
                 key={theme.id || 'open'}
                 onClick={() => setConversationTheme(theme.id)}
@@ -203,12 +177,17 @@ Move through each step naturally, spending time on areas they want to explore de
       {/* Conversation display */}
       <div className="flex-1 overflow-y-auto px-6 py-4">
         {transcript.map((msg, i) => (
-          <div key={i} className={`mb-4 ${msg.role === 'user' ? 'text-right' : 'text-left'}`}>
-            <div className={`inline-block max-w-[85%] px-4 py-3 rounded-2xl ${
-              msg.role === 'user'
-                ? 'bg-white/20 text-white rounded-br-none'
-                : 'bg-white/10 text-white/90 rounded-bl-none'
-            }`}>
+          <div
+            key={i}
+            className={`mb-4 ${msg.role === 'user' ? 'text-right' : 'text-left'}`}
+          >
+            <div
+              className={`inline-block max-w-[85%] px-4 py-3 rounded-2xl ${
+                msg.role === 'user'
+                  ? 'bg-white/20 text-white rounded-br-none'
+                  : 'bg-white/10 text-white/90 rounded-bl-none'
+              }`}
+            >
               <p className="text-sm">{msg.text}</p>
             </div>
           </div>
@@ -232,28 +211,102 @@ Move through each step naturally, spending time on areas they want to explore de
       {error && (
         <div className="mx-6 mb-4 p-3 bg-red-500/20 border border-red-400/30 rounded-lg">
           <p className="text-red-200 text-sm">{error}</p>
+          <button
+            onClick={clearError}
+            className="text-red-300 text-xs mt-1 underline"
+          >
+            Dismiss
+          </button>
         </div>
       )}
 
-      {/* Main control */}
+      {/* Save prompt modal */}
+      {showSavePrompt && (
+        <div className="absolute inset-0 bg-black/50 flex items-center justify-center p-6">
+          <div className="bg-gray-800 rounded-2xl p-6 max-w-sm w-full">
+            <h3 className="text-white text-lg font-medium mb-2">Save as Entry?</h3>
+            <p className="text-white/60 text-sm mb-4">
+              Would you like to save this conversation as a journal entry?
+            </p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => handleSaveDecision(false)}
+                className="flex-1 py-2 px-4 rounded-lg bg-gray-700 text-white/80 hover:bg-gray-600"
+              >
+                Discard
+              </button>
+              <button
+                onClick={() => handleSaveDecision(true)}
+                className="flex-1 py-2 px-4 rounded-lg bg-indigo-600 text-white hover:bg-indigo-500 flex items-center justify-center gap-2"
+              >
+                <Save size={16} />
+                Save
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Main controls */}
       <div className="p-6 pb-[max(2rem,env(safe-area-inset-bottom))] flex flex-col items-center">
         {status === 'disconnected' ? (
+          // Start button
           <button
             onClick={startConversation}
             className="w-24 h-24 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 shadow-lg shadow-purple-500/30 flex items-center justify-center hover:scale-105 transition-transform"
           >
             <Phone size={36} className="text-white" />
           </button>
+        ) : status === 'connecting' ? (
+          // Connecting indicator
+          <div className="w-24 h-24 rounded-full bg-gradient-to-br from-yellow-500 to-orange-600 shadow-lg flex items-center justify-center animate-pulse">
+            <div className="w-8 h-8 border-4 border-white/30 border-t-white rounded-full animate-spin" />
+          </div>
         ) : (
-          <button
-            onClick={endConversation}
-            className="w-24 h-24 rounded-full bg-red-500 shadow-lg shadow-red-500/30 flex items-center justify-center hover:scale-105 transition-transform animate-pulse"
-          >
-            <Phone size={36} className="text-white rotate-[135deg]" />
-          </button>
+          // Recording controls
+          <div className="flex items-center gap-6">
+            {/* End call button */}
+            <button
+              onClick={handleEndConversation}
+              className="w-16 h-16 rounded-full bg-red-500 shadow-lg shadow-red-500/30 flex items-center justify-center hover:scale-105 transition-transform"
+            >
+              <Phone size={24} className="text-white rotate-[135deg]" />
+            </button>
+
+            {/* Push-to-talk button */}
+            <button
+              onMouseDown={toggleRecording}
+              onMouseUp={() => isRecording && toggleRecording()}
+              onTouchStart={toggleRecording}
+              onTouchEnd={() => isRecording && toggleRecording()}
+              disabled={status === 'speaking'}
+              className={`w-24 h-24 rounded-full shadow-lg flex items-center justify-center transition-all ${
+                isRecording
+                  ? 'bg-green-500 shadow-green-500/30 scale-110'
+                  : status === 'speaking'
+                  ? 'bg-gray-500 opacity-50 cursor-not-allowed'
+                  : 'bg-gradient-to-br from-indigo-500 to-purple-600 shadow-purple-500/30 hover:scale-105'
+              }`}
+            >
+              {isRecording ? (
+                <MicOff size={36} className="text-white animate-pulse" />
+              ) : (
+                <Mic size={36} className="text-white" />
+              )}
+            </button>
+          </div>
         )}
+
         <p className="text-white/60 text-sm mt-4">
-          {status === 'disconnected' ? 'Tap to start talking' : 'Tap to end conversation'}
+          {status === 'disconnected'
+            ? 'Tap to start talking'
+            : status === 'connecting'
+            ? 'Connecting to voice service...'
+            : status === 'speaking'
+            ? 'Wait for response...'
+            : isRecording
+            ? 'Release to send'
+            : 'Hold to speak'}
         </p>
       </div>
     </div>
