@@ -1421,7 +1421,19 @@ export default function App() {
       </AnimatePresence>
 
       {view === 'chat' && <Chat entries={visible} onClose={() => setView('feed')} category={cat} />}
-      {view === 'realtime' && <RealtimeConversation entries={visible} onClose={() => setView('feed')} category={cat} />}
+      {view === 'realtime' && (
+        <RealtimeConversation
+          entries={visible}
+          onClose={() => setView('feed')}
+          category={cat}
+          onSaveEntry={(data) => {
+            // Save the voice transcript as a journal entry
+            if (data?.text) {
+              saveEntry(data.text);
+            }
+          }}
+        />
+      )}
     </div>
   );
 }

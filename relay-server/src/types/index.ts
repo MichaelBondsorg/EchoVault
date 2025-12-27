@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import type { GuidedSessionState } from '../sessions/schema.js';
 
 // Processing modes
 export type ProcessingMode = 'realtime' | 'standard';
@@ -91,13 +92,32 @@ export interface UsageLimitReached {
   suggestion: string;
 }
 
+export interface GuidedPromptMessage {
+  type: 'guided_prompt';
+  promptId?: string;
+  prompt: string;
+  isOpening: boolean;
+  isClosing: boolean;
+  promptIndex: number;
+  totalPrompts: number;
+}
+
+export interface GuidedSessionComplete {
+  type: 'guided_session_complete';
+  sessionType: string;
+  responses: Record<string, string>;
+  summary: string;
+}
+
 export type RelayMessage =
   | TranscriptDelta
   | AudioResponse
   | SessionSaved
   | SessionError
   | SessionReady
-  | UsageLimitReached;
+  | UsageLimitReached
+  | GuidedPromptMessage
+  | GuidedSessionComplete;
 
 // Session state
 export interface SessionState {
@@ -111,6 +131,8 @@ export interface SessionState {
   lastActivity: number;
   audioBuffer: Buffer[];
   context?: ConversationContext;
+  // Guided session state (when in guided mode)
+  guidedState?: GuidedSessionState;
 }
 
 // Conversation context for RAG

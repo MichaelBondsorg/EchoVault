@@ -13,6 +13,8 @@ export const useVoiceRelay = () => {
   const [error, setError] = useState(null);
   const [sessionId, setSessionId] = useState(null);
   const [mode, setMode] = useState(null);
+  const [guidedState, setGuidedState] = useState(null); // Track guided session progress
+  const [guidedComplete, setGuidedComplete] = useState(null); // Completed session data
 
   const wsRef = useRef(null);
   const audioContextRef = useRef(null);
@@ -197,6 +199,27 @@ export const useVoiceRelay = () => {
         setError(message.suggestion);
         break;
 
+      case 'guided_prompt':
+        // Update guided session state
+        setGuidedState({
+          promptId: message.promptId,
+          prompt: message.prompt,
+          isOpening: message.isOpening,
+          isClosing: message.isClosing,
+          promptIndex: message.promptIndex,
+          totalPrompts: message.totalPrompts,
+        });
+        break;
+
+      case 'guided_session_complete':
+        // Mark guided session as complete with data for saving
+        setGuidedComplete({
+          sessionType: message.sessionType,
+          responses: message.responses,
+          summary: message.summary,
+        });
+        break;
+
       case 'error':
         setError(message.message);
         if (!message.recoverable) {
@@ -341,6 +364,8 @@ export const useVoiceRelay = () => {
     setStatus('disconnected');
     setSessionId(null);
     setMode(null);
+    setGuidedState(null);
+    setGuidedComplete(null);
     localTranscriptRef.current = '';
     sequenceIdRef.current = 0;
   }, []);
@@ -389,6 +414,8 @@ export const useVoiceRelay = () => {
     error,
     sessionId,
     mode,
+    guidedState,
+    guidedComplete,
     connect,
     disconnect,
     startRecording,
@@ -396,6 +423,7 @@ export const useVoiceRelay = () => {
     endSession,
     clearError: () => setError(null),
     clearTranscript: () => setTranscript([]),
+    clearGuidedComplete: () => setGuidedComplete(null),
   };
 };
 

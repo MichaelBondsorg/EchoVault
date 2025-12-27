@@ -30,6 +30,13 @@ import {
   closeStandardSession,
   hasStandardSession,
 } from './relay/standardPipeline.js';
+import {
+  initializeGuidedSession,
+  processGuidedTurn,
+  closeGuidedSession,
+  hasGuidedSession,
+  getGuidedSessionData,
+} from './relay/guidedPipeline.js';
 import { ClientMessageSchema } from './types/index.js';
 import type { GuidedSessionType } from './types/index.js';
 
@@ -118,6 +125,9 @@ wss.on('connection', async (ws, req) => {
       }
       if (hasStandardSession(session.sessionId)) {
         closeStandardSession(session.sessionId);
+      }
+      if (hasGuidedSession(session.sessionId)) {
+        closeGuidedSession(session.sessionId);
       }
       await endSession(session.sessionId);
     }
@@ -232,11 +242,23 @@ async function handleStartSession(
     // Initialize appropriate pipeline
     if (session.mode === 'realtime') {
       await createRealtimeConnection(ws, session, context);
+    } else if (typedSessionType !== 'free') {
+      // Use guided pipeline for structured sessions
+      const success = await initializeGuidedSession(
+        ws,
+        session,
+        context,
+        typedSessionType as GuidedSessionType
+      );
+      if (!success) {
+        // Fall back to standard if guided session not available
+        await initializeStandardSession(ws, session, context);
+      }
     } else {
       await initializeStandardSession(ws, session, context);
     }
 
-    console.log(`Session ${session.sessionId} started for user ${userId} in ${session.mode} mode`);
+    console.log(`Session ${session.sessionId} started for user ${userId} in ${session.mode} mode (${typedSessionType})`);
   } catch (error) {
     console.error('Failed to start session:', error);
     sendToClient(ws, {
@@ -297,6 +319,9 @@ async function handleEndTurn(ws: WebSocket, userId: string): Promise<void> {
   if (session.mode === 'realtime') {
     // Commit audio buffer to OpenAI Realtime
     commitRealtimeAudio(session.sessionId);
+  } else if (hasGuidedSession(session.sessionId)) {
+    // Process through guided pipeline
+    await processGuidedTurn(session.sessionId);
   } else {
     // Process buffered audio through standard pipeline
     await processStandardTurn(session.sessionId);
@@ -322,6 +347,11 @@ async function handleEndSession(
     return;
   }
 
+  // Get guided session data before cleanup
+  const guidedData = hasGuidedSession(session.sessionId)
+    ? getGuidedSessionData(session.sessionId)
+    : null;
+
   // Close OpenAI connection
   if (hasRealtimeSession(session.sessionId)) {
     closeRealtimeConnection(session.sessionId);
@@ -329,11 +359,24 @@ async function handleEndSession(
   if (hasStandardSession(session.sessionId)) {
     closeStandardSession(session.sessionId);
   }
+  if (hasGuidedSession(session.sessionId)) {
+    closeGuidedSession(session.sessionId);
+  }
 
   // End session and get stats
   const result = await endSession(session.sessionId);
 
   if (result && saveOptions?.save) {
+    // For guided sessions, send the structured data
+    if (guidedData) {
+      sendToClient(ws, {
+        type: 'guided_session_complete',
+        sessionType: guidedData.sessionType,
+        responses: guidedData.responses,
+        summary: guidedData.entryText,
+      });
+    }
+
     // TODO: Save transcript as entry via Cloud Function
     // For now, send success response
     sendToClient(ws, {
