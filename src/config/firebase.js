@@ -28,6 +28,7 @@ export const functions = getFunctions(app);
 export const analyzeJournalEntryFn = httpsCallable(functions, 'analyzeJournalEntry', { timeout: 120000 }); // 2 min
 export const generateEmbeddingFn = httpsCallable(functions, 'generateEmbedding', { timeout: 60000 }); // 1 min
 export const transcribeAudioFn = httpsCallable(functions, 'transcribeAudio', { timeout: 540000 }); // 9 min - matches server
+export const transcribeWithToneFn = httpsCallable(functions, 'transcribeWithTone', { timeout: 540000 }); // 9 min - transcription + voice tone
 export const askJournalAIFn = httpsCallable(functions, 'askJournalAI', { timeout: 120000 }); // 2 min
 export const executePromptFn = httpsCallable(functions, 'executePrompt', { timeout: 120000 }); // 2 min
 

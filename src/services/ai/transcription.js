@@ -1,4 +1,4 @@
-import { transcribeAudioFn } from '../../config';
+import { transcribeAudioFn, transcribeWithToneFn } from '../../config';
 
 /**
  * Sleep helper for retry backoff
@@ -92,5 +92,77 @@ export const transcribeAudio = async (base64, mimeType, maxRetries = 3) => {
 
   // All retries exhausted
   console.error('All transcription attempts failed:', lastError);
+  return 'API_EXCEPTION';
+};
+
+/**
+ * Transcribe audio with voice tone analysis using Cloud Function
+ * Combines Whisper transcription with Gemini voice tone analysis
+ * @param {string} base64 - Base64 encoded audio
+ * @param {string} mimeType - MIME type of the audio
+ * @param {number} maxRetries - Maximum number of retry attempts (default: 3)
+ * @returns {Promise<{transcript: string, toneAnalysis: object|null}|string>} - Result object or error code
+ */
+export const transcribeAudioWithTone = async (base64, mimeType, maxRetries = 3) => {
+  let lastError = null;
+
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      if (attempt > 0) {
+        const backoffMs = Math.pow(2, attempt) * 1000;
+        console.log(`Transcription+Tone retry attempt ${attempt}/${maxRetries} after ${backoffMs}ms backoff`);
+        await sleep(backoffMs);
+      }
+
+      console.log('Transcription+Tone request (via Cloud Function):', {
+        mimeType,
+        attempt: attempt + 1,
+        maxRetries: maxRetries + 1
+      });
+
+      const result = await transcribeWithToneFn({ base64, mimeType });
+
+      // Check for error response
+      if (result.data?.error) {
+        const errorCode = result.data.error;
+        console.error('Transcription+Tone error:', errorCode);
+
+        // Don't retry non-retryable errors
+        if (errorCode === 'API_RATE_LIMIT' || errorCode === 'API_AUTH_ERROR' || errorCode === 'API_BAD_REQUEST') {
+          return errorCode;
+        }
+
+        lastError = new Error(errorCode);
+        continue;
+      }
+
+      const { transcript, toneAnalysis } = result.data || {};
+
+      if (!transcript) {
+        console.error('Transcription returned no content');
+        lastError = new Error('API_NO_CONTENT');
+        continue;
+      }
+
+      console.log('Transcription+Tone result:', {
+        transcriptLength: transcript.length,
+        hasToneAnalysis: !!toneAnalysis,
+        toneEnergy: toneAnalysis?.energy,
+        toneMood: toneAnalysis?.moodScore?.toFixed(2)
+      });
+
+      return { transcript, toneAnalysis };
+    } catch (e) {
+      console.error(`Transcription+Tone API exception (attempt ${attempt + 1}):`, e);
+      lastError = e;
+
+      if (!isRetryableError(e)) {
+        console.log('Non-retryable error, stopping retry attempts');
+        break;
+      }
+    }
+  }
+
+  console.error('All transcription+tone attempts failed:', lastError);
   return 'API_EXCEPTION';
 };

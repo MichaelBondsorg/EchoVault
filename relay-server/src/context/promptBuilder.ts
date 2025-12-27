@@ -129,7 +129,7 @@ const getTimeOfDay = (): string => {
 };
 
 /**
- * Define the get_memory tool for OpenAI
+ * Define the get_memory tool for OpenAI Chat Completions API
  */
 export const getMemoryToolDefinition = () => ({
   type: 'function' as const,
@@ -157,5 +157,36 @@ export const getMemoryToolDefinition = () => ({
       },
       required: ['query'],
     },
+  },
+});
+
+/**
+ * Define the get_memory tool for OpenAI Realtime API
+ * Note: Realtime API uses a flattened format (name at top level, not nested under function)
+ */
+export const getMemoryToolDefinitionRealtime = () => ({
+  type: 'function' as const,
+  name: 'get_memory',
+  description:
+    'Retrieve relevant past journal entries when the user references something from their history. Use this when they mention past events, people, goals, or say things like "remember when" or "like last time".',
+  parameters: {
+    type: 'object',
+    properties: {
+      query: {
+        type: 'string',
+        description: 'What to search for in past entries',
+      },
+      date_hint: {
+        type: 'string',
+        description:
+          'Approximate date reference if mentioned (e.g., "last Tuesday", "two weeks ago")',
+      },
+      entity_type: {
+        type: 'string',
+        enum: ['person', 'goal', 'situation', 'event', 'place', 'any'],
+        description: 'Type of entity to search for',
+      },
+    },
+    required: ['query'],
   },
 });

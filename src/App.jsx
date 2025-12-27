@@ -27,7 +27,7 @@ import { safeDate, formatDateForInput, getTodayForInput, parseDateInput, getDate
 import { sanitizeEntry } from './utils/entries';
 
 // Services
-import { generateEmbedding, findRelevantMemories, transcribeAudio } from './services/ai';
+import { generateEmbedding, findRelevantMemories, transcribeAudioWithTone } from './services/ai';
 import {
   classifyEntry, analyzeEntry, generateInsight, extractEnhancedContext
 } from './services/analysis';
@@ -569,7 +569,7 @@ export default function App() {
     }
   }, [pendingEntry]);
 
-  const doSaveEntry = async (textInput, safetyFlagged = false, safetyUserResponse = null, temporalContext = null) => {
+  const doSaveEntry = async (textInput, safetyFlagged = false, safetyUserResponse = null, temporalContext = null, voiceTone = null) => {
     if (!user) return;
 
     let finalTex = textInput;
@@ -589,6 +589,8 @@ export default function App() {
       hasTemporalContext: !!temporalContext,
       temporalDetected: temporalContext?.detected,
       effectiveDate: effectiveDate.toDateString(),
+      hasVoiceTone: !!voiceTone,
+      voiceMood: voiceTone?.moodScore?.toFixed(2),
       note: 'effectiveDate is always current date now - signals handle temporal attribution'
     });
 
@@ -641,6 +643,22 @@ export default function App() {
         // Signal extraction version - increments on each edit for race condition handling
         signalExtractionVersion: 1
       };
+
+      // Store voice tone analysis if available (from voice recording)
+      if (voiceTone) {
+        entryData.voiceTone = {
+          moodScore: voiceTone.moodScore,
+          energy: voiceTone.energy,
+          emotions: voiceTone.emotions,
+          confidence: voiceTone.confidence,
+          summary: voiceTone.summary,
+          analyzedAt: Timestamp.now()
+        };
+        // Also set initial analysis mood from voice tone if confidence is high enough
+        if (voiceTone.confidence >= 0.6) {
+          entryData.voiceMoodScore = voiceTone.moodScore;
+        }
+      }
 
       // Store temporal context if detected (past reference)
       if (temporalContext?.detected && temporalContext?.reference) {
@@ -830,16 +848,16 @@ export default function App() {
     }
   };
 
-  const saveEntry = async (textInput) => {
+  const saveEntry = async (textInput, voiceTone = null) => {
     if (!user) return;
     setProcessing(true);
-    console.log('[SaveEntry] Starting save process, text length:', textInput.length);
+    console.log('[SaveEntry] Starting save process, text length:', textInput.length, 'hasVoiceTone:', !!voiceTone);
 
     // Check for crisis keywords first (safety priority)
     const hasCrisis = checkCrisisKeywords(textInput);
     if (hasCrisis) {
       console.log('[SaveEntry] Crisis keywords detected, showing modal');
-      setPendingEntry({ text: textInput, safetyFlagged: true });
+      setPendingEntry({ text: textInput, safetyFlagged: true, voiceTone });
       setCrisisModal(true);
       setProcessing(false);
       return;
@@ -876,10 +894,10 @@ export default function App() {
       }
 
       // Always save with current date - signals handle temporal attribution
-      await doSaveEntry(textInput, false, null, temporal.detected ? temporal : null);
+      await doSaveEntry(textInput, false, null, temporal.detected ? temporal : null, voiceTone);
     } catch (e) {
       console.error('Temporal detection failed, saving normally:', e);
-      await doSaveEntry(textInput);
+      await doSaveEntry(textInput, false, null, null, voiceTone);
     }
   };
 
@@ -980,44 +998,53 @@ export default function App() {
     }
 
     try {
-      console.log('[Transcription] Starting transcription API call...');
+      console.log('[Transcription] Starting transcription+tone API call...');
       const startTime = Date.now();
-      const transcript = await transcribeAudio(base64, mime);
+      const result = await transcribeAudioWithTone(base64, mime);
       console.log('[Transcription] API call completed in', Date.now() - startTime, 'ms');
-      console.log('[Transcription] Result:', transcript?.substring?.(0, 100) || transcript);
+
+      // Handle error codes (string responses)
+      if (typeof result === 'string') {
+        if (result === 'API_RATE_LIMIT') {
+          alert("Too many requests - please wait a moment and try again");
+          setProcessing(false);
+          releaseWakeLock();
+          return;
+        }
+
+        if (result === 'API_AUTH_ERROR') {
+          alert("API authentication error - please check settings");
+          setProcessing(false);
+          releaseWakeLock();
+          return;
+        }
+
+        if (result === 'API_BAD_REQUEST') {
+          alert("Audio format not supported - please try recording again");
+          setProcessing(false);
+          releaseWakeLock();
+          try { localStorage.removeItem(audioBackupKey); } catch (e) {}
+          return;
+        }
+
+        if (result.startsWith('API_')) {
+          alert("Transcription failed after multiple attempts. Please check your network connection and try again. Your recording has been saved locally.");
+          setProcessing(false);
+          releaseWakeLock();
+          return;
+        }
+      }
+
+      const { transcript, toneAnalysis } = result;
+      console.log('[Transcription] Result:', {
+        transcriptPreview: transcript?.substring?.(0, 100),
+        hasToneAnalysis: !!toneAnalysis,
+        toneEnergy: toneAnalysis?.energy,
+        toneMood: toneAnalysis?.moodScore?.toFixed(2)
+      });
 
       if (!transcript) {
         alert("Transcription failed - please try again. Your recording has been saved locally.");
-        setProcessing(false);
-        releaseWakeLock();
-        return;
-      }
-
-      if (transcript === 'API_RATE_LIMIT') {
-        alert("Too many requests - please wait a moment and try again");
-        setProcessing(false);
-        releaseWakeLock();
-        return;
-      }
-
-      if (transcript === 'API_AUTH_ERROR') {
-        alert("API authentication error - please check settings");
-        setProcessing(false);
-        releaseWakeLock();
-        return;
-      }
-
-      if (transcript === 'API_BAD_REQUEST') {
-        alert("Audio format not supported - please try recording again");
-        setProcessing(false);
-        releaseWakeLock();
-        // Clear backup since audio format is invalid
-        try { localStorage.removeItem(audioBackupKey); } catch (e) {}
-        return;
-      }
-
-      if (transcript.startsWith('API_')) {
-        alert("Transcription failed after multiple attempts. Please check your network connection and try again. Your recording has been saved locally.");
         setProcessing(false);
         releaseWakeLock();
         return;
@@ -1027,7 +1054,6 @@ export default function App() {
         alert("No speech detected - please try speaking closer to the microphone");
         setProcessing(false);
         releaseWakeLock();
-        // Clear backup since no valid speech
         try { localStorage.removeItem(audioBackupKey); } catch (e) {}
         return;
       }
@@ -1036,8 +1062,9 @@ export default function App() {
       console.log('[Transcription] Success! Clearing backup and saving entry...');
       try { localStorage.removeItem(audioBackupKey); } catch (e) {}
 
-      console.log('[Transcription] Calling saveEntry with transcript length:', transcript.length);
-      await saveEntry(transcript);
+      // Pass voice tone analysis to saveEntry
+      console.log('[Transcription] Calling saveEntry with transcript length:', transcript.length, 'voiceTone:', !!toneAnalysis);
+      await saveEntry(transcript, toneAnalysis);
       console.log('[Transcription] saveEntry completed');
     } catch (error) {
       console.error('[Transcription] handleAudioWrapper error:', error);

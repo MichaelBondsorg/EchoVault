@@ -840,6 +840,165 @@ INSTRUCTIONS:
   }
 );
 
+/**
+ * Cloud Function: Transcribe audio with voice tone analysis
+ * Combines Whisper transcription with Gemini voice tone analysis
+ */
+export const transcribeWithTone = onCall(
+  {
+    secrets: [openaiApiKey, geminiApiKey],
+    cors: true,
+    maxInstances: 5,
+    timeoutSeconds: 540,  // 9 minutes (max allowed)
+    memory: '1GiB'
+  },
+  async (request) => {
+    if (!request.auth) {
+      throw new HttpsError('unauthenticated', 'User must be authenticated');
+    }
+
+    const { base64, mimeType } = request.data;
+
+    if (!base64 || !mimeType) {
+      throw new HttpsError('invalid-argument', 'Audio data and mimeType are required');
+    }
+
+    const oaiKey = openaiApiKey.value();
+    const gemKey = geminiApiKey.value();
+
+    if (!oaiKey) {
+      throw new HttpsError('failed-precondition', 'OpenAI API key not configured');
+    }
+
+    try {
+      // Convert base64 to buffer
+      const buffer = Buffer.from(base64, 'base64');
+
+      // Determine file extension
+      const fileExt = mimeType.includes('webm') ? 'webm' : mimeType.includes('mp4') ? 'mp4' : 'wav';
+
+      // 1. Transcribe with Whisper
+      const boundary = '----FormBoundary' + Math.random().toString(36).slice(2);
+      const formDataParts = [
+        `--${boundary}\r\n`,
+        `Content-Disposition: form-data; name="file"; filename="audio.${fileExt}"\r\n`,
+        `Content-Type: ${mimeType}\r\n\r\n`,
+        buffer,
+        `\r\n--${boundary}\r\n`,
+        `Content-Disposition: form-data; name="model"\r\n\r\n`,
+        `whisper-1\r\n`,
+        `--${boundary}--\r\n`
+      ];
+
+      const formBody = Buffer.concat(
+        formDataParts.map(part => Buffer.isBuffer(part) ? part : Buffer.from(part))
+      );
+
+      const whisperRes = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${oaiKey}`,
+          'Content-Type': `multipart/form-data; boundary=${boundary}`
+        },
+        body: formBody
+      });
+
+      if (!whisperRes.ok) {
+        const errorData = await whisperRes.json().catch(() => ({}));
+        console.error('Whisper API error:', whisperRes.status, errorData);
+
+        if (whisperRes.status === 429) return { error: 'API_RATE_LIMIT' };
+        if (whisperRes.status === 401) return { error: 'API_AUTH_ERROR' };
+        if (whisperRes.status === 400) return { error: 'API_BAD_REQUEST' };
+        return { error: 'API_ERROR' };
+      }
+
+      const whisperData = await whisperRes.json();
+      let transcript = whisperData.text || null;
+
+      if (!transcript) {
+        return { error: 'API_NO_CONTENT' };
+      }
+
+      // Remove filler words
+      const fillerWords = /\b(um|uh|uhm|like|you know|so|well|actually|basically|literally)\b/gi;
+      transcript = transcript.replace(fillerWords, ' ').replace(/\s+/g, ' ').trim();
+
+      // 2. Analyze voice tone with Gemini (if API key is available and audio is long enough)
+      let toneAnalysis = null;
+
+      // Only analyze if audio is at least 2 seconds (rough estimate based on buffer size)
+      // webm/mp4 compressed audio is ~16kbps, so 2 seconds ≈ 4KB
+      const minAudioSize = 4000;
+
+      if (gemKey && buffer.length >= minAudioSize) {
+        try {
+          const tonePrompt = `Analyze the emotional tone and mood from this voice recording. Focus on:
+1. The speaker's emotional state based on voice characteristics (tone, pace, pitch variations, pauses)
+2. Energy level (low/medium/high)
+3. Specific emotions you can detect
+
+The transcript of what they said: "${transcript}"
+
+Respond in this exact JSON format only, no other text:
+{
+  "moodScore": <number 0-1, where 0 is very negative/distressed and 1 is very positive/joyful>,
+  "energy": "<low|medium|high>",
+  "emotions": ["<emotion1>", "<emotion2>"],
+  "confidence": <number 0-1 indicating analysis confidence>,
+  "summary": "<brief 1-sentence description of their emotional state>"
+}`;
+
+          const geminiRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key=${gemKey}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              contents: [{
+                parts: [
+                  { inline_data: { mime_type: mimeType, data: base64 } },
+                  { text: tonePrompt }
+                ]
+              }]
+            })
+          });
+
+          if (geminiRes.ok) {
+            const geminiData = await geminiRes.json();
+            const responseText = geminiData.candidates?.[0]?.content?.parts?.[0]?.text || '';
+
+            // Parse JSON from response
+            const jsonMatch = responseText.match(/\{[\s\S]*\}/);
+            if (jsonMatch) {
+              const parsed = JSON.parse(jsonMatch[0]);
+              toneAnalysis = {
+                moodScore: Math.max(0, Math.min(1, parsed.moodScore)),
+                energy: ['low', 'medium', 'high'].includes(parsed.energy) ? parsed.energy : 'medium',
+                emotions: Array.isArray(parsed.emotions) ? parsed.emotions.slice(0, 5) : [],
+                confidence: Math.max(0, Math.min(1, parsed.confidence)),
+                summary: parsed.summary || 'Unable to determine emotional state'
+              };
+              console.log('Voice tone analysis completed:', toneAnalysis.summary);
+            }
+          } else {
+            console.warn('Gemini API error for tone analysis:', geminiRes.status);
+          }
+        } catch (toneError) {
+          console.warn('Voice tone analysis failed (non-critical):', toneError.message);
+          // Continue without tone analysis - transcription is the critical part
+        }
+      }
+
+      return {
+        transcript,
+        toneAnalysis  // Will be null if Gemini unavailable or audio too short
+      };
+    } catch (error) {
+      console.error('transcribeWithTone error:', error);
+      return { error: 'API_EXCEPTION' };
+    }
+  }
+);
+
 // ============================================
 // PATTERN COMPUTATION FUNCTIONS
 // ============================================

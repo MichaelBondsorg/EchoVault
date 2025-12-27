@@ -1,8 +1,9 @@
 import WebSocket from 'ws';
 import { config } from '../config/index.js';
 import type { SessionState, ConversationContext } from '../types/index.js';
-import { buildSystemPrompt, getMemoryToolDefinition } from '../context/promptBuilder.js';
+import { buildSystemPrompt, getMemoryToolDefinitionRealtime } from '../context/promptBuilder.js';
 import { appendTranscript, sendToClient } from './sessionManager.js';
+import { searchEntries } from '../auth/firebase.js';
 
 const OPENAI_REALTIME_URL = 'wss://api.openai.com/v1/realtime';
 
@@ -65,7 +66,7 @@ export const createRealtimeConnection = async (
           prefix_padding_ms: 300,
           silence_duration_ms: 500,
         },
-        tools: [getMemoryToolDefinition()],
+        tools: [getMemoryToolDefinitionRealtime()],
         tool_choice: 'auto',
       },
     };
@@ -244,17 +245,38 @@ const handleToolCall = async (sessionId: string, event: any): Promise<void> => {
 };
 
 /**
- * Search memory (RAG) - placeholder implementation
+ * Search memory (RAG) - actual implementation using Firestore
  */
 const searchMemory = async (
   userId: string,
   args: { query: string; date_hint?: string; entity_type?: string }
 ): Promise<string> => {
-  // TODO: Implement actual hybrid RAG search via Firebase
-  // This would call a Cloud Function or directly query Firestore + vector DB
+  try {
+    console.log(`[RAG] Searching for "${args.query}" (date: ${args.date_hint || 'any'}, type: ${args.entity_type || 'any'})`);
 
-  // Placeholder response
-  return 'No relevant entries found for this query.';
+    const results = await searchEntries(userId, args.query, {
+      dateHint: args.date_hint,
+      entityType: args.entity_type as 'person' | 'goal' | 'situation' | 'event' | 'place' | 'any' | undefined,
+      limit: 3,
+    });
+
+    if (results.length === 0) {
+      return 'No relevant entries found for this query.';
+    }
+
+    // Format results for the AI to use
+    const formattedResults = results.map((r, i) => {
+      const moodStr = r.moodScore !== undefined ? ` (mood: ${(r.moodScore * 10).toFixed(1)}/10)` : '';
+      return `${i + 1}. ${r.effectiveDate}: "${r.title}"${moodStr}\n   ${r.excerpt}\n   [Found via: ${r.relevanceReason}]`;
+    }).join('\n\n');
+
+    console.log(`[RAG] Found ${results.length} results`);
+
+    return `Found ${results.length} relevant journal entries:\n\n${formattedResults}`;
+  } catch (error) {
+    console.error('[RAG] Search error:', error);
+    return 'Error searching memory. Please try a different query.';
+  }
 };
 
 /**
