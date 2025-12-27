@@ -109,6 +109,24 @@ export interface GuidedSessionComplete {
   summary: string;
 }
 
+// Voice tone analysis result
+export interface VoiceToneAnalysis {
+  moodScore: number; // 0-1 scale
+  energy: 'low' | 'medium' | 'high';
+  emotions: string[];
+  confidence: number;
+  summary: string;
+}
+
+// Session analysis results (sent before session_saved)
+export interface SessionAnalysis {
+  type: 'session_analysis';
+  voiceTone?: VoiceToneAnalysis;
+  suggestedTitle?: string;
+  suggestedTags?: string[];
+  transcript: string;
+}
+
 export type RelayMessage =
   | TranscriptDelta
   | AudioResponse
@@ -117,7 +135,8 @@ export type RelayMessage =
   | SessionReady
   | UsageLimitReached
   | GuidedPromptMessage
-  | GuidedSessionComplete;
+  | GuidedSessionComplete
+  | SessionAnalysis;
 
 // Session state
 export interface SessionState {
@@ -129,7 +148,8 @@ export interface SessionState {
   sequenceId: number;
   startTime: number;
   lastActivity: number;
-  audioBuffer: Buffer[];
+  audioBuffer: Buffer[]; // Current turn audio buffer
+  fullSessionAudio: Buffer[]; // All audio for tone analysis
   context?: ConversationContext;
   // Guided session state (when in guided mode)
   guidedState?: GuidedSessionState;

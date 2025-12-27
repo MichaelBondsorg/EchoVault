@@ -1,6 +1,10 @@
 import { morningCheckin } from './morning-checkin.js';
 import { eveningReflection } from './evening-reflection.js';
 import { gratitudePractice } from './gratitude-practice.js';
+import { goalSetting } from './goal-setting.js';
+import { emotionalProcessing } from './emotional-processing.js';
+import { stressRelease } from './stress-release.js';
+import { weeklyReview } from './weekly-review.js';
 import type { GuidedSessionDefinition, GuidedSessionType } from '../schema.js';
 
 /**
@@ -10,12 +14,12 @@ export const sessionDefinitions: Record<GuidedSessionType, GuidedSessionDefiniti
   morning_checkin: morningCheckin,
   evening_reflection: eveningReflection,
   gratitude_practice: gratitudePractice,
-  goal_setting: undefined, // TODO: Phase 3
-  emotional_processing: undefined, // TODO: Phase 3
-  stress_release: undefined, // TODO: Phase 3
-  weekly_review: undefined, // TODO: Phase 3
-  celebration: undefined, // TODO: Phase 3
-  situation_processing: undefined, // TODO: Phase 3
+  goal_setting: goalSetting,
+  emotional_processing: emotionalProcessing,
+  stress_release: stressRelease,
+  weekly_review: weeklyReview,
+  celebration: undefined, // TODO: Future
+  situation_processing: undefined, // TODO: Future
   custom: undefined,
 };
 
@@ -64,4 +68,12 @@ export const getSuggestedSessions = (
   });
 };
 
-export { morningCheckin, eveningReflection, gratitudePractice };
+export {
+  morningCheckin,
+  eveningReflection,
+  gratitudePractice,
+  goalSetting,
+  emotionalProcessing,
+  stressRelease,
+  weeklyReview,
+};

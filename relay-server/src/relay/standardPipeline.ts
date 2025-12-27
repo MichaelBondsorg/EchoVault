@@ -8,6 +8,7 @@ import {
   getMemoryToolDefinition,
 } from '../context/promptBuilder.js';
 import { appendTranscript, flushAudioBuffer, sendToClient } from './sessionManager.js';
+import { searchEntries } from '../auth/firebase.js';
 
 const openai = new OpenAI({
   apiKey: config.openaiApiKey,
@@ -339,14 +340,38 @@ const handleToolCallsAndRespond = async (
 };
 
 /**
- * Search memory (RAG) - placeholder
+ * Search memory (RAG) - actual implementation
  */
 const searchMemory = async (
   userId: string,
   args: { query: string; date_hint?: string; entity_type?: string }
 ): Promise<string> => {
-  // TODO: Implement actual hybrid RAG search
-  return 'No relevant entries found for this query.';
+  try {
+    console.log(`[RAG] Searching for "${args.query}" (date: ${args.date_hint || 'any'}, type: ${args.entity_type || 'any'})`);
+
+    const results = await searchEntries(userId, args.query, {
+      dateHint: args.date_hint,
+      entityType: args.entity_type as 'person' | 'goal' | 'situation' | 'event' | 'place' | 'any' | undefined,
+      limit: 3,
+    });
+
+    if (results.length === 0) {
+      return 'No relevant entries found for this query.';
+    }
+
+    // Format results for the AI to use
+    const formattedResults = results.map((r, i) => {
+      const moodStr = r.moodScore !== undefined ? ` (mood: ${(r.moodScore * 10).toFixed(1)}/10)` : '';
+      return `${i + 1}. ${r.effectiveDate}: "${r.title}"${moodStr}\n   ${r.excerpt}\n   [Found via: ${r.relevanceReason}]`;
+    }).join('\n\n');
+
+    console.log(`[RAG] Found ${results.length} results`);
+
+    return `Found ${results.length} relevant journal entries:\n\n${formattedResults}`;
+  } catch (error) {
+    console.error('[RAG] Search error:', error);
+    return 'Error searching memory. Please try a different query.';
+  }
 };
 
 /**

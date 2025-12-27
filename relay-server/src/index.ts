@@ -16,6 +16,7 @@ import {
   sendToClient,
   checkUsageLimits,
   getProcessingMode,
+  getFullSessionAudio,
 } from './relay/sessionManager.js';
 import {
   createRealtimeConnection,
@@ -37,6 +38,11 @@ import {
   hasGuidedSession,
   getGuidedSessionData,
 } from './relay/guidedPipeline.js';
+import {
+  analyzeVoiceTone,
+  generateTitleAndTags,
+  isVoiceToneAnalysisAvailable,
+} from './analysis/voiceTone.js';
 import { ClientMessageSchema } from './types/index.js';
 import type { GuidedSessionType } from './types/index.js';
 
@@ -352,6 +358,10 @@ async function handleEndSession(
     ? getGuidedSessionData(session.sessionId)
     : null;
 
+  // Get full session audio for tone analysis BEFORE cleanup
+  const fullAudio = getFullSessionAudio(session.sessionId);
+  const transcript = session.transcript;
+
   // Close OpenAI connection
   if (hasRealtimeSession(session.sessionId)) {
     closeRealtimeConnection(session.sessionId);
@@ -361,6 +371,38 @@ async function handleEndSession(
   }
   if (hasGuidedSession(session.sessionId)) {
     closeGuidedSession(session.sessionId);
+  }
+
+  // Run voice tone analysis and title generation in parallel (if saving)
+  let voiceToneResult = null;
+  let titleTagsResult = null;
+
+  if (saveOptions?.save && fullAudio) {
+    console.log(`[${session.sessionId}] Running voice analysis on ${fullAudio.length} bytes of audio`);
+
+    // Run analysis in parallel
+    const [toneResult, titleResult] = await Promise.all([
+      analyzeVoiceTone(fullAudio, transcript),
+      generateTitleAndTags(transcript, session.sessionType),
+    ]);
+
+    voiceToneResult = toneResult;
+    titleTagsResult = titleResult;
+
+    // Send session analysis results to client
+    sendToClient(ws, {
+      type: 'session_analysis',
+      voiceTone: voiceToneResult || undefined,
+      suggestedTitle: titleTagsResult?.title,
+      suggestedTags: titleTagsResult?.tags,
+      transcript,
+    });
+
+    console.log(`[${session.sessionId}] Voice analysis complete:`, {
+      mood: voiceToneResult?.moodScore,
+      emotions: voiceToneResult?.emotions,
+      title: titleTagsResult?.title,
+    });
   }
 
   // End session and get stats

@@ -15,6 +15,7 @@ export const useVoiceRelay = () => {
   const [mode, setMode] = useState(null);
   const [guidedState, setGuidedState] = useState(null); // Track guided session progress
   const [guidedComplete, setGuidedComplete] = useState(null); // Completed session data
+  const [sessionAnalysis, setSessionAnalysis] = useState(null); // Voice tone and title analysis
 
   const wsRef = useRef(null);
   const audioContextRef = useRef(null);
@@ -220,6 +221,16 @@ export const useVoiceRelay = () => {
         });
         break;
 
+      case 'session_analysis':
+        // Voice tone and title/tag analysis results
+        setSessionAnalysis({
+          voiceTone: message.voiceTone,
+          suggestedTitle: message.suggestedTitle,
+          suggestedTags: message.suggestedTags,
+          transcript: message.transcript,
+        });
+        break;
+
       case 'error':
         setError(message.message);
         if (!message.recoverable) {
@@ -366,6 +377,7 @@ export const useVoiceRelay = () => {
     setMode(null);
     setGuidedState(null);
     setGuidedComplete(null);
+    setSessionAnalysis(null);
     localTranscriptRef.current = '';
     sequenceIdRef.current = 0;
   }, []);
@@ -416,6 +428,7 @@ export const useVoiceRelay = () => {
     mode,
     guidedState,
     guidedComplete,
+    sessionAnalysis,
     connect,
     disconnect,
     startRecording,
@@ -424,6 +437,7 @@ export const useVoiceRelay = () => {
     clearError: () => setError(null),
     clearTranscript: () => setTranscript([]),
     clearGuidedComplete: () => setGuidedComplete(null),
+    clearSessionAnalysis: () => setSessionAnalysis(null),
   };
 };
 

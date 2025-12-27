@@ -278,4 +278,214 @@ export const getMoodTrajectory = async (
   };
 };
 
+/**
+ * Search entries by text content for RAG
+ * Returns entries matching the query with relevant excerpts
+ */
+export const searchEntries = async (
+  userId: string,
+  query: string,
+  options?: {
+    dateHint?: string;
+    entityType?: 'person' | 'goal' | 'situation' | 'event' | 'place' | 'any';
+    limit?: number;
+  }
+): Promise<Array<{
+  id: string;
+  effectiveDate: string;
+  title: string;
+  excerpt: string;
+  moodScore?: number;
+  relevanceReason: string;
+}>> => {
+  const entriesRef = firestore
+    .collection('artifacts')
+    .doc(APP_COLLECTION_ID)
+    .collection('users')
+    .doc(userId)
+    .collection('entries');
+
+  const limit = options?.limit || 5;
+
+  // Normalize query for matching
+  const queryLower = query.toLowerCase();
+  const queryWords = queryLower.split(/\s+/).filter(w => w.length > 2);
+
+  // Get entries to search through
+  // For now, search through recent entries (could be optimized with full-text index later)
+  let baseQuery = entriesRef.orderBy('createdAt', 'desc');
+
+  // If date hint provided, try to filter by date range
+  if (options?.dateHint) {
+    const dateRange = parseDateHint(options.dateHint);
+    if (dateRange) {
+      baseQuery = entriesRef
+        .where('effectiveDate', '>=', dateRange.start)
+        .where('effectiveDate', '<=', dateRange.end)
+        .orderBy('effectiveDate', 'desc');
+    }
+  }
+
+  const snapshot = await baseQuery.limit(50).get();
+
+  const results: Array<{
+    id: string;
+    effectiveDate: string;
+    title: string;
+    excerpt: string;
+    moodScore?: number;
+    relevanceReason: string;
+    score: number;
+  }> = [];
+
+  for (const doc of snapshot.docs) {
+    const data = doc.data();
+    const text = (data.text || '').toLowerCase();
+    const title = (data.title || data.analysis?.title || '').toLowerCase();
+    const tags = (data.tags || []).map((t: string) => t.toLowerCase());
+
+    // Calculate relevance score
+    let score = 0;
+    const reasons: string[] = [];
+
+    // Check title match
+    if (title.includes(queryLower)) {
+      score += 3;
+      reasons.push('title match');
+    }
+
+    // Check word matches in text
+    let matchedWords = 0;
+    for (const word of queryWords) {
+      if (text.includes(word)) {
+        matchedWords++;
+      }
+    }
+    if (matchedWords > 0) {
+      score += matchedWords;
+      reasons.push(`${matchedWords} keyword${matchedWords > 1 ? 's' : ''} in text`);
+    }
+
+    // Check entity type matches in tags
+    if (options?.entityType && options.entityType !== 'any') {
+      const prefix = `@${options.entityType}:`;
+      const hasEntityTag = tags.some((t: string) => t.startsWith(prefix) && t.includes(queryLower));
+      if (hasEntityTag) {
+        score += 2;
+        reasons.push(`${options.entityType} tag match`);
+      }
+    }
+
+    // Check for person mentions
+    if (queryWords.some(w => text.includes(`@person:${w}`) || tags.includes(`@person:${w}`))) {
+      score += 2;
+      reasons.push('person mention');
+    }
+
+    if (score > 0) {
+      // Extract relevant excerpt
+      const excerpt = extractExcerpt(data.text || '', queryWords);
+
+      results.push({
+        id: doc.id,
+        effectiveDate: data.effectiveDate?.toDate?.()?.toISOString?.()?.split('T')[0] || 'unknown',
+        title: data.title || data.analysis?.title || 'Untitled',
+        excerpt,
+        moodScore: data.analysis?.mood_score,
+        relevanceReason: reasons.join(', '),
+        score,
+      });
+    }
+  }
+
+  // Sort by score and return top results
+  return results
+    .sort((a, b) => b.score - a.score)
+    .slice(0, limit)
+    .map(({ score, ...rest }) => rest);
+};
+
+/**
+ * Parse natural language date hints into date ranges
+ */
+const parseDateHint = (hint: string): { start: Date; end: Date } | null => {
+  const now = new Date();
+  const hintLower = hint.toLowerCase();
+
+  // Handle common patterns
+  if (hintLower.includes('yesterday')) {
+    const yesterday = new Date(now);
+    yesterday.setDate(yesterday.getDate() - 1);
+    return { start: yesterday, end: yesterday };
+  }
+
+  if (hintLower.includes('last week')) {
+    const end = new Date(now);
+    const start = new Date(now);
+    start.setDate(start.getDate() - 7);
+    return { start, end };
+  }
+
+  if (hintLower.includes('two weeks ago') || hintLower.includes('2 weeks ago')) {
+    const end = new Date(now);
+    end.setDate(end.getDate() - 7);
+    const start = new Date(now);
+    start.setDate(start.getDate() - 14);
+    return { start, end };
+  }
+
+  if (hintLower.includes('last month')) {
+    const end = new Date(now);
+    const start = new Date(now);
+    start.setMonth(start.getMonth() - 1);
+    return { start, end };
+  }
+
+  // Handle day names
+  const days = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+  for (const day of days) {
+    if (hintLower.includes(`last ${day}`)) {
+      const targetDay = days.indexOf(day);
+      const diff = (now.getDay() - targetDay + 7) % 7 || 7;
+      const target = new Date(now);
+      target.setDate(target.getDate() - diff);
+      return { start: target, end: target };
+    }
+  }
+
+  return null;
+};
+
+/**
+ * Extract a relevant excerpt around matching words
+ */
+const extractExcerpt = (text: string, queryWords: string[]): string => {
+  const maxLength = 200;
+  const textLower = text.toLowerCase();
+
+  // Find first match position
+  let matchPos = -1;
+  for (const word of queryWords) {
+    const pos = textLower.indexOf(word);
+    if (pos !== -1 && (matchPos === -1 || pos < matchPos)) {
+      matchPos = pos;
+    }
+  }
+
+  if (matchPos === -1) {
+    // No match found, return beginning of text
+    return text.slice(0, maxLength) + (text.length > maxLength ? '...' : '');
+  }
+
+  // Extract context around match
+  const start = Math.max(0, matchPos - 50);
+  const end = Math.min(text.length, matchPos + 150);
+
+  let excerpt = text.slice(start, end);
+  if (start > 0) excerpt = '...' + excerpt;
+  if (end < text.length) excerpt += '...';
+
+  return excerpt;
+};
+
 export { firestore, APP_COLLECTION_ID };

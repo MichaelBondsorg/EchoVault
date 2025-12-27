@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { X, Phone, Mic, MicOff, Save, ChevronLeft } from 'lucide-react';
+import { X, Phone, Mic, MicOff, Save, ChevronLeft, Smile, Frown, Meh, Zap, Battery, BatteryLow } from 'lucide-react';
 import { useVoiceRelay } from '../../hooks/useVoiceRelay';
 import GuidedSessionPicker from './GuidedSessionPicker';
 
@@ -8,6 +8,8 @@ const RealtimeConversation = ({ entries, onClose, category, onSaveEntry }) => {
   const [showPicker, setShowPicker] = useState(true);
   const [isRecording, setIsRecording] = useState(false);
   const [showSavePrompt, setShowSavePrompt] = useState(false);
+  const [editableMood, setEditableMood] = useState(null); // User-adjustable mood score
+  const [editableTitle, setEditableTitle] = useState(''); // User-editable title
 
   const {
     status,
@@ -17,6 +19,7 @@ const RealtimeConversation = ({ entries, onClose, category, onSaveEntry }) => {
     mode,
     guidedState,
     guidedComplete,
+    sessionAnalysis,
     connect,
     disconnect,
     startRecording,
@@ -25,7 +28,20 @@ const RealtimeConversation = ({ entries, onClose, category, onSaveEntry }) => {
     clearError,
     clearTranscript,
     clearGuidedComplete,
+    clearSessionAnalysis,
   } = useVoiceRelay();
+
+  // Initialize editable values from session analysis
+  useEffect(() => {
+    if (sessionAnalysis) {
+      if (sessionAnalysis.voiceTone?.moodScore !== undefined) {
+        setEditableMood(Math.round(sessionAnalysis.voiceTone.moodScore * 10));
+      }
+      if (sessionAnalysis.suggestedTitle) {
+        setEditableTitle(sessionAnalysis.suggestedTitle);
+      }
+    }
+  }, [sessionAnalysis]);
 
   // Start conversation with selected session type
   const startConversation = useCallback(async (sessionType) => {
@@ -64,16 +80,28 @@ const RealtimeConversation = ({ entries, onClose, category, onSaveEntry }) => {
     const finalTranscript = await endSession(save);
 
     if (save && onSaveEntry) {
+      // Build mood data from user-adjusted values or analysis
+      const moodData = editableMood !== null ? {
+        moodScore: editableMood / 10, // Convert 0-10 back to 0-1
+        energy: sessionAnalysis?.voiceTone?.energy,
+        emotions: sessionAnalysis?.voiceTone?.emotions,
+        source: 'voice_analysis',
+      } : undefined;
+
       if (guidedComplete) {
         // For guided sessions, use the structured summary
         onSaveEntry({
           text: guidedComplete.summary,
+          title: editableTitle || undefined,
+          moodScore: moodData?.moodScore,
           source: 'voice',
           voiceMetadata: {
             fullTranscript: finalTranscript,
             sessionType: guidedComplete.sessionType,
             responses: guidedComplete.responses,
             mode: 'guided',
+            voiceTone: moodData,
+            suggestedTags: sessionAnalysis?.suggestedTags,
           },
         });
       } else if (finalTranscript) {
@@ -85,20 +113,27 @@ const RealtimeConversation = ({ entries, onClose, category, onSaveEntry }) => {
 
         onSaveEntry({
           text: entryText,
+          title: editableTitle || undefined,
+          moodScore: moodData?.moodScore,
           source: 'voice',
           voiceMetadata: {
             fullTranscript: finalTranscript,
             sessionType: selectedSessionType || 'free',
             mode,
+            voiceTone: moodData,
+            suggestedTags: sessionAnalysis?.suggestedTags,
           },
         });
       }
     }
 
     setShowSavePrompt(false);
+    setEditableMood(null);
+    setEditableTitle('');
     clearGuidedComplete();
+    clearSessionAnalysis();
     onClose();
-  }, [endSession, onSaveEntry, transcript, selectedSessionType, mode, guidedComplete, clearGuidedComplete, onClose]);
+  }, [endSession, onSaveEntry, transcript, selectedSessionType, mode, guidedComplete, clearGuidedComplete, clearSessionAnalysis, onClose, editableMood, editableTitle, sessionAnalysis]);
 
   // Toggle recording
   const toggleRecording = useCallback(() => {
@@ -275,7 +310,7 @@ const RealtimeConversation = ({ entries, onClose, category, onSaveEntry }) => {
       {/* Save prompt modal */}
       {showSavePrompt && (
         <div className="absolute inset-0 bg-black/50 flex items-center justify-center p-6">
-          <div className="bg-gray-800 rounded-2xl p-6 max-w-sm w-full">
+          <div className="bg-gray-800 rounded-2xl p-6 max-w-sm w-full max-h-[90vh] overflow-y-auto">
             <h3 className="text-white text-lg font-medium mb-2">
               {guidedComplete ? 'Session Complete!' : 'Save as Entry?'}
             </h3>
@@ -284,6 +319,87 @@ const RealtimeConversation = ({ entries, onClose, category, onSaveEntry }) => {
                 ? 'Would you like to save your responses as a journal entry?'
                 : 'Would you like to save this conversation as a journal entry?'}
             </p>
+
+            {/* Title input */}
+            {(sessionAnalysis?.suggestedTitle || editableTitle) && (
+              <div className="mb-4">
+                <label className="text-white/60 text-xs mb-1 block">Title</label>
+                <input
+                  type="text"
+                  value={editableTitle}
+                  onChange={(e) => setEditableTitle(e.target.value)}
+                  placeholder="Entry title..."
+                  className="w-full bg-white/10 text-white text-sm rounded-lg px-3 py-2 border border-white/10 focus:border-indigo-500 focus:outline-none"
+                />
+              </div>
+            )}
+
+            {/* Mood analysis display */}
+            {sessionAnalysis?.voiceTone && (
+              <div className="mb-4 p-3 bg-white/5 rounded-lg">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-white/60 text-xs">Detected Mood</span>
+                  <div className="flex items-center gap-1">
+                    {sessionAnalysis.voiceTone.energy === 'high' && <Zap size={14} className="text-yellow-400" />}
+                    {sessionAnalysis.voiceTone.energy === 'medium' && <Battery size={14} className="text-green-400" />}
+                    {sessionAnalysis.voiceTone.energy === 'low' && <BatteryLow size={14} className="text-blue-400" />}
+                    <span className="text-white/40 text-xs capitalize">{sessionAnalysis.voiceTone.energy} energy</span>
+                  </div>
+                </div>
+
+                {/* Mood slider */}
+                <div className="flex items-center gap-3 mb-2">
+                  <Frown size={18} className="text-red-400" />
+                  <input
+                    type="range"
+                    min="0"
+                    max="10"
+                    value={editableMood ?? 5}
+                    onChange={(e) => setEditableMood(parseInt(e.target.value))}
+                    className="flex-1 h-2 bg-gradient-to-r from-red-500 via-yellow-500 to-green-500 rounded-full appearance-none cursor-pointer"
+                    style={{
+                      WebkitAppearance: 'none',
+                    }}
+                  />
+                  <Smile size={18} className="text-green-400" />
+                </div>
+                <div className="text-center text-white/80 text-sm font-medium">
+                  {editableMood ?? 5}/10
+                </div>
+
+                {/* Emotions */}
+                {sessionAnalysis.voiceTone.emotions?.length > 0 && (
+                  <div className="flex flex-wrap gap-1 mt-2">
+                    {sessionAnalysis.voiceTone.emotions.slice(0, 4).map((emotion, i) => (
+                      <span
+                        key={i}
+                        className="px-2 py-0.5 bg-white/10 text-white/70 text-xs rounded-full"
+                      >
+                        {emotion}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Suggested tags */}
+            {sessionAnalysis?.suggestedTags?.length > 0 && (
+              <div className="mb-4">
+                <label className="text-white/60 text-xs mb-1 block">Suggested Tags</label>
+                <div className="flex flex-wrap gap-1">
+                  {sessionAnalysis.suggestedTags.map((tag, i) => (
+                    <span
+                      key={i}
+                      className="px-2 py-1 bg-indigo-500/20 text-indigo-300 text-xs rounded-full"
+                    >
+                      #{tag}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+
             {guidedComplete && (
               <div className="bg-white/5 rounded-lg p-3 mb-4 max-h-32 overflow-y-auto">
                 <p className="text-white/70 text-sm">{guidedComplete.summary}</p>
