@@ -1151,53 +1151,176 @@ function computeTemporalPatterns(entries) {
 }
 
 /**
- * Detect contradictions between stated intentions and actual behavior
+ * Detect termination language in text
+ * Used to identify when a user has abandoned or completed a goal
  */
-function detectContradictions(entries, activityPatterns) {
+function detectsTerminationLanguage(text) {
+  if (!text) return false;
+  const terminationPatterns = [
+    /I('m| am) (no longer|not) (interested in|pursuing|going after)/i,
+    /decided (against|not to)/i,
+    /giving up on/i,
+    /moving on from/i,
+    /that('s| is) (not|no longer) (a priority|important)/i,
+    /changed my mind about/i,
+    /I don't want to anymore/i,
+    /not going to happen/i,
+    /abandoning/i,
+    /letting go of/i
+  ];
+  return terminationPatterns.some(p => p.test(text));
+}
+
+/**
+ * Detect achievement language in text
+ */
+function detectsAchievementLanguage(text) {
+  if (!text) return false;
+  const achievementPatterns = [
+    /I (did it|made it|got it|achieved|accomplished)/i,
+    /finally\s+(.+)ed/i,
+    /succeeded in/i,
+    /completed/i,
+    /finished/i,
+    /reached my goal/i,
+    /mission accomplished/i,
+    /got the (job|offer|promotion)/i
+  ];
+  return achievementPatterns.some(p => p.test(text));
+}
+
+/**
+ * Detect contradictions between stated intentions and actual behavior
+ *
+ * V2: Now queries signal_states collection as Source of Truth for goal states.
+ * Only falls back to entry scanning for users who haven't migrated to the new system.
+ *
+ * @param {Array} entries - Recent journal entries
+ * @param {Array} activityPatterns - Computed activity patterns
+ * @param {Map} signalStatesMap - Pre-fetched signal_states (goals) keyed by topic
+ */
+function detectContradictions(entries, activityPatterns, signalStatesMap = null) {
   const contradictions = [];
   const now = new Date();
   const twoWeeksAgo = new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000);
 
-  // Find goal-related entries
-  const goalEntries = entries.filter(e =>
-    e.tags?.some(t => t.startsWith('@goal:')) ||
-    e.text?.toLowerCase().match(/\b(want to|going to|need to|should|plan to|trying to)\b.*\b(more|less|start|stop|better)\b/)
-  );
+  // If signalStatesMap is provided, use it as Source of Truth
+  if (signalStatesMap && signalStatesMap.size > 0) {
+    // Query-based approach: Only check ACTIVE goals from signal_states
+    signalStatesMap.forEach((goalState, goalTopic) => {
+      // Skip non-active states (achieved, abandoned, paused-for-too-long)
+      if (!['active', 'proposed'].includes(goalState.state)) return;
 
-  // Type 1: Goal abandonment detection
-  goalEntries.forEach(entry => {
-    const goalTags = (entry.tags || []).filter(t => t.startsWith('@goal:'));
+      const goalName = goalTopic.replace(/_/g, ' ');
+      const lastUpdated = goalState.lastUpdated?.toDate?.() || goalState.lastUpdated;
+      const daysSinceUpdate = lastUpdated
+        ? Math.floor((now - new Date(lastUpdated)) / (1000 * 60 * 60 * 24))
+        : 999;
 
-    goalTags.forEach(goalTag => {
+      // Only flag if lastUpdated is older than 14 days
+      if (daysSinceUpdate > 14) {
+        contradictions.push({
+          type: 'goal_abandonment',
+          goalTag: `@goal:${goalTopic}`,
+          goalName,
+          signalId: goalState.id, // Include signal ID for UI to update
+          message: `You set "${goalName}" as a goal ${daysSinceUpdate} days ago but haven't made progress since`,
+          severity: daysSinceUpdate > 30 ? 'high' : 'medium',
+          requiresUserInput: true,
+          suggestion: 'Is this still a goal you\'re working toward?',
+          actions: [
+            { label: 'Still working on it', action: 'reactivate' },
+            { label: 'Completed!', action: 'achieve' },
+            { label: 'No longer a priority', action: 'abandon' }
+          ],
+          originalEntry: {
+            date: lastUpdated,
+            snippet: null
+          }
+        });
+      }
+    });
+  } else {
+    // Legacy fallback: Scan entries for goals (for users without signal_states migration)
+    // This code path will be removed once all users have migrated
+    const goalStates = new Map();
+
+    entries.forEach(entry => {
+      const goalUpdate = entry.analysis?.extractEnhancedContext?.goal_update;
+      const goalTags = (entry.tags || []).filter(t => t.startsWith('@goal:'));
+      const entryDate = entry.effectiveDate?.toDate?.() || entry.createdAt?.toDate?.() || new Date(entry.effectiveDate || entry.createdAt);
+
+      if (goalUpdate && goalUpdate.tag) {
+        const goalTag = goalUpdate.tag;
+        const status = goalUpdate.status;
+
+        if (status === 'achieved' || status === 'abandoned') {
+          goalStates.set(goalTag, { state: 'terminated', terminatedAt: entryDate, reason: status });
+        } else if (status === 'progress' || status === 'active' || status === 'struggling') {
+          const existing = goalStates.get(goalTag) || { state: 'active', progressEntries: [] };
+          if (existing.state !== 'terminated') {
+            goalStates.set(goalTag, {
+              state: 'active',
+              lastMention: entryDate,
+              progressEntries: [...(existing.progressEntries || []), entry.id]
+            });
+          }
+        }
+      }
+
+      goalTags.forEach(goalTag => {
+        const existing = goalStates.get(goalTag);
+        if (existing?.state === 'terminated') return;
+
+        if (detectsTerminationLanguage(entry.text)) {
+          goalStates.set(goalTag, { state: 'terminated', terminatedAt: entryDate, reason: 'termination_language' });
+          return;
+        }
+
+        if (detectsAchievementLanguage(entry.text)) {
+          goalStates.set(goalTag, { state: 'terminated', terminatedAt: entryDate, reason: 'achieved' });
+          return;
+        }
+
+        goalStates.set(goalTag, {
+          state: 'active',
+          lastMention: entryDate,
+          firstMention: existing?.firstMention || entryDate,
+          progressEntries: [...(existing?.progressEntries || []), entry.id]
+        });
+      });
+    });
+
+    goalStates.forEach((goalData, goalTag) => {
+      if (goalData.state === 'terminated') return;
+
       const goalName = goalTag.replace('@goal:', '').replace(/_/g, ' ');
-
-      // Find related activity mentions
       const relatedActivity = `@activity:${goalTag.replace('@goal:', '')}`;
-      const recentMentions = entries.filter(e => {
+      const recentActivityMentions = entries.filter(e => {
         const entryDate = e.effectiveDate?.toDate?.() || e.createdAt?.toDate?.() || new Date(e.effectiveDate || e.createdAt);
         return entryDate >= twoWeeksAgo && e.tags?.includes(relatedActivity);
       });
 
-      if (recentMentions.length === 0) {
-        const entryDate = entry.effectiveDate?.toDate?.() || entry.createdAt?.toDate?.() || new Date(entry.effectiveDate || entry.createdAt);
-        const daysSince = Math.floor((now - entryDate) / (1000 * 60 * 60 * 24));
+      const lastMention = goalData.lastMention || goalData.firstMention;
+      const daysSince = lastMention ? Math.floor((now - lastMention) / (1000 * 60 * 60 * 24)) : 999;
 
-        if (daysSince > 7) {
-          contradictions.push({
-            type: 'goal_abandonment',
-            goalTag,
-            goalName,
-            message: `You mentioned wanting to "${goalName}" ${daysSince} days ago but haven't mentioned it since`,
-            severity: daysSince > 21 ? 'high' : 'medium',
-            originalEntry: {
-              date: entryDate,
-              snippet: entry.text?.substring(0, 100)
-            }
-          });
-        }
+      if (recentActivityMentions.length === 0 && daysSince > 7) {
+        contradictions.push({
+          type: 'goal_abandonment',
+          goalTag,
+          goalName,
+          message: `You mentioned wanting to "${goalName}" ${daysSince} days ago but haven't mentioned it since`,
+          severity: daysSince > 21 ? 'high' : 'medium',
+          requiresUserInput: true,
+          suggestion: 'Is this still a goal you\'re working toward?',
+          originalEntry: {
+            date: lastMention,
+            snippet: null
+          }
+        });
       }
     });
-  });
+  }
 
   // Type 2: Sentiment contradiction
   const negativeStatements = entries.filter(e =>
@@ -1323,6 +1446,32 @@ function generateInsightsSummary(activityPatterns, temporalPatterns, contradicti
 }
 
 /**
+ * Fetch active goal states from signal_states collection
+ * Returns a Map keyed by topic for O(1) lookup
+ */
+async function fetchActiveGoalStates(userId) {
+  const signalStatesRef = db.collection('artifacts')
+    .doc(APP_COLLECTION_ID)
+    .collection('users')
+    .doc(userId)
+    .collection('signal_states');
+
+  // Query for goal-type signals that are active or proposed
+  const snapshot = await signalStatesRef
+    .where('type', '==', 'goal')
+    .where('state', 'in', ['active', 'proposed', 'paused'])
+    .get();
+
+  const goalStatesMap = new Map();
+  snapshot.docs.forEach(doc => {
+    const data = doc.data();
+    goalStatesMap.set(data.topic, { id: doc.id, ...data });
+  });
+
+  return goalStatesMap;
+}
+
+/**
  * Main pattern computation function
  */
 async function computeAllPatterns(userId, category = null) {
@@ -1346,10 +1495,15 @@ async function computeAllPatterns(userId, category = null) {
     return null;
   }
 
+  // Fetch active goals from signal_states (Source of Truth)
+  const signalStatesMap = await fetchActiveGoalStates(userId);
+  console.log(`Fetched ${signalStatesMap.size} active goals from signal_states for user ${userId}`);
+
   // Compute patterns
   const activitySentiment = computeActivitySentiment(entries);
   const temporalPatterns = computeTemporalPatterns(entries);
-  const contradictions = detectContradictions(entries, activitySentiment);
+  // Pass signalStatesMap to detectContradictions - uses DB as source of truth
+  const contradictions = detectContradictions(entries, activitySentiment, signalStatesMap);
   const summary = generateInsightsSummary(activitySentiment, temporalPatterns, contradictions);
 
   const timestamp = FieldValue.serverTimestamp();

@@ -43,6 +43,16 @@ service cloud.firestore {
         allow read, write: if isOwner(userId);
       }
 
+      // NEW: Signal states subcollection (lifecycle tracking for goals, insights, patterns)
+      match /signal_states/{stateId} {
+        allow read, write: if isOwner(userId);
+      }
+
+      // NEW: Insight exclusions subcollection (dismissed patterns that shouldn't resurface)
+      match /insight_exclusions/{exclusionId} {
+        allow read, write: if isOwner(userId);
+      }
+
       // RAG embeddings subcollection
       match /rag_embeddings/{embeddingId} {
         allow read, write: if isOwner(userId);
