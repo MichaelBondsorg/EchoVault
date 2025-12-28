@@ -11,33 +11,144 @@ export const checkCrisisKeywords = (text) => CRISIS_KEYWORDS.test(text);
 export const checkWarningIndicators = (text) => WARNING_INDICATORS.test(text);
 
 /**
+ * Longitudinal Risk Configuration
+ * 14-day window aligns with Maslach Burnout Inventory recommendation
+ * for detecting sustained patterns vs temporary dips
+ */
+const LONGITUDINAL_CONFIG = {
+  windowDays: 14,          // 14-day analysis window for stable burnout detection
+  minimumEntries: 5,       // Need at least 5 entries for meaningful trend
+  slopeThreshold: -0.03,   // More lenient slope over longer window (-0.03 per entry)
+  avgMoodThreshold: 0.30,  // Average mood below this triggers concern
+  acuteSlopeThreshold: -0.05, // Steeper slope in 7-day subset indicates acute decline
+  acuteWindowDays: 7       // Window for detecting acute (rapid) decline
+};
+
+/**
  * Check longitudinal risk based on recent entries
+ *
+ * Uses a 14-day window with two-tier detection:
+ * 1. Sustained decline: Gradual downward trend over 14 days
+ * 2. Acute decline: Rapid drop in last 7 days
+ *
+ * @param {Array} recentEntries - All recent entries (pre-filtered or full array)
+ * @returns {Object} Risk assessment with details
  */
 export const checkLongitudinalRisk = (recentEntries) => {
-  const last7Days = recentEntries.filter(e =>
-    e.createdAt > new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
-  );
+  const now = Date.now();
 
-  if (last7Days.length < 3) {
+  // Filter to 14-day window
+  const last14Days = recentEntries.filter(e => {
+    const entryTime = e.createdAt instanceof Date
+      ? e.createdAt.getTime()
+      : e.createdAt?.toDate?.()?.getTime?.() || new Date(e.createdAt).getTime();
+    return entryTime > now - LONGITUDINAL_CONFIG.windowDays * 24 * 60 * 60 * 1000;
+  });
+
+  if (last14Days.length < LONGITUDINAL_CONFIG.minimumEntries) {
     console.log('Longitudinal risk check skipped: insufficient data', {
-      entriesInWindow: last7Days.length,
-      requiredMinimum: 3
+      entriesInWindow: last14Days.length,
+      requiredMinimum: LONGITUDINAL_CONFIG.minimumEntries
     });
-    return false;
+    return {
+      isAtRisk: false,
+      reason: 'insufficient_data',
+      entriesAnalyzed: last14Days.length,
+      windowDays: LONGITUDINAL_CONFIG.windowDays
+    };
   }
 
-  const avgMood = last7Days.reduce((sum, e) =>
-    sum + (e.analysis?.mood_score || 0.5), 0) / last7Days.length;
+  // Sort by date (oldest first for slope calculation)
+  const sorted = [...last14Days].sort((a, b) => {
+    const aTime = a.createdAt instanceof Date ? a.createdAt.getTime() : a.createdAt?.toDate?.()?.getTime?.() || 0;
+    const bTime = b.createdAt instanceof Date ? b.createdAt.getTime() : b.createdAt?.toDate?.()?.getTime?.() || 0;
+    return aTime - bTime;
+  });
 
-  const moodScores = last7Days.map(e => e.analysis?.mood_score || 0.5);
+  const moodScores = sorted.map(e => e.analysis?.mood_score ?? 0.5);
+
+  // Calculate average mood
+  const avgMood = moodScores.reduce((sum, score) => sum + score, 0) / moodScores.length;
+
+  // Calculate linear regression slope (14-day window)
   const n = moodScores.length;
   const sumX = (n * (n - 1)) / 2;
   const sumY = moodScores.reduce((a, b) => a + b, 0);
   const sumXY = moodScores.reduce((sum, y, x) => sum + x * y, 0);
   const sumX2 = (n * (n - 1) * (2 * n - 1)) / 6;
-  const slope = (n * sumXY - sumX * sumY) / (n * sumX2 - sumX * sumX);
+  const sustainedSlope = (n * sumXY - sumX * sumY) / (n * sumX2 - sumX * sumX);
 
-  return avgMood < 0.25 || slope < -0.05;
+  // Check for acute decline (last 7 days)
+  const last7Days = sorted.filter(e => {
+    const entryTime = e.createdAt instanceof Date
+      ? e.createdAt.getTime()
+      : e.createdAt?.toDate?.()?.getTime?.() || 0;
+    return entryTime > now - LONGITUDINAL_CONFIG.acuteWindowDays * 24 * 60 * 60 * 1000;
+  });
+
+  let acuteSlope = 0;
+  if (last7Days.length >= 3) {
+    const acuteMoods = last7Days.map(e => e.analysis?.mood_score ?? 0.5);
+    const an = acuteMoods.length;
+    const aSumX = (an * (an - 1)) / 2;
+    const aSumY = acuteMoods.reduce((a, b) => a + b, 0);
+    const aSumXY = acuteMoods.reduce((sum, y, x) => sum + x * y, 0);
+    const aSumX2 = (an * (an - 1) * (2 * an - 1)) / 6;
+    acuteSlope = (an * aSumXY - aSumX * aSumY) / (an * aSumX2 - aSumX * aSumX);
+  }
+
+  // Determine risk factors
+  const isSustainedDecline = sustainedSlope < LONGITUDINAL_CONFIG.slopeThreshold;
+  const isAcuteDecline = acuteSlope < LONGITUDINAL_CONFIG.acuteSlopeThreshold;
+  const isLowAvgMood = avgMood < LONGITUDINAL_CONFIG.avgMoodThreshold;
+
+  // At risk if any condition is met
+  const isAtRisk = isLowAvgMood || isSustainedDecline || isAcuteDecline;
+
+  // Determine primary reason
+  let reason = null;
+  if (isAtRisk) {
+    if (isAcuteDecline && isLowAvgMood) {
+      reason = 'acute_decline_with_low_mood';
+    } else if (isAcuteDecline) {
+      reason = 'acute_decline';
+    } else if (isSustainedDecline && isLowAvgMood) {
+      reason = 'sustained_decline_with_low_mood';
+    } else if (isSustainedDecline) {
+      reason = 'sustained_decline';
+    } else {
+      reason = 'low_average_mood';
+    }
+  }
+
+  const result = {
+    isAtRisk,
+    reason,
+    entriesAnalyzed: last14Days.length,
+    windowDays: LONGITUDINAL_CONFIG.windowDays,
+    metrics: {
+      avgMood: Math.round(avgMood * 100) / 100,
+      sustainedSlope: Math.round(sustainedSlope * 1000) / 1000,
+      acuteSlope: Math.round(acuteSlope * 1000) / 1000,
+      acuteEntriesCount: last7Days.length
+    },
+    thresholds: {
+      avgMood: LONGITUDINAL_CONFIG.avgMoodThreshold,
+      sustainedSlope: LONGITUDINAL_CONFIG.slopeThreshold,
+      acuteSlope: LONGITUDINAL_CONFIG.acuteSlopeThreshold
+    },
+    flags: {
+      isSustainedDecline,
+      isAcuteDecline,
+      isLowAvgMood
+    }
+  };
+
+  if (isAtRisk) {
+    console.log('Longitudinal risk detected:', result);
+  }
+
+  return result;
 };
 
 /**

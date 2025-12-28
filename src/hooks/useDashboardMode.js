@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import { getTimePhase, getPrimaryIntent, getTimeGreeting } from '../services/temporal/time';
+import { checkLongitudinalRisk } from '../services/safety';
 
 /**
  * Mood State Thresholds
@@ -65,16 +66,28 @@ const getLastEntryMood = (entries) => {
 };
 
 /**
- * Determine mood state based on today's entries and signals
- * Uses the "Thermostat" logic from spec:
- * - If effective_mood < 0.35 OR last_entry.mood < 0.3 -> shelter
- * - If effective_mood > 0.75 -> cheerleader
- * - Else -> neutral
+ * Determine mood state based on today's entries, signals, and longitudinal trends
+ * Uses the "Thermostat" logic from spec with proactive burnout detection:
+ *
+ * SHELTER MODE triggers when ANY of these are true:
+ * - Today's effective mood < 0.35
+ * - Last entry mood < 0.30
+ * - 14-day longitudinal risk is detected (sustained or acute decline)
+ *
+ * CHEERLEADER MODE: effective_mood > 0.75
  *
  * @param {Array} todayEntries - Today's entries
  * @param {Object|null} daySummary - Pre-computed day summary (includes signals)
+ * @param {Object|null} longitudinalRisk - Result from checkLongitudinalRisk
  */
-const determineMoodState = (todayEntries, daySummary = null) => {
+const determineMoodState = (todayEntries, daySummary = null, longitudinalRisk = null) => {
+  // Check longitudinal risk FIRST - this is the proactive burnout detection
+  // Even if today seems fine, a 14-day downward trend should trigger shelter
+  if (longitudinalRisk?.isAtRisk) {
+    console.log('Shelter mode triggered by longitudinal risk:', longitudinalRisk.reason);
+    return 'shelter';
+  }
+
   // If no entries AND no signals, neutral
   const hasSignals = daySummary && daySummary.signalCount > 0;
   if (todayEntries.length === 0 && !hasSignals) return 'neutral';
@@ -89,7 +102,7 @@ const determineMoodState = (todayEntries, daySummary = null) => {
     return 'shelter';
   }
 
-  // Cheerleader mode: high average
+  // Cheerleader mode: high average (only if no longitudinal concerns)
   if (effectiveMood !== null && effectiveMood > MOOD_THRESHOLDS.cheerleader) {
     return 'cheerleader';
   }
@@ -161,9 +174,14 @@ const generateHeroContent = (timePhase, moodState, summary, userName, carryForwa
  * 1. Time of Day (morning/midday/evening)
  * 2. User's Mood (neutral/shelter/cheerleader)
  * 3. Signal-based scoring (when available)
+ * 4. Longitudinal Risk (14-day trend analysis) - PROACTIVE BURNOUT DETECTION
+ *
+ * The longitudinal risk check enables proactive shelter mode:
+ * - Even if today's mood is neutral, a 14-day downward trend triggers shelter
+ * - Distinguishes between sustained decline (gradual) and acute decline (rapid)
  *
  * @param {Object} options
- * @param {Array} options.entries - All user entries
+ * @param {Array} options.entries - All user entries (used for longitudinal analysis)
  * @param {Array} options.todayEntries - Today's filtered entries
  * @param {Object} options.summary - Current day summary (from synthesis)
  * @param {Object} options.todaySummary - Today's day_summary from signals (from Cloud Function)
@@ -196,11 +214,55 @@ export const useDashboardMode = ({
     return () => clearInterval(interval);
   }, []);
 
-  // Calculate mood state from today's entries
+  // Calculate longitudinal risk from all entries (14-day window)
+  // This enables PROACTIVE shelter mode for burnout detection
+  const longitudinalRisk = useMemo(() => {
+    if (entries.length < 5) return null; // Not enough data
+    return checkLongitudinalRisk(entries);
+  }, [entries]);
+
+  // Calculate mood state considering both today's data AND longitudinal trends
   const moodState = useMemo(() => {
     if (shelterOverride) return 'neutral'; // User chose to exit shelter
-    return determineMoodState(todayEntries);
-  }, [todayEntries, shelterOverride]);
+    return determineMoodState(todayEntries, todaySummary, longitudinalRisk);
+  }, [todayEntries, todaySummary, longitudinalRisk, shelterOverride]);
+
+  // Determine why shelter mode was triggered (for contextual messaging)
+  const shelterTrigger = useMemo(() => {
+    if (moodState !== 'shelter') return null;
+
+    // Check longitudinal risk first (proactive detection)
+    if (longitudinalRisk?.isAtRisk) {
+      return {
+        type: 'longitudinal',
+        reason: longitudinalRisk.reason,
+        metrics: longitudinalRisk.metrics,
+        message: getLongitudinalMessage(longitudinalRisk.reason)
+      };
+    }
+
+    // Today-based triggers
+    const effectiveMood = getEffectiveMood(todaySummary, todayEntries);
+    const lastMood = getLastEntryMood(todayEntries);
+
+    if (lastMood !== null && lastMood < 0.3) {
+      return {
+        type: 'acute',
+        reason: 'low_last_entry',
+        message: "Your last entry suggested you might be having a tough moment."
+      };
+    }
+
+    if (effectiveMood !== null && effectiveMood < MOOD_THRESHOLDS.shelter) {
+      return {
+        type: 'today',
+        reason: 'low_daily_mood',
+        message: "Today seems to be a challenging day."
+      };
+    }
+
+    return { type: 'unknown', reason: 'unspecified', message: null };
+  }, [moodState, longitudinalRisk, todayEntries, todaySummary]);
 
   // Get primary intent based on time (unless in shelter mode)
   const primaryIntent = useMemo(() => {
@@ -208,11 +270,19 @@ export const useDashboardMode = ({
     return getPrimaryIntent(timePhase);
   }, [timePhase, moodState]);
 
-  // Generate hero content
+  // Generate hero content with longitudinal context when applicable
   const heroContent = useMemo(() => {
     const userName = user?.displayName?.split(' ')[0] || null;
-    return generateHeroContent(timePhase, moodState, summary, userName, carryForwardItems);
-  }, [timePhase, moodState, summary, user, carryForwardItems]);
+    const content = generateHeroContent(timePhase, moodState, summary, userName, carryForwardItems);
+
+    // Add longitudinal context if shelter was triggered proactively
+    if (moodState === 'shelter' && shelterTrigger?.type === 'longitudinal') {
+      content.proactiveWarning = shelterTrigger.message;
+      content.isProactive = true;
+    }
+
+    return content;
+  }, [timePhase, moodState, summary, user, carryForwardItems, shelterTrigger]);
 
   // Calculate average mood for display
   const averageMood = useMemo(() => {
@@ -228,14 +298,39 @@ export const useDashboardMode = ({
     // Derived content
     heroContent,      // Object with title, subtitle, and mode-specific data
 
+    // Longitudinal analysis
+    longitudinalRisk, // Full risk assessment object (or null)
+    shelterTrigger,   // Why shelter was triggered (for UI context)
+
     // Utilities
     averageMood,      // Number or null
     isLowMood: moodState === 'shelter',
     isHighMood: moodState === 'cheerleader',
+    isProactiveShelter: shelterTrigger?.type === 'longitudinal',
 
     // For debugging/display
     thresholds: MOOD_THRESHOLDS
   };
+};
+
+/**
+ * Get user-friendly message for longitudinal risk reason
+ */
+const getLongitudinalMessage = (reason) => {
+  switch (reason) {
+    case 'acute_decline_with_low_mood':
+      return "Your mood has dropped significantly this week and is running low overall. Let's take a breather.";
+    case 'acute_decline':
+      return "I've noticed a quick dip in your mood this week. Want to check in with yourself?";
+    case 'sustained_decline_with_low_mood':
+      return "You've been running on empty for a while. It might be time for some self-care.";
+    case 'sustained_decline':
+      return "I'm noticing a gradual downward trend over the past couple weeks. How are you really doing?";
+    case 'low_average_mood':
+      return "Your mood has been consistently low lately. You deserve some support.";
+    default:
+      return "I've noticed some patterns that suggest you might benefit from a gentle pause.";
+  }
 };
 
 export default useDashboardMode;

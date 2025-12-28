@@ -1,30 +1,43 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Heart, Mic, MessageCircle, Leaf, X, Anchor, ArrowLeft, Check } from 'lucide-react';
+import { Heart, Mic, MessageCircle, Leaf, X, Anchor, ArrowLeft, Check, Wind, Clock, AlertTriangle, Shield } from 'lucide-react';
+import BreathingExercise, { BreathingExerciseSelector } from '../../shelter/BreathingExercise';
+import GroundingExercise from '../../shelter/GroundingExercise';
+import DecompressionTimer from '../../shelter/DecompressionTimer';
 
 /**
- * ShelterView - Minimalist, soothing view for low mood states
+ * ShelterView - Minimalist, soothing view for low mood and burnout states
  *
- * Trigger: mood_score < 0.35
+ * Triggers:
+ * - mood_score < 0.35 (original reactive trigger)
+ * - burnoutRisk.riskLevel === 'critical' (burnout-specific)
+ * - Declining mood + high burnout + fatigue tags
  *
  * Design Philosophy:
  * - Remove Stats / Streaks / Tasks (reduce pressure)
  * - Warmer, softer colors
  * - Validation-first messaging
  * - Primary actions: "Vent" (voice recorder), "Drop Anchor" (grounding exercise)
+ * - NEW: Burnout-specific decompression tools
  *
  * Content:
- * - Hero: "It's okay to have a hard day." (Validation)
+ * - Hero: Contextual validation based on trigger type
+ * - Burnout Context: Show detected signals if burnout-triggered
  * - Action: "Vent" button (voice recorder auto-start)
- * - Action: "Drop Anchor" button (ACT grounding exercise)
+ * - Action: "Drop Anchor" / Grounding exercises
+ * - Action: Breathing exercises
+ * - Action: Decompression timer
  * - Resource: CBT reframe if available
- * - Exit: Option to return to normal view
+ * - Exit: Option to return to normal view (with exit criteria)
  *
  * Props:
  * - cbtReframe: string | null - Perspective from challenges
+ * - burnoutRisk: object | null - Burnout risk assessment
+ * - triggerType: 'low_mood' | 'burnout' | 'manual' - What triggered shelter mode
  * - onVent: () => void - Start voice recording
  * - onTextEntry: () => void - Alternative text entry
  * - onExit: () => void - Return to normal view
+ * - onActivityComplete: (activity) => void - Track completed activities
  */
 
 // Drop Anchor Exercise Component
@@ -277,16 +290,46 @@ const DropAnchorExercise = ({ onComplete, onBack }) => {
 
 const ShelterView = ({
   cbtReframe,
+  burnoutRisk = null,
+  triggerType = 'low_mood',
   onVent,
   onTextEntry,
-  onExit
+  onExit,
+  onActivityComplete
 }) => {
-  const [mode, setMode] = useState('menu'); // 'menu' | 'anchor'
+  const [mode, setMode] = useState('menu'); // 'menu' | 'anchor' | 'breathing' | 'grounding' | 'timer'
+  const [selectedBreathingType, setSelectedBreathingType] = useState('box');
+  const [completedActivities, setCompletedActivities] = useState([]);
 
-  const handleAnchorComplete = () => {
+  const isBurnoutTrigger = triggerType === 'burnout' || burnoutRisk?.riskLevel === 'critical';
+  const riskLevel = burnoutRisk?.riskLevel || 'moderate';
+
+  const handleActivityComplete = (activity) => {
+    setCompletedActivities(prev => [...prev, activity]);
+    if (onActivityComplete) onActivityComplete(activity);
     setMode('menu');
   };
 
+  const handleAnchorComplete = () => {
+    handleActivityComplete({ type: 'anchor', completedAt: new Date() });
+  };
+
+  const handleBreathingComplete = (result) => {
+    handleActivityComplete({ type: 'breathing', ...result, completedAt: new Date() });
+  };
+
+  const handleGroundingComplete = (result) => {
+    handleActivityComplete({ type: 'grounding', ...result, completedAt: new Date() });
+  };
+
+  const handleTimerComplete = (result) => {
+    handleActivityComplete({ type: 'timer', ...result, completedAt: new Date() });
+  };
+
+  // Exit criteria: must complete at least 1 activity for burnout triggers
+  const canExit = !isBurnoutTrigger || completedActivities.length >= 1;
+
+  // Render specific modes
   if (mode === 'anchor') {
     return (
       <DropAnchorExercise
@@ -296,6 +339,112 @@ const ShelterView = ({
     );
   }
 
+  if (mode === 'breathing') {
+    return (
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        className="space-y-4"
+      >
+        <button
+          onClick={() => setMode('menu')}
+          className="flex items-center gap-1.5 text-xs text-blue-500 hover:text-blue-700 transition-colors"
+        >
+          <ArrowLeft size={14} />
+          <span>Back to menu</span>
+        </button>
+        <div className="bg-gradient-to-br from-blue-900/50 to-indigo-900/50 rounded-3xl border border-blue-500/30">
+          <BreathingExercise
+            exerciseType={selectedBreathingType}
+            onComplete={handleBreathingComplete}
+            onSkip={() => setMode('menu')}
+          />
+        </div>
+      </motion.div>
+    );
+  }
+
+  if (mode === 'grounding') {
+    return (
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        className="space-y-4"
+      >
+        <button
+          onClick={() => setMode('menu')}
+          className="flex items-center gap-1.5 text-xs text-purple-500 hover:text-purple-700 transition-colors"
+        >
+          <ArrowLeft size={14} />
+          <span>Back to menu</span>
+        </button>
+        <div className="bg-gradient-to-br from-purple-900/50 to-blue-900/50 rounded-3xl border border-purple-500/30">
+          <GroundingExercise
+            onComplete={handleGroundingComplete}
+            onSkip={() => setMode('menu')}
+          />
+        </div>
+      </motion.div>
+    );
+  }
+
+  if (mode === 'timer') {
+    return (
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        className="space-y-4"
+      >
+        <button
+          onClick={() => setMode('menu')}
+          className="flex items-center gap-1.5 text-xs text-blue-500 hover:text-blue-700 transition-colors"
+        >
+          <ArrowLeft size={14} />
+          <span>Back to menu</span>
+        </button>
+        <div className="bg-gradient-to-br from-gray-800/80 to-gray-900/80 rounded-3xl border border-white/10">
+          <DecompressionTimer
+            riskLevel={riskLevel}
+            onComplete={handleTimerComplete}
+            onEarlyExit={(result) => {
+              handleActivityComplete({ type: 'timer_early', ...result, completedAt: new Date() });
+            }}
+            minTimeRequired={isBurnoutTrigger ? 5 : 0}
+          />
+        </div>
+      </motion.div>
+    );
+  }
+
+  if (mode === 'breathing-select') {
+    return (
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        className="space-y-4"
+      >
+        <button
+          onClick={() => setMode('menu')}
+          className="flex items-center gap-1.5 text-xs text-blue-500 hover:text-blue-700 transition-colors"
+        >
+          <ArrowLeft size={14} />
+          <span>Back to menu</span>
+        </button>
+        <div className="bg-gradient-to-br from-blue-900/30 to-indigo-900/30 rounded-3xl p-6 border border-blue-500/20">
+          <h3 className="text-lg font-semibold text-white mb-4">Choose a Breathing Exercise</h3>
+          <BreathingExerciseSelector
+            selected={selectedBreathingType}
+            onSelect={(type) => {
+              setSelectedBreathingType(type);
+              setMode('breathing');
+            }}
+          />
+        </div>
+      </motion.div>
+    );
+  }
+
+  // Main menu
   return (
     <motion.div
       className="space-y-5"
@@ -304,35 +453,97 @@ const ShelterView = ({
       exit={{ opacity: 0 }}
     >
       {/* Exit button - subtle, top right */}
-      <div className="flex justify-end">
+      <div className="flex justify-between items-center">
+        {/* Activity progress */}
+        {isBurnoutTrigger && completedActivities.length > 0 && (
+          <div className="flex items-center gap-1.5 text-xs text-green-400">
+            <Check size={12} />
+            <span>{completedActivities.length} activity completed</span>
+          </div>
+        )}
+        <div className="flex-1" />
         <motion.button
           onClick={onExit}
-          className="flex items-center gap-1.5 text-xs text-warm-400 hover:text-warm-600 transition-colors px-2 py-1 rounded-full hover:bg-warm-100"
-          whileHover={{ scale: 1.02 }}
-          whileTap={{ scale: 0.98 }}
+          disabled={!canExit}
+          className={`flex items-center gap-1.5 text-xs px-2 py-1 rounded-full transition-colors ${
+            canExit
+              ? 'text-warm-400 hover:text-warm-600 hover:bg-warm-100'
+              : 'text-warm-300 cursor-not-allowed'
+          }`}
+          whileHover={canExit ? { scale: 1.02 } : {}}
+          whileTap={canExit ? { scale: 0.98 } : {}}
         >
           <X size={12} />
           <span>Return to normal view</span>
         </motion.button>
       </div>
 
-      {/* Hero - Validation first */}
+      {/* Burnout Context - Show if burnout-triggered */}
+      {isBurnoutTrigger && burnoutRisk && (
+        <motion.div
+          className="bg-gradient-to-br from-amber-900/30 to-red-900/30 rounded-2xl p-4 border border-amber-500/30"
+          initial={{ opacity: 0, y: -10 }}
+          animate={{ opacity: 1, y: 0 }}
+        >
+          <div className="flex items-center gap-2 mb-2">
+            <AlertTriangle size={18} className="text-amber-400" />
+            <span className="text-sm font-semibold text-amber-200">Burnout Signals Detected</span>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {burnoutRisk.signals?.slice(0, 4).map((signal, idx) => (
+              <span
+                key={idx}
+                className="px-2 py-1 bg-black/30 rounded-full text-xs text-amber-100"
+              >
+                {signal.replace(/_/g, ' ')}
+              </span>
+            ))}
+          </div>
+          {!canExit && (
+            <p className="text-xs text-amber-200/70 mt-3">
+              Please complete at least one decompression activity before exiting.
+            </p>
+          )}
+        </motion.div>
+      )}
+
+      {/* Hero - Contextual validation */}
       <motion.div
-        className="bg-gradient-to-br from-rose-50 via-pink-50 to-warm-50 rounded-3xl p-6 border border-rose-100 shadow-soft text-center"
+        className={`rounded-3xl p-6 border shadow-soft text-center ${
+          isBurnoutTrigger
+            ? 'bg-gradient-to-br from-amber-50 via-orange-50 to-warm-50 border-amber-200'
+            : 'bg-gradient-to-br from-rose-50 via-pink-50 to-warm-50 border-rose-100'
+        }`}
         initial={{ opacity: 0, y: -10 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.1 }}
       >
-        <div className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-rose-100 mb-4">
-          <Heart size={24} className="text-rose-400" />
+        <div className={`inline-flex items-center justify-center w-12 h-12 rounded-full mb-4 ${
+          isBurnoutTrigger ? 'bg-amber-100' : 'bg-rose-100'
+        }`}>
+          {isBurnoutTrigger ? (
+            <Shield size={24} className="text-amber-500" />
+          ) : (
+            <Heart size={24} className="text-rose-400" />
+          )}
         </div>
 
-        <h2 className="text-xl font-display font-bold text-rose-800 mb-2">
-          It's okay to have a hard day.
+        <h2 className={`text-xl font-display font-bold mb-2 ${
+          isBurnoutTrigger ? 'text-amber-800' : 'text-rose-800'
+        }`}>
+          {isBurnoutTrigger
+            ? "Time to decompress."
+            : "It's okay to have a hard day."
+          }
         </h2>
 
-        <p className="text-sm font-body text-rose-600 leading-relaxed max-w-xs mx-auto">
-          Sometimes we just need to let it out. No judgment here.
+        <p className={`text-sm font-body leading-relaxed max-w-xs mx-auto ${
+          isBurnoutTrigger ? 'text-amber-700' : 'text-rose-600'
+        }`}>
+          {isBurnoutTrigger
+            ? "Your mind and body are sending signals. Let's take a moment to reset."
+            : "Sometimes we just need to let it out. No judgment here."
+          }
         </p>
       </motion.div>
 
@@ -355,7 +566,7 @@ const ShelterView = ({
         </div>
       </motion.button>
 
-      {/* Secondary Actions Row */}
+      {/* Decompression Tools Grid */}
       <div className="grid grid-cols-2 gap-3">
         {/* Text Entry */}
         <motion.button
@@ -371,20 +582,62 @@ const ShelterView = ({
           <span className="font-medium text-sm">Write it down</span>
         </motion.button>
 
-        {/* Drop Anchor - ACT Grounding */}
+        {/* Breathing Exercise */}
         <motion.button
-          onClick={() => setMode('anchor')}
-          className="bg-teal-100 hover:bg-teal-200 text-teal-700 rounded-2xl p-4 flex flex-col items-center justify-center gap-2 transition-all"
+          onClick={() => setMode('breathing-select')}
+          className="bg-blue-100 hover:bg-blue-200 text-blue-700 rounded-2xl p-4 flex flex-col items-center justify-center gap-2 transition-all"
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.3 }}
           whileHover={{ scale: 1.01 }}
           whileTap={{ scale: 0.99 }}
         >
+          <Wind size={20} />
+          <span className="font-medium text-sm">Breathing</span>
+        </motion.button>
+
+        {/* 5-4-3-2-1 Grounding */}
+        <motion.button
+          onClick={() => setMode('grounding')}
+          className="bg-purple-100 hover:bg-purple-200 text-purple-700 rounded-2xl p-4 flex flex-col items-center justify-center gap-2 transition-all"
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.35 }}
+          whileHover={{ scale: 1.01 }}
+          whileTap={{ scale: 0.99 }}
+        >
           <Anchor size={20} />
-          <span className="font-medium text-sm">Drop Anchor</span>
+          <span className="font-medium text-sm">5-4-3-2-1</span>
+        </motion.button>
+
+        {/* Decompression Timer */}
+        <motion.button
+          onClick={() => setMode('timer')}
+          className="bg-teal-100 hover:bg-teal-200 text-teal-700 rounded-2xl p-4 flex flex-col items-center justify-center gap-2 transition-all"
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.4 }}
+          whileHover={{ scale: 1.01 }}
+          whileTap={{ scale: 0.99 }}
+        >
+          <Clock size={20} />
+          <span className="font-medium text-sm">Take a Break</span>
         </motion.button>
       </div>
+
+      {/* Drop Anchor - Classic ACT */}
+      <motion.button
+        onClick={() => setMode('anchor')}
+        className="w-full bg-teal-500 hover:bg-teal-600 text-white rounded-2xl p-4 flex items-center justify-center gap-3 transition-all"
+        initial={{ opacity: 0, y: 10 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.45 }}
+        whileHover={{ scale: 1.01 }}
+        whileTap={{ scale: 0.99 }}
+      >
+        <Anchor size={20} />
+        <span className="font-medium">Drop Anchor (ACT Grounding)</span>
+      </motion.button>
 
       {/* CBT Reframe - If available */}
       {cbtReframe && (
@@ -392,7 +645,7 @@ const ShelterView = ({
           className="bg-white rounded-2xl p-5 border border-warm-100 shadow-sm"
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.35 }}
+          transition={{ delay: 0.5 }}
         >
           <div className="flex items-center gap-2 mb-3">
             <Leaf size={16} className="text-green-500" />
@@ -411,9 +664,12 @@ const ShelterView = ({
         className="text-center text-xs text-warm-400 font-body px-4"
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
-        transition={{ delay: 0.4 }}
+        transition={{ delay: 0.55 }}
       >
-        This view appears when you might need extra support. You can always return to the regular dashboard.
+        {isBurnoutTrigger
+          ? "Take your time. Your wellbeing matters more than productivity right now."
+          : "This view appears when you might need extra support. You can always return to the regular dashboard."
+        }
       </motion.p>
     </motion.div>
   );

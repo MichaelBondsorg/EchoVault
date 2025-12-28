@@ -1192,21 +1192,25 @@ function detectsAchievementLanguage(text) {
 /**
  * Detect contradictions between stated intentions and actual behavior
  *
- * V2: Now queries signal_states collection as Source of Truth for goal states.
- * Only falls back to entry scanning for users who haven't migrated to the new system.
+ * V3: Uses signal_states collection as the SOLE Source of Truth for goal states.
+ * Legacy entry-scanning fallback has been removed to prevent "Ghost Goal" problem.
  *
- * @param {Array} entries - Recent journal entries
+ * The Ghost Goal Problem: If we scan entries for goals, terminated goals can
+ * "reappear" after they fall out of the 200-entry window. By using signal_states
+ * exclusively, terminated goals stay terminated forever.
+ *
+ * @param {Array} entries - Recent journal entries (used for sentiment/avoidance contradictions only)
  * @param {Array} activityPatterns - Computed activity patterns
- * @param {Map} signalStatesMap - Pre-fetched signal_states (goals) keyed by topic
+ * @param {Map} signalStatesMap - Pre-fetched signal_states (goals) keyed by topic - REQUIRED
  */
-function detectContradictions(entries, activityPatterns, signalStatesMap = null) {
+function detectContradictions(entries, activityPatterns, signalStatesMap) {
   const contradictions = [];
   const now = new Date();
-  const twoWeeksAgo = new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000);
 
-  // If signalStatesMap is provided, use it as Source of Truth
+  // Type 1: Goal abandonment - ONLY from signal_states (Source of Truth)
+  // If no signal_states exist yet, skip goal-based contradiction detection
+  // Goals will be added to signal_states via processEntryForGoals on new entries
   if (signalStatesMap && signalStatesMap.size > 0) {
-    // Query-based approach: Only check ACTIVE goals from signal_states
     signalStatesMap.forEach((goalState, goalTopic) => {
       // Skip non-active states (achieved, abandoned, paused-for-too-long)
       if (!['active', 'proposed'].includes(goalState.state)) return;
@@ -1240,87 +1244,9 @@ function detectContradictions(entries, activityPatterns, signalStatesMap = null)
         });
       }
     });
-  } else {
-    // Legacy fallback: Scan entries for goals (for users without signal_states migration)
-    // This code path will be removed once all users have migrated
-    const goalStates = new Map();
-
-    entries.forEach(entry => {
-      const goalUpdate = entry.analysis?.extractEnhancedContext?.goal_update;
-      const goalTags = (entry.tags || []).filter(t => t.startsWith('@goal:'));
-      const entryDate = entry.effectiveDate?.toDate?.() || entry.createdAt?.toDate?.() || new Date(entry.effectiveDate || entry.createdAt);
-
-      if (goalUpdate && goalUpdate.tag) {
-        const goalTag = goalUpdate.tag;
-        const status = goalUpdate.status;
-
-        if (status === 'achieved' || status === 'abandoned') {
-          goalStates.set(goalTag, { state: 'terminated', terminatedAt: entryDate, reason: status });
-        } else if (status === 'progress' || status === 'active' || status === 'struggling') {
-          const existing = goalStates.get(goalTag) || { state: 'active', progressEntries: [] };
-          if (existing.state !== 'terminated') {
-            goalStates.set(goalTag, {
-              state: 'active',
-              lastMention: entryDate,
-              progressEntries: [...(existing.progressEntries || []), entry.id]
-            });
-          }
-        }
-      }
-
-      goalTags.forEach(goalTag => {
-        const existing = goalStates.get(goalTag);
-        if (existing?.state === 'terminated') return;
-
-        if (detectsTerminationLanguage(entry.text)) {
-          goalStates.set(goalTag, { state: 'terminated', terminatedAt: entryDate, reason: 'termination_language' });
-          return;
-        }
-
-        if (detectsAchievementLanguage(entry.text)) {
-          goalStates.set(goalTag, { state: 'terminated', terminatedAt: entryDate, reason: 'achieved' });
-          return;
-        }
-
-        goalStates.set(goalTag, {
-          state: 'active',
-          lastMention: entryDate,
-          firstMention: existing?.firstMention || entryDate,
-          progressEntries: [...(existing?.progressEntries || []), entry.id]
-        });
-      });
-    });
-
-    goalStates.forEach((goalData, goalTag) => {
-      if (goalData.state === 'terminated') return;
-
-      const goalName = goalTag.replace('@goal:', '').replace(/_/g, ' ');
-      const relatedActivity = `@activity:${goalTag.replace('@goal:', '')}`;
-      const recentActivityMentions = entries.filter(e => {
-        const entryDate = e.effectiveDate?.toDate?.() || e.createdAt?.toDate?.() || new Date(e.effectiveDate || e.createdAt);
-        return entryDate >= twoWeeksAgo && e.tags?.includes(relatedActivity);
-      });
-
-      const lastMention = goalData.lastMention || goalData.firstMention;
-      const daysSince = lastMention ? Math.floor((now - lastMention) / (1000 * 60 * 60 * 24)) : 999;
-
-      if (recentActivityMentions.length === 0 && daysSince > 7) {
-        contradictions.push({
-          type: 'goal_abandonment',
-          goalTag,
-          goalName,
-          message: `You mentioned wanting to "${goalName}" ${daysSince} days ago but haven't mentioned it since`,
-          severity: daysSince > 21 ? 'high' : 'medium',
-          requiresUserInput: true,
-          suggestion: 'Is this still a goal you\'re working toward?',
-          originalEntry: {
-            date: lastMention,
-            snippet: null
-          }
-        });
-      }
-    });
   }
+  // Note: If signalStatesMap is empty, we simply don't generate goal contradictions.
+  // New goals will be added to signal_states via processEntryForGoals.
 
   // Type 2: Sentiment contradiction
   const negativeStatements = entries.filter(e =>
@@ -1559,25 +1485,41 @@ async function computeAllPatterns(userId, category = null) {
 
 /**
  * Trigger: On new entry creation
- * Incrementally update patterns when a new entry is created
+ * 1. Process entry for goal signals (update signal_states)
+ * 2. Recompute patterns (using updated signal_states as Source of Truth)
+ *
+ * IMPORTANT: processEntryForGoals MUST run before computeAllPatterns
+ * to ensure signal_states is updated before the Pattern Engine runs.
  */
 export const onEntryCreate = onDocumentCreated(
   'artifacts/{appId}/users/{userId}/entries/{entryId}',
   async (event) => {
-    const { userId, appId } = event.params;
+    const { userId, appId, entryId } = event.params;
 
     if (appId !== APP_COLLECTION_ID) {
-      console.log(`Skipping pattern update for app ${appId}`);
+      console.log(`Skipping processing for app ${appId}`);
       return null;
     }
 
-    console.log(`New entry created for user ${userId}, recomputing patterns...`);
+    const entryData = event.data.data();
+    const entry = { id: entryId, ...entryData };
+
+    console.log(`New entry created for user ${userId}, processing goals and patterns...`);
 
     try {
+      // Step 1: Process entry for goal signals FIRST
+      // This updates signal_states with any detected goals, progress, or terminations
+      const goalResult = await processEntryForGoals(userId, entry);
+      if (goalResult) {
+        console.log(`Goal processing result: ${goalResult.isNew ? 'created new goal' : goalResult.skipped ? 'skipped (terminated)' : 'updated existing goal'}`);
+      }
+
+      // Step 2: Recompute patterns (now using updated signal_states)
       await computeAllPatterns(userId);
-      return { success: true };
+
+      return { success: true, goalProcessed: !!goalResult };
     } catch (error) {
-      console.error(`Error computing patterns for user ${userId}:`, error);
+      console.error(`Error processing entry for user ${userId}:`, error);
       return { success: false, error: error.message };
     }
   }
@@ -1585,19 +1527,37 @@ export const onEntryCreate = onDocumentCreated(
 
 /**
  * Trigger: On entry update (mood analysis complete)
- * Recompute when entry gets mood score
+ * 1. Process goals when analysis is added (goal_update from extractEnhancedContext)
+ * 2. Recompute patterns when entry gets mood score
  */
 export const onEntryUpdate = onDocumentUpdated(
   'artifacts/{appId}/users/{userId}/entries/{entryId}',
   async (event) => {
-    const { userId, appId } = event.params;
+    const { userId, appId, entryId } = event.params;
 
     if (appId !== APP_COLLECTION_ID) return null;
 
     const before = event.data.before.data();
     const after = event.data.after.data();
 
-    // Only recompute if mood score was just added
+    // Check if analysis was just added (contains goal_update info)
+    const hadGoalUpdate = before.analysis?.goal_update ||
+                          before.analysis?.extractEnhancedContext?.goal_update;
+    const hasGoalUpdate = after.analysis?.goal_update ||
+                          after.analysis?.extractEnhancedContext?.goal_update;
+
+    // Process goals if goal_update was just added
+    if (!hadGoalUpdate && hasGoalUpdate) {
+      console.log(`Goal update detected for user ${userId}, processing goals...`);
+      try {
+        const entry = { id: entryId, ...after };
+        await processEntryForGoals(userId, entry);
+      } catch (error) {
+        console.error(`Error processing goals for user ${userId}:`, error);
+      }
+    }
+
+    // Recompute patterns if mood score was just added
     const hadMood = before.analysis?.mood_score !== undefined;
     const hasMood = after.analysis?.mood_score !== undefined;
 
@@ -1687,6 +1647,743 @@ export const refreshPatterns = onCall(
     }
   }
 );
+
+// ============================================
+// BURNOUT DETECTION FUNCTIONS
+// ============================================
+
+// Burnout indicator keywords (server-side mirror of client burnoutIndicators.js)
+const BURNOUT_KEYWORDS = {
+  fatigue: [
+    'tired', 'exhausted', 'drained', 'burned out', 'burnout', 'burnt out',
+    "can't keep up", 'running on empty', 'no energy', 'depleted',
+    'wiped out', 'worn out', 'fatigued', 'spent', 'tapped out'
+  ],
+  overwork: [
+    'overtime', 'working late', 'late night', 'weekend work', 'no break',
+    'back-to-back', 'non-stop', 'nonstop', 'slammed', 'swamped',
+    'drowning in work', 'too many meetings', 'endless meetings',
+    'never-ending', 'piling up', 'behind on everything'
+  ],
+  physicalSymptoms: [
+    'eyes hurt', 'eye strain', 'headache', 'migraine', "can't sleep",
+    'insomnia', 'stress eating', 'not eating', 'skipping meals',
+    'neck pain', 'back pain', 'tense', 'tension', 'grinding teeth',
+    'jaw clenching', 'stomach issues', 'nauseous', 'heart racing'
+  ],
+  emotionalExhaustion: [
+    'overwhelmed', 'drowning', 'nothing left', 'running on empty',
+    "can't take it", 'at my limit', 'breaking point', 'losing it',
+    'falling apart', 'shutting down', 'checked out', 'going through motions',
+    "don't care anymore", "what's the point", 'empty inside'
+  ],
+  recovery: [
+    'took a break', 'rested', 'day off', 'vacation', 'relaxed',
+    'recharged', 'feeling better', 'recovered', 'self-care',
+    'walked away', 'logged off', 'unplugged', 'disconnected'
+  ]
+};
+
+const BURNOUT_FACTOR_WEIGHTS = {
+  moodTrajectory: 0.25,
+  fatigueKeywords: 0.20,
+  overworkIndicators: 0.20,
+  physicalSymptoms: 0.15,
+  workTagDensity: 0.10,
+  lowMoodStreak: 0.10
+};
+
+const BURNOUT_RISK_LEVELS = {
+  LOW: { min: 0, max: 0.3, label: 'low' },
+  MODERATE: { min: 0.3, max: 0.5, label: 'moderate' },
+  HIGH: { min: 0.5, max: 0.7, label: 'high' },
+  CRITICAL: { min: 0.7, max: 1.0, label: 'critical' }
+};
+
+/**
+ * Find keyword matches in text
+ */
+function findBurnoutKeywordMatches(text, keywords) {
+  if (!text) return { found: false, matches: [], count: 0 };
+  const lowerText = text.toLowerCase();
+  const matches = keywords.filter(kw => lowerText.includes(kw.toLowerCase()));
+  return { found: matches.length > 0, matches, count: matches.length };
+}
+
+/**
+ * Check if entry was created during high-risk time
+ */
+function checkBurnoutTimeRisk(entryDate) {
+  const date = entryDate instanceof Date ? entryDate : new Date(entryDate);
+  const hour = date.getHours();
+  const day = date.getDay();
+  const risks = [];
+
+  // Late night (10 PM - 5 AM)
+  if (hour >= 22 || hour < 5) risks.push('late_night_entry');
+  // Weekend
+  if (day === 0 || day === 6) risks.push('weekend_entry');
+
+  return { isRiskTime: risks.length > 0, risks, hour, dayOfWeek: day };
+}
+
+/**
+ * Compute burnout risk score from entries
+ * Server-side implementation mirroring client burnoutRiskScore.js
+ */
+function computeBurnoutRiskFromEntries(entries) {
+  if (!entries || entries.length < 3) {
+    return {
+      riskScore: 0,
+      riskLevel: 'low',
+      signals: [],
+      factors: {},
+      triggerShelterMode: false,
+      insufficientData: true
+    };
+  }
+
+  const recentEntries = entries.slice(0, 14);
+  const signals = [];
+  const factors = {};
+
+  // Factor 1: Mood Trajectory (25%)
+  const moodScores = recentEntries
+    .filter(e => e.analysis?.mood_score !== null && e.analysis?.mood_score !== undefined)
+    .map(e => e.analysis.mood_score);
+
+  let moodFactor = { score: 0, signal: null };
+  if (moodScores.length >= 2) {
+    const latest = moodScores.slice(0, 3).reduce((a, b) => a + b, 0) / Math.min(3, moodScores.length);
+    const oldest = moodScores.slice(-3).reduce((a, b) => a + b, 0) / Math.min(3, moodScores.length);
+    const trend = latest - oldest;
+    const avgMood = moodScores.reduce((a, b) => a + b, 0) / moodScores.length;
+
+    let score = 0;
+    if (trend < -0.2) score += 0.5;
+    else if (trend < -0.1) score += 0.3;
+    else if (trend < 0) score += 0.1;
+
+    if (avgMood < 0.3) score += 0.5;
+    else if (avgMood < 0.4) score += 0.3;
+    else if (avgMood < 0.5) score += 0.1;
+
+    moodFactor = {
+      score: Math.min(1, score),
+      signal: score > 0.3 ? 'declining_mood' : null
+    };
+  }
+  factors.moodTrajectory = moodFactor;
+  if (moodFactor.signal) signals.push(moodFactor.signal);
+
+  // Factor 2: Fatigue Keywords (20%)
+  const fatigueKeywords = [...BURNOUT_KEYWORDS.fatigue, ...BURNOUT_KEYWORDS.emotionalExhaustion];
+  let fatigueMatchCount = 0;
+  recentEntries.forEach(entry => {
+    const result = findBurnoutKeywordMatches(entry.text, fatigueKeywords);
+    if (result.found) fatigueMatchCount++;
+  });
+  const fatigueFreq = recentEntries.length > 0 ? fatigueMatchCount / recentEntries.length : 0;
+  const fatigueScore = Math.min(1, fatigueFreq * 1.5);
+  factors.fatigueKeywords = {
+    score: fatigueScore,
+    signal: fatigueScore > 0.3 ? 'fatigue' : null
+  };
+  if (fatigueScore > 0.3) signals.push('fatigue');
+
+  // Factor 3: Overwork Indicators (20%)
+  let lateNightCount = 0;
+  let weekendCount = 0;
+  let overworkKeywordCount = 0;
+  recentEntries.forEach(entry => {
+    const entryDate = entry.createdAt?.toDate?.() || entry.createdAt;
+    const timeRisk = checkBurnoutTimeRisk(entryDate);
+    if (timeRisk.risks.includes('late_night_entry')) lateNightCount++;
+    if (timeRisk.risks.includes('weekend_entry')) weekendCount++;
+    const kwResult = findBurnoutKeywordMatches(entry.text, BURNOUT_KEYWORDS.overwork);
+    if (kwResult.found) overworkKeywordCount++;
+  });
+  const lateNightRatio = recentEntries.length > 0 ? lateNightCount / recentEntries.length : 0;
+  const weekendRatio = recentEntries.length > 0 ? weekendCount / recentEntries.length : 0;
+  const overworkRatio = recentEntries.length > 0 ? overworkKeywordCount / recentEntries.length : 0;
+  const overworkScore = Math.min(1, (lateNightRatio * 0.4) + (weekendRatio * 0.3) + (overworkRatio * 0.3));
+  factors.overworkIndicators = {
+    score: overworkScore,
+    signal: overworkScore > 0.3 ? 'overwork_pattern' : null
+  };
+  if (overworkScore > 0.3) signals.push('overwork_pattern');
+
+  // Factor 4: Physical Symptoms (15%)
+  let physicalMatchCount = 0;
+  recentEntries.forEach(entry => {
+    const result = findBurnoutKeywordMatches(entry.text, BURNOUT_KEYWORDS.physicalSymptoms);
+    if (result.found) physicalMatchCount++;
+  });
+  const physicalFreq = recentEntries.length > 0 ? physicalMatchCount / recentEntries.length : 0;
+  const physicalScore = Math.min(1, physicalFreq * 1.5);
+  factors.physicalSymptoms = {
+    score: physicalScore,
+    signal: physicalScore > 0.3 ? 'physical_symptoms' : null
+  };
+  if (physicalScore > 0.3) signals.push('physical_symptoms');
+
+  // Factor 5: Work Tag Density (10%)
+  let totalTags = 0;
+  let workTags = 0;
+  const workTagPatterns = ['@project:', '@deadline:', '@meeting:', '@work:', '@client:', '@boss:'];
+  recentEntries.forEach(entry => {
+    const tags = entry.tags || [];
+    totalTags += tags.length;
+    tags.forEach(tag => {
+      if (workTagPatterns.some(p => tag.startsWith(p.replace(':', '')))) workTags++;
+    });
+  });
+  const workDensity = totalTags > 0 ? workTags / totalTags : 0;
+  const workDensityScore = Math.min(1, workDensity * 1.5);
+  factors.workTagDensity = {
+    score: workDensityScore,
+    signal: workDensityScore > 0.4 ? 'work_dominated_entries' : null
+  };
+  if (workDensityScore > 0.4) signals.push('work_dominated_entries');
+
+  // Factor 6: Low Mood Streak (10%)
+  let currentStreak = 0;
+  for (const entry of recentEntries) {
+    const mood = entry.analysis?.mood_score;
+    if (mood !== null && mood !== undefined && mood < 0.4) {
+      currentStreak++;
+    } else {
+      break;
+    }
+  }
+  let streakScore = 0;
+  if (currentStreak >= 5) streakScore = 1.0;
+  else if (currentStreak >= 4) streakScore = 0.8;
+  else if (currentStreak >= 3) streakScore = 0.5;
+  else if (currentStreak >= 2) streakScore = 0.2;
+  factors.lowMoodStreak = {
+    score: streakScore,
+    signal: currentStreak >= 3 ? `${currentStreak}_day_low_streak` : null
+  };
+  if (currentStreak >= 3) signals.push(`${currentStreak}_day_low_streak`);
+
+  // Calculate weighted score
+  let rawScore =
+    (factors.moodTrajectory.score * BURNOUT_FACTOR_WEIGHTS.moodTrajectory) +
+    (factors.fatigueKeywords.score * BURNOUT_FACTOR_WEIGHTS.fatigueKeywords) +
+    (factors.overworkIndicators.score * BURNOUT_FACTOR_WEIGHTS.overworkIndicators) +
+    (factors.physicalSymptoms.score * BURNOUT_FACTOR_WEIGHTS.physicalSymptoms) +
+    (factors.workTagDensity.score * BURNOUT_FACTOR_WEIGHTS.workTagDensity) +
+    (factors.lowMoodStreak.score * BURNOUT_FACTOR_WEIGHTS.lowMoodStreak);
+
+  // Apply recovery discount
+  let recoverySignals = 0;
+  recentEntries.slice(0, 5).forEach(entry => {
+    const result = findBurnoutKeywordMatches(entry.text, BURNOUT_KEYWORDS.recovery);
+    if (result.found) recoverySignals++;
+  });
+  const recoveryDiscount = Math.min(0.15, recoverySignals * 0.05);
+  const adjustedScore = Math.max(0, rawScore - recoveryDiscount);
+  const riskScore = Math.min(1, Math.max(0, adjustedScore));
+
+  // Determine risk level
+  let riskLevel = 'low';
+  if (riskScore >= BURNOUT_RISK_LEVELS.CRITICAL.min) riskLevel = 'critical';
+  else if (riskScore >= BURNOUT_RISK_LEVELS.HIGH.min) riskLevel = 'high';
+  else if (riskScore >= BURNOUT_RISK_LEVELS.MODERATE.min) riskLevel = 'moderate';
+
+  // Determine if shelter mode should trigger
+  let triggerShelterMode = false;
+  if (riskLevel === 'critical') triggerShelterMode = true;
+  else if (riskLevel === 'high') {
+    const severeFactors = Object.values(factors).filter(f => f.score > 0.6);
+    triggerShelterMode = severeFactors.length >= 2;
+  }
+
+  return {
+    riskScore: Number(riskScore.toFixed(3)),
+    riskLevel,
+    signals,
+    factors,
+    triggerShelterMode,
+    recoveryDiscount: recoveryDiscount > 0 ? recoveryDiscount : undefined,
+    entryCount: recentEntries.length,
+    assessedAt: new Date().toISOString()
+  };
+}
+
+/**
+ * Cloud Function: Compute burnout risk on-demand
+ */
+export const computeBurnoutRisk = onCall(
+  {
+    cors: true,
+    maxInstances: 5
+  },
+  async (request) => {
+    if (!request.auth) {
+      throw new HttpsError('unauthenticated', 'Must be logged in');
+    }
+
+    const userId = request.auth.uid;
+
+    try {
+      // Fetch recent entries
+      const entriesRef = db.collection('artifacts')
+        .doc(APP_COLLECTION_ID)
+        .collection('users')
+        .doc(userId)
+        .collection('entries');
+
+      const snapshot = await entriesRef
+        .orderBy('createdAt', 'desc')
+        .limit(14)
+        .get();
+
+      const entries = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+
+      // Compute risk
+      const assessment = computeBurnoutRiskFromEntries(entries);
+
+      // Store assessment in burnout_assessments collection
+      const assessmentRef = db.collection('artifacts')
+        .doc(APP_COLLECTION_ID)
+        .collection('users')
+        .doc(userId)
+        .collection('burnout_assessments');
+
+      await assessmentRef.add({
+        ...assessment,
+        createdAt: FieldValue.serverTimestamp(),
+        source: 'on_demand'
+      });
+
+      return assessment;
+    } catch (error) {
+      console.error(`Error computing burnout risk for user ${userId}:`, error);
+      throw new HttpsError('internal', 'Failed to compute burnout risk');
+    }
+  }
+);
+
+/**
+ * Cloud Function: Log burnout-related events for analytics
+ * Tracks: nudge_shown, nudge_dismissed, shelter_entered, shelter_exited, activity_completed
+ */
+export const logBurnoutEvent = onCall(
+  {
+    cors: true,
+    maxInstances: 10
+  },
+  async (request) => {
+    if (!request.auth) {
+      throw new HttpsError('unauthenticated', 'Must be logged in');
+    }
+
+    const userId = request.auth.uid;
+    const { eventType, riskLevel, riskScore, dismissCount, activityType, duration, metadata } = request.data;
+
+    if (!eventType) {
+      throw new HttpsError('invalid-argument', 'eventType is required');
+    }
+
+    const validEventTypes = [
+      'nudge_shown',
+      'nudge_dismissed',
+      'nudge_acknowledged',
+      'shelter_entered',
+      'shelter_exited',
+      'activity_completed',
+      'breathing_completed',
+      'grounding_completed',
+      'timer_completed'
+    ];
+
+    if (!validEventTypes.includes(eventType)) {
+      throw new HttpsError('invalid-argument', `Invalid eventType: ${eventType}`);
+    }
+
+    try {
+      const eventsRef = db.collection('artifacts')
+        .doc(APP_COLLECTION_ID)
+        .collection('users')
+        .doc(userId)
+        .collection('burnout_events');
+
+      await eventsRef.add({
+        eventType,
+        riskLevel: riskLevel || null,
+        riskScore: riskScore || null,
+        dismissCount: dismissCount || null,
+        activityType: activityType || null,
+        duration: duration || null,
+        metadata: metadata || null,
+        createdAt: FieldValue.serverTimestamp()
+      });
+
+      console.log(`Logged burnout event for user ${userId}: ${eventType}`);
+      return { success: true };
+    } catch (error) {
+      console.error(`Error logging burnout event for user ${userId}:`, error);
+      throw new HttpsError('internal', 'Failed to log event');
+    }
+  }
+);
+
+/**
+ * Trigger: Compute burnout risk when a new entry is created
+ * Stores the latest assessment for quick access
+ */
+export const onEntryCreateBurnoutCheck = onDocumentCreated(
+  'artifacts/{appId}/users/{userId}/entries/{entryId}',
+  async (event) => {
+    const { userId, appId } = event.params;
+
+    if (appId !== APP_COLLECTION_ID) {
+      return null;
+    }
+
+    console.log(`Checking burnout risk for user ${userId} after new entry...`);
+
+    try {
+      // Fetch recent entries (including the new one)
+      const entriesRef = db.collection('artifacts')
+        .doc(APP_COLLECTION_ID)
+        .collection('users')
+        .doc(userId)
+        .collection('entries');
+
+      const snapshot = await entriesRef
+        .orderBy('createdAt', 'desc')
+        .limit(14)
+        .get();
+
+      const entries = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+
+      if (entries.length < 3) {
+        console.log(`Not enough entries for burnout check (${entries.length})`);
+        return null;
+      }
+
+      // Compute risk
+      const assessment = computeBurnoutRiskFromEntries(entries);
+
+      // Store latest assessment (overwrite previous)
+      const userRef = db.collection('artifacts')
+        .doc(APP_COLLECTION_ID)
+        .collection('users')
+        .doc(userId);
+
+      await userRef.set({
+        latestBurnoutAssessment: {
+          ...assessment,
+          updatedAt: FieldValue.serverTimestamp()
+        }
+      }, { merge: true });
+
+      // If risk is high/critical, also store in history
+      if (['high', 'critical'].includes(assessment.riskLevel)) {
+        await userRef.collection('burnout_assessments').add({
+          ...assessment,
+          createdAt: FieldValue.serverTimestamp(),
+          source: 'entry_trigger',
+          triggeringEntryId: event.params.entryId
+        });
+
+        console.log(`High burnout risk detected for user ${userId}: ${assessment.riskLevel} (${assessment.riskScore})`);
+      }
+
+      return { success: true, riskLevel: assessment.riskLevel };
+    } catch (error) {
+      console.error(`Error checking burnout for user ${userId}:`, error);
+      return { success: false, error: error.message };
+    }
+  }
+);
+
+// ============================================
+// GOAL LIFECYCLE PROCESSING (Server-Side)
+// ============================================
+
+// Goal detection patterns (mirror of client-side goalLifecycle.js)
+const GOAL_PATTERNS = [
+  /I want to\s+(.+)/i,
+  /I('m| am) going to\s+(.+)/i,
+  /planning to\s+(.+)/i,
+  /my goal is to\s+(.+)/i,
+  /I('m| am) working on\s+(.+)/i,
+  /trying to\s+(.+)/i,
+  /hoping to\s+(.+)/i
+];
+
+const TERMINATION_PATTERNS = [
+  /I('m| am) (no longer|not) (interested in|pursuing|going after)/i,
+  /decided (against|not to)/i,
+  /giving up on/i,
+  /moving on from/i,
+  /that('s| is) (not|no longer) (a priority|important)/i,
+  /changed my mind about/i,
+  /I don't want to anymore/i,
+  /not going to happen/i,
+  /abandoning/i,
+  /letting go of/i
+];
+
+const ACHIEVEMENT_PATTERNS = [
+  /I (did it|made it|got it|achieved|accomplished)/i,
+  /finally\s+(.+)ed/i,
+  /succeeded in/i,
+  /completed/i,
+  /finished/i,
+  /reached my goal/i,
+  /mission accomplished/i,
+  /got the (job|offer|promotion)/i
+];
+
+const PROGRESS_PATTERNS = [
+  /making progress on/i,
+  /step closer to/i,
+  /working towards/i,
+  /getting better at/i,
+  /improving/i,
+  /on track/i
+];
+
+/**
+ * Extract goal topic from text
+ */
+function extractGoalTopic(text) {
+  // Try @goal: tags first
+  const goalTagMatch = text.match(/@goal:([a-z_]+)/i);
+  if (goalTagMatch) {
+    return goalTagMatch[1].replace(/_/g, ' ');
+  }
+
+  // Try pattern matching
+  for (const pattern of GOAL_PATTERNS) {
+    const match = text.match(pattern);
+    if (match) {
+      const goalText = match[1] || match[2] || match[0];
+      return goalText
+        .replace(/[.!?,;:].*$/, '')
+        .trim()
+        .slice(0, 100);
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Check for progress language
+ */
+function detectsProgressLanguage(text) {
+  if (!text) return false;
+  return PROGRESS_PATTERNS.some(p => p.test(text));
+}
+
+/**
+ * Normalize topic to underscore format for consistency
+ */
+function normalizeTopicKey(topic) {
+  return topic.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '');
+}
+
+/**
+ * Create or update a goal in signal_states collection
+ */
+async function upsertGoalState(userId, topic, entryId, updateType, context = {}) {
+  const signalStatesRef = db.collection('artifacts')
+    .doc(APP_COLLECTION_ID)
+    .collection('users')
+    .doc(userId)
+    .collection('signal_states');
+
+  const topicKey = normalizeTopicKey(topic);
+
+  // Check if goal already exists
+  const existingSnapshot = await signalStatesRef
+    .where('type', '==', 'goal')
+    .where('topic', '==', topicKey)
+    .limit(1)
+    .get();
+
+  const now = FieldValue.serverTimestamp();
+
+  if (existingSnapshot.empty) {
+    // Create new goal (proposed state)
+    if (updateType === 'termination' || updateType === 'achievement') {
+      // Don't create a new goal just to terminate it
+      console.log(`Skipping goal creation for ${topicKey} - termination without existing goal`);
+      return null;
+    }
+
+    const newGoal = {
+      type: 'goal',
+      topic: topicKey,
+      displayName: topic,
+      state: 'proposed',
+      stateHistory: [{
+        from: null,
+        to: 'proposed',
+        at: now,
+        context: { detectedFrom: entryId }
+      }],
+      sourceEntries: [entryId],
+      metadata: {
+        detectedAt: new Date().toISOString(),
+        originalText: context.originalText?.slice(0, 500)
+      },
+      createdAt: now,
+      lastUpdated: now
+    };
+
+    const docRef = await signalStatesRef.add(newGoal);
+    console.log(`Created new goal: ${topicKey} (${docRef.id})`);
+    return { id: docRef.id, ...newGoal, isNew: true };
+  } else {
+    // Update existing goal
+    const existingDoc = existingSnapshot.docs[0];
+    const existingData = existingDoc.data();
+    const existingState = existingData.state;
+
+    // Skip if already in terminal state
+    if (['achieved', 'abandoned'].includes(existingState)) {
+      console.log(`Skipping update for terminated goal: ${topicKey} (${existingState})`);
+      return { id: existingDoc.id, ...existingData, skipped: true };
+    }
+
+    let newState = existingState;
+    let historyEntry = null;
+
+    switch (updateType) {
+      case 'termination':
+        newState = 'abandoned';
+        historyEntry = { from: existingState, to: 'abandoned', at: now, context: { terminationEntry: entryId, reason: 'termination_language' } };
+        break;
+      case 'achievement':
+        newState = 'achieved';
+        historyEntry = { from: existingState, to: 'achieved', at: now, context: { achievementEntry: entryId } };
+        break;
+      case 'progress':
+        // Auto-confirm proposed goals on progress
+        if (existingState === 'proposed') {
+          newState = 'active';
+          historyEntry = { from: 'proposed', to: 'active', at: now, context: { autoConfirmed: true, progressEntry: entryId } };
+        }
+        // For active goals, just update lastUpdated
+        break;
+      case 'mention':
+        // Just update lastUpdated to prevent false abandonment detection
+        break;
+    }
+
+    const updateData = {
+      lastUpdated: now,
+      sourceEntries: FieldValue.arrayUnion(entryId)
+    };
+
+    if (newState !== existingState && historyEntry) {
+      // Limit stateHistory to prevent document bloat
+      let newHistory = [...(existingData.stateHistory || []), historyEntry];
+      if (newHistory.length > 20) {
+        const firstEntry = newHistory[0];
+        const recentEntries = newHistory.slice(-19);
+        newHistory = [firstEntry, ...recentEntries];
+      }
+
+      updateData.state = newState;
+      updateData.stateHistory = newHistory;
+    }
+
+    await existingDoc.ref.update(updateData);
+    console.log(`Updated goal ${topicKey}: ${existingState} → ${newState}`);
+
+    return { id: existingDoc.id, state: newState, previousState: existingState };
+  }
+}
+
+/**
+ * Process an entry for goal signals
+ * Called after entry is created to update signal_states
+ */
+async function processEntryForGoals(userId, entry) {
+  const entryText = entry.text || '';
+  const entryId = entry.id;
+
+  // Method 1: Check if entry analysis already extracted goal_update
+  const goalUpdate = entry.analysis?.goal_update ||
+                     entry.analysis?.extractEnhancedContext?.goal_update;
+
+  if (goalUpdate && goalUpdate.tag) {
+    const topic = goalUpdate.tag.replace('@goal:', '').replace(/_/g, ' ');
+    const status = goalUpdate.status;
+
+    let updateType = 'mention';
+    if (status === 'achieved') updateType = 'achievement';
+    else if (status === 'abandoned') updateType = 'termination';
+    else if (status === 'progress' || status === 'struggling') updateType = 'progress';
+
+    return await upsertGoalState(userId, topic, entryId, updateType, { originalText: entryText });
+  }
+
+  // Method 2: Check for explicit @goal: tag in entry tags
+  const goalTag = (entry.tags || []).find(t => t.startsWith('@goal:'));
+  if (goalTag) {
+    const topic = goalTag.replace('@goal:', '').replace(/_/g, ' ');
+
+    // Determine update type from entry text
+    let updateType = 'mention';
+    if (detectsTerminationLanguage(entryText)) updateType = 'termination';
+    else if (detectsAchievementLanguage(entryText)) updateType = 'achievement';
+    else if (detectsProgressLanguage(entryText)) updateType = 'progress';
+
+    return await upsertGoalState(userId, topic, entryId, updateType, { originalText: entryText });
+  }
+
+  // Method 3: Pattern-based goal extraction
+  const extractedTopic = extractGoalTopic(entryText);
+  if (extractedTopic) {
+    // Check for termination first
+    if (detectsTerminationLanguage(entryText)) {
+      return await upsertGoalState(userId, extractedTopic, entryId, 'termination', { originalText: entryText });
+    }
+
+    if (detectsAchievementLanguage(entryText)) {
+      return await upsertGoalState(userId, extractedTopic, entryId, 'achievement', { originalText: entryText });
+    }
+
+    if (detectsProgressLanguage(entryText)) {
+      return await upsertGoalState(userId, extractedTopic, entryId, 'progress', { originalText: entryText });
+    }
+
+    // New goal detected
+    return await upsertGoalState(userId, extractedTopic, entryId, 'new', { originalText: entryText });
+  }
+
+  // Method 4: Check if entry text terminates any existing active goals
+  if (detectsTerminationLanguage(entryText) || detectsAchievementLanguage(entryText)) {
+    // Fetch active goals and check if any are mentioned
+    const activeGoals = await fetchActiveGoalStates(userId);
+
+    for (const [topic, goalState] of activeGoals) {
+      const topicWords = topic.split('_');
+      const textLower = entryText.toLowerCase();
+
+      // Check if entry mentions this goal's topic
+      const isMentioned = topicWords.some(word =>
+        word.length > 3 && textLower.includes(word)
+      );
+
+      if (isMentioned) {
+        const updateType = detectsAchievementLanguage(entryText) ? 'achievement' : 'termination';
+        return await upsertGoalState(userId, topic, entryId, updateType, { originalText: entryText });
+      }
+    }
+  }
+
+  return null;
+}
 
 // ============================================
 // SIGNAL AGGREGATION FUNCTIONS
