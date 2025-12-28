@@ -1689,6 +1689,459 @@ export const refreshPatterns = onCall(
 );
 
 // ============================================
+// BURNOUT DETECTION FUNCTIONS
+// ============================================
+
+// Burnout indicator keywords (server-side mirror of client burnoutIndicators.js)
+const BURNOUT_KEYWORDS = {
+  fatigue: [
+    'tired', 'exhausted', 'drained', 'burned out', 'burnout', 'burnt out',
+    "can't keep up", 'running on empty', 'no energy', 'depleted',
+    'wiped out', 'worn out', 'fatigued', 'spent', 'tapped out'
+  ],
+  overwork: [
+    'overtime', 'working late', 'late night', 'weekend work', 'no break',
+    'back-to-back', 'non-stop', 'nonstop', 'slammed', 'swamped',
+    'drowning in work', 'too many meetings', 'endless meetings',
+    'never-ending', 'piling up', 'behind on everything'
+  ],
+  physicalSymptoms: [
+    'eyes hurt', 'eye strain', 'headache', 'migraine', "can't sleep",
+    'insomnia', 'stress eating', 'not eating', 'skipping meals',
+    'neck pain', 'back pain', 'tense', 'tension', 'grinding teeth',
+    'jaw clenching', 'stomach issues', 'nauseous', 'heart racing'
+  ],
+  emotionalExhaustion: [
+    'overwhelmed', 'drowning', 'nothing left', 'running on empty',
+    "can't take it", 'at my limit', 'breaking point', 'losing it',
+    'falling apart', 'shutting down', 'checked out', 'going through motions',
+    "don't care anymore", "what's the point", 'empty inside'
+  ],
+  recovery: [
+    'took a break', 'rested', 'day off', 'vacation', 'relaxed',
+    'recharged', 'feeling better', 'recovered', 'self-care',
+    'walked away', 'logged off', 'unplugged', 'disconnected'
+  ]
+};
+
+const BURNOUT_FACTOR_WEIGHTS = {
+  moodTrajectory: 0.25,
+  fatigueKeywords: 0.20,
+  overworkIndicators: 0.20,
+  physicalSymptoms: 0.15,
+  workTagDensity: 0.10,
+  lowMoodStreak: 0.10
+};
+
+const BURNOUT_RISK_LEVELS = {
+  LOW: { min: 0, max: 0.3, label: 'low' },
+  MODERATE: { min: 0.3, max: 0.5, label: 'moderate' },
+  HIGH: { min: 0.5, max: 0.7, label: 'high' },
+  CRITICAL: { min: 0.7, max: 1.0, label: 'critical' }
+};
+
+/**
+ * Find keyword matches in text
+ */
+function findBurnoutKeywordMatches(text, keywords) {
+  if (!text) return { found: false, matches: [], count: 0 };
+  const lowerText = text.toLowerCase();
+  const matches = keywords.filter(kw => lowerText.includes(kw.toLowerCase()));
+  return { found: matches.length > 0, matches, count: matches.length };
+}
+
+/**
+ * Check if entry was created during high-risk time
+ */
+function checkBurnoutTimeRisk(entryDate) {
+  const date = entryDate instanceof Date ? entryDate : new Date(entryDate);
+  const hour = date.getHours();
+  const day = date.getDay();
+  const risks = [];
+
+  // Late night (10 PM - 5 AM)
+  if (hour >= 22 || hour < 5) risks.push('late_night_entry');
+  // Weekend
+  if (day === 0 || day === 6) risks.push('weekend_entry');
+
+  return { isRiskTime: risks.length > 0, risks, hour, dayOfWeek: day };
+}
+
+/**
+ * Compute burnout risk score from entries
+ * Server-side implementation mirroring client burnoutRiskScore.js
+ */
+function computeBurnoutRiskFromEntries(entries) {
+  if (!entries || entries.length < 3) {
+    return {
+      riskScore: 0,
+      riskLevel: 'low',
+      signals: [],
+      factors: {},
+      triggerShelterMode: false,
+      insufficientData: true
+    };
+  }
+
+  const recentEntries = entries.slice(0, 14);
+  const signals = [];
+  const factors = {};
+
+  // Factor 1: Mood Trajectory (25%)
+  const moodScores = recentEntries
+    .filter(e => e.analysis?.mood_score !== null && e.analysis?.mood_score !== undefined)
+    .map(e => e.analysis.mood_score);
+
+  let moodFactor = { score: 0, signal: null };
+  if (moodScores.length >= 2) {
+    const latest = moodScores.slice(0, 3).reduce((a, b) => a + b, 0) / Math.min(3, moodScores.length);
+    const oldest = moodScores.slice(-3).reduce((a, b) => a + b, 0) / Math.min(3, moodScores.length);
+    const trend = latest - oldest;
+    const avgMood = moodScores.reduce((a, b) => a + b, 0) / moodScores.length;
+
+    let score = 0;
+    if (trend < -0.2) score += 0.5;
+    else if (trend < -0.1) score += 0.3;
+    else if (trend < 0) score += 0.1;
+
+    if (avgMood < 0.3) score += 0.5;
+    else if (avgMood < 0.4) score += 0.3;
+    else if (avgMood < 0.5) score += 0.1;
+
+    moodFactor = {
+      score: Math.min(1, score),
+      signal: score > 0.3 ? 'declining_mood' : null
+    };
+  }
+  factors.moodTrajectory = moodFactor;
+  if (moodFactor.signal) signals.push(moodFactor.signal);
+
+  // Factor 2: Fatigue Keywords (20%)
+  const fatigueKeywords = [...BURNOUT_KEYWORDS.fatigue, ...BURNOUT_KEYWORDS.emotionalExhaustion];
+  let fatigueMatchCount = 0;
+  recentEntries.forEach(entry => {
+    const result = findBurnoutKeywordMatches(entry.text, fatigueKeywords);
+    if (result.found) fatigueMatchCount++;
+  });
+  const fatigueFreq = recentEntries.length > 0 ? fatigueMatchCount / recentEntries.length : 0;
+  const fatigueScore = Math.min(1, fatigueFreq * 1.5);
+  factors.fatigueKeywords = {
+    score: fatigueScore,
+    signal: fatigueScore > 0.3 ? 'fatigue' : null
+  };
+  if (fatigueScore > 0.3) signals.push('fatigue');
+
+  // Factor 3: Overwork Indicators (20%)
+  let lateNightCount = 0;
+  let weekendCount = 0;
+  let overworkKeywordCount = 0;
+  recentEntries.forEach(entry => {
+    const entryDate = entry.createdAt?.toDate?.() || entry.createdAt;
+    const timeRisk = checkBurnoutTimeRisk(entryDate);
+    if (timeRisk.risks.includes('late_night_entry')) lateNightCount++;
+    if (timeRisk.risks.includes('weekend_entry')) weekendCount++;
+    const kwResult = findBurnoutKeywordMatches(entry.text, BURNOUT_KEYWORDS.overwork);
+    if (kwResult.found) overworkKeywordCount++;
+  });
+  const lateNightRatio = recentEntries.length > 0 ? lateNightCount / recentEntries.length : 0;
+  const weekendRatio = recentEntries.length > 0 ? weekendCount / recentEntries.length : 0;
+  const overworkRatio = recentEntries.length > 0 ? overworkKeywordCount / recentEntries.length : 0;
+  const overworkScore = Math.min(1, (lateNightRatio * 0.4) + (weekendRatio * 0.3) + (overworkRatio * 0.3));
+  factors.overworkIndicators = {
+    score: overworkScore,
+    signal: overworkScore > 0.3 ? 'overwork_pattern' : null
+  };
+  if (overworkScore > 0.3) signals.push('overwork_pattern');
+
+  // Factor 4: Physical Symptoms (15%)
+  let physicalMatchCount = 0;
+  recentEntries.forEach(entry => {
+    const result = findBurnoutKeywordMatches(entry.text, BURNOUT_KEYWORDS.physicalSymptoms);
+    if (result.found) physicalMatchCount++;
+  });
+  const physicalFreq = recentEntries.length > 0 ? physicalMatchCount / recentEntries.length : 0;
+  const physicalScore = Math.min(1, physicalFreq * 1.5);
+  factors.physicalSymptoms = {
+    score: physicalScore,
+    signal: physicalScore > 0.3 ? 'physical_symptoms' : null
+  };
+  if (physicalScore > 0.3) signals.push('physical_symptoms');
+
+  // Factor 5: Work Tag Density (10%)
+  let totalTags = 0;
+  let workTags = 0;
+  const workTagPatterns = ['@project:', '@deadline:', '@meeting:', '@work:', '@client:', '@boss:'];
+  recentEntries.forEach(entry => {
+    const tags = entry.tags || [];
+    totalTags += tags.length;
+    tags.forEach(tag => {
+      if (workTagPatterns.some(p => tag.startsWith(p.replace(':', '')))) workTags++;
+    });
+  });
+  const workDensity = totalTags > 0 ? workTags / totalTags : 0;
+  const workDensityScore = Math.min(1, workDensity * 1.5);
+  factors.workTagDensity = {
+    score: workDensityScore,
+    signal: workDensityScore > 0.4 ? 'work_dominated_entries' : null
+  };
+  if (workDensityScore > 0.4) signals.push('work_dominated_entries');
+
+  // Factor 6: Low Mood Streak (10%)
+  let currentStreak = 0;
+  for (const entry of recentEntries) {
+    const mood = entry.analysis?.mood_score;
+    if (mood !== null && mood !== undefined && mood < 0.4) {
+      currentStreak++;
+    } else {
+      break;
+    }
+  }
+  let streakScore = 0;
+  if (currentStreak >= 5) streakScore = 1.0;
+  else if (currentStreak >= 4) streakScore = 0.8;
+  else if (currentStreak >= 3) streakScore = 0.5;
+  else if (currentStreak >= 2) streakScore = 0.2;
+  factors.lowMoodStreak = {
+    score: streakScore,
+    signal: currentStreak >= 3 ? `${currentStreak}_day_low_streak` : null
+  };
+  if (currentStreak >= 3) signals.push(`${currentStreak}_day_low_streak`);
+
+  // Calculate weighted score
+  let rawScore =
+    (factors.moodTrajectory.score * BURNOUT_FACTOR_WEIGHTS.moodTrajectory) +
+    (factors.fatigueKeywords.score * BURNOUT_FACTOR_WEIGHTS.fatigueKeywords) +
+    (factors.overworkIndicators.score * BURNOUT_FACTOR_WEIGHTS.overworkIndicators) +
+    (factors.physicalSymptoms.score * BURNOUT_FACTOR_WEIGHTS.physicalSymptoms) +
+    (factors.workTagDensity.score * BURNOUT_FACTOR_WEIGHTS.workTagDensity) +
+    (factors.lowMoodStreak.score * BURNOUT_FACTOR_WEIGHTS.lowMoodStreak);
+
+  // Apply recovery discount
+  let recoverySignals = 0;
+  recentEntries.slice(0, 5).forEach(entry => {
+    const result = findBurnoutKeywordMatches(entry.text, BURNOUT_KEYWORDS.recovery);
+    if (result.found) recoverySignals++;
+  });
+  const recoveryDiscount = Math.min(0.15, recoverySignals * 0.05);
+  const adjustedScore = Math.max(0, rawScore - recoveryDiscount);
+  const riskScore = Math.min(1, Math.max(0, adjustedScore));
+
+  // Determine risk level
+  let riskLevel = 'low';
+  if (riskScore >= BURNOUT_RISK_LEVELS.CRITICAL.min) riskLevel = 'critical';
+  else if (riskScore >= BURNOUT_RISK_LEVELS.HIGH.min) riskLevel = 'high';
+  else if (riskScore >= BURNOUT_RISK_LEVELS.MODERATE.min) riskLevel = 'moderate';
+
+  // Determine if shelter mode should trigger
+  let triggerShelterMode = false;
+  if (riskLevel === 'critical') triggerShelterMode = true;
+  else if (riskLevel === 'high') {
+    const severeFactors = Object.values(factors).filter(f => f.score > 0.6);
+    triggerShelterMode = severeFactors.length >= 2;
+  }
+
+  return {
+    riskScore: Number(riskScore.toFixed(3)),
+    riskLevel,
+    signals,
+    factors,
+    triggerShelterMode,
+    recoveryDiscount: recoveryDiscount > 0 ? recoveryDiscount : undefined,
+    entryCount: recentEntries.length,
+    assessedAt: new Date().toISOString()
+  };
+}
+
+/**
+ * Cloud Function: Compute burnout risk on-demand
+ */
+export const computeBurnoutRisk = onCall(
+  {
+    cors: true,
+    maxInstances: 5
+  },
+  async (request) => {
+    if (!request.auth) {
+      throw new HttpsError('unauthenticated', 'Must be logged in');
+    }
+
+    const userId = request.auth.uid;
+
+    try {
+      // Fetch recent entries
+      const entriesRef = db.collection('artifacts')
+        .doc(APP_COLLECTION_ID)
+        .collection('users')
+        .doc(userId)
+        .collection('entries');
+
+      const snapshot = await entriesRef
+        .orderBy('createdAt', 'desc')
+        .limit(14)
+        .get();
+
+      const entries = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+
+      // Compute risk
+      const assessment = computeBurnoutRiskFromEntries(entries);
+
+      // Store assessment in burnout_assessments collection
+      const assessmentRef = db.collection('artifacts')
+        .doc(APP_COLLECTION_ID)
+        .collection('users')
+        .doc(userId)
+        .collection('burnout_assessments');
+
+      await assessmentRef.add({
+        ...assessment,
+        createdAt: FieldValue.serverTimestamp(),
+        source: 'on_demand'
+      });
+
+      return assessment;
+    } catch (error) {
+      console.error(`Error computing burnout risk for user ${userId}:`, error);
+      throw new HttpsError('internal', 'Failed to compute burnout risk');
+    }
+  }
+);
+
+/**
+ * Cloud Function: Log burnout-related events for analytics
+ * Tracks: nudge_shown, nudge_dismissed, shelter_entered, shelter_exited, activity_completed
+ */
+export const logBurnoutEvent = onCall(
+  {
+    cors: true,
+    maxInstances: 10
+  },
+  async (request) => {
+    if (!request.auth) {
+      throw new HttpsError('unauthenticated', 'Must be logged in');
+    }
+
+    const userId = request.auth.uid;
+    const { eventType, riskLevel, riskScore, dismissCount, activityType, duration, metadata } = request.data;
+
+    if (!eventType) {
+      throw new HttpsError('invalid-argument', 'eventType is required');
+    }
+
+    const validEventTypes = [
+      'nudge_shown',
+      'nudge_dismissed',
+      'nudge_acknowledged',
+      'shelter_entered',
+      'shelter_exited',
+      'activity_completed',
+      'breathing_completed',
+      'grounding_completed',
+      'timer_completed'
+    ];
+
+    if (!validEventTypes.includes(eventType)) {
+      throw new HttpsError('invalid-argument', `Invalid eventType: ${eventType}`);
+    }
+
+    try {
+      const eventsRef = db.collection('artifacts')
+        .doc(APP_COLLECTION_ID)
+        .collection('users')
+        .doc(userId)
+        .collection('burnout_events');
+
+      await eventsRef.add({
+        eventType,
+        riskLevel: riskLevel || null,
+        riskScore: riskScore || null,
+        dismissCount: dismissCount || null,
+        activityType: activityType || null,
+        duration: duration || null,
+        metadata: metadata || null,
+        createdAt: FieldValue.serverTimestamp()
+      });
+
+      console.log(`Logged burnout event for user ${userId}: ${eventType}`);
+      return { success: true };
+    } catch (error) {
+      console.error(`Error logging burnout event for user ${userId}:`, error);
+      throw new HttpsError('internal', 'Failed to log event');
+    }
+  }
+);
+
+/**
+ * Trigger: Compute burnout risk when a new entry is created
+ * Stores the latest assessment for quick access
+ */
+export const onEntryCreateBurnoutCheck = onDocumentCreated(
+  'artifacts/{appId}/users/{userId}/entries/{entryId}',
+  async (event) => {
+    const { userId, appId } = event.params;
+
+    if (appId !== APP_COLLECTION_ID) {
+      return null;
+    }
+
+    console.log(`Checking burnout risk for user ${userId} after new entry...`);
+
+    try {
+      // Fetch recent entries (including the new one)
+      const entriesRef = db.collection('artifacts')
+        .doc(APP_COLLECTION_ID)
+        .collection('users')
+        .doc(userId)
+        .collection('entries');
+
+      const snapshot = await entriesRef
+        .orderBy('createdAt', 'desc')
+        .limit(14)
+        .get();
+
+      const entries = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+
+      if (entries.length < 3) {
+        console.log(`Not enough entries for burnout check (${entries.length})`);
+        return null;
+      }
+
+      // Compute risk
+      const assessment = computeBurnoutRiskFromEntries(entries);
+
+      // Store latest assessment (overwrite previous)
+      const userRef = db.collection('artifacts')
+        .doc(APP_COLLECTION_ID)
+        .collection('users')
+        .doc(userId);
+
+      await userRef.set({
+        latestBurnoutAssessment: {
+          ...assessment,
+          updatedAt: FieldValue.serverTimestamp()
+        }
+      }, { merge: true });
+
+      // If risk is high/critical, also store in history
+      if (['high', 'critical'].includes(assessment.riskLevel)) {
+        await userRef.collection('burnout_assessments').add({
+          ...assessment,
+          createdAt: FieldValue.serverTimestamp(),
+          source: 'entry_trigger',
+          triggeringEntryId: event.params.entryId
+        });
+
+        console.log(`High burnout risk detected for user ${userId}: ${assessment.riskLevel} (${assessment.riskScore})`);
+      }
+
+      return { success: true, riskLevel: assessment.riskLevel };
+    } catch (error) {
+      console.error(`Error checking burnout for user ${userId}:`, error);
+      return { success: false, error: error.message };
+    }
+  }
+);
+
+// ============================================
 // SIGNAL AGGREGATION FUNCTIONS
 // ============================================
 
