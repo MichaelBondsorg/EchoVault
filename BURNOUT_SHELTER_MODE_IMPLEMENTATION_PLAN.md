@@ -9,6 +9,7 @@ This document outlines the implementation plan for 8 major feature enhancements 
 
 ## Table of Contents
 
+0. [Feature 0: Stateful Signal Architecture (Foundation)](#feature-0-stateful-signal-architecture-foundation)
 1. [Feature 1: Burnout Prediction and Proactive Shelter Mode](#feature-1-burnout-prediction-and-proactive-shelter-mode)
 2. [Feature 2: Leadership and Management Support](#feature-2-leadership-and-management-support)
 3. [Feature 3: SAD and Environmental Contextualization](#feature-3-sad-and-environmental-contextualization)
@@ -19,6 +20,408 @@ This document outlines the implementation plan for 8 major feature enhancements 
 8. [Feature 8: HealthKit Integration](#feature-8-healthkit-integration)
 9. [Implementation Priority & Dependencies](#implementation-priority--dependencies)
 10. [Technical Architecture Overview](#technical-architecture-overview)
+
+---
+
+## Feature 0: Stateful Signal Architecture (Foundation)
+
+### Critical Problem Analysis
+
+The current pattern engine has fundamental architectural issues that will undermine all 8 features if not addressed:
+
+**Problem 1: Ghost Goals**
+```javascript
+// Current detectContradictions logic (simplified)
+const goals = entries.filter(e => e.text.match(/I want to|planning to|@goal:/));
+const recentMentions = getRecentMentions(goalTopic, 14);
+if (recentMentions.length === 0) {
+  flag("goal_abandonment", daysSince(goalEntry));  // ← Always fires on old goals
+}
+```
+The system has no concept of goal termination. Writing "I don't want that job anymore" doesn't clear the flag because the original "I want the job" entry still exists.
+
+**Problem 2: Stateless Observations**
+```javascript
+// Current temporal pattern logic
+const mondayMood = entries.filter(e => e.day === 'Monday').avgMood();
+insight("Mondays are harder for you");  // ← User already knows this
+```
+Pure mathematical correlation without causal analysis or actionability.
+
+**Problem 3: RAG Context Gaps**
+The `generateInsight` function uses semantic similarity to pull "relevant" entries, but often misses the specific entry that **terminates** or **updates** a previous signal.
+
+### Solution: Stateful Signal Model
+
+Transform signals from **stateless observations** to **lifecycle-aware entities**.
+
+#### 0.1 Signal Lifecycle States
+
+**New File:** `/src/services/signals/signalLifecycle.js`
+
+```javascript
+export const SIGNAL_STATES = {
+  // Goals
+  goal_proposed: 'proposed',      // AI detected, awaiting user confirmation
+  goal_active: 'active',          // User confirmed, currently pursuing
+  goal_achieved: 'achieved',      // User marked complete
+  goal_abandoned: 'abandoned',    // User explicitly cancelled
+  goal_paused: 'paused',          // Temporarily deprioritized
+
+  // Insights
+  insight_pending: 'pending',     // Awaiting user review
+  insight_verified: 'verified',   // User confirmed accuracy
+  insight_dismissed: 'dismissed', // User marked as not useful
+  insight_actioned: 'actioned',   // User took suggested action
+
+  // Patterns
+  pattern_detected: 'detected',   // System found correlation
+  pattern_confirmed: 'confirmed', // User validated pattern
+  pattern_rejected: 'rejected',   // User said "not accurate"
+  pattern_resolved: 'resolved'    // Root cause addressed
+};
+
+export const transitionSignalState = async (signalId, newState, context) => {
+  const signal = await getSignal(signalId);
+
+  // Validate transition is allowed
+  if (!isValidTransition(signal.state, newState)) {
+    throw new Error(`Cannot transition from ${signal.state} to ${newState}`);
+  }
+
+  // Update signal with new state and context
+  await updateSignal(signalId, {
+    state: newState,
+    stateHistory: [
+      ...signal.stateHistory,
+      { from: signal.state, to: newState, at: new Date(), context }
+    ],
+    lastUpdated: new Date()
+  });
+
+  // Trigger side effects
+  if (newState === 'dismissed') {
+    await excludeFromFutureAnalysis(signal);
+  }
+  if (newState === 'achieved' || newState === 'abandoned') {
+    await closeRelatedContradictions(signal);
+  }
+};
+```
+
+#### 0.2 Goal Lifecycle Tracking
+
+**New File:** `/src/services/goals/goalLifecycle.js`
+
+```javascript
+export const detectGoalSignal = async (entry) => {
+  // AI-powered goal extraction (not just regex)
+  const potentialGoals = await extractGoalIntentions(entry.text);
+
+  for (const goal of potentialGoals) {
+    // Check if this updates an existing goal
+    const existingGoal = await findRelatedGoal(goal.topic);
+
+    if (existingGoal) {
+      // Determine if this is an update, achievement, or abandonment
+      const updateType = await classifyGoalUpdate(entry, existingGoal);
+
+      if (updateType === 'termination') {
+        await transitionSignalState(existingGoal.id, 'abandoned', {
+          terminationEntry: entry.id,
+          reason: extractTerminationReason(entry.text)
+        });
+        return;  // Don't create new goal
+      }
+
+      if (updateType === 'achievement') {
+        await transitionSignalState(existingGoal.id, 'achieved', {
+          achievementEntry: entry.id
+        });
+        return;
+      }
+
+      // Otherwise, it's a progress update
+      await addProgressToGoal(existingGoal.id, entry);
+      return;
+    }
+
+    // New goal - create in "proposed" state
+    await createGoal({
+      topic: goal.topic,
+      state: 'proposed',
+      sourceEntry: entry.id,
+      extractedText: goal.text,
+      requiresConfirmation: true
+    });
+  }
+};
+
+// Enhanced contradiction detection that respects lifecycle
+export const detectContradictionsV2 = async (entries) => {
+  // Only look at ACTIVE goals, not all historical mentions
+  const activeGoals = await getGoalsByState(['active']);
+
+  const contradictions = [];
+  for (const goal of activeGoals) {
+    const recentProgress = await getRecentProgress(goal.id, 14);
+
+    if (recentProgress.length === 0) {
+      // Check if there's a termination signal we missed
+      const terminationSignal = await findTerminationSignal(goal, entries);
+
+      if (terminationSignal) {
+        // Auto-transition to abandoned/achieved based on signal
+        await transitionSignalState(goal.id, terminationSignal.newState, {
+          autoDetected: true,
+          sourceEntry: terminationSignal.entryId
+        });
+      } else {
+        // Only then flag as potential abandonment
+        contradictions.push({
+          goal,
+          type: 'inactivity',
+          daysSince: daysSince(goal.lastProgress || goal.createdAt),
+          requiresUserInput: true  // Ask user, don't assume
+        });
+      }
+    }
+  }
+
+  return contradictions;
+};
+```
+
+#### 0.3 User-Dismissible Insights UI
+
+**New Component:** `/src/components/insights/DismissibleInsight.jsx`
+
+```javascript
+const DismissibleInsight = ({ insight, onDismiss, onVerify, onAction }) => {
+  const [showFeedback, setShowFeedback] = useState(false);
+
+  const handleDismiss = async (reason) => {
+    await transitionSignalState(insight.id, 'dismissed', {
+      reason,
+      dismissedAt: new Date()
+    });
+
+    // Ensure this insight type doesn't regenerate
+    await addToExclusionList(insight.patternType, insight.context);
+
+    onDismiss(insight);
+  };
+
+  return (
+    <InsightCard>
+      <InsightContent>
+        <p>{insight.message}</p>
+        {insight.source && (
+          <SourceTag>Based on {insight.source}</SourceTag>
+        )}
+      </InsightContent>
+
+      <InsightActions>
+        <Button onClick={() => onVerify(insight)} variant="primary">
+          This is accurate
+        </Button>
+        <Button onClick={() => onAction(insight)} variant="secondary">
+          Take suggested action
+        </Button>
+        <Button onClick={() => setShowFeedback(true)} variant="ghost">
+          Not useful
+        </Button>
+      </InsightActions>
+
+      {showFeedback && (
+        <DismissFeedback>
+          <p>Why isn't this useful?</p>
+          <RadioGroup>
+            <Radio value="outdated" label="This is outdated information" />
+            <Radio value="inaccurate" label="This doesn't match my experience" />
+            <Radio value="obvious" label="I already knew this" />
+            <Radio value="not_actionable" label="I can't do anything about it" />
+          </RadioGroup>
+          <Button onClick={() => handleDismiss(selectedReason)}>
+            Dismiss & don't show again
+          </Button>
+        </DismissFeedback>
+      )}
+    </InsightCard>
+  );
+};
+```
+
+#### 0.4 "What" to "Why" Insight Enhancement
+
+**Modified:** Cloud Function `generateInsight`
+
+```javascript
+// Current: Pure observation
+{
+  type: "temporal_pattern",
+  message: "Mondays tend to be harder for you.",
+  data: { day: "Monday", avgMood: 0.42 }
+}
+
+// Redesigned: Causal analysis with ACT/CBT framing
+{
+  type: "temporal_pattern_with_cause",
+  observation: "Mondays tend to be harder for you.",
+  causal_analysis: {
+    correlating_themes: ["manager feedback", "weekly planning", "@project:orion"],
+    strongest_correlation: "manager feedback",
+    correlation_strength: 0.73,
+    sample_entries: ["entry_123", "entry_456"]
+  },
+  therapeutic_reframe: {
+    framework: "CBT",
+    potential_distortion: "anticipatory_anxiety",
+    reframe_prompt: "You've mentioned 'manager feedback' in 3 of your last 4 Monday entries. This correlates with a 30% mood dip. Is there a thought pattern around receiving feedback that we could examine?"
+  },
+  actionable_suggestion: {
+    micro_action: "Before your next Monday meeting, try the 5-4-3-2-1 grounding technique",
+    values_connection: "This supports your value of 'Growth' - feedback is data, not judgment"
+  },
+  dismissible: true,
+  requires_verification: true
+}
+```
+
+#### 0.5 Hybrid State Tracking (Immediate Fix)
+
+**Modified:** `/functions/index.js` - `detectContradictions`
+
+```javascript
+// BEFORE: Ignores goal_update status
+const goals = entries.filter(e => e.tags?.some(t => t.startsWith('@goal:')));
+
+// AFTER: Respects extractEnhancedContext.goal_update
+const detectContradictions = (entries) => {
+  const activeGoals = new Map();
+
+  // First pass: Build goal state from entries
+  for (const entry of entries) {
+    const goalContext = entry.analysis?.extractEnhancedContext?.goal_update;
+
+    if (goalContext) {
+      const goalId = goalContext.goal_id || goalContext.topic;
+
+      if (goalContext.status === 'achieved' || goalContext.status === 'abandoned') {
+        // Mark this goal as TERMINATED - stop tracking
+        activeGoals.delete(goalId);
+      } else if (goalContext.status === 'active' || goalContext.status === 'progress') {
+        activeGoals.set(goalId, {
+          ...activeGoals.get(goalId),
+          lastMention: entry.createdAt,
+          progressEntries: [...(activeGoals.get(goalId)?.progressEntries || []), entry.id]
+        });
+      }
+    }
+
+    // Also check for implicit termination signals
+    if (detectsTerminationLanguage(entry.text)) {
+      const relatedGoal = findRelatedGoal(entry, activeGoals);
+      if (relatedGoal) {
+        activeGoals.delete(relatedGoal);
+      }
+    }
+  }
+
+  // Second pass: Only flag ACTIVE goals with no recent progress
+  const contradictions = [];
+  for (const [goalId, goalData] of activeGoals) {
+    if (daysSince(goalData.lastMention) > 14) {
+      contradictions.push({
+        goalId,
+        type: 'inactivity',
+        daysSince: daysSince(goalData.lastMention),
+        askUser: true  // Don't assume abandonment
+      });
+    }
+  }
+
+  return contradictions;
+};
+
+const detectsTerminationLanguage = (text) => {
+  const terminationPatterns = [
+    /I('m| am) (no longer|not) (interested|pursuing|going after)/i,
+    /decided (against|not to)/i,
+    /giving up on/i,
+    /moving on from/i,
+    /that('s| is) (not|no longer) (a priority|important)/i,
+    /changed my mind about/i
+  ];
+  return terminationPatterns.some(p => p.test(text));
+};
+```
+
+#### 0.6 Database Schema for Stateful Signals
+
+**New Collection:** `/users/{userId}/signal_states`
+
+```javascript
+{
+  id: string,
+  type: 'goal' | 'pattern' | 'insight' | 'contradiction',
+  topic: string,
+  state: string,  // From SIGNAL_STATES
+  stateHistory: [
+    { from: string, to: string, at: Date, context: object }
+  ],
+  sourceEntries: string[],
+  lastUpdated: Date,
+  exclusions: {
+    excludeFromContradictions: boolean,
+    excludeFromInsights: boolean,
+    excludeFromPatterns: boolean
+  },
+  userFeedback: {
+    verified: boolean,
+    dismissed: boolean,
+    dismissReason: string | null,
+    actionTaken: string | null
+  }
+}
+```
+
+**New Collection:** `/users/{userId}/insight_exclusions`
+
+```javascript
+{
+  patternType: string,  // e.g., "temporal_monday_low"
+  context: object,      // e.g., { day: "Monday", theme: "work" }
+  excludedAt: Date,
+  reason: string,
+  permanent: boolean
+}
+```
+
+#### 0.7 Implementation Steps
+
+| Step | Task | Files Affected | Priority |
+|------|------|----------------|----------|
+| 1 | Create signal lifecycle service | New: `/src/services/signals/signalLifecycle.js` | P0 |
+| 2 | Implement goal lifecycle tracking | New: `/src/services/goals/goalLifecycle.js` | P0 |
+| 3 | Fix detectContradictions to respect termination | `/functions/index.js` | P0 (Immediate) |
+| 4 | Add DismissibleInsight component | New: `/src/components/insights/DismissibleInsight.jsx` | P0 |
+| 5 | Enhance insight generation with causal analysis | `/functions/index.js` | P1 |
+| 6 | Create signal_states Firestore collection | `/firestore.rules` | P0 |
+| 7 | Create insight_exclusions collection | `/firestore.rules` | P0 |
+| 8 | Migrate existing goals to stateful model | New: `/scripts/migrateToStatefulSignals.js` | P1 |
+| 9 | Add goal confirmation UI flow | `/src/components/goals/GoalConfirmation.jsx` | P1 |
+| 10 | Write tests for lifecycle transitions | `/src/services/signals/__tests__/` | P1 |
+
+#### 0.8 How This Enables Other Features
+
+| Feature | Dependency on Stateful Signals |
+|---------|-------------------------------|
+| 1. Burnout | Burnout signals can be dismissed if user says "I've addressed this" |
+| 2. Leadership | Leadership threads become lifecycle-aware (active → resolved) |
+| 4. Values | Value alignment tracking respects "I'm consciously deprioritizing X" |
+| 5. Anticipatory | Plan signals transition from pending → completed → reflected |
+| 7. Social | Social nudges can be dismissed with "I prefer solitude right now" |
 
 ---
 
@@ -2384,12 +2787,20 @@ The phased approach ensures high-impact features are delivered first while build
 
 ---
 
-*Document Version: 1.1*
+*Document Version: 1.2*
 *Created: December 2024*
 *Updated: December 2024*
 *Author: Implementation Planning*
 
 ### Changelog
+
+**v1.2** - Added Stateful Signal Architecture (Foundation):
+- Feature 0: Complete signal lifecycle model (proposed → active → achieved/abandoned)
+- Goal Lifecycle Tracking: Fixes "Ghost Goal" problem
+- Dismissible Insights: Users can reject irrelevant patterns
+- "What" to "Why" Enhancement: Causal analysis with CBT/ACT framing
+- Immediate Fix: detectContradictions now respects termination language
+- New collections: signal_states, insight_exclusions
 
 **v1.1** - Added Critical UX Refinements:
 - Feature 1: Soft Block pattern instead of auto-trigger (addresses jarring UX concern)
