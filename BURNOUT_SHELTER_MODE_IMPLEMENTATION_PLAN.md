@@ -85,9 +85,90 @@ export const BURNOUT_INDICATORS = {
 - `0.0 - 0.3`: Low risk (green)
 - `0.3 - 0.5`: Moderate risk (yellow) - gentle nudge
 - `0.5 - 0.7`: High risk (orange) - suggest break
-- `0.7 - 1.0`: Critical (red) - auto-trigger Shelter Mode
+- `0.7 - 1.0`: Critical (red) - show strong nudge banner (see 1.2)
 
-#### 1.2 Enhanced ShelterView Trigger Logic
+#### 1.2 Soft Block UX Pattern (Critical Refinement)
+
+**Problem:** Auto-triggering Shelter Mode during high-stress projects (like "Project Orion") could be jarring and anxiety-inducing if the user is mid-task.
+
+**Solution:** Implement a "Strong Nudge" pattern instead of forced transition.
+
+**New Component:** `/src/components/shelter/BurnoutNudgeBanner.jsx`
+
+```javascript
+const BurnoutNudgeBanner = ({ burnoutRisk, onEnterShelter, onDismiss }) => {
+  const [dismissCount, setDismissCount] = useState(0);
+  const [acknowledgmentRequired, setAcknowledgmentRequired] = useState(false);
+
+  // After 3 dismissals, require acknowledgment
+  const handleDismiss = () => {
+    if (dismissCount >= 2) {
+      setAcknowledgmentRequired(true);
+    } else {
+      setDismissCount(prev => prev + 1);
+      onDismiss();
+    }
+  };
+
+  return (
+    <PersistentBanner priority="critical" dismissable={!acknowledgmentRequired}>
+      <AlertTriangle className="text-amber-500" />
+      <div>
+        <h3>Burnout Warning</h3>
+        <p>
+          Our signals suggest you're reaching a critical burnout threshold.
+          We recommend taking a break to decompress.
+        </p>
+        <div className="detected-signals">
+          {burnoutRisk.signals.map(signal => (
+            <Badge key={signal}>{signal}</Badge>
+          ))}
+        </div>
+      </div>
+
+      <div className="actions">
+        <Button variant="primary" onClick={onEnterShelter}>
+          Enter Shelter Mode
+        </Button>
+        {!acknowledgmentRequired ? (
+          <Button variant="ghost" onClick={handleDismiss}>
+            Keep Journaling
+          </Button>
+        ) : (
+          <AcknowledgmentPrompt
+            message="I understand I may be at risk for burnout"
+            onAcknowledge={() => {
+              setAcknowledgmentRequired(false);
+              onDismiss();
+            }}
+          />
+        )}
+      </div>
+    </PersistentBanner>
+  );
+};
+```
+
+**Escalation Ladder:**
+1. **First Detection (0.5-0.7):** Gentle suggestion in dashboard
+2. **Second Detection (0.7+):** Persistent banner, dismissable
+3. **Third Dismissal:** Requires acknowledgment checkbox
+4. **Continued Pattern:** Logs "burnout_warning_dismissed" for later reflection
+
+**Database Tracking:**
+
+```javascript
+// Add to burnout_tracking collection
+{
+  // ... existing fields ...
+  nudgesShown: number,
+  nudgesDismissed: number,
+  acknowledgmentGiven: boolean,
+  userChoice: 'entered_shelter' | 'continued_journaling' | 'acknowledged_risk'
+}
+```
+
+#### 1.3 Enhanced ShelterView Trigger Logic
 
 **Modified File:** `/src/components/dashboard/DayDashboard.jsx`
 
@@ -300,19 +381,138 @@ if (hasLeadershipContext) {
 }
 ```
 
-#### 2.5 UI Integration
+#### 2.5 Leadership Threads (Longitudinal Mentee Tracking)
+
+**Problem:** The Post-Mortem focuses on single events, but managers need to track mentee growth over months (e.g., giving Jason feedback in December, noting his growth in February).
+
+**Solution:** Create "Leadership Threads" that link feedback conversations to follow-up mentions.
+
+**New File:** `/src/services/leadership/leadershipThreads.js`
+
+```javascript
+export const createLeadershipThread = async (userId, entry, leadershipContext) => {
+  // When feedback session detected, create a Growth Goal thread
+  if (leadershipContext.contexts.includes('performance_review') ||
+      leadershipContext.contexts.includes('one_on_one')) {
+
+    const thread = {
+      id: generateId(),
+      createdAt: new Date(),
+      person: leadershipContext.mentionedPeople[0],  // e.g., @person:jason
+      threadType: 'growth_tracking',
+      initialEntry: {
+        id: entry.id,
+        date: entry.createdAt,
+        summary: extractFeedbackSummary(entry),
+        feedbackGiven: extractFeedbackTopics(entry)  // e.g., ['communication', 'ownership']
+      },
+      followUps: [],
+      status: 'active'
+    };
+
+    await saveLeadershipThread(userId, thread);
+    return thread;
+  }
+};
+
+export const linkFollowUpMention = async (userId, entry, personTag) => {
+  // When person is mentioned again, check for active threads
+  const activeThreads = await getActiveThreadsForPerson(userId, personTag);
+
+  if (activeThreads.length > 0) {
+    const thread = activeThreads[0];
+    const followUp = {
+      entryId: entry.id,
+      date: entry.createdAt,
+      sentiment: entry.analysis.mood_score > 0.6 ? 'positive' : 'neutral',
+      progressIndicators: extractProgressIndicators(entry),  // e.g., ['showed initiative', 'improved communication']
+      summary: extractMentionSummary(entry)
+    };
+
+    await addFollowUpToThread(userId, thread.id, followUp);
+
+    // Return context for AI to surface
+    return {
+      hasActiveThread: true,
+      previousFeedback: thread.initialEntry.feedbackGiven,
+      daysSinceInitial: daysBetween(thread.initialEntry.date, new Date()),
+      progressNotes: thread.followUps.map(f => f.progressIndicators).flat()
+    };
+  }
+
+  return { hasActiveThread: false };
+};
+```
+
+**Enhanced Leadership Analysis with Thread Context:**
+
+```javascript
+// In Cloud Function analyzeEntry, include thread context
+"leadership_analysis": {
+  // ... existing fields ...
+  "thread_context": {
+    "has_active_thread": true,
+    "person": "@person:jason",
+    "days_since_feedback": 45,
+    "original_feedback": ["communication", "taking ownership"],
+    "observed_progress": ["showed initiative on Q4 planning", "led team meeting confidently"],
+    "reflection_prompt": "You gave Jason feedback on communication 45 days ago. Based on today's entry, it sounds like he's showing real growth. Consider acknowledging this in your next 1:1."
+  }
+}
+```
+
+**New Component:** `/src/components/leadership/LeadershipThreadCard.jsx`
+
+Displays:
+1. **Timeline View** - Initial feedback → Follow-up mentions over time
+2. **Progress Indicators** - Extracted growth signals
+3. **Next Action Suggestion** - "Acknowledge growth in next 1:1"
+4. **Thread Archive** - Mark thread complete when goal achieved
+
+**Database Schema:**
+
+```javascript
+// New Collection: /users/{userId}/leadership_threads
+{
+  id: string,
+  person: string,  // @person:jason
+  threadType: 'growth_tracking' | 'conflict_resolution' | 'mentorship',
+  status: 'active' | 'completed' | 'archived',
+  initialEntry: {
+    id: string,
+    date: Date,
+    summary: string,
+    feedbackGiven: string[]
+  },
+  followUps: [
+    {
+      entryId: string,
+      date: Date,
+      sentiment: string,
+      progressIndicators: string[],
+      summary: string
+    }
+  ],
+  completedAt: Date | null,
+  completionNote: string | null
+}
+```
+
+#### 2.6 UI Integration
 
 **EntryCard Enhancement:**
 - Add "Leadership Insights" expandable section
 - Show detected management context
 - Link to Post-Mortem guided reflection
+- **NEW:** Show thread context when mentee has active growth thread
 
 **New Dashboard Widget:**
 - "Team Emotional Labor" tracker
 - People you've supported recently
 - Self-care reminders for managers
+- **NEW:** "Active Growth Threads" - people with pending feedback follow-ups
 
-#### 2.6 Implementation Steps
+#### 2.7 Implementation Steps
 
 | Step | Task | Files Affected |
 |------|------|----------------|
@@ -408,7 +608,87 @@ export const analyzeEnvironmentalCorrelations = (entries, environmentData) => {
 }
 ```
 
-#### 3.3 Proactive SAD Interventions
+#### 3.3 Indoor Time Correlation (Critical Refinement)
+
+**Problem:** A user can be in a sunny city but stuck in a windowless office until 10 PM (like Alex during Project Orion). Weather API alone misses this context.
+
+**Solution:** Cross-reference environmental data with overwork indicators from Feature 1 to detect "missed daylight" patterns.
+
+**New File:** `/src/services/environment/indoorTimeAnalysis.js`
+
+```javascript
+export const analyzeIndoorExposure = (entries, environmentData, burnoutData) => {
+  const missedDaylightDays = [];
+
+  entries.forEach((entry, index) => {
+    const env = environmentData[index];
+    const burnout = burnoutData[index];
+
+    // Detect "sunny outside but user missed it"
+    const wasSunnyDay = env?.weather?.condition === 'sunny' ||
+                        env?.daylight?.daylightHours > 10;
+    const wasOverworking = burnout?.signals?.includes('overwork') ||
+                           entry.createdAt.getHours() >= 20;  // Entry after 8 PM
+    const mentionsIndoor = /office|desk|meeting|screen|computer/i.test(entry.text);
+
+    if (wasSunnyDay && wasOverworking && mentionsIndoor) {
+      missedDaylightDays.push({
+        date: entry.createdAt,
+        sunsetTime: env.daylight.sunset,
+        entryTime: entry.createdAt,
+        hoursOfDaylightMissed: calculateMissedHours(env, entry),
+        mood: entry.analysis.mood_score
+      });
+    }
+  });
+
+  return {
+    missedDaylightDays,
+    missedDaylightStreak: calculateStreak(missedDaylightDays),
+    avgMoodOnMissedDays: average(missedDaylightDays.map(d => d.mood)),
+    avgMoodOnExposedDays: calculateExposedDaysMood(entries, missedDaylightDays),
+    recommendation: generateIndoorRecommendation(missedDaylightDays)
+  };
+};
+
+const generateIndoorRecommendation = (missedDays) => {
+  if (missedDays.length >= 5) {
+    return {
+      type: 'critical_light_deficit',
+      message: "You've been indoors during daylight hours for 5+ days. This significantly increases SAD risk, even in sunny weather.",
+      suggestions: [
+        { action: 'SAD_lamp', priority: 'high', reason: 'Compensate for missed natural light' },
+        { action: 'lunch_walk', priority: 'medium', reason: 'Get 15 min of midday light' },
+        { action: 'morning_light', priority: 'medium', reason: 'Open blinds immediately on waking' }
+      ]
+    };
+  }
+  // ... other thresholds
+};
+```
+
+**Enhanced Environmental Insights Display:**
+
+```javascript
+// In SADInterventions.jsx, add indoor context
+<InsightCard type="warning">
+  <h4>Light Exposure Gap</h4>
+  <p>
+    The weather was sunny this week, but you logged entries after dark
+    on {missedDays} of {totalDays} days.
+  </p>
+  <p>
+    Your mood averaged {avgMissed} on missed-daylight days vs {avgExposed}
+    on days with outdoor time.
+  </p>
+  <Recommendation>
+    A SAD lamp is especially important when work keeps you indoors
+    during available sunlight.
+  </Recommendation>
+</InsightCard>
+```
+
+#### 3.4 Proactive SAD Interventions
 
 **New Component:** `/src/components/environment/SADInterventions.jsx`
 
@@ -417,8 +697,9 @@ When SAD patterns detected, show:
 2. **Exercise Nudge** - "Your gym visits boost your mood by 31%. Winter might be a good time to increase frequency."
 3. **Social Connection** - "Dark evenings can feel isolating. Have you texted Mark recently?"
 4. **Vitamin D Reminder** - Link to health considerations
+5. **NEW: Indoor Alert** - "You've been missing available daylight. Even 15 min at lunch helps."
 
-#### 3.4 Entry Enrichment
+#### 3.5 Entry Enrichment
 
 **Enhanced Entry Storage:**
 
@@ -433,7 +714,7 @@ When SAD patterns detected, show:
 }
 ```
 
-#### 3.5 External API Integration
+#### 3.6 External API Integration
 
 **APIs to Integrate:**
 
@@ -448,7 +729,7 @@ When SAD patterns detected, show:
 - `sunTimesApi.js`
 - `locationApi.js`
 
-#### 3.6 Implementation Steps
+#### 3.7 Implementation Steps
 
 | Step | Task | Files Affected |
 |------|------|----------------|
@@ -548,11 +829,143 @@ export const computeValueAlignment = (entries, dateRange) => {
    - Mapped to corresponding values
    - Color-coded (green = aligned, red = misaligned)
 
-#### 4.3 Behavior Extraction Enhancement
+#### 4.3 Compassionate Reframe for Value Gaps (Critical Refinement)
+
+**Problem:** Simply showing "You violated your 'Health' value by skipping the gym" can feel judgmental and shame-inducing. Users often make conscious trade-offs between values (e.g., sacrificing gym time to meet a work deadline).
+
+**Solution:** Detect value trade-offs and frame them with compassion, acknowledging that sometimes values conflict.
+
+**New File:** `/src/services/values/compassionateReframe.js`
+
+```javascript
+export const generateCompassionateReframe = (valueGap, entry) => {
+  // Detect if violation was a conscious trade-off vs unconscious neglect
+  const tradeOff = detectValueTradeOff(valueGap, entry);
+
+  if (tradeOff.isTradeOff) {
+    // User consciously chose one value over another
+    return {
+      type: 'trade_off_acknowledgment',
+      prioritizedValue: tradeOff.prioritizedValue,  // e.g., 'achievement'
+      sacrificedValue: tradeOff.sacrificedValue,    // e.g., 'health'
+      context: tradeOff.context,                     // e.g., 'project deadline'
+      message: generateTradeOffMessage(tradeOff),
+      rebalancePrompt: generateRebalancePrompt(tradeOff)
+    };
+  } else {
+    // Unconscious drift from values
+    return {
+      type: 'gentle_awareness',
+      value: valueGap.value,
+      message: generateGentleAwarenessMessage(valueGap),
+      microCommitment: suggestMicroCommitment(valueGap.value)
+    };
+  }
+};
+
+const generateTradeOffMessage = (tradeOff) => {
+  return `You prioritized '${tradeOff.prioritizedValue}' over '${tradeOff.sacrificedValue}' ` +
+         `this week because of ${tradeOff.context}. This was a conscious choice for a ` +
+         `deadline, not a failure of character. Values sometimes compete, and you chose ` +
+         `what mattered most in the moment.`;
+};
+
+const generateRebalancePrompt = (tradeOff) => {
+  return {
+    question: `Now that ${tradeOff.context} is behind you, how might you rebalance toward '${tradeOff.sacrificedValue}' this week?`,
+    suggestions: [
+      `Schedule one ${tradeOff.sacrificedValue}-aligned activity`,
+      `Set a boundary to protect ${tradeOff.sacrificedValue} time`,
+      `Reflect on what sustainable balance looks like for you`
+    ]
+  };
+};
+
+const detectValueTradeOff = (valueGap, entry) => {
+  // Look for evidence of competing values in the same entry
+  const mentionedValues = entry.analysis?.behavior_extraction?.values_mentioned || [];
+  const demonstratedValues = entry.analysis?.behavior_extraction?.values_demonstrated || [];
+
+  // If user mentioned health but demonstrated achievement, it's a trade-off
+  if (mentionedValues.includes(valueGap.value) &&
+      demonstratedValues.length > 0 &&
+      !demonstratedValues.includes(valueGap.value)) {
+
+    const prioritizedValue = demonstratedValues[0];
+    const contextClues = extractContextClues(entry.text);
+
+    return {
+      isTradeOff: true,
+      prioritizedValue,
+      sacrificedValue: valueGap.value,
+      context: contextClues.reason || 'competing priorities'
+    };
+  }
+
+  return { isTradeOff: false };
+};
+```
+
+**Enhanced Gap Alert Component:**
+
+**Modified File:** `/src/components/values/ValueGapAlert.jsx`
+
+```javascript
+const ValueGapAlert = ({ valueGap, entry }) => {
+  const reframe = generateCompassionateReframe(valueGap, entry);
+
+  if (reframe.type === 'trade_off_acknowledgment') {
+    return (
+      <AlertCard variant="compassionate">
+        <ValueTradeOffIcon
+          from={reframe.sacrificedValue}
+          to={reframe.prioritizedValue}
+        />
+
+        <div className="message">
+          <p>{reframe.message}</p>
+        </div>
+
+        <RebalanceSection>
+          <h4>{reframe.rebalancePrompt.question}</h4>
+          <ul>
+            {reframe.rebalancePrompt.suggestions.map((s, i) => (
+              <li key={i}>{s}</li>
+            ))}
+          </ul>
+        </RebalanceSection>
+
+        <SelfCompassionReminder>
+          "Living by your values doesn't mean perfect alignment every day.
+          It means returning to them when you notice you've drifted."
+        </SelfCompassionReminder>
+      </AlertCard>
+    );
+  }
+
+  // Gentle awareness for unconscious drift
+  return (
+    <AlertCard variant="gentle">
+      <p>{reframe.message}</p>
+      <MicroCommitment action={reframe.microCommitment} />
+    </AlertCard>
+  );
+};
+```
+
+**Key UX Principles:**
+
+1. **No Shame** - Never use words like "failed", "violated", or "broke"
+2. **Context Awareness** - Acknowledge external pressures (deadlines, crises)
+3. **Trade-off Recognition** - Validate that sometimes values compete
+4. **Forward Focus** - Always offer a path to rebalance, not dwell on gap
+5. **Self-Compassion** - Include reminders that imperfection is human
+
+#### 4.4 Behavior Extraction Enhancement
 
 **Modified File:** `/functions/index.js`
 
-Add behavior extraction to entry analysis:
+Add behavior extraction to entry analysis (note: avoid judgmental language):
 
 ```javascript
 "behavior_extraction": {
@@ -573,7 +986,7 @@ Add behavior extraction to entry analysis:
 }
 ```
 
-#### 4.4 Database Schema
+#### 4.5 Database Schema
 
 **New Collection:** `/users/{userId}/values_tracking`
 
@@ -604,7 +1017,7 @@ Add behavior extraction to entry analysis:
 }
 ```
 
-#### 4.5 Implementation Steps
+#### 4.6 Implementation Steps
 
 | Step | Task | Files Affected |
 |------|------|----------------|
@@ -733,7 +1146,188 @@ export const scheduleAnticipatorySupportNotification = (event) => {
 }
 ```
 
-#### 5.6 Implementation Steps
+#### 5.6 "How Did It Go?" Follow-Up (CBT Loop Closure)
+
+**Problem:** Feature 5 provides grounding tools before a stressful event, but doesn't close the CBT loop by helping the user reflect on whether their anticipatory anxiety matched reality.
+
+**Solution:** Trigger a follow-up reflection in EveningMirror when a morning check-in was completed.
+
+**New File:** `/src/services/anticipatory/eventFollowUp.js`
+
+```javascript
+export const checkForPendingFollowUps = async (userId) => {
+  // Find events that had a morning check-in but no evening reflection
+  const todayCheckIns = await getMorningCheckInsForDate(userId, today);
+
+  const pendingFollowUps = todayCheckIns.filter(checkIn =>
+    !checkIn.eveningReflectionCompleted &&
+    isAfter(new Date(), checkIn.eventTime)  // Event has passed
+  );
+
+  return pendingFollowUps.map(checkIn => ({
+    eventId: checkIn.id,
+    eventDescription: checkIn.eventContent,
+    anticipatedAnxiety: checkIn.anxietyLevel,  // 1-10 from morning
+    groundingToolUsed: checkIn.groundingToolCompleted,
+    promptType: 'event_reflection'
+  }));
+};
+
+export const recordEventReflection = async (userId, eventId, reflection) => {
+  // Store the reflection and compute CBT insight
+  const checkIn = await getMorningCheckIn(userId, eventId);
+
+  const cbtInsight = {
+    anticipatedWorst: checkIn.worstCaseThought,
+    actualOutcome: reflection.whatHappened,
+    anxietyAccuracy: calculateAnxietyAccuracy(checkIn.anxietyLevel, reflection.actualAnxiety),
+    catastrophizingEvidence: reflection.actualAnxiety < checkIn.anxietyLevel - 3,
+    reframeLearning: generateReframeLearning(checkIn, reflection)
+  };
+
+  await saveEventReflection(userId, eventId, {
+    ...reflection,
+    cbtInsight,
+    completedAt: new Date()
+  });
+
+  return cbtInsight;
+};
+
+const generateReframeLearning = (checkIn, reflection) => {
+  if (reflection.actualAnxiety < checkIn.anxietyLevel - 3) {
+    return {
+      type: 'catastrophizing_evidence',
+      message: `Your anxiety before the ${checkIn.eventContent} was ${checkIn.anxietyLevel}/10, but afterward it was ${reflection.actualAnxiety}/10. This is evidence that your mind overestimated the threat.`,
+      futureReframe: "Next time you feel anxious about a similar event, remember: your predictions tend to be worse than reality."
+    };
+  }
+  // ... other patterns
+};
+```
+
+**Enhanced EveningMirror Component:**
+
+**Modified File:** `/src/components/dashboard/views/EveningMirror.jsx`
+
+```javascript
+const EveningMirror = ({ userId }) => {
+  const [pendingFollowUps, setPendingFollowUps] = useState([]);
+
+  useEffect(() => {
+    const loadFollowUps = async () => {
+      const followUps = await checkForPendingFollowUps(userId);
+      setPendingFollowUps(followUps);
+    };
+    loadFollowUps();
+  }, [userId]);
+
+  return (
+    <div className="evening-mirror">
+      {/* Existing evening reflection content */}
+
+      {pendingFollowUps.length > 0 && (
+        <EventReflectionPrompt
+          event={pendingFollowUps[0]}
+          onComplete={handleReflectionComplete}
+        />
+      )}
+    </div>
+  );
+};
+```
+
+**New Component:** `/src/components/anticipatory/EventReflectionPrompt.jsx`
+
+```javascript
+const EventReflectionPrompt = ({ event, onComplete }) => {
+  const [step, setStep] = useState(1);
+  const [reflection, setReflection] = useState({});
+
+  const steps = [
+    {
+      title: "How did it go?",
+      prompt: `You were nervous about your ${event.eventDescription} this morning. Now that it's over, how did it actually go?`,
+      input: 'textarea'
+    },
+    {
+      title: "Anxiety Check",
+      prompt: "On a scale of 1-10, how anxious did you actually feel during the event?",
+      input: 'slider',
+      compare: event.anticipatedAnxiety
+    },
+    {
+      title: "Reality vs. Worry",
+      prompt: "Did the worst-case scenario you imagined actually happen?",
+      input: 'select',
+      options: ['No, it went better than I thought', 'It was about what I expected', 'Yes, it was as bad as I feared', 'It was worse than I expected']
+    },
+    {
+      title: "Learning",
+      prompt: "What's one thing you learned from this experience?",
+      input: 'textarea'
+    }
+  ];
+
+  const handleComplete = async () => {
+    const cbtInsight = await recordEventReflection(userId, event.eventId, reflection);
+    onComplete(cbtInsight);
+  };
+
+  return (
+    <ReflectionCard>
+      <ProgressDots current={step} total={steps.length} />
+      <Step {...steps[step - 1]} value={reflection} onChange={setReflection} />
+      <Navigation onNext={() => setStep(s => s + 1)} onComplete={handleComplete} />
+
+      {step === 2 && event.anticipatedAnxiety && (
+        <ComparisonDisplay
+          before={event.anticipatedAnxiety}
+          after={reflection.actualAnxiety}
+        />
+      )}
+    </ReflectionCard>
+  );
+};
+```
+
+**Database Schema:**
+
+```javascript
+// Add to signals collection or new collection
+// /users/{userId}/event_reflections
+{
+  eventId: string,
+  eventDescription: string,
+  morningCheckIn: {
+    completedAt: Date,
+    anxietyLevel: number,
+    worstCaseThought: string,
+    groundingToolUsed: string
+  },
+  eveningReflection: {
+    completedAt: Date,
+    whatHappened: string,
+    actualAnxiety: number,
+    outcomeVsExpectation: string,
+    learning: string
+  },
+  cbtInsight: {
+    catastrophizingEvidence: boolean,
+    anxietyAccuracy: number,  // How close prediction was to reality
+    reframeLearning: string
+  }
+}
+```
+
+**Longitudinal CBT Pattern Tracking:**
+
+Over time, the system can show users:
+- "Your anxiety predictions are typically 40% higher than actual outcomes"
+- "You've completed 12 event reflections. In 10 of them, reality was better than expected."
+- "This evidence suggests your mind tends to overestimate threat."
+
+#### 5.7 Implementation Steps
 
 | Step | Task | Files Affected |
 |------|------|----------------|
@@ -1562,6 +2156,226 @@ Feature 6 (Vector DB) ─── Embeddings ──> RAG Service (standalone)
 
 ---
 
+## Cross-Cutting Concern: Privacy Ledger (Features 3 & 8)
+
+### Problem Statement
+
+EchoVault is designed as a "vault" - a safe, private space for users to process their emotions. Features 3 (Environmental) and 8 (HealthKit) introduce external data sources that may feel invasive:
+
+- **Location tracking** (even if only for weather/sunset data)
+- **Health data access** (sleep, heart rate, workouts)
+- **Continuous environmental correlation**
+
+Users may be wary of "Always On" tracking, even if it's well-intentioned.
+
+### Solution: Privacy Ledger
+
+A transparent, user-accessible log of exactly how their data is being used.
+
+**New Component:** `/src/components/privacy/PrivacyLedger.jsx`
+
+```javascript
+const PrivacyLedger = ({ userId }) => {
+  const [ledgerEntries, setLedgerEntries] = useState([]);
+
+  useEffect(() => {
+    const loadLedger = async () => {
+      const entries = await getPrivacyLedger(userId);
+      setLedgerEntries(entries);
+    };
+    loadLedger();
+  }, [userId]);
+
+  return (
+    <div className="privacy-ledger">
+      <h2>Your Data Usage</h2>
+      <p className="intro">
+        EchoVault collects some data to provide personalized insights.
+        Here's exactly what we've accessed and how it was used.
+      </p>
+
+      <DataTypeSection type="location">
+        <h3>Location Data</h3>
+        <p>Used to: Determine sunrise/sunset times and weather for SAD correlation</p>
+        <ul>
+          {ledgerEntries.filter(e => e.type === 'location').map(entry => (
+            <LedgerEntry key={entry.id} entry={entry} />
+          ))}
+        </ul>
+        <PrivacyNote>
+          Your location is only accessed when you open the app.
+          It is never shared with third parties.
+          Processed locally on your device.
+        </PrivacyNote>
+      </DataTypeSection>
+
+      <DataTypeSection type="health">
+        <h3>Health Data (HealthKit/Google Fit)</h3>
+        <p>Used to: Correlate sleep, activity, and stress indicators with your mood</p>
+        <ul>
+          {ledgerEntries.filter(e => e.type === 'health').map(entry => (
+            <LedgerEntry key={entry.id} entry={entry} />
+          ))}
+        </ul>
+        <PrivacyNote>
+          Health data is read-only. EchoVault never writes to HealthKit.
+          All correlation analysis happens locally or in your private Firestore.
+          We do not sell or share health data.
+        </PrivacyNote>
+      </DataTypeSection>
+
+      <RevokeSection>
+        <h3>Manage Permissions</h3>
+        <Button onClick={revokeLocation}>Revoke Location Access</Button>
+        <Button onClick={revokeHealth}>Revoke Health Access</Button>
+        <Button onClick={deleteAllExternalData}>Delete All External Data</Button>
+      </RevokeSection>
+    </div>
+  );
+};
+
+const LedgerEntry = ({ entry }) => (
+  <li className="ledger-entry">
+    <span className="date">{formatDate(entry.timestamp)}</span>
+    <span className="action">{entry.action}</span>
+    <span className="purpose">{entry.purpose}</span>
+    <span className="data-points">{entry.dataPoints.join(', ')}</span>
+  </li>
+);
+```
+
+### Privacy Ledger Service
+
+**New File:** `/src/services/privacy/privacyLedger.js`
+
+```javascript
+export const logDataAccess = async (userId, accessLog) => {
+  // Called whenever external data is accessed
+  await addDoc(collection(db, `users/${userId}/privacy_ledger`), {
+    timestamp: new Date(),
+    type: accessLog.type,  // 'location' | 'health' | 'weather'
+    action: accessLog.action,  // 'fetched_sunset_time' | 'read_sleep_data'
+    purpose: accessLog.purpose,  // 'SAD_correlation' | 'mood_prediction'
+    dataPoints: accessLog.dataPoints,  // ['sunset_time: 5:15 PM', 'city: Seattle']
+    processingLocation: accessLog.processingLocation  // 'local' | 'cloud'
+  });
+};
+
+// Example usage in environment service
+export const getEnvironmentContext = async () => {
+  const position = await Geolocation.getCurrentPosition();
+
+  // Log the access
+  await logDataAccess(userId, {
+    type: 'location',
+    action: 'fetched_location_for_weather',
+    purpose: 'Determine sunrise/sunset times for SAD pattern analysis',
+    dataPoints: [`lat: ${position.coords.latitude.toFixed(2)}`, `lon: ${position.coords.longitude.toFixed(2)}`],
+    processingLocation: 'local'
+  });
+
+  // ... continue with weather fetch
+};
+
+// Example usage in health service
+export const getHealthSummary = async (date) => {
+  const sleep = await HealthKit.queryCategorySamples({ sampleType: 'sleepAnalysis', ... });
+
+  // Log the access
+  await logDataAccess(userId, {
+    type: 'health',
+    action: 'read_sleep_data',
+    purpose: 'Correlate sleep hours with mood for personalized insights',
+    dataPoints: [`sleep_hours: ${parseSleepData(sleep).totalHours}h`],
+    processingLocation: 'local'
+  });
+
+  // ... continue with health summary
+};
+```
+
+### In-Context Privacy Callouts
+
+When displaying insights that use external data, show the source:
+
+**Example in SADInterventions.jsx:**
+
+```javascript
+<InsightCard>
+  <h4>Light Exposure Pattern</h4>
+  <p>Your mood drops 23% on days with less than 10 hours of daylight.</p>
+
+  <PrivacyCallout>
+    <LockIcon />
+    <span>
+      This insight uses your location to determine sunset times.
+      Location data is processed locally and never shared.
+      <Link to="/privacy-ledger">View full data usage</Link>
+    </span>
+  </PrivacyCallout>
+</InsightCard>
+```
+
+**Example in HealthInsightsWidget.jsx:**
+
+```javascript
+<InsightCard>
+  <h4>Sleep-Mood Connection</h4>
+  <p>You're 31% happier on days with 7+ hours of sleep.</p>
+
+  <PrivacyCallout>
+    <LockIcon />
+    <span>
+      This insight uses sleep data from HealthKit.
+      Health data is read-only and stays on your device.
+      <Link to="/privacy-ledger">View full data usage</Link>
+    </span>
+  </PrivacyCallout>
+</InsightCard>
+```
+
+### Database Schema
+
+**New Collection:** `/users/{userId}/privacy_ledger`
+
+```javascript
+{
+  id: string,
+  timestamp: Date,
+  type: 'location' | 'health' | 'weather' | 'environmental',
+  action: string,  // Human-readable action
+  purpose: string,  // Why this data was accessed
+  dataPoints: string[],  // What specific data was accessed (sanitized)
+  processingLocation: 'local' | 'cloud',
+  feature: string  // Which feature triggered this access
+}
+```
+
+### Key Privacy Principles
+
+1. **Transparency** - Users can see exactly what data was accessed and when
+2. **Purpose Limitation** - Each access logged with specific purpose
+3. **Local Processing** - Prefer on-device processing when possible
+4. **Easy Revocation** - One-click to revoke permissions
+5. **Data Deletion** - Users can delete all external data without affecting journal entries
+6. **Minimal Collection** - Only collect what's needed for the specific insight
+7. **No Selling** - Explicit commitment that health/location data is never sold
+
+### Implementation Steps
+
+| Step | Task | Files Affected |
+|------|------|----------------|
+| 1 | Create privacy ledger service | New: `/src/services/privacy/privacyLedger.js` |
+| 2 | Add logging to environment service | `/src/services/environment/environmentService.js` |
+| 3 | Add logging to health service | `/src/services/health/healthDataService.js` |
+| 4 | Create Privacy Ledger UI component | New: `/src/components/privacy/PrivacyLedger.jsx` |
+| 5 | Create in-context PrivacyCallout component | New: `/src/components/privacy/PrivacyCallout.jsx` |
+| 6 | Add privacy ledger to settings navigation | `/src/components/settings/` |
+| 7 | Create revocation handlers | `/src/services/privacy/revokePermissions.js` |
+| 8 | Add privacy ledger Firestore collection | `/firestore.rules` |
+
+---
+
 ## Conclusion
 
 This implementation plan transforms EchoVault from a reactive journaling tool into a proactive mental wellness companion. By leveraging existing infrastructure (mood trajectory, ACT framework, signal extraction, person tags) and adding targeted new capabilities (burnout detection, environmental awareness, biometric integration), the app can anticipate user needs and provide timely interventions.
@@ -1570,6 +2384,17 @@ The phased approach ensures high-impact features are delivered first while build
 
 ---
 
-*Document Version: 1.0*
+*Document Version: 1.1*
 *Created: December 2024*
+*Updated: December 2024*
 *Author: Implementation Planning*
+
+### Changelog
+
+**v1.1** - Added Critical UX Refinements:
+- Feature 1: Soft Block pattern instead of auto-trigger (addresses jarring UX concern)
+- Feature 2: Leadership Threads for longitudinal mentee growth tracking
+- Feature 3: Indoor Time correlation for missed daylight detection
+- Feature 4: Compassionate Reframe for value gap handling (no shame approach)
+- Feature 5: "How Did It Go?" follow-up for CBT loop closure
+- Cross-cutting: Privacy Ledger for transparent data usage (Features 3 & 8)
