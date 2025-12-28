@@ -23,7 +23,8 @@ import {
   where,
   orderBy,
   Timestamp,
-  writeBatch
+  writeBatch,
+  runTransaction
 } from '../../config/firebase';
 import { APP_COLLECTION_ID } from '../../config/constants';
 
@@ -200,54 +201,77 @@ export const getAllSignalStates = async (userId, type = null) => {
   return snapshot.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data() }));
 };
 
+// Maximum stateHistory entries to prevent document bloat
+// Only actual state changes are tracked, not progress updates
+const MAX_STATE_HISTORY_LENGTH = 20;
+
 /**
  * Transition a signal to a new state
+ *
+ * Uses Firestore transaction to prevent race conditions when
+ * multiple entries are saved quickly or background sync occurs.
  */
 export const transitionSignalState = async (userId, signalId, newState, context = {}) => {
-  const signal = await getSignalState(userId, signalId);
-
-  if (!signal) {
-    throw new Error(`Signal not found: ${signalId}`);
-  }
-
-  if (!isValidTransition(signal.state, newState)) {
-    throw new Error(`Invalid transition from ${signal.state} to ${newState}`);
-  }
-
-  const now = Timestamp.now();
   const signalRef = doc(db, 'artifacts', APP_COLLECTION_ID, 'users', userId, 'signal_states', signalId);
 
-  const updateData = {
-    state: newState,
-    stateHistory: [
-      ...signal.stateHistory,
-      { from: signal.state, to: newState, at: now, context }
-    ],
-    lastUpdated: now
-  };
+  const result = await runTransaction(db, async (transaction) => {
+    const docSnap = await transaction.get(signalRef);
 
-  // Update user feedback based on state
-  if (newState === SIGNAL_STATES.INSIGHT_DISMISSED || newState === SIGNAL_STATES.PATTERN_REJECTED) {
-    updateData['userFeedback.dismissed'] = true;
-    updateData['userFeedback.dismissReason'] = context.reason || null;
-  }
+    if (!docSnap.exists()) {
+      throw new Error(`Signal not found: ${signalId}`);
+    }
 
-  if (newState === SIGNAL_STATES.INSIGHT_VERIFIED || newState === SIGNAL_STATES.PATTERN_CONFIRMED) {
-    updateData['userFeedback.verified'] = true;
-  }
+    const signal = { id: docSnap.id, ...docSnap.data() };
 
-  if (newState === SIGNAL_STATES.INSIGHT_ACTIONED) {
-    updateData['userFeedback.actionTaken'] = context.action || 'completed';
-  }
+    if (!isValidTransition(signal.state, newState)) {
+      throw new Error(`Invalid transition from ${signal.state} to ${newState}`);
+    }
 
-  await updateDoc(signalRef, updateData);
+    const now = Timestamp.now();
 
-  console.log(`Transitioned signal ${signalId}: ${signal.state} → ${newState}`);
+    // Build new history entry
+    const newHistoryEntry = { from: signal.state, to: newState, at: now, context };
 
-  // Trigger side effects
-  await handleStateTransitionSideEffects(userId, signal, newState, context);
+    // Limit stateHistory to prevent document bloat (1MB Firestore limit)
+    // Keep the first entry (creation) and last N-1 entries
+    let newHistory = [...(signal.stateHistory || []), newHistoryEntry];
+    if (newHistory.length > MAX_STATE_HISTORY_LENGTH) {
+      const firstEntry = newHistory[0];
+      const recentEntries = newHistory.slice(-(MAX_STATE_HISTORY_LENGTH - 1));
+      newHistory = [firstEntry, ...recentEntries];
+    }
 
-  return { ...signal, state: newState };
+    const updateData = {
+      state: newState,
+      stateHistory: newHistory,
+      lastUpdated: now
+    };
+
+    // Update user feedback based on state
+    if (newState === SIGNAL_STATES.INSIGHT_DISMISSED || newState === SIGNAL_STATES.PATTERN_REJECTED) {
+      updateData['userFeedback.dismissed'] = true;
+      updateData['userFeedback.dismissReason'] = context.reason || null;
+    }
+
+    if (newState === SIGNAL_STATES.INSIGHT_VERIFIED || newState === SIGNAL_STATES.PATTERN_CONFIRMED) {
+      updateData['userFeedback.verified'] = true;
+    }
+
+    if (newState === SIGNAL_STATES.INSIGHT_ACTIONED) {
+      updateData['userFeedback.actionTaken'] = context.action || 'completed';
+    }
+
+    transaction.update(signalRef, updateData);
+
+    console.log(`Transitioned signal ${signalId}: ${signal.state} → ${newState}`);
+
+    return { ...signal, state: newState, stateHistory: newHistory };
+  });
+
+  // Trigger side effects outside the transaction
+  await handleStateTransitionSideEffects(userId, result, newState, context);
+
+  return result;
 };
 
 /**

@@ -384,67 +384,147 @@ export const recordGoalProgress = async (userId, goalId, entryId, metadata = {})
 // GOAL LOOKUP
 // ============================================
 
+// Minimum Jaccard similarity threshold for goal matching
+// Set high enough to avoid "Working on Orion project" matching "Working on garden"
+const GOAL_SIMILARITY_THRESHOLD = 0.4;
+
+// Common stop words to exclude from similarity calculations
+const STOP_WORDS = new Set([
+  'i', 'me', 'my', 'the', 'a', 'an', 'to', 'on', 'in', 'at', 'for', 'of',
+  'and', 'or', 'but', 'is', 'am', 'are', 'was', 'were', 'be', 'been',
+  'want', 'need', 'going', 'trying', 'working', 'get', 'more', 'some'
+]);
+
+/**
+ * Tokenize and clean text for comparison
+ * Removes stop words and keeps meaningful content words
+ */
+const tokenize = (text) => {
+  return text
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, '') // Remove punctuation
+    .split(/\s+/)
+    .filter(w => w.length > 2 && !STOP_WORDS.has(w));
+};
+
+/**
+ * Calculate Jaccard similarity between two sets of words
+ * Returns value between 0 (no overlap) and 1 (identical)
+ */
+const jaccardSimilarity = (words1, words2) => {
+  if (words1.length === 0 || words2.length === 0) return 0;
+
+  const set1 = new Set(words1);
+  const set2 = new Set(words2);
+
+  // Calculate intersection
+  const intersection = new Set([...set1].filter(x => set2.has(x)));
+
+  // Calculate union
+  const union = new Set([...set1, ...set2]);
+
+  return intersection.size / union.size;
+};
+
+/**
+ * Calculate weighted similarity score
+ * Gives higher weight to longer matching words and exact substring matches
+ */
+const calculateSimilarityScore = (topic1, topic2) => {
+  const words1 = tokenize(topic1);
+  const words2 = tokenize(topic2);
+
+  // 1. Jaccard similarity (40% weight)
+  const jaccard = jaccardSimilarity(words1, words2);
+
+  // 2. Substring match bonus (30% weight)
+  // Check if one topic is a substring of the other
+  const t1Lower = topic1.toLowerCase();
+  const t2Lower = topic2.toLowerCase();
+  const substringBonus = t1Lower.includes(t2Lower) || t2Lower.includes(t1Lower) ? 1 : 0;
+
+  // 3. Semantic word match (30% weight)
+  // Check if important (longer) words match
+  const importantWords1 = words1.filter(w => w.length >= 5);
+  const importantWords2 = words2.filter(w => w.length >= 5);
+  const importantMatch = importantWords1.length > 0 && importantWords2.length > 0
+    ? jaccardSimilarity(importantWords1, importantWords2)
+    : jaccard;
+
+  // Weighted score
+  return (jaccard * 0.4) + (substringBonus * 0.3) + (importantMatch * 0.3);
+};
+
 /**
  * Find a related goal by topic similarity
+ * Uses Jaccard similarity with threshold to prevent false matches
  */
 const findRelatedGoal = async (userId, topic) => {
   const activeGoals = await getActiveGoals(userId);
 
-  // Exact match first
+  // 1. Exact match first (case-insensitive)
   const exactMatch = activeGoals.find(g =>
     g.topic.toLowerCase() === topic.toLowerCase()
   );
   if (exactMatch) return exactMatch;
 
-  // Fuzzy match - check if topics share significant words
-  const topicWords = topic.toLowerCase().split(/\s+/).filter(w => w.length > 3);
+  // 2. Score all goals and find best match above threshold
+  let bestMatch = null;
+  let bestScore = 0;
 
   for (const goal of activeGoals) {
-    const goalWords = goal.topic.toLowerCase().split(/\s+/).filter(w => w.length > 3);
-    const overlap = topicWords.filter(w => goalWords.includes(w));
+    const score = calculateSimilarityScore(topic, goal.topic);
 
-    if (overlap.length >= Math.min(2, topicWords.length)) {
-      return goal;
+    if (score > bestScore && score >= GOAL_SIMILARITY_THRESHOLD) {
+      bestScore = score;
+      bestMatch = goal;
     }
   }
 
-  return null;
+  if (bestMatch) {
+    console.log(`Matched goal "${topic}" to "${bestMatch.topic}" with score ${bestScore.toFixed(2)}`);
+  }
+
+  return bestMatch;
 };
 
 /**
  * Find a goal by keywords in topic
+ * Requires minimum similarity threshold
  */
 const findGoalByKeywords = async (userId, keywords) => {
   const activeGoals = await getActiveGoals(userId);
-  const keywordList = keywords.toLowerCase().split(/\s+/).filter(w => w.length > 3);
+
+  let bestMatch = null;
+  let bestScore = 0;
 
   for (const goal of activeGoals) {
-    const goalText = goal.topic.toLowerCase();
-    const matchCount = keywordList.filter(kw => goalText.includes(kw)).length;
+    const score = calculateSimilarityScore(keywords, goal.topic);
 
-    if (matchCount >= 1) {
-      return goal;
+    if (score > bestScore && score >= GOAL_SIMILARITY_THRESHOLD) {
+      bestScore = score;
+      bestMatch = goal;
     }
   }
 
-  return null;
+  return bestMatch;
 };
 
 /**
  * Check if entry text mentions a goal
+ * Uses similarity scoring instead of simple substring matching
  */
 const entryMentionsGoal = (entryText, goalTopic) => {
   const text = entryText.toLowerCase();
   const topic = goalTopic.toLowerCase();
 
-  // Direct mention
+  // Direct mention is always a match
   if (text.includes(topic)) return true;
 
-  // Check key words
-  const topicWords = topic.split(/\s+/).filter(w => w.length > 3);
-  const matchCount = topicWords.filter(w => text.includes(w)).length;
-
-  return matchCount >= Math.ceil(topicWords.length / 2);
+  // Calculate similarity between entry and goal topic
+  // Use a lower threshold for mentions (we're more lenient here)
+  const score = calculateSimilarityScore(entryText, goalTopic);
+  return score >= (GOAL_SIMILARITY_THRESHOLD * 0.8); // 80% of normal threshold
 };
 
 // ============================================
