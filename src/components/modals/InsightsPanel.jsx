@@ -1,17 +1,19 @@
 import React, { useMemo, useState, useEffect } from 'react';
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 import {
   X, TrendingDown, TrendingUp, AlertTriangle, Heart, Calendar,
-  Sparkles, BarChart3, Loader2, Sun, Cloud, Target, RefreshCw,
+  Sparkles, BarChart3, Loader2, Sun, Cloud, Target,
   AlertOctagon, Zap, Clock
 } from 'lucide-react';
 import { analyzeLongitudinalPatterns } from '../../services/safety';
 import { getAllPatterns } from '../../services/patterns/cached';
+import { addToExclusionList } from '../../services/signals/signalLifecycle';
 
 const InsightsPanel = ({ entries, userId, category, onClose }) => {
   const [loading, setLoading] = useState(true);
   const [cachedPatterns, setCachedPatterns] = useState(null);
   const [source, setSource] = useState(null);
+  const [dismissedPatterns, setDismissedPatterns] = useState(new Set());
 
   // Load cached patterns from Firestore
   useEffect(() => {
@@ -86,34 +88,80 @@ const InsightsPanel = ({ entries, userId, category, onClose }) => {
     }
   };
 
-  // Helper to render a pattern card
-  const PatternCard = ({ pattern, index }) => (
-    <motion.div
-      initial={{ opacity: 0, y: 10 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ delay: index * 0.03 }}
-      className={`p-4 rounded-2xl border ${getPatternColor(pattern.type)}`}
-    >
-      <div className="flex items-start gap-3">
-        <div className="mt-0.5">{getPatternIcon(pattern.type)}</div>
-        <div className="flex-1">
-          <p className="text-sm font-medium text-warm-800 font-body">{pattern.message || pattern.insight}</p>
-          {pattern.entity && (
-            <p className="text-xs text-warm-600 mt-1 font-medium">{pattern.entity}</p>
-          )}
-          {pattern.type === 'trigger_correlation' && (
-            <p className="text-xs text-warm-500 mt-1">Based on {Math.round(pattern.percentDiff)}% mood difference</p>
-          )}
-          {pattern.type === 'recovery_pattern' && (
-            <p className="text-xs text-warm-500 mt-1">Based on {pattern.samples} recovery instances</p>
-          )}
-          {pattern.confidence && (
-            <p className="text-xs text-warm-400 mt-1">{Math.round(pattern.confidence * 100)}% confidence</p>
-          )}
+  // Generate a unique key for a pattern (for dismissal tracking)
+  const getPatternKey = (pattern) => {
+    return `${pattern.type}:${pattern.entity || ''}:${(pattern.message || pattern.insight || '').slice(0, 50)}`;
+  };
+
+  // Handle pattern dismissal
+  const handleDismissPattern = async (pattern, patternKey) => {
+    // Immediately hide from UI
+    setDismissedPatterns(prev => new Set([...prev, patternKey]));
+
+    // Persist to exclusions if userId available
+    if (userId) {
+      try {
+        await addToExclusionList(userId, {
+          patternType: pattern.type,
+          context: {
+            entity: pattern.entity,
+            message: (pattern.message || pattern.insight || '').slice(0, 100)
+          },
+          reason: 'user_dismissed',
+          permanent: false // 30-day exclusion by default
+        });
+      } catch (error) {
+        console.error('Failed to persist pattern dismissal:', error);
+      }
+    }
+  };
+
+  // Helper to render a pattern card with dismiss button
+  const PatternCard = ({ pattern, index }) => {
+    const patternKey = getPatternKey(pattern);
+
+    // Don't render if dismissed
+    if (dismissedPatterns.has(patternKey)) return null;
+
+    return (
+      <motion.div
+        initial={{ opacity: 0, y: 10 }}
+        animate={{ opacity: 1, y: 0 }}
+        exit={{ opacity: 0, x: -20, height: 0 }}
+        transition={{ delay: index * 0.03 }}
+        className={`p-4 rounded-2xl border ${getPatternColor(pattern.type)} relative group`}
+      >
+        <div className="flex items-start gap-3">
+          <div className="mt-0.5">{getPatternIcon(pattern.type)}</div>
+          <div className="flex-1">
+            <p className="text-sm font-medium text-warm-800 font-body">{pattern.message || pattern.insight}</p>
+            {pattern.entity && (
+              <p className="text-xs text-warm-600 mt-1 font-medium">{pattern.entity}</p>
+            )}
+            {pattern.type === 'trigger_correlation' && (
+              <p className="text-xs text-warm-500 mt-1">Based on {Math.round(pattern.percentDiff)}% mood difference</p>
+            )}
+            {pattern.type === 'recovery_pattern' && (
+              <p className="text-xs text-warm-500 mt-1">Based on {pattern.samples} recovery instances</p>
+            )}
+            {pattern.confidence && (
+              <p className="text-xs text-warm-400 mt-1">{Math.round(pattern.confidence * 100)}% confidence</p>
+            )}
+          </div>
+
+          {/* Dismiss button - visible on hover */}
+          <button
+            onClick={() => handleDismissPattern(pattern, patternKey)}
+            className="absolute top-2 right-2 p-1.5 rounded-full opacity-0 group-hover:opacity-100 hover:bg-white/70 transition-all text-warm-400 hover:text-warm-600"
+            aria-label="Dismiss this insight"
+            title="Not useful? Click to hide"
+          >
+            <X size={14} />
+          </button>
         </div>
-      </div>
-    </motion.div>
-  );
+      </motion.div>
+    );
+  };
 
   // Section header component
   const SectionHeader = ({ icon: Icon, title, color }) => (
@@ -180,11 +228,13 @@ const InsightsPanel = ({ entries, userId, category, onClose }) => {
               {hasSummary && (
                 <>
                   <SectionHeader icon={Sparkles} title="Key Insights" color="text-secondary-600" />
-                  <div className="space-y-2">
-                    {cachedPatterns.summary.map((insight, i) => (
-                      <PatternCard key={`summary-${i}`} pattern={insight} index={i} />
-                    ))}
-                  </div>
+                  <AnimatePresence mode="popLayout">
+                    <div className="space-y-2">
+                      {cachedPatterns.summary.map((insight, i) => (
+                        <PatternCard key={`summary-${i}`} pattern={insight} index={i} />
+                      ))}
+                    </div>
+                  </AnimatePresence>
                 </>
               )}
 
@@ -192,19 +242,21 @@ const InsightsPanel = ({ entries, userId, category, onClose }) => {
               {hasContradictions && (
                 <>
                   <SectionHeader icon={AlertOctagon} title="Worth Reflecting On" color="text-purple-600" />
-                  <div className="space-y-2">
-                    {cachedPatterns.contradictions.map((contradiction, i) => (
-                      <PatternCard
-                        key={`contradiction-${i}`}
-                        pattern={{
-                          type: contradiction.type,
-                          message: contradiction.message,
-                          confidence: contradiction.confidence
-                        }}
-                        index={i}
-                      />
-                    ))}
-                  </div>
+                  <AnimatePresence mode="popLayout">
+                    <div className="space-y-2">
+                      {cachedPatterns.contradictions.map((contradiction, i) => (
+                        <PatternCard
+                          key={`contradiction-${i}`}
+                          pattern={{
+                            type: contradiction.type,
+                            message: contradiction.message,
+                            confidence: contradiction.confidence
+                          }}
+                          index={i}
+                        />
+                      ))}
+                    </div>
+                  </AnimatePresence>
                 </>
               )}
 
@@ -212,23 +264,25 @@ const InsightsPanel = ({ entries, userId, category, onClose }) => {
               {hasActivityPatterns && (
                 <>
                   <SectionHeader icon={TrendingUp} title="Activities & Mood" color="text-green-600" />
-                  <div className="space-y-2">
-                    {cachedPatterns.activitySentiment
-                      .filter(p => p.insight)
-                      .slice(0, 5)
-                      .map((pattern, i) => (
-                        <PatternCard
-                          key={`activity-${i}`}
-                          pattern={{
-                            type: pattern.sentiment === 'positive' ? 'positive_activity' : 'negative_activity',
-                            message: pattern.insight,
-                            entity: pattern.entity,
-                            confidence: pattern.confidence
-                          }}
-                          index={i}
-                        />
-                      ))}
-                  </div>
+                  <AnimatePresence mode="popLayout">
+                    <div className="space-y-2">
+                      {cachedPatterns.activitySentiment
+                        .filter(p => p.insight)
+                        .slice(0, 5)
+                        .map((pattern, i) => (
+                          <PatternCard
+                            key={`activity-${i}`}
+                            pattern={{
+                              type: pattern.sentiment === 'positive' ? 'positive_activity' : 'negative_activity',
+                              message: pattern.insight,
+                              entity: pattern.entity,
+                              confidence: pattern.confidence
+                            }}
+                            index={i}
+                          />
+                        ))}
+                    </div>
+                  </AnimatePresence>
                 </>
               )}
 
@@ -236,45 +290,49 @@ const InsightsPanel = ({ entries, userId, category, onClose }) => {
               {hasTemporalPatterns && (
                 <>
                   <SectionHeader icon={Calendar} title="Time Patterns" color="text-blue-600" />
-                  <div className="space-y-2">
-                    {cachedPatterns.temporal.insights.bestDay && (
-                      <PatternCard
-                        pattern={{
-                          type: 'best_day',
-                          message: cachedPatterns.temporal.insights.bestDay.insight
-                        }}
-                        index={0}
-                      />
-                    )}
-                    {cachedPatterns.temporal.insights.worstDay && (
-                      <PatternCard
-                        pattern={{
-                          type: 'worst_day',
-                          message: cachedPatterns.temporal.insights.worstDay.insight
-                        }}
-                        index={1}
-                      />
-                    )}
-                    {cachedPatterns.temporal.insights.bestHour && (
-                      <PatternCard
-                        pattern={{
-                          type: 'weekly_high',
-                          message: cachedPatterns.temporal.insights.bestHour.insight
-                        }}
-                        index={2}
-                      />
-                    )}
-                  </div>
+                  <AnimatePresence mode="popLayout">
+                    <div className="space-y-2">
+                      {cachedPatterns.temporal.insights.bestDay && (
+                        <PatternCard
+                          pattern={{
+                            type: 'best_day',
+                            message: cachedPatterns.temporal.insights.bestDay.insight
+                          }}
+                          index={0}
+                        />
+                      )}
+                      {cachedPatterns.temporal.insights.worstDay && (
+                        <PatternCard
+                          pattern={{
+                            type: 'worst_day',
+                            message: cachedPatterns.temporal.insights.worstDay.insight
+                          }}
+                          index={1}
+                        />
+                      )}
+                      {cachedPatterns.temporal.insights.bestHour && (
+                        <PatternCard
+                          pattern={{
+                            type: 'weekly_high',
+                            message: cachedPatterns.temporal.insights.bestHour.insight
+                          }}
+                          index={2}
+                        />
+                      )}
+                    </div>
+                  </AnimatePresence>
                 </>
               )}
 
               {/* Fallback to client patterns if no cached data */}
               {!hasCachedContent && clientPatterns.length > 0 && (
-                <div className="space-y-2">
-                  {clientPatterns.map((pattern, i) => (
-                    <PatternCard key={`client-${i}`} pattern={pattern} index={i} />
-                  ))}
-                </div>
+                <AnimatePresence mode="popLayout">
+                  <div className="space-y-2">
+                    {clientPatterns.map((pattern, i) => (
+                      <PatternCard key={`client-${i}`} pattern={pattern} index={i} />
+                    ))}
+                  </div>
+                </AnimatePresence>
               )}
             </div>
           )}
