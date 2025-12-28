@@ -1151,52 +1151,150 @@ function computeTemporalPatterns(entries) {
 }
 
 /**
+ * Detect termination language in text
+ * Used to identify when a user has abandoned or completed a goal
+ */
+function detectsTerminationLanguage(text) {
+  if (!text) return false;
+  const terminationPatterns = [
+    /I('m| am) (no longer|not) (interested in|pursuing|going after)/i,
+    /decided (against|not to)/i,
+    /giving up on/i,
+    /moving on from/i,
+    /that('s| is) (not|no longer) (a priority|important)/i,
+    /changed my mind about/i,
+    /I don't want to anymore/i,
+    /not going to happen/i,
+    /abandoning/i,
+    /letting go of/i
+  ];
+  return terminationPatterns.some(p => p.test(text));
+}
+
+/**
+ * Detect achievement language in text
+ */
+function detectsAchievementLanguage(text) {
+  if (!text) return false;
+  const achievementPatterns = [
+    /I (did it|made it|got it|achieved|accomplished)/i,
+    /finally\s+(.+)ed/i,
+    /succeeded in/i,
+    /completed/i,
+    /finished/i,
+    /reached my goal/i,
+    /mission accomplished/i,
+    /got the (job|offer|promotion)/i
+  ];
+  return achievementPatterns.some(p => p.test(text));
+}
+
+/**
  * Detect contradictions between stated intentions and actual behavior
+ *
+ * IMPROVED: Now respects goal_update status and termination signals.
+ * Goals that have been explicitly abandoned or achieved are not flagged.
  */
 function detectContradictions(entries, activityPatterns) {
   const contradictions = [];
   const now = new Date();
   const twoWeeksAgo = new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000);
 
-  // Find goal-related entries
-  const goalEntries = entries.filter(e =>
-    e.tags?.some(t => t.startsWith('@goal:')) ||
-    e.text?.toLowerCase().match(/\b(want to|going to|need to|should|plan to|trying to)\b.*\b(more|less|start|stop|better)\b/)
-  );
+  // Build a map of goal states from entries
+  // Key: goal tag, Value: { state, lastMention, progressEntries }
+  const goalStates = new Map();
 
-  // Type 1: Goal abandonment detection
-  goalEntries.forEach(entry => {
+  // First pass: Process all entries to build goal state
+  entries.forEach(entry => {
+    const goalUpdate = entry.analysis?.extractEnhancedContext?.goal_update;
     const goalTags = (entry.tags || []).filter(t => t.startsWith('@goal:'));
+    const entryDate = entry.effectiveDate?.toDate?.() || entry.createdAt?.toDate?.() || new Date(entry.effectiveDate || entry.createdAt);
 
-    goalTags.forEach(goalTag => {
-      const goalName = goalTag.replace('@goal:', '').replace(/_/g, ' ');
+    // Process explicit goal_update from analysis
+    if (goalUpdate && goalUpdate.tag) {
+      const goalTag = goalUpdate.tag;
+      const status = goalUpdate.status;
 
-      // Find related activity mentions
-      const relatedActivity = `@activity:${goalTag.replace('@goal:', '')}`;
-      const recentMentions = entries.filter(e => {
-        const entryDate = e.effectiveDate?.toDate?.() || e.createdAt?.toDate?.() || new Date(e.effectiveDate || e.createdAt);
-        return entryDate >= twoWeeksAgo && e.tags?.includes(relatedActivity);
-      });
-
-      if (recentMentions.length === 0) {
-        const entryDate = entry.effectiveDate?.toDate?.() || entry.createdAt?.toDate?.() || new Date(entry.effectiveDate || entry.createdAt);
-        const daysSince = Math.floor((now - entryDate) / (1000 * 60 * 60 * 24));
-
-        if (daysSince > 7) {
-          contradictions.push({
-            type: 'goal_abandonment',
-            goalTag,
-            goalName,
-            message: `You mentioned wanting to "${goalName}" ${daysSince} days ago but haven't mentioned it since`,
-            severity: daysSince > 21 ? 'high' : 'medium',
-            originalEntry: {
-              date: entryDate,
-              snippet: entry.text?.substring(0, 100)
-            }
+      if (status === 'achieved' || status === 'abandoned') {
+        // Mark goal as TERMINATED - remove from active tracking
+        goalStates.set(goalTag, { state: 'terminated', terminatedAt: entryDate, reason: status });
+      } else if (status === 'progress' || status === 'active' || status === 'struggling') {
+        // Update last mention
+        const existing = goalStates.get(goalTag) || { state: 'active', progressEntries: [] };
+        if (existing.state !== 'terminated') {
+          goalStates.set(goalTag, {
+            state: 'active',
+            lastMention: entryDate,
+            progressEntries: [...(existing.progressEntries || []), entry.id]
           });
         }
       }
+    }
+
+    // Process @goal: tags
+    goalTags.forEach(goalTag => {
+      const existing = goalStates.get(goalTag);
+
+      // Skip if already terminated
+      if (existing?.state === 'terminated') return;
+
+      // Check for termination language in the entry
+      if (detectsTerminationLanguage(entry.text)) {
+        goalStates.set(goalTag, { state: 'terminated', terminatedAt: entryDate, reason: 'termination_language' });
+        return;
+      }
+
+      // Check for achievement language
+      if (detectsAchievementLanguage(entry.text)) {
+        goalStates.set(goalTag, { state: 'terminated', terminatedAt: entryDate, reason: 'achieved' });
+        return;
+      }
+
+      // Otherwise, update as active
+      goalStates.set(goalTag, {
+        state: 'active',
+        lastMention: entryDate,
+        firstMention: existing?.firstMention || entryDate,
+        progressEntries: [...(existing?.progressEntries || []), entry.id]
+      });
     });
+  });
+
+  // Second pass: Only flag ACTIVE goals with no recent progress
+  goalStates.forEach((goalData, goalTag) => {
+    // Skip terminated goals
+    if (goalData.state === 'terminated') return;
+
+    const goalName = goalTag.replace('@goal:', '').replace(/_/g, ' ');
+
+    // Find related activity mentions in last 14 days
+    const relatedActivity = `@activity:${goalTag.replace('@goal:', '')}`;
+    const recentActivityMentions = entries.filter(e => {
+      const entryDate = e.effectiveDate?.toDate?.() || e.createdAt?.toDate?.() || new Date(e.effectiveDate || e.createdAt);
+      return entryDate >= twoWeeksAgo && e.tags?.includes(relatedActivity);
+    });
+
+    // Check last mention date
+    const lastMention = goalData.lastMention || goalData.firstMention;
+    const daysSince = lastMention ? Math.floor((now - lastMention) / (1000 * 60 * 60 * 24)) : 999;
+
+    // Only flag if no recent activity AND no recent goal mentions
+    if (recentActivityMentions.length === 0 && daysSince > 7) {
+      contradictions.push({
+        type: 'goal_abandonment',
+        goalTag,
+        goalName,
+        message: `You mentioned wanting to "${goalName}" ${daysSince} days ago but haven't mentioned it since`,
+        severity: daysSince > 21 ? 'high' : 'medium',
+        // NEW: Flag that this needs user confirmation, not assumption
+        requiresUserInput: true,
+        suggestion: 'Is this still a goal you\'re working toward?',
+        originalEntry: {
+          date: lastMention,
+          snippet: null // We don't have easy access to the original text here
+        }
+      });
+    }
   });
 
   // Type 2: Sentiment contradiction
