@@ -1192,21 +1192,25 @@ function detectsAchievementLanguage(text) {
 /**
  * Detect contradictions between stated intentions and actual behavior
  *
- * V2: Now queries signal_states collection as Source of Truth for goal states.
- * Only falls back to entry scanning for users who haven't migrated to the new system.
+ * V3: Uses signal_states collection as the SOLE Source of Truth for goal states.
+ * Legacy entry-scanning fallback has been removed to prevent "Ghost Goal" problem.
  *
- * @param {Array} entries - Recent journal entries
+ * The Ghost Goal Problem: If we scan entries for goals, terminated goals can
+ * "reappear" after they fall out of the 200-entry window. By using signal_states
+ * exclusively, terminated goals stay terminated forever.
+ *
+ * @param {Array} entries - Recent journal entries (used for sentiment/avoidance contradictions only)
  * @param {Array} activityPatterns - Computed activity patterns
- * @param {Map} signalStatesMap - Pre-fetched signal_states (goals) keyed by topic
+ * @param {Map} signalStatesMap - Pre-fetched signal_states (goals) keyed by topic - REQUIRED
  */
-function detectContradictions(entries, activityPatterns, signalStatesMap = null) {
+function detectContradictions(entries, activityPatterns, signalStatesMap) {
   const contradictions = [];
   const now = new Date();
-  const twoWeeksAgo = new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000);
 
-  // If signalStatesMap is provided, use it as Source of Truth
+  // Type 1: Goal abandonment - ONLY from signal_states (Source of Truth)
+  // If no signal_states exist yet, skip goal-based contradiction detection
+  // Goals will be added to signal_states via processEntryForGoals on new entries
   if (signalStatesMap && signalStatesMap.size > 0) {
-    // Query-based approach: Only check ACTIVE goals from signal_states
     signalStatesMap.forEach((goalState, goalTopic) => {
       // Skip non-active states (achieved, abandoned, paused-for-too-long)
       if (!['active', 'proposed'].includes(goalState.state)) return;
@@ -1240,87 +1244,9 @@ function detectContradictions(entries, activityPatterns, signalStatesMap = null)
         });
       }
     });
-  } else {
-    // Legacy fallback: Scan entries for goals (for users without signal_states migration)
-    // This code path will be removed once all users have migrated
-    const goalStates = new Map();
-
-    entries.forEach(entry => {
-      const goalUpdate = entry.analysis?.extractEnhancedContext?.goal_update;
-      const goalTags = (entry.tags || []).filter(t => t.startsWith('@goal:'));
-      const entryDate = entry.effectiveDate?.toDate?.() || entry.createdAt?.toDate?.() || new Date(entry.effectiveDate || entry.createdAt);
-
-      if (goalUpdate && goalUpdate.tag) {
-        const goalTag = goalUpdate.tag;
-        const status = goalUpdate.status;
-
-        if (status === 'achieved' || status === 'abandoned') {
-          goalStates.set(goalTag, { state: 'terminated', terminatedAt: entryDate, reason: status });
-        } else if (status === 'progress' || status === 'active' || status === 'struggling') {
-          const existing = goalStates.get(goalTag) || { state: 'active', progressEntries: [] };
-          if (existing.state !== 'terminated') {
-            goalStates.set(goalTag, {
-              state: 'active',
-              lastMention: entryDate,
-              progressEntries: [...(existing.progressEntries || []), entry.id]
-            });
-          }
-        }
-      }
-
-      goalTags.forEach(goalTag => {
-        const existing = goalStates.get(goalTag);
-        if (existing?.state === 'terminated') return;
-
-        if (detectsTerminationLanguage(entry.text)) {
-          goalStates.set(goalTag, { state: 'terminated', terminatedAt: entryDate, reason: 'termination_language' });
-          return;
-        }
-
-        if (detectsAchievementLanguage(entry.text)) {
-          goalStates.set(goalTag, { state: 'terminated', terminatedAt: entryDate, reason: 'achieved' });
-          return;
-        }
-
-        goalStates.set(goalTag, {
-          state: 'active',
-          lastMention: entryDate,
-          firstMention: existing?.firstMention || entryDate,
-          progressEntries: [...(existing?.progressEntries || []), entry.id]
-        });
-      });
-    });
-
-    goalStates.forEach((goalData, goalTag) => {
-      if (goalData.state === 'terminated') return;
-
-      const goalName = goalTag.replace('@goal:', '').replace(/_/g, ' ');
-      const relatedActivity = `@activity:${goalTag.replace('@goal:', '')}`;
-      const recentActivityMentions = entries.filter(e => {
-        const entryDate = e.effectiveDate?.toDate?.() || e.createdAt?.toDate?.() || new Date(e.effectiveDate || e.createdAt);
-        return entryDate >= twoWeeksAgo && e.tags?.includes(relatedActivity);
-      });
-
-      const lastMention = goalData.lastMention || goalData.firstMention;
-      const daysSince = lastMention ? Math.floor((now - lastMention) / (1000 * 60 * 60 * 24)) : 999;
-
-      if (recentActivityMentions.length === 0 && daysSince > 7) {
-        contradictions.push({
-          type: 'goal_abandonment',
-          goalTag,
-          goalName,
-          message: `You mentioned wanting to "${goalName}" ${daysSince} days ago but haven't mentioned it since`,
-          severity: daysSince > 21 ? 'high' : 'medium',
-          requiresUserInput: true,
-          suggestion: 'Is this still a goal you\'re working toward?',
-          originalEntry: {
-            date: lastMention,
-            snippet: null
-          }
-        });
-      }
-    });
   }
+  // Note: If signalStatesMap is empty, we simply don't generate goal contradictions.
+  // New goals will be added to signal_states via processEntryForGoals.
 
   // Type 2: Sentiment contradiction
   const negativeStatements = entries.filter(e =>
@@ -1559,25 +1485,41 @@ async function computeAllPatterns(userId, category = null) {
 
 /**
  * Trigger: On new entry creation
- * Incrementally update patterns when a new entry is created
+ * 1. Process entry for goal signals (update signal_states)
+ * 2. Recompute patterns (using updated signal_states as Source of Truth)
+ *
+ * IMPORTANT: processEntryForGoals MUST run before computeAllPatterns
+ * to ensure signal_states is updated before the Pattern Engine runs.
  */
 export const onEntryCreate = onDocumentCreated(
   'artifacts/{appId}/users/{userId}/entries/{entryId}',
   async (event) => {
-    const { userId, appId } = event.params;
+    const { userId, appId, entryId } = event.params;
 
     if (appId !== APP_COLLECTION_ID) {
-      console.log(`Skipping pattern update for app ${appId}`);
+      console.log(`Skipping processing for app ${appId}`);
       return null;
     }
 
-    console.log(`New entry created for user ${userId}, recomputing patterns...`);
+    const entryData = event.data.data();
+    const entry = { id: entryId, ...entryData };
+
+    console.log(`New entry created for user ${userId}, processing goals and patterns...`);
 
     try {
+      // Step 1: Process entry for goal signals FIRST
+      // This updates signal_states with any detected goals, progress, or terminations
+      const goalResult = await processEntryForGoals(userId, entry);
+      if (goalResult) {
+        console.log(`Goal processing result: ${goalResult.isNew ? 'created new goal' : goalResult.skipped ? 'skipped (terminated)' : 'updated existing goal'}`);
+      }
+
+      // Step 2: Recompute patterns (now using updated signal_states)
       await computeAllPatterns(userId);
-      return { success: true };
+
+      return { success: true, goalProcessed: !!goalResult };
     } catch (error) {
-      console.error(`Error computing patterns for user ${userId}:`, error);
+      console.error(`Error processing entry for user ${userId}:`, error);
       return { success: false, error: error.message };
     }
   }
@@ -1585,19 +1527,37 @@ export const onEntryCreate = onDocumentCreated(
 
 /**
  * Trigger: On entry update (mood analysis complete)
- * Recompute when entry gets mood score
+ * 1. Process goals when analysis is added (goal_update from extractEnhancedContext)
+ * 2. Recompute patterns when entry gets mood score
  */
 export const onEntryUpdate = onDocumentUpdated(
   'artifacts/{appId}/users/{userId}/entries/{entryId}',
   async (event) => {
-    const { userId, appId } = event.params;
+    const { userId, appId, entryId } = event.params;
 
     if (appId !== APP_COLLECTION_ID) return null;
 
     const before = event.data.before.data();
     const after = event.data.after.data();
 
-    // Only recompute if mood score was just added
+    // Check if analysis was just added (contains goal_update info)
+    const hadGoalUpdate = before.analysis?.goal_update ||
+                          before.analysis?.extractEnhancedContext?.goal_update;
+    const hasGoalUpdate = after.analysis?.goal_update ||
+                          after.analysis?.extractEnhancedContext?.goal_update;
+
+    // Process goals if goal_update was just added
+    if (!hadGoalUpdate && hasGoalUpdate) {
+      console.log(`Goal update detected for user ${userId}, processing goals...`);
+      try {
+        const entry = { id: entryId, ...after };
+        await processEntryForGoals(userId, entry);
+      } catch (error) {
+        console.error(`Error processing goals for user ${userId}:`, error);
+      }
+    }
+
+    // Recompute patterns if mood score was just added
     const hadMood = before.analysis?.mood_score !== undefined;
     const hasMood = after.analysis?.mood_score !== undefined;
 
@@ -2140,6 +2100,290 @@ export const onEntryCreateBurnoutCheck = onDocumentCreated(
     }
   }
 );
+
+// ============================================
+// GOAL LIFECYCLE PROCESSING (Server-Side)
+// ============================================
+
+// Goal detection patterns (mirror of client-side goalLifecycle.js)
+const GOAL_PATTERNS = [
+  /I want to\s+(.+)/i,
+  /I('m| am) going to\s+(.+)/i,
+  /planning to\s+(.+)/i,
+  /my goal is to\s+(.+)/i,
+  /I('m| am) working on\s+(.+)/i,
+  /trying to\s+(.+)/i,
+  /hoping to\s+(.+)/i
+];
+
+const TERMINATION_PATTERNS = [
+  /I('m| am) (no longer|not) (interested in|pursuing|going after)/i,
+  /decided (against|not to)/i,
+  /giving up on/i,
+  /moving on from/i,
+  /that('s| is) (not|no longer) (a priority|important)/i,
+  /changed my mind about/i,
+  /I don't want to anymore/i,
+  /not going to happen/i,
+  /abandoning/i,
+  /letting go of/i
+];
+
+const ACHIEVEMENT_PATTERNS = [
+  /I (did it|made it|got it|achieved|accomplished)/i,
+  /finally\s+(.+)ed/i,
+  /succeeded in/i,
+  /completed/i,
+  /finished/i,
+  /reached my goal/i,
+  /mission accomplished/i,
+  /got the (job|offer|promotion)/i
+];
+
+const PROGRESS_PATTERNS = [
+  /making progress on/i,
+  /step closer to/i,
+  /working towards/i,
+  /getting better at/i,
+  /improving/i,
+  /on track/i
+];
+
+/**
+ * Extract goal topic from text
+ */
+function extractGoalTopic(text) {
+  // Try @goal: tags first
+  const goalTagMatch = text.match(/@goal:([a-z_]+)/i);
+  if (goalTagMatch) {
+    return goalTagMatch[1].replace(/_/g, ' ');
+  }
+
+  // Try pattern matching
+  for (const pattern of GOAL_PATTERNS) {
+    const match = text.match(pattern);
+    if (match) {
+      const goalText = match[1] || match[2] || match[0];
+      return goalText
+        .replace(/[.!?,;:].*$/, '')
+        .trim()
+        .slice(0, 100);
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Check for progress language
+ */
+function detectsProgressLanguage(text) {
+  if (!text) return false;
+  return PROGRESS_PATTERNS.some(p => p.test(text));
+}
+
+/**
+ * Normalize topic to underscore format for consistency
+ */
+function normalizeTopicKey(topic) {
+  return topic.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '');
+}
+
+/**
+ * Create or update a goal in signal_states collection
+ */
+async function upsertGoalState(userId, topic, entryId, updateType, context = {}) {
+  const signalStatesRef = db.collection('artifacts')
+    .doc(APP_COLLECTION_ID)
+    .collection('users')
+    .doc(userId)
+    .collection('signal_states');
+
+  const topicKey = normalizeTopicKey(topic);
+
+  // Check if goal already exists
+  const existingSnapshot = await signalStatesRef
+    .where('type', '==', 'goal')
+    .where('topic', '==', topicKey)
+    .limit(1)
+    .get();
+
+  const now = FieldValue.serverTimestamp();
+
+  if (existingSnapshot.empty) {
+    // Create new goal (proposed state)
+    if (updateType === 'termination' || updateType === 'achievement') {
+      // Don't create a new goal just to terminate it
+      console.log(`Skipping goal creation for ${topicKey} - termination without existing goal`);
+      return null;
+    }
+
+    const newGoal = {
+      type: 'goal',
+      topic: topicKey,
+      displayName: topic,
+      state: 'proposed',
+      stateHistory: [{
+        from: null,
+        to: 'proposed',
+        at: now,
+        context: { detectedFrom: entryId }
+      }],
+      sourceEntries: [entryId],
+      metadata: {
+        detectedAt: new Date().toISOString(),
+        originalText: context.originalText?.slice(0, 500)
+      },
+      createdAt: now,
+      lastUpdated: now
+    };
+
+    const docRef = await signalStatesRef.add(newGoal);
+    console.log(`Created new goal: ${topicKey} (${docRef.id})`);
+    return { id: docRef.id, ...newGoal, isNew: true };
+  } else {
+    // Update existing goal
+    const existingDoc = existingSnapshot.docs[0];
+    const existingData = existingDoc.data();
+    const existingState = existingData.state;
+
+    // Skip if already in terminal state
+    if (['achieved', 'abandoned'].includes(existingState)) {
+      console.log(`Skipping update for terminated goal: ${topicKey} (${existingState})`);
+      return { id: existingDoc.id, ...existingData, skipped: true };
+    }
+
+    let newState = existingState;
+    let historyEntry = null;
+
+    switch (updateType) {
+      case 'termination':
+        newState = 'abandoned';
+        historyEntry = { from: existingState, to: 'abandoned', at: now, context: { terminationEntry: entryId, reason: 'termination_language' } };
+        break;
+      case 'achievement':
+        newState = 'achieved';
+        historyEntry = { from: existingState, to: 'achieved', at: now, context: { achievementEntry: entryId } };
+        break;
+      case 'progress':
+        // Auto-confirm proposed goals on progress
+        if (existingState === 'proposed') {
+          newState = 'active';
+          historyEntry = { from: 'proposed', to: 'active', at: now, context: { autoConfirmed: true, progressEntry: entryId } };
+        }
+        // For active goals, just update lastUpdated
+        break;
+      case 'mention':
+        // Just update lastUpdated to prevent false abandonment detection
+        break;
+    }
+
+    const updateData = {
+      lastUpdated: now,
+      sourceEntries: FieldValue.arrayUnion(entryId)
+    };
+
+    if (newState !== existingState && historyEntry) {
+      // Limit stateHistory to prevent document bloat
+      let newHistory = [...(existingData.stateHistory || []), historyEntry];
+      if (newHistory.length > 20) {
+        const firstEntry = newHistory[0];
+        const recentEntries = newHistory.slice(-19);
+        newHistory = [firstEntry, ...recentEntries];
+      }
+
+      updateData.state = newState;
+      updateData.stateHistory = newHistory;
+    }
+
+    await existingDoc.ref.update(updateData);
+    console.log(`Updated goal ${topicKey}: ${existingState} → ${newState}`);
+
+    return { id: existingDoc.id, state: newState, previousState: existingState };
+  }
+}
+
+/**
+ * Process an entry for goal signals
+ * Called after entry is created to update signal_states
+ */
+async function processEntryForGoals(userId, entry) {
+  const entryText = entry.text || '';
+  const entryId = entry.id;
+
+  // Method 1: Check if entry analysis already extracted goal_update
+  const goalUpdate = entry.analysis?.goal_update ||
+                     entry.analysis?.extractEnhancedContext?.goal_update;
+
+  if (goalUpdate && goalUpdate.tag) {
+    const topic = goalUpdate.tag.replace('@goal:', '').replace(/_/g, ' ');
+    const status = goalUpdate.status;
+
+    let updateType = 'mention';
+    if (status === 'achieved') updateType = 'achievement';
+    else if (status === 'abandoned') updateType = 'termination';
+    else if (status === 'progress' || status === 'struggling') updateType = 'progress';
+
+    return await upsertGoalState(userId, topic, entryId, updateType, { originalText: entryText });
+  }
+
+  // Method 2: Check for explicit @goal: tag in entry tags
+  const goalTag = (entry.tags || []).find(t => t.startsWith('@goal:'));
+  if (goalTag) {
+    const topic = goalTag.replace('@goal:', '').replace(/_/g, ' ');
+
+    // Determine update type from entry text
+    let updateType = 'mention';
+    if (detectsTerminationLanguage(entryText)) updateType = 'termination';
+    else if (detectsAchievementLanguage(entryText)) updateType = 'achievement';
+    else if (detectsProgressLanguage(entryText)) updateType = 'progress';
+
+    return await upsertGoalState(userId, topic, entryId, updateType, { originalText: entryText });
+  }
+
+  // Method 3: Pattern-based goal extraction
+  const extractedTopic = extractGoalTopic(entryText);
+  if (extractedTopic) {
+    // Check for termination first
+    if (detectsTerminationLanguage(entryText)) {
+      return await upsertGoalState(userId, extractedTopic, entryId, 'termination', { originalText: entryText });
+    }
+
+    if (detectsAchievementLanguage(entryText)) {
+      return await upsertGoalState(userId, extractedTopic, entryId, 'achievement', { originalText: entryText });
+    }
+
+    if (detectsProgressLanguage(entryText)) {
+      return await upsertGoalState(userId, extractedTopic, entryId, 'progress', { originalText: entryText });
+    }
+
+    // New goal detected
+    return await upsertGoalState(userId, extractedTopic, entryId, 'new', { originalText: entryText });
+  }
+
+  // Method 4: Check if entry text terminates any existing active goals
+  if (detectsTerminationLanguage(entryText) || detectsAchievementLanguage(entryText)) {
+    // Fetch active goals and check if any are mentioned
+    const activeGoals = await fetchActiveGoalStates(userId);
+
+    for (const [topic, goalState] of activeGoals) {
+      const topicWords = topic.split('_');
+      const textLower = entryText.toLowerCase();
+
+      // Check if entry mentions this goal's topic
+      const isMentioned = topicWords.some(word =>
+        word.length > 3 && textLower.includes(word)
+      );
+
+      if (isMentioned) {
+        const updateType = detectsAchievementLanguage(entryText) ? 'achievement' : 'termination';
+        return await upsertGoalState(userId, topic, entryId, updateType, { originalText: entryText });
+      }
+    }
+  }
+
+  return null;
+}
 
 // ============================================
 // SIGNAL AGGREGATION FUNCTIONS
