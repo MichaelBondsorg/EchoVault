@@ -39,6 +39,7 @@ import { completeActionItem, handleEntryDateChange, calculateStreak } from './se
 import { processEntrySignals } from './services/signals/processEntrySignals';
 import { updateSignalStatus, batchUpdateSignalStatus } from './services/signals';
 import { runEntryPostProcessing } from './services/background';
+import { getEntryHealthContext } from './services/health';
 
 // Hooks
 import { useIOSMeta } from './hooks/useIOSMeta';
@@ -635,6 +636,23 @@ export default function App() {
     const related = embedding ? findRelevantMemories(embedding, entries, cat) : [];
     const recent = entries.slice(0, 5);
 
+    // Capture health context (sleep, steps, workout, stress) if available
+    let healthContext = null;
+    try {
+      healthContext = await getEntryHealthContext();
+      if (healthContext) {
+        console.log('Health context captured:', {
+          sleep: healthContext.sleepLastNight,
+          steps: healthContext.stepsToday,
+          workout: healthContext.hasWorkout,
+          stress: healthContext.stressIndicator
+        });
+      }
+    } catch (healthError) {
+      // Health context is optional - don't block entry saving
+      console.warn('Could not capture health context:', healthError.message);
+    }
+
     try {
       const entryData = {
         text: finalTex,
@@ -647,6 +665,11 @@ export default function App() {
         // Signal extraction version - increments on each edit for race condition handling
         signalExtractionVersion: 1
       };
+
+      // Store health context if available (from Apple Health / Google Fit)
+      if (healthContext) {
+        entryData.healthContext = healthContext;
+      }
 
       // Store voice tone analysis if available (from voice recording)
       if (voiceTone) {
