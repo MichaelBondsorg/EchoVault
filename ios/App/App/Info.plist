@@ -67,11 +67,15 @@
 	<key>NSHealthUpdateUsageDescription</key>
 	<string>EchoVault does not write any data to Apple Health.</string>
 
-	<!-- App Transport Security - Allow HTTPS connections -->
+	<!-- App Transport Security - Allow all connections (temporary for debugging) -->
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsArbitraryLoads</key>
-		<false/>
+		<true/>
+		<key>NSAllowsArbitraryLoadsInWebContent</key>
+		<true/>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
 	</dict>
 
 	<!-- Background Modes (if needed for audio) -->

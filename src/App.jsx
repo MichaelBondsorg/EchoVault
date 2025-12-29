@@ -13,10 +13,11 @@ import {
   auth, db,
   onAuthStateChanged, signOut, signInWithCustomToken,
   GoogleAuthProvider, signInWithPopup, signInWithCredential,
+  exchangeGoogleTokenFn,
   collection, addDoc, query, orderBy, onSnapshot,
   Timestamp, deleteDoc, doc, updateDoc, limit, setDoc
 } from './config/firebase';
-import { Capacitor } from '@capacitor/core';
+import { Capacitor, registerPlugin } from '@capacitor/core';
 import {
   APP_COLLECTION_ID, CURRENT_CONTEXT_VERSION,
   DEFAULT_SAFETY_PLAN
@@ -1125,9 +1126,9 @@ export default function App() {
 
     try {
       if (isNative) {
-        // Native iOS/Android: Use Capacitor social login plugin
+        // Native iOS/Android: Use Capacitor social login plugin via registerPlugin
         console.log('[EchoVault] Using native Google Sign-In...');
-        const { SocialLogin } = await import('@capgo/capacitor-social-login');
+        const SocialLogin = registerPlugin('SocialLogin');
 
         // Initialize with iOS client ID
         // Note: webClientId is needed for Firebase idToken, iosClientId for native iOS
@@ -1149,18 +1150,114 @@ export default function App() {
         console.log('[EchoVault] Native sign-in response:', response);
 
         if (response?.result?.idToken) {
-          // Use the ID token to sign in with Firebase
-          const credential = GoogleAuthProvider.credential(response.result.idToken);
-          const result = await signInWithCredential(auth, credential);
-          console.log('[EchoVault] Firebase sign-in successful:', result.user?.uid);
-        } else if (response?.result?.accessToken) {
+          console.log('[EchoVault] Got idToken, using Cloud Function to exchange for Firebase token...');
+
+          try {
+            // Use direct fetch to Cloud Function instead of httpsCallable
+            // httpsCallable may also hang in WKWebView like signInWithCredential
+            console.log('[EchoVault] Calling exchangeGoogleToken via fetch...');
+
+            const functionUrl = 'https://us-central1-echo-vault-app.cloudfunctions.net/exchangeGoogleToken';
+
+            const fetchResponse = await fetch(functionUrl, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({
+                data: { idToken: response.result.idToken }
+              })
+            });
+
+            console.log('[EchoVault] Fetch response status:', fetchResponse.status);
+
+            if (!fetchResponse.ok) {
+              const errorText = await fetchResponse.text();
+              console.error('[EchoVault] Cloud Function error:', errorText);
+              throw new Error(`Cloud Function failed: ${fetchResponse.status} - ${errorText}`);
+            }
+
+            const exchangeResult = await fetchResponse.json();
+            console.log('[EchoVault] Cloud Function returned:', exchangeResult.result?.user?.email);
+
+            // Firebase callable functions wrap the response in { result: ... }
+            const resultData = exchangeResult.result || exchangeResult;
+
+            if (!resultData?.customToken) {
+              console.error('[EchoVault] No custom token in response:', exchangeResult);
+              throw new Error('Cloud Function did not return a custom token');
+            }
+
+            // signInWithCustomToken also hangs in WKWebView - use non-blocking approach
+            console.log('[EchoVault] Signing in with custom token (non-blocking)...');
+
+            let signInCompleted = false;
+            let signInError = null;
+
+            // Fire without awaiting
+            signInWithCustomToken(auth, resultData.customToken)
+              .then((result) => {
+                signInCompleted = true;
+                console.log('[EchoVault] signInWithCustomToken resolved! User:', result.user?.uid);
+              })
+              .catch((err) => {
+                signInCompleted = true;
+                signInError = err;
+                console.error('[EchoVault] signInWithCustomToken rejected:', err.code, err.message);
+              });
+
+            // Poll for auth state change (every 500ms for up to 15 seconds)
+            console.log('[EchoVault] Polling for auth state...');
+            for (let i = 0; i < 30; i++) {
+              await new Promise(resolve => setTimeout(resolve, 500));
+
+              if (signInCompleted) {
+                if (signInError) {
+                  throw signInError;
+                }
+                console.log('[EchoVault] Sign-in completed via promise');
+                break;
+              }
+
+              if (auth.currentUser) {
+                console.log('[EchoVault] User detected:', auth.currentUser.uid);
+                break;
+              }
+
+              if (i % 4 === 0 && i > 0) {
+                console.log(`[EchoVault] Still waiting... (${i * 0.5}s)`);
+              }
+            }
+
+            if (auth.currentUser) {
+              console.log('[EchoVault] Sign-in successful! User:', auth.currentUser.email);
+            } else {
+              console.warn('[EchoVault] Auth still pending after 15s');
+              // Don't throw - the auth might complete later
+              alert('Sign-in is processing. The app should update shortly.');
+            }
+
+          } catch (fbError) {
+            console.error('[EchoVault] Firebase auth failed:', fbError);
+            console.error('[EchoVault] Error details:', fbError?.message, fbError?.code);
+
+            // Handle specific Cloud Function errors
+            if (fbError.code === 'functions/unauthenticated') {
+              alert('Google token verification failed. Please try signing in again.');
+            } else if (fbError.code === 'functions/internal') {
+              alert('Server error during sign-in. Please try again.');
+            } else {
+              alert(`Sign-in failed: ${fbError?.message || String(fbError)}`);
+            }
+            throw fbError;
+          }
+        } else if (response?.result?.accessToken?.token) {
           // Fallback: some configurations return accessToken instead
-          console.log('[EchoVault] Using accessToken for credential...');
-          const credential = GoogleAuthProvider.credential(null, response.result.accessToken);
-          const result = await signInWithCredential(auth, credential);
-          console.log('[EchoVault] Firebase sign-in successful:', result.user?.uid);
+          console.log('[EchoVault] No idToken, accessToken not supported with Cloud Function approach');
+          alert('Sign-in configuration error. Please contact support.');
+          throw new Error('accessToken sign-in not supported');
         } else {
-          console.error('[EchoVault] Response:', JSON.stringify(response, null, 2));
+          console.error('[EchoVault] No idToken or accessToken in response');
           throw new Error('No ID token or access token received from Google Sign-In');
         }
       } else {
@@ -1182,6 +1279,9 @@ export default function App() {
         console.error('[EchoVault] Domain not authorized. Add this domain to Firebase Console > Authentication > Settings > Authorized domains');
       } else if (error.message?.includes('cancelled') || error.message?.includes('canceled')) {
         console.log('[EchoVault] Sign-in was cancelled by user');
+      } else if (error.message?.includes('timeout')) {
+        // Already handled above, don't show another alert
+        console.log('[EchoVault] Timeout error already handled');
       } else {
         alert(`Sign-in failed: ${error.message}`);
       }
