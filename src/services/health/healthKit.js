@@ -19,37 +19,22 @@
  * 3. Info.plist permissions are already configured
  */
 
-import { Capacitor, registerPlugin } from '@capacitor/core';
+import { Capacitor } from '@capacitor/core';
+import { Health } from '@flomentumsolutions/capacitor-health-extended';
 import { setPermissionStatus, cacheHealthData } from './platformHealth';
 
-// Use registerPlugin for native plugins (avoids dynamic import issues in WKWebView)
-let HealthPlugin = null;
-let pluginInitialized = false;
-
 /**
- * Initialize Health plugin
- * Returns null if not on iOS or plugin not available
+ * Get Health plugin instance
+ * Returns null if not on iOS
  */
 const getHealthPlugin = async () => {
-  if (pluginInitialized) return HealthPlugin;
-  pluginInitialized = true;
-
   if (Capacitor.getPlatform() !== 'ios') {
-    console.log('[HealthKit] Not on iOS, skipping plugin initialization');
+    console.log('[HealthKit] Not on iOS, skipping plugin');
     return null;
   }
 
-  try {
-    // Use registerPlugin with the correct plugin name
-    // The plugin registers as 'HealthPlugin' (see plugin's index.js)
-    HealthPlugin = registerPlugin('HealthPlugin');
-    console.log('[HealthKit] Plugin registered successfully');
-    return HealthPlugin;
-  } catch (error) {
-    console.warn('[HealthKit] Plugin registration failed:', error.message);
-    console.warn('To enable HealthKit, run: npm install @flomentumsolutions/capacitor-health-extended && npx cap sync');
-    return null;
-  }
+  console.log('[HealthKit] Using Health plugin from @flomentumsolutions/capacitor-health-extended');
+  return Health;
 };
 
 /**
