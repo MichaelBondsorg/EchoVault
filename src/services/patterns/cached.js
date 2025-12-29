@@ -3,11 +3,13 @@
  *
  * Reads pre-computed patterns from Firestore (computed by Cloud Functions)
  * Falls back to on-demand computation if cache is stale or missing
+ * Filters out dismissed/excluded patterns before returning
  */
 
 import { db, doc, getDoc, collection, getDocs } from '../../config/firebase';
 import { APP_COLLECTION_ID } from '../../config/constants';
 import { computeActivitySentiment, computeTemporalPatterns, computeMoodTriggers } from './index';
+import { getActiveExclusions } from '../signals/signalLifecycle';
 
 // Cache staleness threshold (6 hours)
 const CACHE_MAX_AGE_MS = 6 * 60 * 60 * 1000;
@@ -64,6 +66,7 @@ export const getCachedPatterns = async (userId) => {
 
 /**
  * Get pattern summary for dashboard display
+ * Filters out excluded patterns
  */
 export const getPatternSummary = async (userId) => {
   try {
@@ -83,7 +86,19 @@ export const getPatternSummary = async (userId) => {
       return null;
     }
 
-    return snapshot.data();
+    const data = snapshot.data();
+
+    // Filter exclusions if data array exists
+    if (data.data && Array.isArray(data.data)) {
+      try {
+        const exclusions = await getActiveExclusions(userId);
+        data.data = filterExcludedPatterns(data.data, exclusions);
+      } catch (error) {
+        console.warn('Could not filter exclusions for pattern summary:', error);
+      }
+    }
+
+    return data;
   } catch (error) {
     console.error('Error fetching pattern summary:', error);
     return null;
@@ -92,6 +107,7 @@ export const getPatternSummary = async (userId) => {
 
 /**
  * Get activity sentiment patterns
+ * Filters out excluded patterns
  */
 export const getActivityPatterns = async (userId) => {
   try {
@@ -111,7 +127,19 @@ export const getActivityPatterns = async (userId) => {
       return null;
     }
 
-    return snapshot.data();
+    const data = snapshot.data();
+
+    // Filter exclusions if data array exists
+    if (data.data && Array.isArray(data.data)) {
+      try {
+        const exclusions = await getActiveExclusions(userId);
+        data.data = filterExcludedPatterns(data.data, exclusions);
+      } catch (error) {
+        console.warn('Could not filter exclusions for activity patterns:', error);
+      }
+    }
+
+    return data;
   } catch (error) {
     console.error('Error fetching activity patterns:', error);
     return null;
@@ -148,6 +176,7 @@ export const getTemporalPatterns = async (userId) => {
 
 /**
  * Get contradictions
+ * Filters out excluded contradictions
  */
 export const getContradictions = async (userId) => {
   try {
@@ -167,7 +196,19 @@ export const getContradictions = async (userId) => {
       return null;
     }
 
-    return snapshot.data();
+    const data = snapshot.data();
+
+    // Filter exclusions if data array exists
+    if (data.data && Array.isArray(data.data)) {
+      try {
+        const exclusions = await getActiveExclusions(userId);
+        data.data = filterExcludedPatterns(data.data, exclusions);
+      } catch (error) {
+        console.warn('Could not filter exclusions for contradictions:', error);
+      }
+    }
+
+    return data;
   } catch (error) {
     console.error('Error fetching contradictions:', error);
     return null;
@@ -175,25 +216,97 @@ export const getContradictions = async (userId) => {
 };
 
 /**
+ * Check if a pattern matches any exclusion
+ */
+const isPatternMatchedByExclusion = (pattern, exclusions) => {
+  for (const exclusion of exclusions) {
+    // Check pattern type match
+    const patternType = pattern.type ||
+      (pattern.sentiment === 'positive' ? 'positive_activity' :
+       pattern.sentiment === 'negative' ? 'negative_activity' : null);
+
+    if (exclusion.patternType !== patternType) continue;
+
+    // Check context match
+    const exclusionContext = exclusion.context || {};
+    const contextKeys = Object.keys(exclusionContext);
+
+    if (contextKeys.length === 0) {
+      // Blanket exclusion for this pattern type
+      return true;
+    }
+
+    // Check each context key
+    let allMatch = true;
+    for (const key of contextKeys) {
+      const patternValue = key === 'entity' ? pattern.entity :
+                          key === 'message' ? (pattern.message || pattern.insight || '').slice(0, 100) :
+                          pattern[key];
+
+      if (exclusionContext[key] !== patternValue) {
+        allMatch = false;
+        break;
+      }
+    }
+
+    if (allMatch) return true;
+  }
+
+  return false;
+};
+
+/**
+ * Filter patterns against active exclusions
+ */
+const filterExcludedPatterns = (patterns, exclusions) => {
+  if (!exclusions || exclusions.length === 0) return patterns;
+  return patterns.filter(p => !isPatternMatchedByExclusion(p, exclusions));
+};
+
+/**
  * Get all patterns with fallback to on-demand computation
+ * Filters out dismissed/excluded patterns before returning
  *
  * @param {string} userId - User ID
  * @param {Object[]} entries - Entries for fallback computation
  * @param {string} category - Category filter
- * @returns {Object} All pattern data
+ * @returns {Object} All pattern data (with exclusions filtered out)
  */
 export const getAllPatterns = async (userId, entries = [], category = null) => {
+  // Load active exclusions for filtering
+  let exclusions = [];
+  try {
+    exclusions = await getActiveExclusions(userId);
+  } catch (error) {
+    console.warn('Could not load exclusions, showing all patterns:', error);
+  }
+
   // Try to get cached patterns first
   const cached = await getCachedPatterns(userId);
 
   if (cached && !cached._stale) {
     console.log('Using cached patterns');
+
+    // Filter out excluded patterns
+    const activitySentiment = filterExcludedPatterns(
+      cached.activity_sentiment?.data || [],
+      exclusions
+    );
+    const contradictions = filterExcludedPatterns(
+      cached.contradictions?.data || [],
+      exclusions
+    );
+    const summary = filterExcludedPatterns(
+      cached.summary?.data || [],
+      exclusions
+    );
+
     return {
       source: 'cache',
-      activitySentiment: cached.activity_sentiment?.data || [],
+      activitySentiment,
       temporal: cached.temporal?.data || {},
-      contradictions: cached.contradictions?.data || [],
-      summary: cached.summary?.data || [],
+      contradictions,
+      summary,
       updatedAt: cached.summary?.updatedAt?.toDate?.() || new Date()
     };
   }
@@ -205,11 +318,14 @@ export const getAllPatterns = async (userId, entries = [], category = null) => {
       ? entries.filter(e => e.category === category)
       : entries;
 
-    const activitySentiment = computeActivitySentiment(filteredEntries, category);
+    let activitySentiment = computeActivitySentiment(filteredEntries, category);
     const temporal = computeTemporalPatterns(filteredEntries, category);
     const triggers = computeMoodTriggers(filteredEntries, category);
 
-    // Generate summary from computed patterns
+    // Filter out excluded patterns
+    activitySentiment = filterExcludedPatterns(activitySentiment, exclusions);
+
+    // Generate summary from computed patterns (already filtered)
     const summary = generateLocalSummary(activitySentiment, temporal);
 
     return {

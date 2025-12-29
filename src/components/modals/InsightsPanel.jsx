@@ -7,23 +7,37 @@ import {
 } from 'lucide-react';
 import { analyzeLongitudinalPatterns } from '../../services/safety';
 import { getAllPatterns } from '../../services/patterns/cached';
-import { addToExclusionList } from '../../services/signals/signalLifecycle';
+import { addToExclusionList, getActiveExclusions } from '../../services/signals/signalLifecycle';
 
 const InsightsPanel = ({ entries, userId, category, onClose }) => {
   const [loading, setLoading] = useState(true);
   const [cachedPatterns, setCachedPatterns] = useState(null);
   const [source, setSource] = useState(null);
   const [dismissedPatterns, setDismissedPatterns] = useState(new Set());
+  const [dismissingPattern, setDismissingPattern] = useState(null); // Pattern being dismissed
 
-  // Load cached patterns from Firestore
+  // Load cached patterns and exclusions from Firestore
   useEffect(() => {
-    const loadPatterns = async () => {
+    const loadPatternsAndExclusions = async () => {
       if (!userId) {
         setLoading(false);
         return;
       }
 
       try {
+        // Load exclusions first to pre-populate dismissed state
+        const exclusions = await getActiveExclusions(userId);
+        const excludedKeys = new Set(
+          exclusions.map(exc => {
+            // Reconstruct the pattern key from exclusion context
+            const entity = exc.context?.entity || '';
+            const message = exc.context?.message || '';
+            return `${exc.patternType}:${entity}:${message.slice(0, 50)}`;
+          })
+        );
+        setDismissedPatterns(excludedKeys);
+
+        // Then load patterns
         const result = await getAllPatterns(userId, entries, category);
         setCachedPatterns(result);
         setSource(result.source);
@@ -34,7 +48,7 @@ const InsightsPanel = ({ entries, userId, category, onClose }) => {
       }
     };
 
-    loadPatterns();
+    loadPatternsAndExclusions();
   }, [userId, entries, category]);
 
   // Fallback to client-side patterns if no cached data
@@ -93,10 +107,20 @@ const InsightsPanel = ({ entries, userId, category, onClose }) => {
     return `${pattern.type}:${pattern.entity || ''}:${(pattern.message || pattern.insight || '').slice(0, 50)}`;
   };
 
-  // Handle pattern dismissal
-  const handleDismissPattern = async (pattern, patternKey) => {
+  // Show dismiss options for a pattern
+  const handleShowDismissOptions = (pattern, patternKey) => {
+    setDismissingPattern({ pattern, patternKey });
+  };
+
+  // Handle pattern dismissal with permanent option
+  const handleDismissPattern = async (permanent = false) => {
+    if (!dismissingPattern) return;
+
+    const { pattern, patternKey } = dismissingPattern;
+
     // Immediately hide from UI
     setDismissedPatterns(prev => new Set([...prev, patternKey]));
+    setDismissingPattern(null);
 
     // Persist to exclusions if userId available
     if (userId) {
@@ -108,7 +132,7 @@ const InsightsPanel = ({ entries, userId, category, onClose }) => {
             message: (pattern.message || pattern.insight || '').slice(0, 100)
           },
           reason: 'user_dismissed',
-          permanent: false // 30-day exclusion by default
+          permanent
         });
       } catch (error) {
         console.error('Failed to persist pattern dismissal:', error);
@@ -119,6 +143,7 @@ const InsightsPanel = ({ entries, userId, category, onClose }) => {
   // Helper to render a pattern card with dismiss button
   const PatternCard = ({ pattern, index }) => {
     const patternKey = getPatternKey(pattern);
+    const isBeingDismissed = dismissingPattern?.patternKey === patternKey;
 
     // Don't render if dismissed
     if (dismissedPatterns.has(patternKey)) return null;
@@ -147,17 +172,50 @@ const InsightsPanel = ({ entries, userId, category, onClose }) => {
             {pattern.confidence && (
               <p className="text-xs text-warm-400 mt-1">{Math.round(pattern.confidence * 100)}% confidence</p>
             )}
+
+            {/* Dismiss options - shown when dismissing this pattern */}
+            {isBeingDismissed && (
+              <motion.div
+                initial={{ opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: 'auto' }}
+                className="mt-3 pt-3 border-t border-warm-200 space-y-2"
+              >
+                <p className="text-xs text-warm-600 font-medium">Hide this insight?</p>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => handleDismissPattern(false)}
+                    className="px-3 py-1.5 text-xs bg-warm-100 hover:bg-warm-200 text-warm-700 rounded-lg transition-colors"
+                  >
+                    Hide for 30 days
+                  </button>
+                  <button
+                    onClick={() => handleDismissPattern(true)}
+                    className="px-3 py-1.5 text-xs bg-red-50 hover:bg-red-100 text-red-600 rounded-lg transition-colors"
+                  >
+                    Never show again
+                  </button>
+                  <button
+                    onClick={() => setDismissingPattern(null)}
+                    className="px-3 py-1.5 text-xs text-warm-500 hover:text-warm-700 transition-colors"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </motion.div>
+            )}
           </div>
 
-          {/* Dismiss button - visible on hover */}
-          <button
-            onClick={() => handleDismissPattern(pattern, patternKey)}
-            className="absolute top-2 right-2 p-1.5 rounded-full opacity-0 group-hover:opacity-100 hover:bg-white/70 transition-all text-warm-400 hover:text-warm-600"
-            aria-label="Dismiss this insight"
-            title="Not useful? Click to hide"
-          >
-            <X size={14} />
-          </button>
+          {/* Dismiss button - visible on hover, hidden when showing options */}
+          {!isBeingDismissed && (
+            <button
+              onClick={() => handleShowDismissOptions(pattern, patternKey)}
+              className="absolute top-2 right-2 p-1.5 rounded-full opacity-0 group-hover:opacity-100 hover:bg-white/70 transition-all text-warm-400 hover:text-warm-600"
+              aria-label="Dismiss this insight"
+              title="Not useful? Click to hide"
+            >
+              <X size={14} />
+            </button>
+          )}
         </div>
       </motion.div>
     );

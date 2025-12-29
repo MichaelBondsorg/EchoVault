@@ -1398,7 +1398,83 @@ async function fetchActiveGoalStates(userId) {
 }
 
 /**
+ * Fetch active exclusions from insight_exclusions collection
+ * Returns patterns that should be filtered out
+ */
+async function fetchActiveExclusions(userId) {
+  const exclusionsRef = db.collection('artifacts')
+    .doc(APP_COLLECTION_ID)
+    .collection('users')
+    .doc(userId)
+    .collection('insight_exclusions');
+
+  const snapshot = await exclusionsRef.get();
+  const now = new Date();
+
+  return snapshot.docs
+    .map(doc => ({ id: doc.id, ...doc.data() }))
+    .filter(exclusion => {
+      // Keep if permanent or not expired
+      if (exclusion.permanent) return true;
+      if (exclusion.expiresAt) {
+        const expiryDate = exclusion.expiresAt.toDate?.() || new Date(exclusion.expiresAt);
+        return expiryDate > now;
+      }
+      return false;
+    });
+}
+
+/**
+ * Check if a pattern matches an exclusion
+ */
+function isPatternExcluded(pattern, exclusions) {
+  for (const exclusion of exclusions) {
+    // Check pattern type match
+    const patternType = pattern.type ||
+      (pattern.sentiment === 'positive' ? 'positive_activity' :
+       pattern.sentiment === 'negative' ? 'negative_activity' : null);
+
+    if (exclusion.patternType !== patternType) continue;
+
+    // Check context match
+    const exclusionContext = exclusion.context || {};
+    const contextKeys = Object.keys(exclusionContext);
+
+    if (contextKeys.length === 0) {
+      // Blanket exclusion for this pattern type
+      return true;
+    }
+
+    // Check each context key
+    let allMatch = true;
+    for (const key of contextKeys) {
+      const patternValue = key === 'entity' ? pattern.entity :
+                          key === 'message' ? (pattern.message || pattern.insight || '').slice(0, 100) :
+                          pattern[key];
+
+      if (exclusionContext[key] !== patternValue) {
+        allMatch = false;
+        break;
+      }
+    }
+
+    if (allMatch) return true;
+  }
+
+  return false;
+}
+
+/**
+ * Filter out excluded patterns from an array
+ */
+function filterExcludedPatterns(patterns, exclusions) {
+  if (!exclusions || exclusions.length === 0) return patterns;
+  return patterns.filter(p => !isPatternExcluded(p, exclusions));
+}
+
+/**
  * Main pattern computation function
+ * Now filters out excluded patterns before storing
  */
 async function computeAllPatterns(userId, category = null) {
   // Fetch all entries
@@ -1425,11 +1501,33 @@ async function computeAllPatterns(userId, category = null) {
   const signalStatesMap = await fetchActiveGoalStates(userId);
   console.log(`Fetched ${signalStatesMap.size} active goals from signal_states for user ${userId}`);
 
+  // Fetch active exclusions to filter dismissed patterns
+  let exclusions = [];
+  try {
+    exclusions = await fetchActiveExclusions(userId);
+    console.log(`Fetched ${exclusions.length} active exclusions for user ${userId}`);
+  } catch (error) {
+    console.warn(`Could not fetch exclusions for user ${userId}:`, error);
+  }
+
   // Compute patterns
-  const activitySentiment = computeActivitySentiment(entries);
+  let activitySentiment = computeActivitySentiment(entries);
   const temporalPatterns = computeTemporalPatterns(entries);
   // Pass signalStatesMap to detectContradictions - uses DB as source of truth
-  const contradictions = detectContradictions(entries, activitySentiment, signalStatesMap);
+  let contradictions = detectContradictions(entries, activitySentiment, signalStatesMap);
+
+  // Filter out excluded patterns before storing
+  const originalActivityCount = activitySentiment.length;
+  const originalContradictionCount = contradictions.length;
+
+  activitySentiment = filterExcludedPatterns(activitySentiment, exclusions);
+  contradictions = filterExcludedPatterns(contradictions, exclusions);
+
+  if (exclusions.length > 0) {
+    console.log(`Filtered patterns: activities ${originalActivityCount} -> ${activitySentiment.length}, contradictions ${originalContradictionCount} -> ${contradictions.length}`);
+  }
+
+  // Generate summary from filtered patterns
   const summary = generateInsightsSummary(activitySentiment, temporalPatterns, contradictions);
 
   const timestamp = FieldValue.serverTimestamp();
