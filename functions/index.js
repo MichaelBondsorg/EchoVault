@@ -12,6 +12,7 @@ import { onSchedule } from 'firebase-functions/v2/scheduler';
 import { defineSecret } from 'firebase-functions/params';
 import { initializeApp, getApps } from 'firebase-admin/app';
 import { getFirestore, FieldValue } from 'firebase-admin/firestore';
+import { getAuth } from 'firebase-admin/auth';
 
 // Initialize Firebase Admin
 if (getApps().length === 0) {
@@ -2684,5 +2685,108 @@ export const onSignalWrite = onDocumentWritten(
     }
 
     return { success: true, datesUpdated: Array.from(affectedDates) };
+  }
+);
+
+/**
+ * Cloud Function: Exchange Google ID Token for Firebase Custom Token
+ *
+ * This is used for native iOS/Android sign-in where the Firebase SDK's
+ * signInWithCredential hangs in Capacitor's WKWebView.
+ *
+ * Flow:
+ * 1. Native app gets Google ID token via Capacitor Social Login
+ * 2. Native app calls this function with the ID token
+ * 3. This function verifies the token with Google
+ * 4. Creates a Firebase custom token
+ * 5. Returns the custom token to the native app
+ * 6. Native app uses signInWithCustomToken (which works in WKWebView)
+ */
+export const exchangeGoogleToken = onCall(
+  {
+    cors: true,
+    maxInstances: 20,
+    // No auth required - this IS the sign-in endpoint
+  },
+  async (request) => {
+    const { idToken } = request.data;
+
+    if (!idToken) {
+      throw new HttpsError('invalid-argument', 'idToken is required');
+    }
+
+    console.log('Received Google ID token exchange request');
+
+    try {
+      // Verify the Google ID token
+      // Use Google's tokeninfo endpoint for verification
+      const verifyUrl = `https://oauth2.googleapis.com/tokeninfo?id_token=${idToken}`;
+      const verifyResponse = await fetch(verifyUrl);
+
+      if (!verifyResponse.ok) {
+        const errorText = await verifyResponse.text();
+        console.error('Google token verification failed:', verifyResponse.status, errorText);
+        throw new HttpsError('unauthenticated', 'Invalid Google ID token');
+      }
+
+      const tokenInfo = await verifyResponse.json();
+      console.log('Token verified for:', tokenInfo.email);
+
+      // Verify the token is for our app (check audience)
+      const validAudiences = [
+        '581319345416-9h59io8iev888kej6riag3tqnvik6na0.apps.googleusercontent.com', // Web client
+        '581319345416-sf58st9q2hvst5kakt4tn3sgulor6r7m.apps.googleusercontent.com', // iOS client
+      ];
+
+      if (!validAudiences.includes(tokenInfo.aud)) {
+        console.error('Invalid audience:', tokenInfo.aud);
+        throw new HttpsError('unauthenticated', 'Token has invalid audience');
+      }
+
+      // Check if email is verified
+      if (tokenInfo.email_verified !== 'true') {
+        console.warn('Email not verified for:', tokenInfo.email);
+        // Still allow sign-in, but log it
+      }
+
+      // Use the Google user ID (sub) as the Firebase UID
+      // This ensures consistent user IDs across platforms
+      const uid = tokenInfo.sub;
+      const email = tokenInfo.email;
+      const name = tokenInfo.name;
+      const picture = tokenInfo.picture;
+
+      console.log('Creating custom token for uid:', uid);
+
+      // Create a Firebase custom token
+      const customToken = await getAuth().createCustomToken(uid, {
+        // Additional claims (accessible via auth.token in security rules)
+        email: email,
+        name: name,
+        picture: picture,
+        provider: 'google'
+      });
+
+      console.log('Custom token created successfully for:', email);
+
+      return {
+        customToken,
+        user: {
+          uid,
+          email,
+          name,
+          picture
+        }
+      };
+
+    } catch (error) {
+      console.error('Error in exchangeGoogleToken:', error);
+
+      if (error instanceof HttpsError) {
+        throw error;
+      }
+
+      throw new HttpsError('internal', 'Failed to exchange Google token: ' + error.message);
+    }
   }
 );

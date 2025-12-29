@@ -32,6 +32,7 @@ export const transcribeAudioFn = httpsCallable(functions, 'transcribeAudio', { t
 export const transcribeWithToneFn = httpsCallable(functions, 'transcribeWithTone', { timeout: 540000 }); // 9 min - transcription + voice tone
 export const askJournalAIFn = httpsCallable(functions, 'askJournalAI', { timeout: 120000 }); // 2 min
 export const executePromptFn = httpsCallable(functions, 'executePrompt', { timeout: 120000 }); // 2 min
+export const exchangeGoogleTokenFn = httpsCallable(functions, 'exchangeGoogleToken', { timeout: 30000 }); // 30s - auth should be fast
 
 // Re-export Firebase utilities for convenience
 export {
