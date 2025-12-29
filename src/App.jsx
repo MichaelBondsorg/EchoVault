@@ -16,7 +16,7 @@ import {
   collection, addDoc, query, orderBy, onSnapshot,
   Timestamp, deleteDoc, doc, updateDoc, limit, setDoc
 } from './config/firebase';
-import { Capacitor } from '@capacitor/core';
+import { Capacitor, registerPlugin } from '@capacitor/core';
 import {
   APP_COLLECTION_ID, CURRENT_CONTEXT_VERSION,
   DEFAULT_SAFETY_PLAN
@@ -1125,9 +1125,9 @@ export default function App() {
 
     try {
       if (isNative) {
-        // Native iOS/Android: Use Capacitor social login plugin
+        // Native iOS/Android: Use Capacitor social login plugin via registerPlugin
         console.log('[EchoVault] Using native Google Sign-In...');
-        const { SocialLogin } = await import('@capgo/capacitor-social-login');
+        const SocialLogin = registerPlugin('SocialLogin');
 
         // Initialize with iOS client ID
         // Note: webClientId is needed for Firebase idToken, iosClientId for native iOS
