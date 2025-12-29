@@ -13,6 +13,7 @@ import {
   auth, db,
   onAuthStateChanged, signOut, signInWithCustomToken,
   GoogleAuthProvider, signInWithPopup, signInWithCredential,
+  setPersistence, browserLocalPersistence, inMemoryPersistence,
   collection, addDoc, query, orderBy, onSnapshot,
   Timestamp, deleteDoc, doc, updateDoc, limit, setDoc
 } from './config/firebase';
@@ -1150,40 +1151,64 @@ export default function App() {
 
         if (response?.result?.idToken) {
           console.log('[EchoVault] Got idToken, attempting Firebase sign-in...');
+
           try {
+            // IMPORTANT: Set persistence to browserLocalPersistence for native platforms
+            // IndexedDB (default) can cause blocking issues in WKWebView
+            console.log('[EchoVault] Setting auth persistence for native platform...');
+            try {
+              await setPersistence(auth, browserLocalPersistence);
+              console.log('[EchoVault] Persistence set to browserLocalPersistence');
+            } catch (persistError) {
+              console.warn('[EchoVault] browserLocalPersistence failed, trying inMemoryPersistence:', persistError.message);
+              try {
+                await setPersistence(auth, inMemoryPersistence);
+                console.log('[EchoVault] Persistence set to inMemoryPersistence');
+              } catch (memError) {
+                console.warn('[EchoVault] inMemoryPersistence also failed:', memError.message);
+              }
+            }
+
             // Create credential from Google ID token
             const credential = GoogleAuthProvider.credential(response.result.idToken);
-            console.log('[EchoVault] Credential created');
+            console.log('[EchoVault] Credential created, calling signInWithCredential...');
 
-            // Try signInWithCredential but don't await - let onAuthStateChanged handle it
-            // Also start it in a non-blocking way
-            console.log('[EchoVault] Starting signInWithCredential (non-blocking)...');
+            // Use Promise.race with a timeout to prevent indefinite hanging
+            const signInPromise = signInWithCredential(auth, credential);
+            const timeoutPromise = new Promise((_, reject) =>
+              setTimeout(() => reject(new Error('Sign-in timeout after 15 seconds')), 15000)
+            );
 
-            signInWithCredential(auth, credential)
-              .then((result) => {
-                console.log('[EchoVault] signInWithCredential resolved! User:', result.user?.uid);
-              })
-              .catch((err) => {
-                console.error('[EchoVault] signInWithCredential rejected:', err.code, err.message);
-              });
+            try {
+              const result = await Promise.race([signInPromise, timeoutPromise]);
+              console.log('[EchoVault] signInWithCredential succeeded! User:', result.user?.uid);
+              // onAuthStateChanged will handle setting the user state
+            } catch (raceError) {
+              if (raceError.message?.includes('timeout')) {
+                console.log('[EchoVault] signInWithCredential timed out, checking auth state...');
+                // Even if we timeout, the operation might complete in background
+                // Wait a bit longer and check if user is set
+                await new Promise(resolve => setTimeout(resolve, 2000));
 
-            // Wait a moment for auth state to potentially update
-            console.log('[EchoVault] Waiting for auth state change...');
-            await new Promise(resolve => setTimeout(resolve, 3000));
-
-            // Check if user is now signed in
-            if (auth.currentUser) {
-              console.log('[EchoVault] User is now signed in:', auth.currentUser.uid, auth.currentUser.email);
-              alert('Sign-in successful! Welcome ' + auth.currentUser.email);
-            } else {
-              console.log('[EchoVault] No user yet after 3s, auth may still be processing');
-              alert('Sign-in is processing... the app should update shortly.');
+                if (auth.currentUser) {
+                  console.log('[EchoVault] User signed in after timeout:', auth.currentUser.uid);
+                } else {
+                  console.warn('[EchoVault] No user after timeout - sign-in may have failed');
+                  // Don't throw - let the user try again if needed
+                  alert('Sign-in is taking longer than expected. Please wait a moment or try again.');
+                }
+              } else {
+                throw raceError;
+              }
             }
 
           } catch (fbError) {
             console.error('[EchoVault] Firebase auth failed:', fbError);
             console.error('[EchoVault] Error details:', fbError?.message);
-            alert(`Firebase error: ${fbError?.message || String(fbError)}`);
+            // Don't show alert for timeout (already handled above)
+            if (!fbError.message?.includes('timeout')) {
+              alert(`Firebase error: ${fbError?.message || String(fbError)}`);
+            }
             throw fbError;
           }
         } else if (response?.result?.accessToken?.token) {
@@ -1221,6 +1246,9 @@ export default function App() {
         console.error('[EchoVault] Domain not authorized. Add this domain to Firebase Console > Authentication > Settings > Authorized domains');
       } else if (error.message?.includes('cancelled') || error.message?.includes('canceled')) {
         console.log('[EchoVault] Sign-in was cancelled by user');
+      } else if (error.message?.includes('timeout')) {
+        // Already handled above, don't show another alert
+        console.log('[EchoVault] Timeout error already handled');
       } else {
         alert(`Sign-in failed: ${error.message}`);
       }

@@ -1,7 +1,8 @@
 import { initializeApp } from 'firebase/app';
 import {
   getAuth, onAuthStateChanged, signOut, signInWithCustomToken,
-  GoogleAuthProvider, signInWithPopup, signInWithCredential, OAuthProvider
+  GoogleAuthProvider, signInWithPopup, signInWithCredential, OAuthProvider,
+  setPersistence, indexedDBLocalPersistence, browserLocalPersistence, inMemoryPersistence
 } from 'firebase/auth';
 import {
   getFirestore, collection, addDoc, query, orderBy, onSnapshot,
@@ -41,6 +42,10 @@ export {
   signInWithPopup,
   signInWithCredential,
   OAuthProvider,
+  setPersistence,
+  indexedDBLocalPersistence,
+  browserLocalPersistence,
+  inMemoryPersistence,
   collection,
   addDoc,
   query,
