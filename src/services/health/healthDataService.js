@@ -1,0 +1,258 @@
+/**
+ * Unified Health Data Service
+ *
+ * Cross-platform health data access with graceful fallbacks:
+ * - iOS: HealthKit
+ * - Android: Google Fit
+ * - Web: Cached data from last native session
+ * - All platforms: Manual input option
+ *
+ * Key design principle: Health data enhances insights but is never required.
+ * The app works fully without any health data.
+ */
+
+import { getHealthDataStrategy, cacheHealthData, getCachedHealthData, detectPlatform } from './platformHealth';
+import { getHealthKitSummary, getHealthKitHistory, requestHealthKitPermissions, checkHealthKitPermissions } from './healthKit';
+import { getGoogleFitSummary, getGoogleFitHistory, requestGoogleFitPermissions, checkGoogleFitPermissions } from './googleFit';
+
+/**
+ * Get current health summary using best available method
+ *
+ * @param {Date} date - Date to query (default: today)
+ * @returns {Object} Health summary with source info
+ */
+export const getHealthSummary = async (date = new Date()) => {
+  const strategy = await getHealthDataStrategy();
+
+  switch (strategy.strategy) {
+    case 'healthkit':
+      return await getHealthKitSummary(date);
+
+    case 'googlefit':
+      return await getGoogleFitSummary(date);
+
+    case 'cache':
+      // Return cached data with freshness info
+      return {
+        ...strategy.cachedData,
+        source: 'cache',
+        cacheAge: strategy.cacheAge,
+        note: 'Data from your last mobile session'
+      };
+
+    case 'manual':
+    default:
+      return {
+        available: false,
+        source: 'none',
+        note: 'Health data available when using the mobile app'
+      };
+  }
+};
+
+/**
+ * Get health history for correlation analysis
+ *
+ * @param {number} days - Days to query
+ * @returns {Object} Health history
+ */
+export const getHealthHistory = async (days = 14) => {
+  const { platform } = detectPlatform();
+
+  if (platform === 'ios') {
+    return await getHealthKitHistory(days);
+  }
+
+  if (platform === 'android') {
+    return await getGoogleFitHistory(days);
+  }
+
+  // Web - no history available
+  return {
+    available: false,
+    reason: 'web_platform',
+    note: 'Historical health data only available on mobile'
+  };
+};
+
+/**
+ * Request health permissions for current platform
+ *
+ * @returns {Object} Permission result
+ */
+export const requestHealthPermissions = async () => {
+  const { platform } = detectPlatform();
+
+  if (platform === 'ios') {
+    return await requestHealthKitPermissions();
+  }
+
+  if (platform === 'android') {
+    return await requestGoogleFitPermissions();
+  }
+
+  return {
+    available: false,
+    reason: 'web_platform'
+  };
+};
+
+/**
+ * Check current health permission status
+ *
+ * @returns {Object} Permission status
+ */
+export const checkHealthPermissions = async () => {
+  const { platform } = detectPlatform();
+
+  if (platform === 'ios') {
+    return await checkHealthKitPermissions();
+  }
+
+  if (platform === 'android') {
+    return await checkGoogleFitPermissions();
+  }
+
+  return {
+    available: false,
+    reason: 'web_platform'
+  };
+};
+
+/**
+ * Get health context for entry enrichment
+ *
+ * Returns simplified health context to store with journal entries.
+ * Used to correlate mood with health metrics.
+ *
+ * @returns {Object|null} Health context or null if unavailable
+ */
+export const getEntryHealthContext = async () => {
+  const summary = await getHealthSummary();
+
+  if (!summary.available) {
+    return null;
+  }
+
+  return {
+    sleepLastNight: summary.sleep?.totalHours || null,
+    sleepQuality: summary.sleep?.quality || null,
+    stepsToday: summary.steps || null,
+    hasWorkout: summary.hasWorkout || false,
+    stressIndicator: summary.hrv?.stressIndicator || null,
+    restingHeartRate: summary.heartRate?.resting || null,
+    source: summary.source || 'native',
+    capturedAt: new Date().toISOString()
+  };
+};
+
+/**
+ * Save manual health input (for web users)
+ *
+ * @param {Object} input - { sleepHours, hadWorkout, stressLevel }
+ */
+export const saveManualHealthInput = async (input) => {
+  const manualData = {
+    available: true,
+    source: 'manual',
+    date: new Date().toISOString().split('T')[0],
+    sleep: {
+      totalHours: input.sleepHours,
+      quality: input.sleepHours >= 7 ? 'good' : input.sleepHours >= 5 ? 'fair' : 'poor'
+    },
+    hasWorkout: input.hadWorkout || false,
+    hrv: {
+      stressIndicator: input.stressLevel || null
+    },
+    steps: null,
+    heartRate: null,
+    queriedAt: new Date().toISOString()
+  };
+
+  await cacheHealthData(manualData);
+  return manualData;
+};
+
+/**
+ * Get health data availability status
+ *
+ * @returns {Object} Availability info for UI
+ */
+export const getHealthDataStatus = async () => {
+  const strategy = await getHealthDataStrategy();
+  const { platform, isNative } = detectPlatform();
+
+  return {
+    isAvailable: strategy.isAvailable,
+    strategy: strategy.strategy,
+    platform,
+    isNative,
+    canRequestPermission: isNative && strategy.permissionStatus !== 'granted',
+    hasCachedData: strategy.strategy === 'cache',
+    cacheAge: strategy.cacheAge || null,
+    message: getStatusMessage(strategy)
+  };
+};
+
+/**
+ * Get human-readable status message
+ */
+const getStatusMessage = (strategy) => {
+  switch (strategy.strategy) {
+    case 'healthkit':
+      return strategy.isAvailable
+        ? 'Connected to Apple Health'
+        : 'Apple Health permission needed';
+
+    case 'googlefit':
+      return strategy.isAvailable
+        ? 'Connected to Google Fit'
+        : 'Google Fit permission needed';
+
+    case 'cache':
+      return `Using data from ${strategy.cacheAge}`;
+
+    case 'manual':
+      return 'Tap to add health info manually';
+
+    default:
+      return 'Health data unavailable';
+  }
+};
+
+/**
+ * Refresh health data cache
+ * Call this on app resume or periodically
+ */
+export const refreshHealthCache = async () => {
+  const { isNative, platform } = detectPlatform();
+
+  if (!isNative) {
+    return { refreshed: false, reason: 'not_native' };
+  }
+
+  try {
+    const summary = platform === 'ios'
+      ? await getHealthKitSummary()
+      : await getGoogleFitSummary();
+
+    if (summary.available) {
+      return { refreshed: true, summary };
+    }
+
+    return { refreshed: false, reason: 'fetch_failed' };
+  } catch (error) {
+    return { refreshed: false, reason: error.message };
+  }
+};
+
+export default {
+  getHealthSummary,
+  getHealthHistory,
+  requestHealthPermissions,
+  checkHealthPermissions,
+  getEntryHealthContext,
+  saveManualHealthInput,
+  getHealthDataStatus,
+  refreshHealthCache
+};
