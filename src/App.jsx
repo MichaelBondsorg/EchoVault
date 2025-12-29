@@ -1132,7 +1132,7 @@ export default function App() {
         // Initialize if needed
         await SocialLogin.initialize({
           google: {
-            webClientId: '581319345416-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.apps.googleusercontent.com', // Replace with your actual web client ID
+            webClientId: '581319345416-9h59io8iev888kej6riag3tqnvik6na0.apps.googleusercontent.com', // Replace with your actual web client ID
           }
         });
 
