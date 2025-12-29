@@ -12,10 +12,11 @@ import { celebrate, Button, Modal, ModalHeader, ModalBody, Badge, MoodBadge, Bre
 import {
   auth, db,
   onAuthStateChanged, signOut, signInWithCustomToken,
-  GoogleAuthProvider, signInWithPopup,
+  GoogleAuthProvider, signInWithPopup, signInWithCredential,
   collection, addDoc, query, orderBy, onSnapshot,
   Timestamp, deleteDoc, doc, updateDoc, limit, setDoc
 } from './config/firebase';
+import { Capacitor } from '@capacitor/core';
 import {
   APP_COLLECTION_ID, CURRENT_CONTEXT_VERSION,
   DEFAULT_SAFETY_PLAN
@@ -1117,21 +1118,60 @@ export default function App() {
     }
   };
 
-  // Handle sign-in with logging
+  // Handle sign-in with logging - supports both web and native
   const handleSignIn = async () => {
     console.log('[EchoVault] Sign-in button clicked, attempting Google sign-in...');
+    const isNative = Capacitor.isNativePlatform();
+
     try {
-      const result = await signInWithPopup(auth, new GoogleAuthProvider());
-      console.log('[EchoVault] Sign-in successful:', result.user?.uid);
+      if (isNative) {
+        // Native iOS/Android: Use Capacitor social login plugin
+        console.log('[EchoVault] Using native Google Sign-In...');
+        const { SocialLogin } = await import('@capgo/capacitor-social-login');
+
+        // Initialize if needed
+        await SocialLogin.initialize({
+          google: {
+            webClientId: '581319345416-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.apps.googleusercontent.com', // Replace with your actual web client ID
+          }
+        });
+
+        const response = await SocialLogin.login({
+          provider: 'google',
+          options: {
+            scopes: ['email', 'profile']
+          }
+        });
+
+        console.log('[EchoVault] Native sign-in response:', response);
+
+        if (response?.result?.idToken) {
+          // Use the ID token to sign in with Firebase
+          const credential = GoogleAuthProvider.credential(response.result.idToken);
+          const result = await signInWithCredential(auth, credential);
+          console.log('[EchoVault] Firebase sign-in successful:', result.user?.uid);
+        } else {
+          throw new Error('No ID token received from Google Sign-In');
+        }
+      } else {
+        // Web: Use popup-based sign-in
+        console.log('[EchoVault] Using web popup sign-in...');
+        const result = await signInWithPopup(auth, new GoogleAuthProvider());
+        console.log('[EchoVault] Sign-in successful:', result.user?.uid);
+      }
     } catch (error) {
-      console.error('[EchoVault] Sign-in error:', error.code, error.message);
+      console.error('[EchoVault] Sign-in error:', error.code || error.name, error.message);
       if (error.code === 'auth/popup-blocked') {
         alert('Sign-in popup was blocked. Please allow popups for this site.');
       } else if (error.code === 'auth/popup-closed-by-user') {
         console.log('[EchoVault] User closed the popup');
+      } else if (error.code === 'auth/cancelled-popup-request') {
+        console.log('[EchoVault] Popup request was cancelled - please try again');
       } else if (error.code === 'auth/unauthorized-domain') {
         alert('This domain is not authorized for sign-in. Please contact support.');
         console.error('[EchoVault] Domain not authorized. Add this domain to Firebase Console > Authentication > Settings > Authorized domains');
+      } else if (error.message?.includes('cancelled') || error.message?.includes('canceled')) {
+        console.log('[EchoVault] Sign-in was cancelled by user');
       } else {
         alert(`Sign-in failed: ${error.message}`);
       }
