@@ -1153,20 +1153,44 @@ export default function App() {
           console.log('[EchoVault] Got idToken, using Cloud Function to exchange for Firebase token...');
 
           try {
-            // Use Cloud Function to exchange Google ID token for Firebase custom token
-            // This bypasses the signInWithCredential which hangs in WKWebView
-            console.log('[EchoVault] Calling exchangeGoogleToken Cloud Function...');
-            const exchangeResult = await exchangeGoogleTokenFn({ idToken: response.result.idToken });
+            // Use direct fetch to Cloud Function instead of httpsCallable
+            // httpsCallable may also hang in WKWebView like signInWithCredential
+            console.log('[EchoVault] Calling exchangeGoogleToken via fetch...');
 
-            console.log('[EchoVault] Cloud Function returned:', exchangeResult.data?.user?.email);
+            const functionUrl = 'https://us-central1-echo-vault-app.cloudfunctions.net/exchangeGoogleToken';
 
-            if (!exchangeResult.data?.customToken) {
+            const fetchResponse = await fetch(functionUrl, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({
+                data: { idToken: response.result.idToken }
+              })
+            });
+
+            console.log('[EchoVault] Fetch response status:', fetchResponse.status);
+
+            if (!fetchResponse.ok) {
+              const errorText = await fetchResponse.text();
+              console.error('[EchoVault] Cloud Function error:', errorText);
+              throw new Error(`Cloud Function failed: ${fetchResponse.status} - ${errorText}`);
+            }
+
+            const exchangeResult = await fetchResponse.json();
+            console.log('[EchoVault] Cloud Function returned:', exchangeResult.result?.user?.email);
+
+            // Firebase callable functions wrap the response in { result: ... }
+            const resultData = exchangeResult.result || exchangeResult;
+
+            if (!resultData?.customToken) {
+              console.error('[EchoVault] No custom token in response:', exchangeResult);
               throw new Error('Cloud Function did not return a custom token');
             }
 
-            // Use signInWithCustomToken (which works in WKWebView)
+            // Use signInWithCustomToken (which hopefully works in WKWebView)
             console.log('[EchoVault] Signing in with custom token...');
-            const userCredential = await signInWithCustomToken(auth, exchangeResult.data.customToken);
+            const userCredential = await signInWithCustomToken(auth, resultData.customToken);
             console.log('[EchoVault] Sign-in successful! User:', userCredential.user?.uid, userCredential.user?.email);
 
           } catch (fbError) {
