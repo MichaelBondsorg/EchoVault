@@ -10,7 +10,7 @@
  */
 
 import { collection, query, where, getDocs, doc, setDoc, updateDoc, orderBy, limit } from 'firebase/firestore';
-import { db } from '../../firebase';
+import { db } from '../../config/firebase';
 
 // 15 core values based on ACT research and common life domains
 export const CORE_VALUES = {

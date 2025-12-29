@@ -10,7 +10,7 @@
  */
 
 import { collection, query, where, getDocs, orderBy } from 'firebase/firestore';
-import { db } from '../../firebase';
+import { db } from '../../config/firebase';
 
 // Keywords that often indicate stressful events
 const STRESSFUL_EVENT_KEYWORDS = [

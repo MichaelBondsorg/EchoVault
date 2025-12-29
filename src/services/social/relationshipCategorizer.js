@@ -6,7 +6,7 @@
  */
 
 import { doc, getDoc, setDoc, collection, query, where, getDocs } from 'firebase/firestore';
-import { db } from '../../firebase';
+import { db } from '../../config/firebase';
 
 // Relationship category patterns
 export const RELATIONSHIP_PATTERNS = {
