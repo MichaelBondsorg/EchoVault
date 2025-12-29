@@ -104,7 +104,7 @@ export const getHealthDataStrategy = async () => {
   // No native access, no valid cache
   return {
     strategy: 'manual',
-    isAvailable: true,
+    isAvailable: false,  // No actual health data on web without cache
     capabilities: PLATFORM_CAPABILITIES.web,
     platform,
     fallback: null,
