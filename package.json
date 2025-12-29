@@ -27,6 +27,7 @@
     "@capacitor/splash-screen": "^8.0.0",
     "@capacitor/status-bar": "^8.0.0",
     "@capgo/capacitor-social-login": "^8.2.6",
+    "@flomentumsolutions/capacitor-health-extended": "^0.6.4",
     "canvas-confetti": "^1.9.4",
     "firebase": "^10.7.1",
     "framer-motion": "^12.23.26",

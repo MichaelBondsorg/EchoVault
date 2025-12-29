@@ -40,9 +40,9 @@ const getHealthPlugin = async () => {
   }
 
   try {
-    // Use registerPlugin instead of dynamic import
-    // This works properly in Capacitor's native WebView
-    HealthPlugin = registerPlugin('CapacitorHealthExtended');
+    // Use registerPlugin with the correct plugin name
+    // The plugin registers as 'HealthPlugin' (see plugin's index.js)
+    HealthPlugin = registerPlugin('HealthPlugin');
     console.log('[HealthKit] Plugin registered successfully');
     return HealthPlugin;
   } catch (error) {
