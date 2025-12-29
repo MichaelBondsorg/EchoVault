@@ -8,7 +8,8 @@ export default defineConfig({
       // Don't bundle native-only plugins for web builds
       external: [
         '@flomentumsolutions/capacitor-health-extended',
-        'capacitor-google-fit'
+        'capacitor-google-fit',
+        '@nickmjones/capacitor-healthkit'
       ]
     }
   },
@@ -16,7 +17,8 @@ export default defineConfig({
   optimizeDeps: {
     exclude: [
       '@flomentumsolutions/capacitor-health-extended',
-      'capacitor-google-fit'
+      'capacitor-google-fit',
+      '@nickmjones/capacitor-healthkit'
     ]
   }
 });
