@@ -1129,10 +1129,13 @@ export default function App() {
         console.log('[EchoVault] Using native Google Sign-In...');
         const { SocialLogin } = await import('@capgo/capacitor-social-login');
 
-        // Initialize if needed
+        // Initialize with iOS client ID
+        // Note: webClientId is needed for Firebase idToken, iosClientId for native iOS
         await SocialLogin.initialize({
           google: {
-            webClientId: '581319345416-9h59io8iev888kej6riag3tqnvik6na0.apps.googleusercontent.com', // Replace with your actual web client ID
+            webClientId: '581319345416-9h59io8iev888kej6riag3tqnvik6na0.apps.googleusercontent.com',
+            iOSClientId: '581319345416-sf58st9q2hvst5kakt4tn3sgulor6r7m.apps.googleusercontent.com',
+            iOSServerClientId: '581319345416-9h59io8iev888kej6riag3tqnvik6na0.apps.googleusercontent.com',
           }
         });
 
@@ -1150,8 +1153,15 @@ export default function App() {
           const credential = GoogleAuthProvider.credential(response.result.idToken);
           const result = await signInWithCredential(auth, credential);
           console.log('[EchoVault] Firebase sign-in successful:', result.user?.uid);
+        } else if (response?.result?.accessToken) {
+          // Fallback: some configurations return accessToken instead
+          console.log('[EchoVault] Using accessToken for credential...');
+          const credential = GoogleAuthProvider.credential(null, response.result.accessToken);
+          const result = await signInWithCredential(auth, credential);
+          console.log('[EchoVault] Firebase sign-in successful:', result.user?.uid);
         } else {
-          throw new Error('No ID token received from Google Sign-In');
+          console.error('[EchoVault] Response:', JSON.stringify(response, null, 2));
+          throw new Error('No ID token or access token received from Google Sign-In');
         }
       } else {
         // Web: Use popup-based sign-in
