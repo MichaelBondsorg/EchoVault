@@ -39,6 +39,7 @@ import { completeActionItem, handleEntryDateChange, calculateStreak } from './se
 import { processEntrySignals } from './services/signals/processEntrySignals';
 import { updateSignalStatus, batchUpdateSignalStatus } from './services/signals';
 import { runEntryPostProcessing } from './services/background';
+import { getEntryHealthContext } from './services/health';
 
 // Hooks
 import { useIOSMeta } from './hooks/useIOSMeta';
@@ -49,7 +50,7 @@ import { useWakeLock } from './hooks/useWakeLock';
 // Components
 import {
   CrisisSoftBlockModal, DailySummaryModal, WeeklyReport, InsightsPanel,
-  CrisisResourcesScreen, SafetyPlanScreen, DecompressionScreen, TherapistExportScreen, JournalScreen,
+  CrisisResourcesScreen, SafetyPlanScreen, DecompressionScreen, TherapistExportScreen, JournalScreen, HealthSettingsScreen,
   Chat, RealtimeConversation,
   MoodHeatmap,
   MarkdownLite, GetHelpButton, HamburgerMenu,
@@ -131,6 +132,9 @@ export default function App() {
 
   // Journal Screen (Day Dashboard MVP)
   const [showJournal, setShowJournal] = useState(false);
+
+  // Health Settings Screen
+  const [showHealthSettings, setShowHealthSettings] = useState(false);
 
   // Temporal Context (Phase 2) - for backdating entries
   // DEPRECATED: Old temporal confirmation modal state - replaced by signal extraction (DetectedStrip)
@@ -632,6 +636,23 @@ export default function App() {
     const related = embedding ? findRelevantMemories(embedding, entries, cat) : [];
     const recent = entries.slice(0, 5);
 
+    // Capture health context (sleep, steps, workout, stress) if available
+    let healthContext = null;
+    try {
+      healthContext = await getEntryHealthContext();
+      if (healthContext) {
+        console.log('Health context captured:', {
+          sleep: healthContext.sleepLastNight,
+          steps: healthContext.stepsToday,
+          workout: healthContext.hasWorkout,
+          stress: healthContext.stressIndicator
+        });
+      }
+    } catch (healthError) {
+      // Health context is optional - don't block entry saving
+      console.warn('Could not capture health context:', healthError.message);
+    }
+
     try {
       const entryData = {
         text: finalTex,
@@ -644,6 +665,11 @@ export default function App() {
         // Signal extraction version - increments on each edit for race condition handling
         signalExtractionVersion: 1
       };
+
+      // Store health context if available (from Apple Health / Google Fit)
+      if (healthContext) {
+        entryData.healthContext = healthContext;
+      }
 
       // Store voice tone analysis if available (from voice recording)
       if (voiceTone) {
@@ -1299,6 +1325,12 @@ export default function App() {
         />
       )}
 
+      {showHealthSettings && (
+        <HealthSettingsScreen
+          onClose={() => setShowHealthSettings(false)}
+        />
+      )}
+
       <motion.div
         className="bg-white/95 backdrop-blur-sm border-b border-warm-100 p-4 sticky top-0 z-20 shadow-soft"
         initial={{ y: -20, opacity: 0 }}
@@ -1321,6 +1353,7 @@ export default function App() {
               onOpenChat={() => setView('chat')}
               onOpenVoice={() => setView('realtime')}
               onOpenJournal={() => setShowJournal(true)}
+              onOpenHealthSettings={() => setShowHealthSettings(true)}
               onLogout={() => signOut(auth)}
               notificationPermission={permission}
             />

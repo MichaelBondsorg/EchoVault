@@ -60,6 +60,13 @@
 	<key>NSFaceIDUsageDescription</key>
 	<string>Use Face ID to securely access your private journal entries.</string>
 
+	<!-- HealthKit - Read health data for mood correlation insights -->
+	<key>NSHealthShareUsageDescription</key>
+	<string>EchoVault reads your health data (sleep, steps, heart rate) to show you how your physical health affects your mood. We never share this data.</string>
+
+	<key>NSHealthUpdateUsageDescription</key>
+	<string>EchoVault does not write any data to Apple Health.</string>
+
 	<!-- App Transport Security - Allow HTTPS connections -->
 	<key>NSAppTransportSecurity</key>
 	<dict>
