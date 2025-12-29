@@ -1149,28 +1149,43 @@ export default function App() {
         console.log('[EchoVault] Native sign-in response:', response);
 
         if (response?.result?.idToken) {
-          // Use the ID token to sign in with Firebase
-          console.log('[EchoVault] Got idToken, creating Firebase credential...');
+          // Use the ID token to sign in with Firebase via REST API (bypasses SDK issues in WKWebView)
+          console.log('[EchoVault] Got idToken, using Firebase REST API...');
           try {
-            const credential = GoogleAuthProvider.credential(response.result.idToken);
-            console.log('[EchoVault] Credential created, calling signInWithCredential...');
+            const FIREBASE_API_KEY = 'AIzaSyBuhwHcdxEuYHf6F5SVlWR5BLRio_7kqAg';
 
-            // Add timeout to detect if Firebase is hanging
-            const timeoutPromise = new Promise((_, reject) =>
-              setTimeout(() => reject(new Error('Firebase signInWithCredential timed out after 15s')), 15000)
+            // Call Firebase Auth REST API directly
+            const firebaseResponse = await fetch(
+              `https://identitytoolkit.googleapis.com/v1/accounts:signInWithIdp?key=${FIREBASE_API_KEY}`,
+              {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  postBody: `id_token=${response.result.idToken}&providerId=google.com`,
+                  requestUri: 'https://echovault.app',
+                  returnSecureToken: true,
+                  returnIdpCredential: true
+                })
+              }
             );
 
-            const result = await Promise.race([
-              signInWithCredential(auth, credential),
-              timeoutPromise
-            ]);
+            const firebaseData = await firebaseResponse.json();
+            console.log('[EchoVault] Firebase REST API response:', firebaseData);
 
-            console.log('[EchoVault] Firebase sign-in successful! User:', result.user?.uid, result.user?.email);
-            alert('Sign-in successful! Welcome ' + result.user?.email);
+            if (firebaseData.error) {
+              throw new Error(`Firebase error: ${firebaseData.error.message}`);
+            }
+
+            // Now sign in with the custom token using signInWithCustomToken
+            console.log('[EchoVault] Got Firebase tokens, signing in with custom token...');
+            const customTokenResult = await signInWithCustomToken(auth, firebaseData.idToken);
+            console.log('[EchoVault] Firebase sign-in successful! User:', customTokenResult.user?.uid, customTokenResult.user?.email);
+            alert('Sign-in successful! Welcome ' + (firebaseData.email || customTokenResult.user?.email));
+
           } catch (fbError) {
             console.error('[EchoVault] Firebase auth failed:', fbError);
-            console.error('[EchoVault] Error details - code:', fbError?.code, 'message:', fbError?.message, 'full:', JSON.stringify(fbError));
-            alert(`Firebase error: ${fbError?.code || fbError?.name || 'unknown'} - ${fbError?.message || String(fbError)}`);
+            console.error('[EchoVault] Error details:', fbError?.message);
+            alert(`Firebase error: ${fbError?.message || String(fbError)}`);
             throw fbError;
           }
         } else if (response?.result?.accessToken?.token) {
