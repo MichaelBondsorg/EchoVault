@@ -159,7 +159,7 @@ const HealthSettingsScreen = ({ onClose }) => {
         </button>
       </div>
 
-      <div className="p-4 max-w-md mx-auto space-y-6 pb-20">
+      <div className="p-4 max-w-md mx-auto space-y-6 pb-20 overflow-y-auto" style={{ maxHeight: 'calc(100vh - 80px)' }}>
         {/* Loading State */}
         {loading && (
           <div className="flex items-center justify-center py-12">
