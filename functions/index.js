@@ -2749,12 +2749,27 @@ export const exchangeGoogleToken = onCall(
         // Still allow sign-in, but log it
       }
 
-      // Use the Google user ID (sub) as the Firebase UID
-      // This ensures consistent user IDs across platforms
-      const uid = tokenInfo.sub;
+      // Get user info from Google token
       const email = tokenInfo.email;
       const name = tokenInfo.name;
       const picture = tokenInfo.picture;
+
+      // Look up existing Firebase user by email to preserve their data
+      // If they signed in via web before, they have a different UID than tokenInfo.sub
+      let uid;
+      try {
+        const existingUser = await getAuth().getUserByEmail(email);
+        uid = existingUser.uid;
+        console.log('Found existing Firebase user:', uid, 'for email:', email);
+      } catch (userError) {
+        if (userError.code === 'auth/user-not-found') {
+          // No existing user - use Google sub as new UID
+          uid = tokenInfo.sub;
+          console.log('No existing user, creating with Google sub:', uid);
+        } else {
+          throw userError;
+        }
+      }
 
       console.log('Creating custom token for uid:', uid);
 

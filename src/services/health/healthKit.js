@@ -19,31 +19,34 @@
  * 3. Info.plist permissions are already configured
  */
 
-import { Capacitor } from '@capacitor/core';
+import { Capacitor, registerPlugin } from '@capacitor/core';
 import { setPermissionStatus, cacheHealthData } from './platformHealth';
 
-// Dynamically import Health plugin to avoid crashes on non-iOS platforms
+// Use registerPlugin for native plugins (avoids dynamic import issues in WKWebView)
 let HealthPlugin = null;
+let pluginInitialized = false;
 
 /**
  * Initialize Health plugin
  * Returns null if not on iOS or plugin not available
  */
 const getHealthPlugin = async () => {
-  if (HealthPlugin !== null) return HealthPlugin;
+  if (pluginInitialized) return HealthPlugin;
+  pluginInitialized = true;
 
   if (Capacitor.getPlatform() !== 'ios') {
+    console.log('[HealthKit] Not on iOS, skipping plugin initialization');
     return null;
   }
 
   try {
-    // Dynamic import to prevent bundling issues on non-iOS
-    // Uses capacitor-health-extended - Capacitor 8 compatible
-    const module = await import('@flomentumsolutions/capacitor-health-extended');
-    HealthPlugin = module.CapacitorHealthExtended || module.default;
+    // Use registerPlugin instead of dynamic import
+    // This works properly in Capacitor's native WebView
+    HealthPlugin = registerPlugin('CapacitorHealthExtended');
+    console.log('[HealthKit] Plugin registered successfully');
     return HealthPlugin;
   } catch (error) {
-    console.warn('Health plugin not available:', error.message);
+    console.warn('[HealthKit] Plugin registration failed:', error.message);
     console.warn('To enable HealthKit, run: npm install @flomentumsolutions/capacitor-health-extended && npx cap sync');
     return null;
   }
