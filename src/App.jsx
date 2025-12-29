@@ -1149,38 +1149,36 @@ export default function App() {
         console.log('[EchoVault] Native sign-in response:', response);
 
         if (response?.result?.idToken) {
-          // Use the ID token to sign in with Firebase via REST API (bypasses SDK issues in WKWebView)
-          console.log('[EchoVault] Got idToken, using Firebase REST API...');
+          console.log('[EchoVault] Got idToken, attempting Firebase sign-in...');
           try {
-            const FIREBASE_API_KEY = 'AIzaSyBuhwHcdxEuYHf6F5SVlWR5BLRio_7kqAg';
+            // Create credential from Google ID token
+            const credential = GoogleAuthProvider.credential(response.result.idToken);
+            console.log('[EchoVault] Credential created');
 
-            // Call Firebase Auth REST API directly
-            const firebaseResponse = await fetch(
-              `https://identitytoolkit.googleapis.com/v1/accounts:signInWithIdp?key=${FIREBASE_API_KEY}`,
-              {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  postBody: `id_token=${response.result.idToken}&providerId=google.com`,
-                  requestUri: 'https://echovault.app',
-                  returnSecureToken: true,
-                  returnIdpCredential: true
-                })
-              }
-            );
+            // Try signInWithCredential but don't await - let onAuthStateChanged handle it
+            // Also start it in a non-blocking way
+            console.log('[EchoVault] Starting signInWithCredential (non-blocking)...');
 
-            const firebaseData = await firebaseResponse.json();
-            console.log('[EchoVault] Firebase REST API response:', firebaseData);
+            signInWithCredential(auth, credential)
+              .then((result) => {
+                console.log('[EchoVault] signInWithCredential resolved! User:', result.user?.uid);
+              })
+              .catch((err) => {
+                console.error('[EchoVault] signInWithCredential rejected:', err.code, err.message);
+              });
 
-            if (firebaseData.error) {
-              throw new Error(`Firebase error: ${firebaseData.error.message}`);
+            // Wait a moment for auth state to potentially update
+            console.log('[EchoVault] Waiting for auth state change...');
+            await new Promise(resolve => setTimeout(resolve, 3000));
+
+            // Check if user is now signed in
+            if (auth.currentUser) {
+              console.log('[EchoVault] User is now signed in:', auth.currentUser.uid, auth.currentUser.email);
+              alert('Sign-in successful! Welcome ' + auth.currentUser.email);
+            } else {
+              console.log('[EchoVault] No user yet after 3s, auth may still be processing');
+              alert('Sign-in is processing... the app should update shortly.');
             }
-
-            // Now sign in with the custom token using signInWithCustomToken
-            console.log('[EchoVault] Got Firebase tokens, signing in with custom token...');
-            const customTokenResult = await signInWithCustomToken(auth, firebaseData.idToken);
-            console.log('[EchoVault] Firebase sign-in successful! User:', customTokenResult.user?.uid, customTokenResult.user?.email);
-            alert('Sign-in successful! Welcome ' + (firebaseData.email || customTokenResult.user?.email));
 
           } catch (fbError) {
             console.error('[EchoVault] Firebase auth failed:', fbError);
