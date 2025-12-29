@@ -59,7 +59,11 @@ export const getMorningCheckIn = async (userId, checkInId) => {
 };
 
 /**
- * Get morning check-ins for today that need evening reflection
+ * Get morning check-ins that need evening reflection
+ *
+ * Looks back 48 hours to catch cases where:
+ * - User checked in yesterday but didn't open the app until today
+ * - Event occurred late in the day and user forgot to reflect
  *
  * @param {string} userId
  * @returns {Array} Pending follow-ups
@@ -67,12 +71,13 @@ export const getMorningCheckIn = async (userId, checkInId) => {
 export const checkForPendingFollowUps = async (userId) => {
   try {
     const now = new Date();
-    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    // Look back 48 hours instead of just today
+    const lookbackStart = new Date(now.getTime() - (48 * 60 * 60 * 1000));
 
     const checkInsRef = collection(db, `users/${userId}/anticipatory_checkins`);
     const checkInsQuery = query(
       checkInsRef,
-      where('createdAt', '>=', todayStart),
+      where('createdAt', '>=', lookbackStart),
       where('eveningReflectionCompleted', '==', false)
     );
 
@@ -80,27 +85,46 @@ export const checkForPendingFollowUps = async (userId) => {
     const checkIns = snapshot.docs.map(doc => ({
       id: doc.id,
       ...doc.data(),
-      eventTime: doc.data().eventTime?.toDate?.() || new Date(doc.data().eventTime)
+      eventTime: doc.data().eventTime?.toDate?.() || new Date(doc.data().eventTime),
+      createdAt: doc.data().createdAt?.toDate?.() || new Date(doc.data().createdAt)
     }));
 
     // Filter to only events that have already occurred
+    // (at least 1 hour ago to give user time to decompress)
+    const reflectionBuffer = new Date(now.getTime() - (60 * 60 * 1000)); // 1 hour ago
     const pendingFollowUps = checkIns.filter(checkIn => {
       const eventTime = checkIn.eventTime instanceof Date
         ? checkIn.eventTime
         : new Date(checkIn.eventTime);
-      return eventTime < now;
+      return eventTime < reflectionBuffer;
     });
 
-    return pendingFollowUps.map(checkIn => ({
-      checkInId: checkIn.id,
-      eventId: checkIn.eventId,
-      eventDescription: checkIn.eventContent,
-      anticipatedAnxiety: checkIn.anxietyLevel,
-      worstCaseThought: checkIn.worstCaseThought,
-      groundingToolUsed: checkIn.groundingToolUsed,
-      groundingToolCompleted: checkIn.groundingToolCompleted,
-      promptType: 'event_reflection'
-    }));
+    // Sort by how long ago the event occurred (most recent first)
+    pendingFollowUps.sort((a, b) => {
+      const aTime = a.eventTime instanceof Date ? a.eventTime : new Date(a.eventTime);
+      const bTime = b.eventTime instanceof Date ? b.eventTime : new Date(b.eventTime);
+      return bTime - aTime;
+    });
+
+    return pendingFollowUps.map(checkIn => {
+      const eventTime = checkIn.eventTime instanceof Date
+        ? checkIn.eventTime
+        : new Date(checkIn.eventTime);
+      const hoursSince = Math.floor((now - eventTime) / (1000 * 60 * 60));
+
+      return {
+        checkInId: checkIn.id,
+        eventId: checkIn.eventId,
+        eventDescription: checkIn.eventContent,
+        anticipatedAnxiety: checkIn.anxietyLevel,
+        worstCaseThought: checkIn.worstCaseThought,
+        groundingToolUsed: checkIn.groundingToolUsed,
+        groundingToolCompleted: checkIn.groundingToolCompleted,
+        promptType: 'event_reflection',
+        hoursSinceEvent: hoursSince,
+        isStale: hoursSince > 24 // Mark if reflection is getting old
+      };
+    });
   } catch (error) {
     console.error('Failed to check for pending follow-ups:', error);
     return [];

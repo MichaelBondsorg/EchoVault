@@ -164,69 +164,147 @@ export const analyzeSocialHealth = async (userId, dateRange = 14) => {
 };
 
 /**
+ * Get or refresh Core People cache
+ * Stores frequently mentioned personal connections to avoid re-scanning 6 months of entries
+ */
+export const getCorePeopleCache = async (userId) => {
+  try {
+    const cacheRef = doc(db, `users/${userId}/settings/core_people_cache`);
+    const snapshot = await getDoc(cacheRef);
+
+    if (!snapshot.exists()) {
+      return null;
+    }
+
+    const cache = snapshot.data();
+    const cacheAge = new Date() - new Date(cache.updatedAt);
+    const maxCacheAge = 24 * 60 * 60 * 1000; // 24 hours
+
+    // Return cached data if fresh enough
+    if (cacheAge < maxCacheAge) {
+      return cache.corePeople;
+    }
+
+    return null; // Cache is stale
+  } catch (error) {
+    console.error('Failed to get core people cache:', error);
+    return null;
+  }
+};
+
+/**
+ * Refresh Core People cache
+ * Called periodically (e.g., daily) to update the list of key relationships
+ */
+export const refreshCorePeopleCache = async (userId) => {
+  try {
+    const sixMonthsAgo = new Date();
+    sixMonthsAgo.setDate(sixMonthsAgo.getDate() - 180);
+
+    const entriesRef = collection(db, `users/${userId}/entries`);
+    const entriesQuery = query(
+      entriesRef,
+      where('createdAt', '>=', sixMonthsAgo),
+      orderBy('createdAt', 'desc'),
+      limit(500) // Reasonable limit for cache refresh
+    );
+
+    const snapshot = await getDocs(entriesQuery);
+    const entries = snapshot.docs.map(doc => ({
+      id: doc.id,
+      ...doc.data()
+    }));
+
+    const mentions = extractPersonMentions(entries);
+    const userPreferences = await getUserRelationshipPreferences(userId);
+
+    // Count mentions per person and get their category
+    const personStats = {};
+
+    for (const mention of mentions) {
+      const personName = mention.tag.toLowerCase();
+
+      if (!personStats[personName]) {
+        const category = categorizeRelationship(mention.tag, mention.context, userPreferences);
+        personStats[personName] = {
+          tag: mention.tag,
+          name: personName.replace('@person:', ''),
+          category: category.category,
+          mentionCount: 0,
+          lastMentioned: mention.entryDate,
+          lastContext: mention.context
+        };
+      }
+
+      personStats[personName].mentionCount++;
+      // Update last mentioned if this is more recent
+      if (mention.entryDate > personStats[personName].lastMentioned) {
+        personStats[personName].lastMentioned = mention.entryDate;
+        personStats[personName].lastContext = mention.context;
+      }
+    }
+
+    // Filter to personal connections with 2+ mentions (established relationships)
+    const corePeople = Object.values(personStats)
+      .filter(p => p.category === 'personal' && p.mentionCount >= 2)
+      .sort((a, b) => b.mentionCount - a.mentionCount)
+      .slice(0, 20); // Top 20 core people
+
+    // Save to cache
+    const cacheRef = doc(db, `users/${userId}/settings/core_people_cache`);
+    await setDoc(cacheRef, {
+      corePeople,
+      updatedAt: new Date().toISOString(),
+      entriesScanned: entries.length
+    });
+
+    return corePeople;
+  } catch (error) {
+    console.error('Failed to refresh core people cache:', error);
+    return [];
+  }
+};
+
+/**
  * Find people mentioned in past but not recently
+ * Uses Core People cache to avoid expensive queries
  */
 export const findNeglectedConnections = async (userId, recentMentions, dateRange) => {
   try {
     const recentPersons = new Set(recentMentions.map(p => p.tag.toLowerCase()));
 
-    // Get older entries to find historical connections
-    const oldCutoff = new Date();
-    oldCutoff.setDate(oldCutoff.getDate() - dateRange);
+    // Try to use cached core people first
+    let corePeople = await getCorePeopleCache(userId);
 
-    const olderCutoff = new Date();
-    olderCutoff.setDate(olderCutoff.getDate() - 180); // Look back 6 months
-
-    const entriesRef = collection(db, `users/${userId}/entries`);
-    const olderQuery = query(
-      entriesRef,
-      where('createdAt', '>=', olderCutoff),
-      where('createdAt', '<', oldCutoff),
-      orderBy('createdAt', 'desc'),
-      limit(200)
-    );
-
-    const snapshot = await getDocs(olderQuery);
-    const olderEntries = snapshot.docs.map(doc => ({
-      id: doc.id,
-      ...doc.data()
-    }));
-
-    const olderMentions = extractPersonMentions(olderEntries);
-
-    // Get user preferences
-    const userPreferences = await getUserRelationshipPreferences(userId);
+    // If cache is stale or missing, do a lightweight refresh
+    if (!corePeople) {
+      corePeople = await refreshCorePeopleCache(userId);
+    }
 
     // Find personal connections that haven't been mentioned recently
     const neglected = [];
-    const seen = new Set();
 
-    for (const mention of olderMentions) {
-      const personName = mention.tag.toLowerCase();
-
-      if (seen.has(personName)) continue;
-      if (recentPersons.has(personName)) continue;
-
-      seen.add(personName);
-
-      const category = categorizeRelationship(mention.tag, mention.context, userPreferences);
-
-      // Only track neglected personal connections
-      if (category.category !== 'personal') continue;
+    for (const person of corePeople) {
+      // Skip if mentioned recently
+      if (recentPersons.has(person.tag.toLowerCase())) continue;
 
       // Calculate days since last mention
+      const lastMentioned = person.lastMentioned instanceof Date
+        ? person.lastMentioned
+        : new Date(person.lastMentioned);
+
       const daysSince = Math.floor(
-        (new Date() - mention.entryDate) / (1000 * 60 * 60 * 24)
+        (new Date() - lastMentioned) / (1000 * 60 * 60 * 24)
       );
 
       if (daysSince >= SOCIAL_THRESHOLDS.NEGLECTED_DAYS_THRESHOLD) {
         neglected.push({
-          tag: mention.tag,
-          name: personName.replace('@person:', ''),
-          lastMentioned: mention.entryDate,
+          tag: person.tag,
+          name: person.name,
+          lastMentioned: lastMentioned,
           daysSince,
-          lastContext: mention.context,
-          lastSentiment: mention.sentiment
+          lastContext: person.lastContext,
+          mentionCount: person.mentionCount
         });
       }
     }
@@ -427,6 +505,8 @@ export default {
   extractPersonMentions,
   analyzeSocialHealth,
   findNeglectedConnections,
+  getCorePeopleCache,
+  refreshCorePeopleCache,
   getSocialQuickActions,
   recordSocialAction,
   getSocialTimeline,

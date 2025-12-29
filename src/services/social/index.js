@@ -11,6 +11,8 @@ export {
   extractPersonMentions,
   analyzeSocialHealth,
   findNeglectedConnections,
+  getCorePeopleCache,
+  refreshCorePeopleCache,
   getSocialQuickActions,
   recordSocialAction,
   getSocialTimeline,

@@ -260,14 +260,34 @@ export const formatEventForDisplay = (event) => {
 /**
  * Check if user should see anticipatory support
  * Called when app opens
+ *
+ * Uses a buffer window approach to handle midnight boundary edge cases.
+ * Events within the next 18 hours are considered "imminent" regardless
+ * of calendar day boundaries.
  */
 export const shouldShowAnticipatorySupport = async (userId) => {
-  const events = await getUpcomingStressfulEvents(userId, { daysAhead: 1 });
+  const events = await getUpcomingStressfulEvents(userId, { daysAhead: 2 });
+
+  // Use 18-hour window for "immediate" events to handle midnight edge case
+  // (e.g., user journals at 11:55 PM for an 8 AM event tomorrow)
+  const now = new Date();
+  const imminentCutoff = new Date(now.getTime() + (18 * 60 * 60 * 1000)); // 18 hours
+
+  const imminentEvents = [...events.today, ...events.upcoming].filter(event => {
+    const eventTime = event.targetDate instanceof Date
+      ? event.targetDate
+      : new Date(event.targetDate);
+    return eventTime <= imminentCutoff && eventTime > now;
+  });
+
+  const mostImminent = imminentEvents[0] || null;
 
   return {
-    show: events.hasImmediateEvent,
-    event: events.mostUrgent ? formatEventForDisplay(events.mostUrgent) : null,
-    eventCount: events.today.length
+    show: imminentEvents.length > 0,
+    event: mostImminent ? formatEventForDisplay(mostImminent) : null,
+    eventCount: imminentEvents.length,
+    // Include traditional "today" count for backwards compatibility
+    todayCount: events.today.length
   };
 };
 

@@ -88,42 +88,77 @@ export const categorizeRelationship = (personTag, entryContext = '', userPrefere
   let workScore = 0;
   let personalScore = 0;
 
-  // Check title patterns in the tag itself
+  // Check title patterns in the tag itself (high confidence)
+  // Only match whole words in the tag name
   for (const title of RELATIONSHIP_PATTERNS.work.titles) {
-    if (personName.includes(title)) {
+    // Use word boundary matching for tag names
+    const tagRegex = new RegExp(`\\b${title}\\b`, 'i');
+    if (tagRegex.test(personName)) {
       workScore += 3;
     }
   }
 
   for (const title of RELATIONSHIP_PATTERNS.personal.titles) {
-    if (personName.includes(title)) {
+    const tagRegex = new RegExp(`\\b${title}\\b`, 'i');
+    if (tagRegex.test(personName)) {
       personalScore += 3;
     }
   }
 
-  // Check context keywords
+  // Check for relationship indicators in context
+  // These patterns look for how the person relates to the user, not just job titles
+  // e.g., "my friend Mark who is an engineer" should match "friend", not "engineer"
+  const relationshipPatterns = {
+    personal: [
+      new RegExp(`my\\s+(friend|buddy|bestie)\\s+${escapeRegex(personName)}`, 'i'),
+      new RegExp(`${escapeRegex(personName)}.*\\b(my\\s+)?(friend|partner|spouse|family)\\b`, 'i'),
+      new RegExp(`\\b(hanging out|dinner|lunch|coffee|drinks)\\s+(with\\s+)?${escapeRegex(personName)}`, 'i'),
+      new RegExp(`${escapeRegex(personName)}.*\\b(birthday|wedding|vacation)`, 'i')
+    ],
+    work: [
+      new RegExp(`my\\s+(manager|boss|colleague|coworker)\\s+${escapeRegex(personName)}`, 'i'),
+      new RegExp(`${escapeRegex(personName)}.*\\b(my\\s+)?(manager|boss|team|report)\\b`, 'i'),
+      new RegExp(`\\b(meeting|standup|sync|1:1)\\s+(with\\s+)?${escapeRegex(personName)}`, 'i'),
+      new RegExp(`${escapeRegex(personName)}.*\\b(@project:|deadline|sprint)`, 'i')
+    ]
+  };
+
+  // Check relationship-specific patterns (high weight)
+  for (const pattern of relationshipPatterns.personal) {
+    if (pattern.test(context)) {
+      personalScore += 4; // High weight for explicit relationship indicators
+    }
+  }
+
+  for (const pattern of relationshipPatterns.work) {
+    if (pattern.test(context)) {
+      workScore += 4;
+    }
+  }
+
+  // Check general context keywords (lower weight, for tiebreakers)
   for (const keyword of RELATIONSHIP_PATTERNS.work.contextKeywords) {
     if (context.includes(keyword)) {
-      workScore += 1;
+      workScore += 0.5; // Lower weight to prevent false positives
     }
   }
 
   for (const keyword of RELATIONSHIP_PATTERNS.personal.contextKeywords) {
     if (context.includes(keyword)) {
-      personalScore += 1;
+      personalScore += 0.5;
     }
   }
 
   // Check regex patterns
   for (const pattern of RELATIONSHIP_PATTERNS.work.patterns) {
     if (pattern.test(context)) {
-      workScore += 2;
+      workScore += 1;
     }
   }
 
   for (const pattern of RELATIONSHIP_PATTERNS.personal.patterns) {
     if (pattern.test(context)) {
-      personalScore += 2;
+      personalScore += 1;
     }
   }
 
@@ -178,6 +213,13 @@ export const categorizeRelationship = (personTag, entryContext = '', userPrefere
       personalScore
     };
   }
+};
+
+/**
+ * Escape special regex characters in a string
+ */
+const escapeRegex = (string) => {
+  return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 };
 
 /**
