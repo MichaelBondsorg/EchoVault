@@ -6,3 +6,4 @@
 
 export { default as SocialResilienceAlert, SocialNudgeCompact, NeglectedConnectionsList } from './SocialResilienceAlert';
 export { default as SocialHealthWidget, SocialHealthCompact } from './SocialHealthWidget';
+export { default as RelationshipCorrectionModal, RelationshipCorrectionButton } from './RelationshipCorrectionModal';

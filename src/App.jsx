@@ -38,6 +38,7 @@ import { detectTemporalContext, needsConfirmation, formatEffectiveDate } from '.
 import { completeActionItem, handleEntryDateChange, calculateStreak } from './services/dashboard';
 import { processEntrySignals } from './services/signals/processEntrySignals';
 import { updateSignalStatus, batchUpdateSignalStatus } from './services/signals';
+import { runEntryPostProcessing } from './services/background';
 
 // Hooks
 import { useIOSMeta } from './hooks/useIOSMeta';
@@ -809,6 +810,14 @@ export default function App() {
 
           try {
             await updateDoc(ref, cleanedUpdateData);
+
+            // Background post-processing (non-blocking)
+            // Refreshes Core People cache if person mentions detected
+            runEntryPostProcessing({
+              userId: user.uid,
+              entryContent: finalTex,
+              analysis: updateData.analysis
+            });
           } catch (updateError) {
             console.error('Failed to update document:', updateError);
             throw updateError;

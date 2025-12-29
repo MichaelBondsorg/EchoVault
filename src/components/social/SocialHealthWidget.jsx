@@ -8,7 +8,7 @@
  * - Isolation risk indicator
  */
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import {
   Users,
@@ -23,17 +23,23 @@ import {
   RefreshCw,
   AlertCircle,
   ChevronRight,
-  Sparkles
+  Sparkles,
+  Edit2
 } from 'lucide-react';
 
 import { analyzeSocialHealth, getSocialTimeline, getSocialQuickActions } from '../../services/social/socialTracker';
 import { generateConnectionNudge } from '../../services/social/connectionNudges';
+import RelationshipCorrectionModal from './RelationshipCorrectionModal';
 
 const SocialHealthWidget = ({ userId, burnoutRisk, currentMood }) => {
   const [socialHealth, setSocialHealth] = useState(null);
   const [timeline, setTimeline] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showDetails, setShowDetails] = useState(false);
+
+  // Relationship correction modal state
+  const [correctionModalOpen, setCorrectionModalOpen] = useState(false);
+  const [selectedPerson, setSelectedPerson] = useState(null);
 
   useEffect(() => {
     loadSocialData();
@@ -69,6 +75,18 @@ const SocialHealthWidget = ({ userId, burnoutRisk, currentMood }) => {
     if (total === 0) return 50;
     return Math.round((socialHealth.uniquePersonalPeople / total) * 100);
   }, [socialHealth]);
+
+  // Handle opening correction modal for a person
+  const handleCorrectionClick = useCallback((person) => {
+    setSelectedPerson(person);
+    setCorrectionModalOpen(true);
+  }, []);
+
+  // Handle category saved - refresh data
+  const handleCategorySaved = useCallback((personName, newCategory) => {
+    // Refresh social data to reflect the new categorization
+    loadSocialData();
+  }, []);
 
   // Loading state
   if (loading) {
@@ -252,6 +270,41 @@ const SocialHealthWidget = ({ userId, burnoutRisk, currentMood }) => {
           </div>
         </div>
       )}
+
+      {/* Ambiguous Connections - Allow correction */}
+      {socialHealth.categorized?.ambiguous?.length > 0 && (
+        <div className="px-4 pb-4 border-t border-warm-100 pt-3">
+          <p className="text-xs text-warm-500 mb-2 flex items-center gap-1">
+            <Edit2 size={12} />
+            Help us categorize:
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {socialHealth.categorized.ambiguous.slice(0, 3).map(person => (
+              <button
+                key={person.name}
+                onClick={() => handleCorrectionClick(person)}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-purple-50 hover:bg-purple-100 rounded-full text-sm text-purple-700 transition-colors"
+              >
+                <span className="capitalize">{person.name}</span>
+                <Edit2 size={12} />
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Relationship Correction Modal */}
+      <RelationshipCorrectionModal
+        isOpen={correctionModalOpen}
+        onClose={() => {
+          setCorrectionModalOpen(false);
+          setSelectedPerson(null);
+        }}
+        person={selectedPerson}
+        currentCategory={selectedPerson?.category}
+        userId={userId}
+        onCategorySaved={handleCategorySaved}
+      />
     </motion.div>
   );
 };
