@@ -1154,11 +1154,23 @@ export default function App() {
           try {
             const credential = GoogleAuthProvider.credential(response.result.idToken);
             console.log('[EchoVault] Credential created, calling signInWithCredential...');
-            const result = await signInWithCredential(auth, credential);
+
+            // Add timeout to detect if Firebase is hanging
+            const timeoutPromise = new Promise((_, reject) =>
+              setTimeout(() => reject(new Error('Firebase signInWithCredential timed out after 15s')), 15000)
+            );
+
+            const result = await Promise.race([
+              signInWithCredential(auth, credential),
+              timeoutPromise
+            ]);
+
             console.log('[EchoVault] Firebase sign-in successful! User:', result.user?.uid, result.user?.email);
+            alert('Sign-in successful! Welcome ' + result.user?.email);
           } catch (fbError) {
-            console.error('[EchoVault] Firebase auth failed:', fbError.code, fbError.message);
-            alert(`Firebase error: ${fbError.code} - ${fbError.message}`);
+            console.error('[EchoVault] Firebase auth failed:', fbError);
+            console.error('[EchoVault] Error details - code:', fbError?.code, 'message:', fbError?.message, 'full:', JSON.stringify(fbError));
+            alert(`Firebase error: ${fbError?.code || fbError?.name || 'unknown'} - ${fbError?.message || String(fbError)}`);
             throw fbError;
           }
         } else if (response?.result?.accessToken?.token) {
