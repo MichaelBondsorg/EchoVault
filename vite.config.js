@@ -5,14 +5,20 @@ export default defineConfig({
   plugins: [react()],
   build: {
     rollupOptions: {
-      // Don't bundle iOS-only plugins for web builds
+      // Don't bundle native-only plugins for web builds
       external: [
-        '@flomentumsolutions/capacitor-health-extended'
+        '@flomentumsolutions/capacitor-health-extended',
+        'capacitor-google-fit',
+        '@nickmjones/capacitor-healthkit'
       ]
     }
   },
   // Handle external modules during dev
   optimizeDeps: {
-    exclude: ['@flomentumsolutions/capacitor-health-extended']
+    exclude: [
+      '@flomentumsolutions/capacitor-health-extended',
+      'capacitor-google-fit',
+      '@nickmjones/capacitor-healthkit'
+    ]
   }
 });
