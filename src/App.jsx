@@ -1188,10 +1188,54 @@ export default function App() {
               throw new Error('Cloud Function did not return a custom token');
             }
 
-            // Use signInWithCustomToken (which hopefully works in WKWebView)
-            console.log('[EchoVault] Signing in with custom token...');
-            const userCredential = await signInWithCustomToken(auth, resultData.customToken);
-            console.log('[EchoVault] Sign-in successful! User:', userCredential.user?.uid, userCredential.user?.email);
+            // signInWithCustomToken also hangs in WKWebView - use non-blocking approach
+            console.log('[EchoVault] Signing in with custom token (non-blocking)...');
+
+            let signInCompleted = false;
+            let signInError = null;
+
+            // Fire without awaiting
+            signInWithCustomToken(auth, resultData.customToken)
+              .then((result) => {
+                signInCompleted = true;
+                console.log('[EchoVault] signInWithCustomToken resolved! User:', result.user?.uid);
+              })
+              .catch((err) => {
+                signInCompleted = true;
+                signInError = err;
+                console.error('[EchoVault] signInWithCustomToken rejected:', err.code, err.message);
+              });
+
+            // Poll for auth state change (every 500ms for up to 15 seconds)
+            console.log('[EchoVault] Polling for auth state...');
+            for (let i = 0; i < 30; i++) {
+              await new Promise(resolve => setTimeout(resolve, 500));
+
+              if (signInCompleted) {
+                if (signInError) {
+                  throw signInError;
+                }
+                console.log('[EchoVault] Sign-in completed via promise');
+                break;
+              }
+
+              if (auth.currentUser) {
+                console.log('[EchoVault] User detected:', auth.currentUser.uid);
+                break;
+              }
+
+              if (i % 4 === 0 && i > 0) {
+                console.log(`[EchoVault] Still waiting... (${i * 0.5}s)`);
+              }
+            }
+
+            if (auth.currentUser) {
+              console.log('[EchoVault] Sign-in successful! User:', auth.currentUser.email);
+            } else {
+              console.warn('[EchoVault] Auth still pending after 15s');
+              // Don't throw - the auth might complete later
+              alert('Sign-in is processing. The app should update shortly.');
+            }
 
           } catch (fbError) {
             console.error('[EchoVault] Firebase auth failed:', fbError);
