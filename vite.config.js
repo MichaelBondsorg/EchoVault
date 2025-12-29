@@ -9,7 +9,8 @@ export default defineConfig({
       external: [
         '@flomentumsolutions/capacitor-health-extended',
         'capacitor-google-fit',
-        '@nickmjones/capacitor-healthkit'
+        '@nickmjones/capacitor-healthkit',
+        '@capgo/capacitor-social-login'
       ]
     }
   },
@@ -18,7 +19,8 @@ export default defineConfig({
     exclude: [
       '@flomentumsolutions/capacitor-health-extended',
       'capacitor-google-fit',
-      '@nickmjones/capacitor-healthkit'
+      '@nickmjones/capacitor-healthkit',
+      '@capgo/capacitor-social-login'
     ]
   }
 });
