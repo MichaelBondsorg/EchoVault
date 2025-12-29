@@ -4,7 +4,7 @@
  * Wrapper for iOS HealthKit via Capacitor plugin.
  * Handles authorization, data queries, and graceful degradation.
  *
- * Plugin: @anthropic-solutions/capacitor-health-extended (Capacitor 8 compatible)
+ * Plugin: @flomentumsolutions/capacitor-health-extended (Capacitor 8 compatible)
  *
  * SETUP INSTRUCTIONS:
  * 1. Install the plugin:
