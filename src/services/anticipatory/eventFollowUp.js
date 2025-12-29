@@ -10,7 +10,7 @@
  */
 
 import { collection, query, where, getDocs, doc, setDoc, getDoc, updateDoc } from 'firebase/firestore';
-import { db } from '../../firebase';
+import { db } from '../../config/firebase';
 
 /**
  * Save a morning check-in for an upcoming event

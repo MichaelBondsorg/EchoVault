@@ -10,7 +10,7 @@
  */
 
 import { doc, getDoc, setDoc } from 'firebase/firestore';
-import { db } from '../../firebase';
+import { db } from '../../config/firebase';
 
 // Priority levels (higher = more urgent)
 export const NUDGE_PRIORITY = {

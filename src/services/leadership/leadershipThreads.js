@@ -13,7 +13,7 @@
  * 4. User marks complete -> Archive thread
  */
 
-import { db } from '../../firebase';
+import { db } from '../../config/firebase';
 import {
   collection,
   doc,
