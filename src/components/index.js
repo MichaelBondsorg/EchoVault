@@ -5,7 +5,7 @@ export { default as ErrorBoundary } from './ErrorBoundary';
 export { CrisisSoftBlockModal, DailySummaryModal, WeeklyReport, InsightsPanel } from './modals';
 
 // Screens
-export { CrisisResourcesScreen, SafetyPlanScreen, DecompressionScreen, TherapistExportScreen, PromptScreen, JournalScreen } from './screens';
+export { CrisisResourcesScreen, SafetyPlanScreen, DecompressionScreen, TherapistExportScreen, PromptScreen, JournalScreen, HealthSettingsScreen } from './screens';
 
 // Chat
 export { Chat, RealtimeConversation } from './chat';

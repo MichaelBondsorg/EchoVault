@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Menu, BarChart3, FileText, Bell, MessageCircle, Phone, LogOut, BookOpen } from 'lucide-react';
+import { Menu, BarChart3, FileText, Bell, MessageCircle, Phone, LogOut, BookOpen, Heart } from 'lucide-react';
 
 const HamburgerMenu = ({
   onShowInsights,
@@ -9,6 +9,7 @@ const HamburgerMenu = ({
   onOpenChat,
   onOpenVoice,
   onOpenJournal,
+  onOpenHealthSettings,
   onLogout,
   notificationPermission
 }) => {
@@ -35,6 +36,7 @@ const HamburgerMenu = ({
     { icon: FileText, label: 'Export for Therapist', onClick: onShowExport, color: 'text-warm-600' },
     { icon: MessageCircle, label: 'Text Chat', onClick: onOpenChat, color: 'text-warm-600' },
     { icon: Phone, label: 'Voice Conversation', onClick: onOpenVoice, color: 'text-primary-600' },
+    { icon: Heart, label: 'Health Settings', onClick: onOpenHealthSettings, color: 'text-pink-500' },
     { icon: Bell, label: 'Notifications', onClick: onRequestPermission, color: notificationPermission === 'granted' ? 'text-primary-600' : 'text-warm-400' },
     { icon: LogOut, label: 'Sign Out', onClick: onLogout, color: 'text-red-500', hoverBg: 'hover:bg-red-50' },
   ];

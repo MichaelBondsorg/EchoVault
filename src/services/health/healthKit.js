@@ -4,10 +4,19 @@
  * Wrapper for iOS HealthKit via Capacitor plugin.
  * Handles authorization, data queries, and graceful degradation.
  *
- * Plugin: @nickmjones/capacitor-healthkit (or similar)
- * Note: Plugin must be installed separately:
- *   npm install @nickmjones/capacitor-healthkit
- *   npx cap sync
+ * Plugin: @perfood/capacitor-healthkit (actively maintained)
+ *
+ * SETUP INSTRUCTIONS:
+ * 1. Install the plugin:
+ *    npm install @perfood/capacitor-healthkit
+ *    npx cap sync
+ *
+ * 2. Add HealthKit capability in Xcode:
+ *    - Open ios/App/App.xcworkspace
+ *    - Select App target → Signing & Capabilities
+ *    - Click "+ Capability" → Add "HealthKit"
+ *
+ * 3. Info.plist permissions are already configured
  */
 
 import { Capacitor } from '@capacitor/core';
@@ -29,11 +38,13 @@ const getHealthKitPlugin = async () => {
 
   try {
     // Dynamic import to prevent bundling issues on non-iOS
-    const module = await import('@nickmjones/capacitor-healthkit');
+    // Uses @perfood/capacitor-healthkit - an actively maintained plugin
+    const module = await import('@perfood/capacitor-healthkit');
     HealthKit = module.HealthKit;
     return HealthKit;
   } catch (error) {
     console.warn('HealthKit plugin not available:', error.message);
+    console.warn('To enable HealthKit, run: npm install @perfood/capacitor-healthkit && npx cap sync');
     return null;
   }
 };

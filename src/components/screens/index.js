@@ -4,3 +4,4 @@ export { default as DecompressionScreen } from './DecompressionScreen';
 export { default as TherapistExportScreen } from './TherapistExportScreen';
 export { default as PromptScreen } from './PromptScreen';
 export { default as JournalScreen } from './JournalScreen';
+export { default as HealthSettingsScreen } from './HealthSettingsScreen';

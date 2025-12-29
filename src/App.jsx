@@ -49,7 +49,7 @@ import { useWakeLock } from './hooks/useWakeLock';
 // Components
 import {
   CrisisSoftBlockModal, DailySummaryModal, WeeklyReport, InsightsPanel,
-  CrisisResourcesScreen, SafetyPlanScreen, DecompressionScreen, TherapistExportScreen, JournalScreen,
+  CrisisResourcesScreen, SafetyPlanScreen, DecompressionScreen, TherapistExportScreen, JournalScreen, HealthSettingsScreen,
   Chat, RealtimeConversation,
   MoodHeatmap,
   MarkdownLite, GetHelpButton, HamburgerMenu,
@@ -131,6 +131,9 @@ export default function App() {
 
   // Journal Screen (Day Dashboard MVP)
   const [showJournal, setShowJournal] = useState(false);
+
+  // Health Settings Screen
+  const [showHealthSettings, setShowHealthSettings] = useState(false);
 
   // Temporal Context (Phase 2) - for backdating entries
   // DEPRECATED: Old temporal confirmation modal state - replaced by signal extraction (DetectedStrip)
@@ -1299,6 +1302,12 @@ export default function App() {
         />
       )}
 
+      {showHealthSettings && (
+        <HealthSettingsScreen
+          onClose={() => setShowHealthSettings(false)}
+        />
+      )}
+
       <motion.div
         className="bg-white/95 backdrop-blur-sm border-b border-warm-100 p-4 sticky top-0 z-20 shadow-soft"
         initial={{ y: -20, opacity: 0 }}
@@ -1321,6 +1330,7 @@ export default function App() {
               onOpenChat={() => setView('chat')}
               onOpenVoice={() => setView('realtime')}
               onOpenJournal={() => setShowJournal(true)}
+              onOpenHealthSettings={() => setShowHealthSettings(true)}
               onLogout={() => signOut(auth)}
               notificationPermission={permission}
             />
