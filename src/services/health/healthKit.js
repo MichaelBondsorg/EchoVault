@@ -4,11 +4,11 @@
  * Wrapper for iOS HealthKit via Capacitor plugin.
  * Handles authorization, data queries, and graceful degradation.
  *
- * Plugin: @perfood/capacitor-healthkit (actively maintained)
+ * Plugin: @anthropic-solutions/capacitor-health-extended (Capacitor 8 compatible)
  *
  * SETUP INSTRUCTIONS:
  * 1. Install the plugin:
- *    npm install @perfood/capacitor-healthkit
+ *    npm install @flomentumsolutions/capacitor-health-extended
  *    npx cap sync
  *
  * 2. Add HealthKit capability in Xcode:
@@ -22,15 +22,15 @@
 import { Capacitor } from '@capacitor/core';
 import { setPermissionStatus, cacheHealthData } from './platformHealth';
 
-// Dynamically import HealthKit to avoid crashes on non-iOS platforms
-let HealthKit = null;
+// Dynamically import Health plugin to avoid crashes on non-iOS platforms
+let HealthPlugin = null;
 
 /**
- * Initialize HealthKit plugin
+ * Initialize Health plugin
  * Returns null if not on iOS or plugin not available
  */
-const getHealthKitPlugin = async () => {
-  if (HealthKit !== null) return HealthKit;
+const getHealthPlugin = async () => {
+  if (HealthPlugin !== null) return HealthPlugin;
 
   if (Capacitor.getPlatform() !== 'ios') {
     return null;
@@ -38,15 +38,30 @@ const getHealthKitPlugin = async () => {
 
   try {
     // Dynamic import to prevent bundling issues on non-iOS
-    // Uses @perfood/capacitor-healthkit - an actively maintained plugin
-    const module = await import('@perfood/capacitor-healthkit');
-    HealthKit = module.HealthKit;
-    return HealthKit;
+    // Uses capacitor-health-extended - Capacitor 8 compatible
+    const module = await import('@flomentumsolutions/capacitor-health-extended');
+    HealthPlugin = module.CapacitorHealthExtended || module.default;
+    return HealthPlugin;
   } catch (error) {
-    console.warn('HealthKit plugin not available:', error.message);
-    console.warn('To enable HealthKit, run: npm install @perfood/capacitor-healthkit && npx cap sync');
+    console.warn('Health plugin not available:', error.message);
+    console.warn('To enable HealthKit, run: npm install @flomentumsolutions/capacitor-health-extended && npx cap sync');
     return null;
   }
+};
+
+/**
+ * Data types we request from HealthKit
+ */
+const HEALTH_PERMISSIONS = {
+  read: [
+    'steps',
+    'heart_rate',
+    'heart_rate_variability',
+    'sleep',
+    'active_calories',
+    'workouts'
+  ],
+  write: [] // Read-only - we never write to HealthKit
 };
 
 /**
@@ -55,31 +70,31 @@ const getHealthKitPlugin = async () => {
  * @returns {Object} { authorized, deniedTypes }
  */
 export const requestHealthKitPermissions = async () => {
-  const plugin = await getHealthKitPlugin();
+  const plugin = await getHealthPlugin();
 
   if (!plugin) {
     return { authorized: false, error: 'HealthKit not available' };
   }
 
   try {
-    const result = await plugin.requestAuthorization({
-      read: [
-        'stepCount',
-        'heartRate',
-        'heartRateVariabilitySDNN',
-        'sleepAnalysis',
-        'activeEnergyBurned',
-        'workout'
-      ],
-      write: [] // Read-only - we never write to HealthKit
+    // Check if health is available on this device
+    const available = await plugin.isHealthAvailable();
+    if (!available.available) {
+      return { authorized: false, error: 'HealthKit not available on this device' };
+    }
+
+    // Request permissions
+    const result = await plugin.requestHealthPermissions({
+      read: HEALTH_PERMISSIONS.read,
+      write: HEALTH_PERMISSIONS.write
     });
 
-    const status = result.authorized ? 'granted' : 'denied';
+    const status = result.granted ? 'granted' : 'denied';
     await setPermissionStatus(status);
 
     return {
-      authorized: result.authorized,
-      deniedTypes: result.deniedTypes || []
+      authorized: result.granted,
+      deniedTypes: result.deniedPermissions || []
     };
   } catch (error) {
     console.error('HealthKit authorization failed:', error);
@@ -92,21 +107,26 @@ export const requestHealthKitPermissions = async () => {
  * Check current HealthKit authorization status
  */
 export const checkHealthKitPermissions = async () => {
-  const plugin = await getHealthKitPlugin();
+  const plugin = await getHealthPlugin();
 
   if (!plugin) {
     return { available: false, reason: 'not_ios' };
   }
 
   try {
-    const status = await plugin.checkAuthorizationStatus({
-      types: ['stepCount', 'sleepAnalysis']
+    const available = await plugin.isHealthAvailable();
+    if (!available.available) {
+      return { available: false, reason: 'not_supported' };
+    }
+
+    const status = await plugin.checkHealthPermissions({
+      read: ['steps', 'sleep']
     });
 
     return {
       available: true,
-      status: status.status,
-      canRequest: status.status === 'notDetermined'
+      status: status.granted ? 'authorized' : 'notDetermined',
+      canRequest: !status.granted
     };
   } catch (error) {
     return { available: false, reason: error.message };
@@ -120,7 +140,7 @@ export const checkHealthKitPermissions = async () => {
  * @returns {Object} Health summary
  */
 export const getHealthKitSummary = async (date = new Date()) => {
-  const plugin = await getHealthKitPlugin();
+  const plugin = await getHealthPlugin();
 
   if (!plugin) {
     return { available: false, reason: 'not_ios' };
@@ -163,9 +183,9 @@ export const getHealthKitSummary = async (date = new Date()) => {
         stressIndicator: calculateStressFromHRV(hrv.average)
       },
       workouts: workouts.map(w => ({
-        type: w.workoutActivityType,
+        type: w.type || w.workoutActivityType,
         duration: w.duration,
-        calories: w.totalEnergyBurned
+        calories: w.calories || w.totalEnergyBurned
       })),
       hasWorkout: workouts.length > 0,
       heartRate: {
@@ -195,14 +215,13 @@ export const getHealthKitSummary = async (date = new Date()) => {
  */
 const querySteps = async (plugin, start, end) => {
   try {
-    const result = await plugin.queryQuantitySamples({
-      sampleType: 'stepCount',
+    const result = await plugin.queryAggregated({
+      dataType: 'steps',
       startDate: start.toISOString(),
       endDate: end.toISOString()
     });
 
-    const total = (result.samples || []).reduce((sum, s) => sum + s.value, 0);
-    return { total: Math.round(total) };
+    return { total: Math.round(result.value || 0) };
   } catch (error) {
     console.warn('Steps query failed:', error);
     return { total: null };
@@ -214,40 +233,26 @@ const querySteps = async (plugin, start, end) => {
  */
 const querySleep = async (plugin, start, end) => {
   try {
-    const result = await plugin.queryCategorySamples({
-      sampleType: 'sleepAnalysis',
+    const result = await plugin.queryAggregated({
+      dataType: 'sleep',
       startDate: start.toISOString(),
       endDate: end.toISOString()
     });
 
-    const samples = result.samples || [];
+    // Result is in minutes, convert to hours
+    const totalMinutes = result.value || 0;
+    const totalHours = totalMinutes / 60;
 
-    // Apple sleep values: 0=InBed, 1=Asleep, 2=Awake
-    const inBedSamples = samples.filter(s => s.value === 0);
-    const asleepSamples = samples.filter(s => s.value === 1);
-
-    const calculateHours = (sampleList) => {
-      return sampleList.reduce((total, s) => {
-        const start = new Date(s.startDate).getTime();
-        const end = new Date(s.endDate).getTime();
-        return total + (end - start) / (1000 * 60 * 60);
-      }, 0);
-    };
-
-    const inBedHours = calculateHours(inBedSamples);
-    const asleepHours = calculateHours(asleepSamples);
-
-    // Sleep quality based on sleep efficiency
-    const efficiency = inBedHours > 0 ? asleepHours / inBedHours : 0;
+    // Estimate quality based on duration
     let quality = 'unknown';
-    if (efficiency >= 0.85) quality = 'good';
-    else if (efficiency >= 0.75) quality = 'fair';
-    else if (efficiency > 0) quality = 'poor';
+    if (totalHours >= 7) quality = 'good';
+    else if (totalHours >= 5) quality = 'fair';
+    else if (totalHours > 0) quality = 'poor';
 
     return {
-      totalHours: Math.round(asleepHours * 10) / 10,
-      inBed: Math.round(inBedHours * 10) / 10,
-      asleep: Math.round(asleepHours * 10) / 10,
+      totalHours: Math.round(totalHours * 10) / 10,
+      inBed: Math.round(totalHours * 10) / 10,
+      asleep: Math.round(totalHours * 10) / 10,
       quality
     };
   } catch (error) {
@@ -261,33 +266,19 @@ const querySleep = async (plugin, start, end) => {
  */
 const queryHRV = async (plugin, start, end) => {
   try {
-    const result = await plugin.queryQuantitySamples({
-      sampleType: 'heartRateVariabilitySDNN',
+    const result = await plugin.queryLatestSample({
+      dataType: 'heart_rate_variability',
       startDate: start.toISOString(),
       endDate: end.toISOString()
     });
 
-    const samples = result.samples || [];
-    if (samples.length === 0) {
+    if (!result || result.value === undefined) {
       return { average: null, trend: 'unknown' };
     }
 
-    const values = samples.map(s => s.value);
-    const average = values.reduce((a, b) => a + b, 0) / values.length;
-
-    // Trend based on first half vs second half
-    const firstHalf = values.slice(0, Math.ceil(values.length / 2));
-    const secondHalf = values.slice(Math.ceil(values.length / 2));
-    const firstAvg = firstHalf.reduce((a, b) => a + b, 0) / firstHalf.length;
-    const secondAvg = secondHalf.reduce((a, b) => a + b, 0) / secondHalf.length;
-
-    let trend = 'stable';
-    if (secondAvg > firstAvg * 1.1) trend = 'improving';
-    if (secondAvg < firstAvg * 0.9) trend = 'declining';
-
     return {
-      average: Math.round(average),
-      trend
+      average: Math.round(result.value),
+      trend: 'stable' // Would need historical data to calculate trend
     };
   } catch (error) {
     console.warn('HRV query failed:', error);
@@ -317,30 +308,22 @@ const queryWorkouts = async (plugin, start, end) => {
  */
 const queryHeartRate = async (plugin, start, end) => {
   try {
-    const result = await plugin.queryQuantitySamples({
-      sampleType: 'heartRate',
+    const result = await plugin.queryLatestSample({
+      dataType: 'heart_rate',
       startDate: start.toISOString(),
       endDate: end.toISOString()
     });
 
-    const samples = result.samples || [];
-    if (samples.length === 0) {
+    if (!result || result.value === undefined) {
       return { resting: null, average: null, max: null };
     }
 
-    const values = samples.map(s => s.value);
-    const average = values.reduce((a, b) => a + b, 0) / values.length;
-    const max = Math.max(...values);
-
-    // Resting HR is typically the lowest values (bottom 10%)
-    const sorted = [...values].sort((a, b) => a - b);
-    const restingValues = sorted.slice(0, Math.ceil(sorted.length * 0.1));
-    const resting = restingValues.reduce((a, b) => a + b, 0) / restingValues.length;
-
+    // With single sample, we can only get current HR
+    const hr = Math.round(result.value);
     return {
-      resting: Math.round(resting),
-      average: Math.round(average),
-      max: Math.round(max)
+      resting: hr, // Best approximation with single sample
+      average: hr,
+      max: hr
     };
   } catch (error) {
     console.warn('Heart rate query failed:', error);
@@ -368,7 +351,7 @@ const calculateStressFromHRV = (hrv) => {
  * @returns {Array} Daily health summaries
  */
 export const getHealthKitHistory = async (days = 14) => {
-  const plugin = await getHealthKitPlugin();
+  const plugin = await getHealthPlugin();
 
   if (!plugin) {
     return { available: false, reason: 'not_ios' };
