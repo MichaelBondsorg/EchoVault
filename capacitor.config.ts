@@ -38,6 +38,13 @@ const config: CapacitorConfig = {
       resize: 'body',
       resizeOnFullScreen: true,
     },
+    SocialLogin: {
+      google: {
+        webClientId: '581319345416-9h59io8iev888kej6riag3tqnvik6na0.apps.googleusercontent.com',
+        iOSClientId: '581319345416-sf58st9q2hvst5kakt4tn3sgulor6r7m.apps.googleusercontent.com',
+        iOSServerClientId: '581319345416-9h59io8iev888kej6riag3tqnvik6na0.apps.googleusercontent.com',
+      },
+    },
   },
 };
 
