@@ -57,23 +57,32 @@ const HEALTH_PERMISSIONS = [
  * @returns {Object} { authorized, deniedTypes }
  */
 export const requestHealthKitPermissions = async () => {
+  console.log('[HealthKit] requestHealthKitPermissions called');
   const plugin = await getHealthPlugin();
 
   if (!plugin) {
+    console.log('[HealthKit] No plugin available');
     return { authorized: false, error: 'HealthKit not available' };
   }
 
+  console.log('[HealthKit] Plugin obtained, checking availability...');
+
   try {
     // Check if health is available on this device
+    console.log('[HealthKit] Calling isHealthAvailable...');
     const available = await plugin.isHealthAvailable();
+    console.log('[HealthKit] isHealthAvailable result:', JSON.stringify(available));
+
     if (!available.available) {
       return { authorized: false, error: 'HealthKit not available on this device' };
     }
 
     // Request permissions using the plugin's expected format
+    console.log('[HealthKit] Calling requestHealthPermissions with:', HEALTH_PERMISSIONS);
     const result = await plugin.requestHealthPermissions({
       permissions: HEALTH_PERMISSIONS
     });
+    console.log('[HealthKit] requestHealthPermissions result:', JSON.stringify(result));
 
     // Check if all requested permissions were granted
     const allGranted = HEALTH_PERMISSIONS.every(
@@ -92,7 +101,8 @@ export const requestHealthKitPermissions = async () => {
       deniedTypes
     };
   } catch (error) {
-    console.error('HealthKit authorization failed:', error);
+    console.error('[HealthKit] Authorization failed:', error);
+    console.error('[HealthKit] Error details:', error?.message, error?.code, error?.stack);
     await setPermissionStatus('error');
     return { authorized: false, error: error.message };
   }
