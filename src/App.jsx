@@ -1150,17 +1150,31 @@ export default function App() {
 
         if (response?.result?.idToken) {
           // Use the ID token to sign in with Firebase
-          const credential = GoogleAuthProvider.credential(response.result.idToken);
-          const result = await signInWithCredential(auth, credential);
-          console.log('[EchoVault] Firebase sign-in successful:', result.user?.uid);
-        } else if (response?.result?.accessToken) {
+          console.log('[EchoVault] Got idToken, creating Firebase credential...');
+          try {
+            const credential = GoogleAuthProvider.credential(response.result.idToken);
+            console.log('[EchoVault] Credential created, calling signInWithCredential...');
+            const result = await signInWithCredential(auth, credential);
+            console.log('[EchoVault] Firebase sign-in successful! User:', result.user?.uid, result.user?.email);
+          } catch (fbError) {
+            console.error('[EchoVault] Firebase auth failed:', fbError.code, fbError.message);
+            alert(`Firebase error: ${fbError.code} - ${fbError.message}`);
+            throw fbError;
+          }
+        } else if (response?.result?.accessToken?.token) {
           // Fallback: some configurations return accessToken instead
-          console.log('[EchoVault] Using accessToken for credential...');
-          const credential = GoogleAuthProvider.credential(null, response.result.accessToken);
-          const result = await signInWithCredential(auth, credential);
-          console.log('[EchoVault] Firebase sign-in successful:', result.user?.uid);
+          console.log('[EchoVault] No idToken, trying accessToken...');
+          try {
+            const credential = GoogleAuthProvider.credential(null, response.result.accessToken.token);
+            const result = await signInWithCredential(auth, credential);
+            console.log('[EchoVault] Firebase sign-in successful! User:', result.user?.uid);
+          } catch (fbError) {
+            console.error('[EchoVault] Firebase auth failed:', fbError.code, fbError.message);
+            alert(`Firebase error: ${fbError.code} - ${fbError.message}`);
+            throw fbError;
+          }
         } else {
-          console.error('[EchoVault] Response:', JSON.stringify(response, null, 2));
+          console.error('[EchoVault] No idToken or accessToken in response');
           throw new Error('No ID token or access token received from Google Sign-In');
         }
       } else {
