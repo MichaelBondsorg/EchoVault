@@ -10,7 +10,7 @@
 
 import { Geolocation } from '@capacitor/geolocation';
 import { Preferences } from '@capacitor/preferences';
-import { getCurrentWeather, getDailyWeatherHistory } from './apis/weather';
+import { getCurrentWeather, getDailyWeatherHistory, getWeatherIcon } from './apis/weather';
 import { getSunTimes, isAfterSunset, isBeforeSunrise, getDaylightRemaining } from './apis/sunTimes';
 
 const LOCATION_CACHE_KEY = 'env_location_cache';
@@ -153,6 +153,10 @@ export const getEnvironmentContext = async () => {
  * Get environmental context for a specific entry
  * Used to enrich entry data at creation time
  *
+ * Captures both:
+ * - Point-in-time weather (current conditions when entry is made)
+ * - Day summary weather (overall day conditions for better correlation)
+ *
  * @returns {Object} Simplified context for storage
  */
 export const getEntryEnvironmentContext = async () => {
@@ -162,15 +166,52 @@ export const getEntryEnvironmentContext = async () => {
     return null;
   }
 
+  const { latitude, longitude } = context.location;
+
+  // Fetch today's weather summary (dominant condition, high/low temps, sunshine)
+  let daySummary = null;
+  try {
+    const dailyHistory = await getDailyWeatherHistory(latitude, longitude, 1);
+    if (dailyHistory && dailyHistory.length > 0) {
+      const today = dailyHistory[dailyHistory.length - 1]; // Most recent day
+      daySummary = {
+        condition: today.condition,
+        conditionLabel: today.conditionLabel,
+        tempHigh: today.tempMax,
+        tempLow: today.tempMin,
+        sunshineMinutes: today.sunshineDuration,
+        sunshinePercent: today.sunshinePercent,
+        isLowSunshine: today.isLowLight
+      };
+    }
+  } catch (error) {
+    console.warn('Failed to fetch day summary weather:', error);
+    // Continue without day summary - point-in-time is still valuable
+  }
+
   return {
+    // Point-in-time (current conditions when entry is made)
     weather: context.weather?.condition || null,
+    weatherLabel: context.weather?.conditionLabel || null,
     temperature: context.weather?.temperature || null,
+    temperatureUnit: context.weather?.temperatureUnit || '°C',
     cloudCover: context.weather?.cloudCover || null,
+    isDay: context.weather?.isDay ?? true,
+
+    // Day summary (overall day conditions - more useful for mood correlation)
+    daySummary,
+
+    // Sun times
     sunsetTime: context.sunTimes?.sunsetLocal || null,
     sunriseTime: context.sunTimes?.sunriseLocal || null,
     daylightHours: context.sunTimes?.daylightHours || null,
+
+    // Light context
     isAfterDark: context.isAfterSunset || context.isBeforeSunrise,
     lightContext: context.lightContext,
+    daylightRemaining: context.daylightRemaining,
+
+    // Metadata
     capturedAt: context.timestamp
   };
 };

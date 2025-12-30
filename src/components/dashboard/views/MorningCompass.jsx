@@ -1,7 +1,7 @@
 import React from 'react';
 import { motion } from 'framer-motion';
 import { Target, Sunrise, ChevronRight } from 'lucide-react';
-import { HeroCard, TaskList } from '../shared';
+import { HeroCard, TaskList, CurrentConditions } from '../shared';
 
 /**
  * MorningCompass - The "Compass" view for morning hours
@@ -72,6 +72,9 @@ const MorningCompass = ({
           </motion.button>
         )}
       </HeroCard>
+
+      {/* Current Conditions */}
+      <CurrentConditions />
 
       {/* Action Items - Only carried forward initially */}
       {allTasks.length > 0 && (

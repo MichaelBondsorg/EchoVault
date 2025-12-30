@@ -42,6 +42,7 @@ import { processEntrySignals } from './services/signals/processEntrySignals';
 import { updateSignalStatus, batchUpdateSignalStatus } from './services/signals';
 import { runEntryPostProcessing } from './services/background';
 import { getEntryHealthContext } from './services/health';
+import { getEntryEnvironmentContext } from './services/environment';
 
 // Hooks
 import { useIOSMeta } from './hooks/useIOSMeta';
@@ -655,6 +656,24 @@ export default function App() {
       console.warn('Could not capture health context:', healthError.message);
     }
 
+    // Capture environment context (weather, light, sun times) if available
+    let environmentContext = null;
+    try {
+      environmentContext = await getEntryEnvironmentContext();
+      if (environmentContext) {
+        console.log('Environment context captured:', {
+          weather: environmentContext.weather,
+          temp: environmentContext.temperature,
+          dayWeather: environmentContext.daySummary?.condition,
+          dayTempHigh: environmentContext.daySummary?.tempHigh,
+          lightContext: environmentContext.lightContext
+        });
+      }
+    } catch (envError) {
+      // Environment context is optional - don't block entry saving
+      console.warn('Could not capture environment context:', envError.message);
+    }
+
     try {
       const entryData = {
         text: finalTex,
@@ -671,6 +690,11 @@ export default function App() {
       // Store health context if available (from Apple Health / Google Fit)
       if (healthContext) {
         entryData.healthContext = healthContext;
+      }
+
+      // Store environment context if available (weather, light, sun times)
+      if (environmentContext) {
+        entryData.environmentContext = environmentContext;
       }
 
       // Store voice tone analysis if available (from voice recording)

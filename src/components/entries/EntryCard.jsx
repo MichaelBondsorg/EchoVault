@@ -2,10 +2,32 @@ import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import {
   Trash2, Calendar, Edit2, Check, RefreshCw, Lightbulb, Wind, Sparkles,
-  Brain, Info, Footprints, Clipboard, X, Compass
+  Brain, Info, Footprints, Clipboard, X, Compass,
+  Sun, Moon, Cloud, CloudRain, CloudSnow, CloudLightning, CloudFog, CloudDrizzle, CloudSun, CloudMoon,
+  Thermometer, Activity, BedDouble
 } from 'lucide-react';
 import { safeString } from '../../utils/string';
 import { formatDateForInput, getTodayForInput, parseDateInput, getDateString } from '../../utils/date';
+
+// Weather icon mapping
+const getWeatherIcon = (condition, isDay = true) => {
+  const icons = {
+    clear: isDay ? Sun : Moon,
+    mostly_clear: isDay ? Sun : Moon,
+    partly_cloudy: isDay ? CloudSun : CloudMoon,
+    overcast: Cloud,
+    foggy: CloudFog,
+    drizzle: CloudDrizzle,
+    rain: CloudRain,
+    heavy_rain: CloudRain,
+    snow: CloudSnow,
+    heavy_snow: CloudSnow,
+    rain_showers: CloudRain,
+    snow_showers: CloudSnow,
+    thunderstorm: CloudLightning
+  };
+  return icons[condition] || Cloud;
+};
 
 // Mood color utility
 const getMoodColor = (score) => {
@@ -400,13 +422,83 @@ const EntryCard = ({ entry, onDelete, onUpdate }) => {
         )}
       </div>
 
-      <div className="text-xs text-warm-400 mb-4 flex items-center gap-1 font-medium">
+      <div className="text-xs text-warm-400 mb-2 flex items-center gap-1 font-medium">
         <Calendar size={12}/>
         {(entry.effectiveDate || entry.createdAt).toLocaleDateString()}
         {entry.effectiveDate && getDateString(entry.effectiveDate) !== getDateString(entry.createdAt) && (
           <span className="text-warm-300 ml-1">(edited)</span>
         )}
       </div>
+
+      {/* Environment & Health Context Strip */}
+      {(entry.environmentContext || entry.healthContext) && (
+        <div className="flex flex-wrap items-center gap-2 text-[10px] text-warm-500 mb-3 pb-2 border-b border-warm-100">
+          {/* Weather Context */}
+          {entry.environmentContext && (() => {
+            const env = entry.environmentContext;
+            const WeatherIcon = getWeatherIcon(env.weather, env.isDay !== false);
+            const dayCondition = env.daySummary?.condition;
+            const showDaySummary = dayCondition && dayCondition !== env.weather;
+
+            return (
+              <>
+                <span className="flex items-center gap-1 bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded-full">
+                  <WeatherIcon size={10} />
+                  {env.temperature !== null && (
+                    <span>{Math.round(env.temperature)}°</span>
+                  )}
+                  {env.weatherLabel && (
+                    <span className="hidden sm:inline">{env.weatherLabel}</span>
+                  )}
+                </span>
+                {/* Day summary if different from point-in-time */}
+                {showDaySummary && (
+                  <span className="flex items-center gap-1 bg-slate-50 text-slate-600 px-1.5 py-0.5 rounded-full">
+                    {(() => {
+                      const DayIcon = getWeatherIcon(dayCondition, true);
+                      return <DayIcon size={10} />;
+                    })()}
+                    <span>{env.daySummary.conditionLabel} day</span>
+                    {env.daySummary.tempHigh !== null && env.daySummary.tempLow !== null && (
+                      <span className="hidden sm:inline">
+                        ({Math.round(env.daySummary.tempHigh)}°/{Math.round(env.daySummary.tempLow)}°)
+                      </span>
+                    )}
+                  </span>
+                )}
+                {/* Sunshine percent for low-light days */}
+                {env.daySummary?.isLowSunshine && env.daySummary?.sunshinePercent !== undefined && (
+                  <span className="text-amber-600 hidden sm:inline">
+                    {env.daySummary.sunshinePercent}% sunshine
+                  </span>
+                )}
+              </>
+            );
+          })()}
+
+          {/* Health Context */}
+          {entry.healthContext && (() => {
+            const health = entry.healthContext;
+            return (
+              <>
+                {health.stepsToday > 0 && (
+                  <span className="flex items-center gap-1 bg-green-50 text-green-700 px-1.5 py-0.5 rounded-full">
+                    <Activity size={10} />
+                    {health.stepsToday.toLocaleString()} steps
+                  </span>
+                )}
+                {health.sleepLastNight > 0 && (
+                  <span className="flex items-center gap-1 bg-purple-50 text-purple-700 px-1.5 py-0.5 rounded-full">
+                    <BedDouble size={10} />
+                    {health.sleepLastNight.toFixed(1)}h sleep
+                  </span>
+                )}
+              </>
+            );
+          })()}
+        </div>
+      )}
+
       <p className="text-warm-600 text-sm whitespace-pre-wrap leading-relaxed font-body">{entry.text}</p>
 
       {/* Extracted Tasks for mixed entries */}

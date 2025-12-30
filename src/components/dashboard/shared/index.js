@@ -5,3 +5,4 @@ export { default as QuickStatsBar } from './QuickStatsBar';
 export { default as GoalsProgress } from './GoalsProgress';
 export { default as WeeklyDigest } from './WeeklyDigest';
 export { default as SituationTimeline } from './SituationTimeline';
+export { default as CurrentConditions } from './CurrentConditions';
