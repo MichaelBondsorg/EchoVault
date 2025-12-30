@@ -20,12 +20,15 @@
  */
 
 import { Capacitor } from '@capacitor/core';
-import { Health } from '@flomentumsolutions/capacitor-health-extended';
 import { setPermissionStatus, cacheHealthData } from './platformHealth';
+
+// Lazy-loaded plugin reference (only loaded on iOS)
+let HealthPlugin = null;
 
 /**
  * Get Health plugin instance
  * Returns null if not on iOS
+ * Uses dynamic import to avoid loading native plugin in web
  */
 const getHealthPlugin = async () => {
   if (Capacitor.getPlatform() !== 'ios') {
@@ -33,8 +36,20 @@ const getHealthPlugin = async () => {
     return null;
   }
 
+  // Lazy load the plugin only when needed on iOS
+  if (!HealthPlugin) {
+    try {
+      const module = await import('@flomentumsolutions/capacitor-health-extended');
+      HealthPlugin = module.Health;
+      console.log('[HealthKit] Plugin loaded dynamically');
+    } catch (error) {
+      console.error('[HealthKit] Failed to load plugin:', error);
+      return null;
+    }
+  }
+
   console.log('[HealthKit] Using Health plugin from @flomentumsolutions/capacitor-health-extended');
-  return Health;
+  return HealthPlugin;
 };
 
 /**
