@@ -20,49 +20,36 @@
  */
 
 import { Capacitor } from '@capacitor/core';
+import { Health } from '@flomentumsolutions/capacitor-health-extended';
 import { setPermissionStatus, cacheHealthData } from './platformHealth';
 
-// Dynamically import Health plugin to avoid crashes on non-iOS platforms
-let HealthPlugin = null;
-
 /**
- * Initialize Health plugin
- * Returns null if not on iOS or plugin not available
+ * Get Health plugin instance
+ * Returns null if not on iOS
  */
 const getHealthPlugin = async () => {
-  if (HealthPlugin !== null) return HealthPlugin;
-
   if (Capacitor.getPlatform() !== 'ios') {
+    console.log('[HealthKit] Not on iOS, skipping plugin');
     return null;
   }
 
-  try {
-    // Dynamic import to prevent bundling issues on non-iOS
-    // Uses capacitor-health-extended - Capacitor 8 compatible
-    const module = await import('@flomentumsolutions/capacitor-health-extended');
-    HealthPlugin = module.CapacitorHealthExtended || module.default;
-    return HealthPlugin;
-  } catch (error) {
-    console.warn('Health plugin not available:', error.message);
-    console.warn('To enable HealthKit, run: npm install @flomentumsolutions/capacitor-health-extended && npx cap sync');
-    return null;
-  }
+  console.log('[HealthKit] Using Health plugin from @flomentumsolutions/capacitor-health-extended');
+  return Health;
 };
 
 /**
  * Data types we request from HealthKit
+ * Uses the plugin's HealthPermission format (uppercase with READ_ prefix)
  */
-const HEALTH_PERMISSIONS = {
-  read: [
-    'steps',
-    'heart_rate',
-    'heart_rate_variability',
-    'sleep',
-    'active_calories',
-    'workouts'
-  ],
-  write: [] // Read-only - we never write to HealthKit
-};
+const HEALTH_PERMISSIONS = [
+  'READ_STEPS',
+  'READ_HEART_RATE',
+  'READ_HRV',
+  'READ_SLEEP',
+  'READ_ACTIVE_CALORIES',
+  'READ_WORKOUTS',
+  'READ_RESTING_HEART_RATE'
+];
 
 /**
  * Request HealthKit authorization
@@ -70,34 +57,52 @@ const HEALTH_PERMISSIONS = {
  * @returns {Object} { authorized, deniedTypes }
  */
 export const requestHealthKitPermissions = async () => {
+  console.log('[HealthKit] requestHealthKitPermissions called');
   const plugin = await getHealthPlugin();
 
   if (!plugin) {
+    console.log('[HealthKit] No plugin available');
     return { authorized: false, error: 'HealthKit not available' };
   }
 
+  console.log('[HealthKit] Plugin obtained, checking availability...');
+
   try {
     // Check if health is available on this device
+    console.log('[HealthKit] Calling isHealthAvailable...');
     const available = await plugin.isHealthAvailable();
+    console.log('[HealthKit] isHealthAvailable result:', JSON.stringify(available));
+
     if (!available.available) {
       return { authorized: false, error: 'HealthKit not available on this device' };
     }
 
-    // Request permissions
+    // Request permissions using the plugin's expected format
+    console.log('[HealthKit] Calling requestHealthPermissions with:', HEALTH_PERMISSIONS);
     const result = await plugin.requestHealthPermissions({
-      read: HEALTH_PERMISSIONS.read,
-      write: HEALTH_PERMISSIONS.write
+      permissions: HEALTH_PERMISSIONS
     });
+    console.log('[HealthKit] requestHealthPermissions result:', JSON.stringify(result));
 
-    const status = result.granted ? 'granted' : 'denied';
+    // Check if all requested permissions were granted
+    const allGranted = HEALTH_PERMISSIONS.every(
+      perm => result.permissions && result.permissions[perm] === true
+    );
+
+    const deniedTypes = HEALTH_PERMISSIONS.filter(
+      perm => result.permissions && result.permissions[perm] !== true
+    );
+
+    const status = allGranted ? 'granted' : (deniedTypes.length < HEALTH_PERMISSIONS.length ? 'partial' : 'denied');
     await setPermissionStatus(status);
 
     return {
-      authorized: result.granted,
-      deniedTypes: result.deniedPermissions || []
+      authorized: allGranted || deniedTypes.length < HEALTH_PERMISSIONS.length,
+      deniedTypes
     };
   } catch (error) {
-    console.error('HealthKit authorization failed:', error);
+    console.error('[HealthKit] Authorization failed:', error);
+    console.error('[HealthKit] Error details:', error?.message, error?.code, error?.stack);
     await setPermissionStatus('error');
     return { authorized: false, error: error.message };
   }
@@ -120,13 +125,16 @@ export const checkHealthKitPermissions = async () => {
     }
 
     const status = await plugin.checkHealthPermissions({
-      read: ['steps', 'sleep']
+      permissions: ['READ_STEPS', 'READ_SLEEP']
     });
+
+    const hasPermissions = status.permissions &&
+      (status.permissions['READ_STEPS'] === true || status.permissions['READ_SLEEP'] === true);
 
     return {
       available: true,
-      status: status.granted ? 'authorized' : 'notDetermined',
-      canRequest: !status.granted
+      status: hasPermissions ? 'authorized' : 'notDetermined',
+      canRequest: !hasPermissions
     };
   } catch (error) {
     return { available: false, reason: error.message };
@@ -183,9 +191,9 @@ export const getHealthKitSummary = async (date = new Date()) => {
         stressIndicator: calculateStressFromHRV(hrv.average)
       },
       workouts: workouts.map(w => ({
-        type: w.type || w.workoutActivityType,
+        type: w.workoutType,
         duration: w.duration,
-        calories: w.calories || w.totalEnergyBurned
+        calories: w.calories
       })),
       hasWorkout: workouts.length > 0,
       heartRate: {
@@ -218,10 +226,13 @@ const querySteps = async (plugin, start, end) => {
     const result = await plugin.queryAggregated({
       dataType: 'steps',
       startDate: start.toISOString(),
-      endDate: end.toISOString()
+      endDate: end.toISOString(),
+      bucket: 'day'
     });
 
-    return { total: Math.round(result.value || 0) };
+    // aggregatedData is an array of daily samples
+    const total = result.aggregatedData?.reduce((sum, sample) => sum + (sample.value || 0), 0) || 0;
+    return { total: Math.round(total) };
   } catch (error) {
     console.warn('Steps query failed:', error);
     return { total: null };
@@ -233,13 +244,16 @@ const querySteps = async (plugin, start, end) => {
  */
 const querySleep = async (plugin, start, end) => {
   try {
-    const result = await plugin.queryAggregated({
-      dataType: 'sleep',
-      startDate: start.toISOString(),
-      endDate: end.toISOString()
+    // Use queryLatestSample for sleep - it returns the most recent sleep session
+    const result = await plugin.queryLatestSample({
+      dataType: 'sleep'
     });
 
-    // Result is in minutes, convert to hours
+    if (!result || result.value === undefined) {
+      return { totalHours: null, quality: 'unknown' };
+    }
+
+    // Result value is in minutes, convert to hours
     const totalMinutes = result.value || 0;
     const totalHours = totalMinutes / 60;
 
@@ -266,10 +280,9 @@ const querySleep = async (plugin, start, end) => {
  */
 const queryHRV = async (plugin, start, end) => {
   try {
+    // Plugin uses 'hrv' not 'heart_rate_variability', and only takes dataType
     const result = await plugin.queryLatestSample({
-      dataType: 'heart_rate_variability',
-      startDate: start.toISOString(),
-      endDate: end.toISOString()
+      dataType: 'hrv'
     });
 
     if (!result || result.value === undefined) {
@@ -291,9 +304,13 @@ const queryHRV = async (plugin, start, end) => {
  */
 const queryWorkouts = async (plugin, start, end) => {
   try {
+    // Plugin requires these boolean flags
     const result = await plugin.queryWorkouts({
       startDate: start.toISOString(),
-      endDate: end.toISOString()
+      endDate: end.toISOString(),
+      includeHeartRate: false,
+      includeRoute: false,
+      includeSteps: false
     });
 
     return result.workouts || [];
@@ -308,20 +325,17 @@ const queryWorkouts = async (plugin, start, end) => {
  */
 const queryHeartRate = async (plugin, start, end) => {
   try {
-    const result = await plugin.queryLatestSample({
-      dataType: 'heart_rate',
-      startDate: start.toISOString(),
-      endDate: end.toISOString()
-    });
+    // Query both latest heart rate and resting heart rate
+    const [hrResult, restingResult] = await Promise.all([
+      plugin.queryLatestSample({ dataType: 'heart-rate' }),
+      plugin.queryLatestSample({ dataType: 'resting-heart-rate' }).catch(() => null)
+    ]);
 
-    if (!result || result.value === undefined) {
-      return { resting: null, average: null, max: null };
-    }
+    const hr = hrResult?.value !== undefined ? Math.round(hrResult.value) : null;
+    const resting = restingResult?.value !== undefined ? Math.round(restingResult.value) : hr;
 
-    // With single sample, we can only get current HR
-    const hr = Math.round(result.value);
     return {
-      resting: hr, // Best approximation with single sample
+      resting: resting,
       average: hr,
       max: hr
     };

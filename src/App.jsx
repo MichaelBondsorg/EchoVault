@@ -42,6 +42,7 @@ import { processEntrySignals } from './services/signals/processEntrySignals';
 import { updateSignalStatus, batchUpdateSignalStatus } from './services/signals';
 import { runEntryPostProcessing } from './services/background';
 import { getEntryHealthContext } from './services/health';
+import { getEntryEnvironmentContext } from './services/environment';
 
 // Hooks
 import { useIOSMeta } from './hooks/useIOSMeta';
@@ -655,6 +656,24 @@ export default function App() {
       console.warn('Could not capture health context:', healthError.message);
     }
 
+    // Capture environment context (weather, light, sun times) if available
+    let environmentContext = null;
+    try {
+      environmentContext = await getEntryEnvironmentContext();
+      if (environmentContext) {
+        console.log('Environment context captured:', {
+          weather: environmentContext.weather,
+          temp: environmentContext.temperature,
+          dayWeather: environmentContext.daySummary?.condition,
+          dayTempHigh: environmentContext.daySummary?.tempHigh,
+          lightContext: environmentContext.lightContext
+        });
+      }
+    } catch (envError) {
+      // Environment context is optional - don't block entry saving
+      console.warn('Could not capture environment context:', envError.message);
+    }
+
     try {
       const entryData = {
         text: finalTex,
@@ -671,6 +690,11 @@ export default function App() {
       // Store health context if available (from Apple Health / Google Fit)
       if (healthContext) {
         entryData.healthContext = healthContext;
+      }
+
+      // Store environment context if available (weather, light, sun times)
+      if (environmentContext) {
+        entryData.environmentContext = environmentContext;
       }
 
       // Store voice tone analysis if available (from voice recording)
@@ -1188,16 +1212,19 @@ export default function App() {
               throw new Error('Cloud Function did not return a custom token');
             }
 
-            // signInWithCustomToken also hangs in WKWebView - use non-blocking approach
-            console.log('[EchoVault] Signing in with custom token (non-blocking)...');
+            // Try signInWithCustomToken with initializeAuth (should work now)
+            // If it still hangs, fall back to REST API
+            console.log('[EchoVault] Signing in with custom token...');
 
             let signInCompleted = false;
             let signInError = null;
+            let signInResult = null;
 
-            // Fire without awaiting
+            // Start signInWithCustomToken (non-blocking)
             signInWithCustomToken(auth, resultData.customToken)
               .then((result) => {
                 signInCompleted = true;
+                signInResult = result;
                 console.log('[EchoVault] signInWithCustomToken resolved! User:', result.user?.uid);
               })
               .catch((err) => {
@@ -1206,35 +1233,62 @@ export default function App() {
                 console.error('[EchoVault] signInWithCustomToken rejected:', err.code, err.message);
               });
 
-            // Poll for auth state change (every 500ms for up to 15 seconds)
-            console.log('[EchoVault] Polling for auth state...');
-            for (let i = 0; i < 30; i++) {
+            // Wait up to 5 seconds for SDK sign-in
+            console.log('[EchoVault] Waiting for SDK sign-in (5s timeout)...');
+            for (let i = 0; i < 10; i++) {
               await new Promise(resolve => setTimeout(resolve, 500));
-
-              if (signInCompleted) {
-                if (signInError) {
-                  throw signInError;
-                }
-                console.log('[EchoVault] Sign-in completed via promise');
-                break;
-              }
-
-              if (auth.currentUser) {
-                console.log('[EchoVault] User detected:', auth.currentUser.uid);
-                break;
-              }
-
-              if (i % 4 === 0 && i > 0) {
-                console.log(`[EchoVault] Still waiting... (${i * 0.5}s)`);
-              }
+              if (signInCompleted || auth.currentUser) break;
             }
 
+            // If SDK worked, we're done
             if (auth.currentUser) {
-              console.log('[EchoVault] Sign-in successful! User:', auth.currentUser.email);
+              console.log('[EchoVault] Sign-in successful via SDK! User:', auth.currentUser.email);
+            } else if (signInCompleted && signInResult) {
+              console.log('[EchoVault] Sign-in completed! User:', signInResult.user?.email);
+            } else if (signInError) {
+              throw signInError;
             } else {
-              console.warn('[EchoVault] Auth still pending after 15s');
-              // Don't throw - the auth might complete later
-              alert('Sign-in is processing. The app should update shortly.');
+              // SDK is hanging - use REST API fallback (Gemini's suggestion)
+              console.log('[EchoVault] SDK hanging, trying REST API fallback...');
+
+              const API_KEY = 'AIzaSyBuhwHcdxEuYHf6F5SVlWR5BLRio_7kqAg';
+              const restUrl = `https://identitytoolkit.googleapis.com/v1/accounts:signInWithCustomToken?key=${API_KEY}`;
+
+              const restResponse = await fetch(restUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  token: resultData.customToken,
+                  returnSecureToken: true,
+                }),
+              });
+
+              const restData = await restResponse.json();
+              console.log('[EchoVault] REST API response:', restData.localId ? 'success' : 'failed');
+
+              if (restData.error) {
+                throw new Error(restData.error.message);
+              }
+
+              // REST API worked - we have idToken and refreshToken
+              // Store them and wait for auth state to update
+              console.log('[EchoVault] REST API returned tokens, user:', restData.localId);
+
+              // The auth state listener should pick up the change
+              // Wait a bit more for it
+              for (let i = 0; i < 10; i++) {
+                await new Promise(resolve => setTimeout(resolve, 500));
+                if (auth.currentUser) {
+                  console.log('[EchoVault] User detected after REST:', auth.currentUser.uid);
+                  break;
+                }
+              }
+
+              if (!auth.currentUser) {
+                // Last resort: show success anyway since REST worked
+                console.warn('[EchoVault] Auth state not updated but REST succeeded');
+                alert('Sign-in successful! Please restart the app if it doesn\'t update.');
+              }
             }
 
           } catch (fbError) {

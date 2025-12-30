@@ -1,7 +1,7 @@
 import React from 'react';
 import { motion } from 'framer-motion';
 import { Zap, Target, MessageCircle, TrendingUp } from 'lucide-react';
-import { HeroCard, TaskList, InsightBite } from '../shared';
+import { HeroCard, TaskList, InsightBite, CurrentConditions } from '../shared';
 
 /**
  * MidDayCheckIn - The "Check-In" view for midday hours
@@ -57,19 +57,22 @@ const MidDayCheckIn = ({
         title={greeting}
         subtitle="How's your momentum?"
       >
-        {/* Energy check prompt */}
-        <motion.button
-          onClick={onEnergyCheck || (() => onPromptClick?.("How is your energy right now?"))}
-          className="w-full text-left p-3 bg-white/50 rounded-xl border border-blue-100 hover:bg-white/70 transition-all group"
-          whileHover={{ scale: 1.01 }}
-          whileTap={{ scale: 0.99 }}
-        >
-          <div className="flex items-center gap-2 text-blue-700">
-            <Zap size={16} className="text-blue-500" />
-            <span className="text-sm font-body">Quick energy check-in</span>
-            <MessageCircle size={14} className="ml-auto opacity-50 group-hover:opacity-100 transition-opacity" />
-          </div>
-        </motion.button>
+        {/* Compact conditions + Energy check */}
+        <div className="space-y-2">
+          <CurrentConditions compact />
+          <motion.button
+            onClick={onEnergyCheck || (() => onPromptClick?.("How is your energy right now?"))}
+            className="w-full text-left p-3 bg-white/50 rounded-xl border border-blue-100 hover:bg-white/70 transition-all group"
+            whileHover={{ scale: 1.01 }}
+            whileTap={{ scale: 0.99 }}
+          >
+            <div className="flex items-center gap-2 text-blue-700">
+              <Zap size={16} className="text-blue-500" />
+              <span className="text-sm font-body">Quick energy check-in</span>
+              <MessageCircle size={14} className="ml-auto opacity-50 group-hover:opacity-100 transition-opacity" />
+            </div>
+          </motion.button>
+        </div>
       </HeroCard>
 
       {/* Next 2 Tasks - Momentum Focus */}

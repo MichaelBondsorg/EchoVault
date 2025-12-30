@@ -1,8 +1,8 @@
 import { initializeApp } from 'firebase/app';
 import {
-  getAuth, onAuthStateChanged, signOut, signInWithCustomToken,
+  initializeAuth, getAuth, onAuthStateChanged, signOut, signInWithCustomToken,
   GoogleAuthProvider, signInWithPopup, signInWithCredential, OAuthProvider,
-  setPersistence, indexedDBLocalPersistence, browserLocalPersistence, inMemoryPersistence
+  setPersistence, browserLocalPersistence, indexedDBLocalPersistence, inMemoryPersistence
 } from 'firebase/auth';
 import {
   getFirestore, collection, addDoc, query, orderBy, onSnapshot,
@@ -10,6 +10,7 @@ import {
   where, writeBatch, runTransaction
 } from 'firebase/firestore';
 import { getFunctions, httpsCallable } from 'firebase/functions';
+import { Capacitor } from '@capacitor/core';
 
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY || "AIzaSyBuhwHcdxEuYHf6F5SVlWR5BLRio_7kqAg",
@@ -21,7 +22,21 @@ const firebaseConfig = {
 };
 
 const app = initializeApp(firebaseConfig);
-export const auth = getAuth(app);
+
+// Use initializeAuth with explicit persistence for native platforms
+// This avoids the WKWebView hang caused by automatic environment detection
+let auth;
+if (Capacitor.isNativePlatform()) {
+  console.log('[Firebase] Using initializeAuth with browserLocalPersistence for native platform');
+  auth = initializeAuth(app, {
+    persistence: browserLocalPersistence
+  });
+} else {
+  console.log('[Firebase] Using getAuth for web platform');
+  auth = getAuth(app);
+}
+
+export { auth };
 export const db = getFirestore(app);
 export const functions = getFunctions(app);
 
