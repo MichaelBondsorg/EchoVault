@@ -14,6 +14,9 @@ import { getActiveExclusions } from '../signals/signalLifecycle';
 // Cache staleness threshold (6 hours)
 const CACHE_MAX_AGE_MS = 6 * 60 * 60 * 1000;
 
+// Local storage key for cache invalidation flags
+const CACHE_INVALIDATION_KEY = 'patternCacheInvalidated';
+
 /**
  * Get cached patterns for a user
  * Returns null if cache doesn't exist or is too stale
@@ -281,10 +284,17 @@ export const getAllPatterns = async (userId, entries = [], category = null) => {
     console.warn('Could not load exclusions, showing all patterns:', error);
   }
 
+  // Check if cache was recently invalidated (e.g., after new entry)
+  const forceRecompute = isCacheInvalidated(userId);
+  if (forceRecompute) {
+    console.log('Cache invalidation flag detected, will recompute');
+    clearCacheInvalidation(userId);
+  }
+
   // Try to get cached patterns first
   const cached = await getCachedPatterns(userId);
 
-  if (cached && !cached._stale) {
+  if (cached && !cached._stale && !forceRecompute) {
     console.log('Using cached patterns');
 
     // Filter out excluded patterns
@@ -397,11 +407,71 @@ function generateLocalSummary(activityPatterns, temporalPatterns) {
   return insights.slice(0, 5);
 }
 
+/**
+ * Invalidate pattern cache for a user
+ * Sets a flag that forces patterns to recompute on next load
+ *
+ * @param {string} userId - User ID
+ */
+export const invalidatePatternCache = async (userId) => {
+  if (!userId) return;
+
+  try {
+    // Set local invalidation flag with timestamp
+    const key = `${CACHE_INVALIDATION_KEY}_${userId}`;
+    localStorage.setItem(key, Date.now().toString());
+  } catch (error) {
+    console.warn('Failed to set cache invalidation flag:', error);
+  }
+};
+
+/**
+ * Check if cache is invalidated for a user
+ *
+ * @param {string} userId - User ID
+ * @returns {boolean} True if cache was recently invalidated
+ */
+export const isCacheInvalidated = (userId) => {
+  if (!userId) return false;
+
+  try {
+    const key = `${CACHE_INVALIDATION_KEY}_${userId}`;
+    const invalidatedAt = localStorage.getItem(key);
+
+    if (!invalidatedAt) return false;
+
+    // Check if invalidation is recent (within last 5 minutes)
+    const invalidationAge = Date.now() - parseInt(invalidatedAt, 10);
+    return invalidationAge < 5 * 60 * 1000;
+  } catch (error) {
+    return false;
+  }
+};
+
+/**
+ * Clear cache invalidation flag after patterns are recomputed
+ *
+ * @param {string} userId - User ID
+ */
+export const clearCacheInvalidation = (userId) => {
+  if (!userId) return;
+
+  try {
+    const key = `${CACHE_INVALIDATION_KEY}_${userId}`;
+    localStorage.removeItem(key);
+  } catch (error) {
+    console.warn('Failed to clear cache invalidation flag:', error);
+  }
+};
+
 export default {
   getCachedPatterns,
   getPatternSummary,
   getActivityPatterns,
   getTemporalPatterns,
   getContradictions,
-  getAllPatterns
+  getAllPatterns,
+  invalidatePatternCache,
+  isCacheInvalidated,
+  clearCacheInvalidation
 };

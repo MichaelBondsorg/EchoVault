@@ -19,6 +19,7 @@ import {
   completeTaskAsWin
 } from '../../services/dashboard';
 import { getPatternSummary, getContradictions } from '../../services/patterns/cached';
+import { getNextInsight, markInsightShown } from '../../services/patterns/insightRotation';
 
 /**
  * DayDashboard - Controller Component
@@ -122,20 +123,44 @@ const DayDashboard = ({
     loadYesterdayCarryForward(userId, category).then(setCarryForwardItems);
   }, [userId, category]);
 
-  // Load pattern insights
+  // Load pattern insights with rotation
   useEffect(() => {
     if (!userId) return;
     const loadInsights = async () => {
+      // Gather all available insights
+      const allInsights = [];
+
+      // Contradictions are high-priority
       const contradictions = await getContradictions(userId);
-      if (contradictions?.data?.[0]) {
-        setCurrentInsight(contradictions.data[0]);
-      } else {
-        const patterns = await getPatternSummary(userId);
-        if (patterns?.data?.[0]) setCurrentInsight(patterns.data[0]);
+      if (contradictions?.data?.length > 0) {
+        contradictions.data.forEach(c => allInsights.push({
+          ...c,
+          type: c.type || 'contradiction',
+          priority: 'high'
+        }));
+      }
+
+      // Pattern summaries
+      const patterns = await getPatternSummary(userId);
+      if (patterns?.data?.length > 0) {
+        patterns.data.forEach(p => allInsights.push({
+          ...p,
+          priority: 'normal'
+        }));
+      }
+
+      if (allInsights.length > 0) {
+        // Use rotation to pick which insight to show
+        const selected = getNextInsight(userId, category, allInsights);
+        if (selected) {
+          setCurrentInsight(selected);
+          // Mark as shown so it rotates next time
+          markInsightShown(userId, category, selected);
+        }
       }
     };
     loadInsights();
-  }, [userId]);
+  }, [userId, category]);
 
   // Generate content with caching
   const generateAndCacheContent = useCallback(async (useCache = true) => {

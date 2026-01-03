@@ -8,6 +8,7 @@ import {
 import { analyzeLongitudinalPatterns } from '../../services/safety';
 import { getAllPatterns } from '../../services/patterns/cached';
 import { addToExclusionList, getActiveExclusions } from '../../services/signals/signalLifecycle';
+import { getRotatedInsights, markInsightShown } from '../../services/patterns/insightRotation';
 
 const InsightsPanel = ({ entries, userId, category, onClose }) => {
   const [loading, setLoading] = useState(true);
@@ -53,6 +54,25 @@ const InsightsPanel = ({ entries, userId, category, onClose }) => {
 
   // Fallback to client-side patterns if no cached data
   const clientPatterns = useMemo(() => analyzeLongitudinalPatterns(entries), [entries]);
+
+  // Apply rotation to activity patterns for varied display order
+  const rotatedActivityPatterns = useMemo(() => {
+    if (!cachedPatterns?.activitySentiment?.length || !userId) {
+      return cachedPatterns?.activitySentiment || [];
+    }
+
+    // Convert to insight format for rotation
+    const insightsForRotation = cachedPatterns.activitySentiment
+      .filter(p => p.insight)
+      .map(p => ({
+        ...p,
+        type: p.sentiment === 'positive' ? 'positive_activity' : 'negative_activity',
+        message: p.insight
+      }));
+
+    // Get rotated order
+    return getRotatedInsights(userId, category, insightsForRotation, 10);
+  }, [cachedPatterns?.activitySentiment, userId, category]);
 
   const getPatternIcon = (type) => {
     switch (type) {
@@ -318,21 +338,20 @@ const InsightsPanel = ({ entries, userId, category, onClose }) => {
                 </>
               )}
 
-              {/* Activity sentiment patterns */}
-              {hasActivityPatterns && (
+              {/* Activity sentiment patterns - rotated for variety */}
+              {hasActivityPatterns && rotatedActivityPatterns.length > 0 && (
                 <>
                   <SectionHeader icon={TrendingUp} title="Activities & Mood" color="text-green-600" />
                   <AnimatePresence mode="popLayout">
                     <div className="space-y-2">
-                      {cachedPatterns.activitySentiment
-                        .filter(p => p.insight)
+                      {rotatedActivityPatterns
                         .slice(0, 5)
                         .map((pattern, i) => (
                           <PatternCard
-                            key={`activity-${i}`}
+                            key={`activity-${pattern.entity || i}`}
                             pattern={{
-                              type: pattern.sentiment === 'positive' ? 'positive_activity' : 'negative_activity',
-                              message: pattern.insight,
+                              type: pattern.type || (pattern.sentiment === 'positive' ? 'positive_activity' : 'negative_activity'),
+                              message: pattern.message || pattern.insight,
                               entity: pattern.entity,
                               confidence: pattern.confidence
                             }}
