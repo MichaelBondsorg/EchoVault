@@ -432,10 +432,204 @@ export const getEntityHistory = (entries, entity) => {
   };
 };
 
+/**
+ * Compute Shadow Friction patterns
+ * Finds entity + context intersections that reveal hidden dynamics
+ *
+ * Example: "Conversations with Sarah about Work are 40% more stressful
+ * than when you discuss Personal Goals"
+ *
+ * @param {Object[]} entries - All entries
+ * @param {string} category - Category filter
+ * @returns {Object[]} Array of intersection patterns
+ */
+export const computeShadowFriction = (entries, category = null) => {
+  const filtered = category ? entries.filter(e => e.category === category) : entries;
+  const intersectionMoods = new Map();
+
+  // Get baseline mood for comparison
+  const allMoods = filtered
+    .filter(e => e.analysis?.mood_score !== null && e.analysis?.mood_score !== undefined)
+    .map(e => e.analysis.mood_score);
+  const baselineMood = allMoods.length > 0
+    ? allMoods.reduce((a, b) => a + b, 0) / allMoods.length
+    : 0.5;
+
+  // Track individual entity moods for comparison
+  const individualEntityMoods = new Map();
+
+  filtered.forEach(entry => {
+    const mood = entry.analysis?.mood_score;
+    if (mood === null || mood === undefined) return;
+
+    const tags = entry.tags || [];
+
+    // Separate entity types
+    const personTags = tags.filter(t => t.startsWith('@person:'));
+    const topicTags = tags.filter(t => t.startsWith('@topic:'));
+    const activityTags = tags.filter(t => t.startsWith('@activity:'));
+    const placeTags = tags.filter(t => t.startsWith('@place:'));
+
+    // Track individual entity moods
+    [...personTags, ...topicTags, ...activityTags, ...placeTags].forEach(tag => {
+      if (!individualEntityMoods.has(tag)) {
+        individualEntityMoods.set(tag, []);
+      }
+      individualEntityMoods.get(tag).push(mood);
+    });
+
+    // Create intersection patterns: person + topic
+    personTags.forEach(person => {
+      topicTags.forEach(topic => {
+        const key = `${person}+${topic}`;
+        if (!intersectionMoods.has(key)) {
+          intersectionMoods.set(key, {
+            moods: [],
+            primary: person,
+            secondary: topic,
+            type: 'person_topic'
+          });
+        }
+        intersectionMoods.get(key).moods.push(mood);
+      });
+
+      // person + activity
+      activityTags.forEach(activity => {
+        const key = `${person}+${activity}`;
+        if (!intersectionMoods.has(key)) {
+          intersectionMoods.set(key, {
+            moods: [],
+            primary: person,
+            secondary: activity,
+            type: 'person_activity'
+          });
+        }
+        intersectionMoods.get(key).moods.push(mood);
+      });
+
+      // person + place
+      placeTags.forEach(place => {
+        const key = `${person}+${place}`;
+        if (!intersectionMoods.has(key)) {
+          intersectionMoods.set(key, {
+            moods: [],
+            primary: person,
+            secondary: place,
+            type: 'person_place'
+          });
+        }
+        intersectionMoods.get(key).moods.push(mood);
+      });
+    });
+
+    // activity + place
+    activityTags.forEach(activity => {
+      placeTags.forEach(place => {
+        const key = `${activity}+${place}`;
+        if (!intersectionMoods.has(key)) {
+          intersectionMoods.set(key, {
+            moods: [],
+            primary: activity,
+            secondary: place,
+            type: 'activity_place'
+          });
+        }
+        intersectionMoods.get(key).moods.push(mood);
+      });
+    });
+  });
+
+  // Calculate intersection patterns
+  const patterns = [];
+
+  intersectionMoods.forEach((data, key) => {
+    // Need at least 2 occurrences
+    if (data.moods.length < 2) return;
+
+    const avgMood = data.moods.reduce((a, b) => a + b, 0) / data.moods.length;
+
+    // Get individual entity averages for comparison
+    const primaryMoods = individualEntityMoods.get(data.primary) || [];
+    const primaryAvg = primaryMoods.length > 0
+      ? primaryMoods.reduce((a, b) => a + b, 0) / primaryMoods.length
+      : baselineMood;
+
+    // Calculate delta from individual entity baseline
+    const deltaFromPrimary = avgMood - primaryAvg;
+    const deltaFromBaseline = avgMood - baselineMood;
+    const deltaPercent = Math.round(deltaFromPrimary * 100);
+
+    // Only create insight if there's a significant difference from individual entity
+    // (at least 15% different from how the person/activity usually affects mood)
+    if (Math.abs(deltaFromPrimary) < 0.12) return;
+
+    // Parse entity names
+    const primaryName = data.primary.split(':')[1]?.replace(/_/g, ' ');
+    const secondaryName = data.secondary.split(':')[1]?.replace(/_/g, ' ');
+    const primaryType = data.primary.split(':')[0].replace('@', '');
+    const secondaryType = data.secondary.split(':')[0].replace('@', '');
+
+    // Generate contextual insight
+    let insight = null;
+    if (data.type === 'person_topic') {
+      if (deltaFromPrimary < -0.12) {
+        insight = `Discussions with ${primaryName} about ${secondaryName} are ${Math.abs(deltaPercent)}% more challenging than other interactions with them`;
+      } else if (deltaFromPrimary > 0.12) {
+        insight = `Talking with ${primaryName} about ${secondaryName} lifts your mood ${deltaPercent}% more than usual`;
+      }
+    } else if (data.type === 'person_activity') {
+      if (deltaFromPrimary < -0.12) {
+        insight = `Doing ${secondaryName} with ${primaryName} tends to be more stressful (${Math.abs(deltaPercent)}% mood dip)`;
+      } else if (deltaFromPrimary > 0.12) {
+        insight = `${secondaryName} with ${primaryName} is especially enjoyable (+${deltaPercent}% mood boost)`;
+      }
+    } else if (data.type === 'person_place') {
+      if (deltaFromPrimary < -0.12) {
+        insight = `Time with ${primaryName} at ${secondaryName} tends to be harder (${Math.abs(deltaPercent)}% lower mood)`;
+      } else if (deltaFromPrimary > 0.12) {
+        insight = `You're happier with ${primaryName} at ${secondaryName} (+${deltaPercent}%)`;
+      }
+    } else if (data.type === 'activity_place') {
+      if (deltaFromBaseline < -0.12) {
+        insight = `${primaryName} at ${secondaryName} is more draining than usual (${Math.abs(Math.round(deltaFromBaseline * 100))}% mood dip)`;
+      } else if (deltaFromBaseline > 0.12) {
+        insight = `${primaryName} at ${secondaryName} is especially energizing (+${Math.round(deltaFromBaseline * 100)}%)`;
+      }
+    }
+
+    if (!insight) return;
+
+    patterns.push({
+      type: 'shadow_friction',
+      intersectionType: data.type,
+      key,
+      primary: data.primary,
+      primaryName,
+      primaryType,
+      secondary: data.secondary,
+      secondaryName,
+      secondaryType,
+      avgMood: Number(avgMood.toFixed(2)),
+      primaryAvgMood: Number(primaryAvg.toFixed(2)),
+      baselineMood: Number(baselineMood.toFixed(2)),
+      deltaFromPrimary: Number(deltaFromPrimary.toFixed(2)),
+      deltaPercent,
+      entryCount: data.moods.length,
+      sentiment: deltaFromPrimary > 0 ? 'positive' : 'negative',
+      insight,
+      message: insight
+    });
+  });
+
+  // Sort by absolute impact
+  return patterns.sort((a, b) => Math.abs(b.deltaFromPrimary) - Math.abs(a.deltaFromPrimary));
+};
+
 export default {
   computeActivitySentiment,
   computeTemporalPatterns,
   computeMoodTriggers,
+  computeShadowFriction,
   generateProactiveContext,
   getEntityHistory
 };

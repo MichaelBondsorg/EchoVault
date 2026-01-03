@@ -8,7 +8,7 @@
 
 import { db, doc, getDoc, collection, getDocs } from '../../config/firebase';
 import { APP_COLLECTION_ID } from '../../config/constants';
-import { computeActivitySentiment, computeTemporalPatterns, computeMoodTriggers } from './index';
+import { computeActivitySentiment, computeTemporalPatterns, computeMoodTriggers, computeShadowFriction } from './index';
 import { getActiveExclusions } from '../signals/signalLifecycle';
 
 // Cache staleness threshold (6 hours)
@@ -306,6 +306,10 @@ export const getAllPatterns = async (userId, entries = [], category = null) => {
       cached.contradictions?.data || [],
       exclusions
     );
+    const shadowFriction = filterExcludedPatterns(
+      cached.shadow_friction?.data || [],
+      exclusions
+    );
     const summary = filterExcludedPatterns(
       cached.summary?.data || [],
       exclusions
@@ -315,6 +319,7 @@ export const getAllPatterns = async (userId, entries = [], category = null) => {
       source: 'cache',
       activitySentiment,
       temporal: cached.temporal?.data || {},
+      shadowFriction,
       contradictions,
       summary,
       updatedAt: cached.summary?.updatedAt?.toDate?.() || new Date()
@@ -332,17 +337,22 @@ export const getAllPatterns = async (userId, entries = [], category = null) => {
     const temporal = computeTemporalPatterns(filteredEntries, category);
     const triggers = computeMoodTriggers(filteredEntries, category);
 
+    // Compute shadow friction (entity + context intersections)
+    let shadowFriction = computeShadowFriction(filteredEntries, category);
+
     // Filter out excluded patterns
     activitySentiment = filterExcludedPatterns(activitySentiment, exclusions);
+    shadowFriction = filterExcludedPatterns(shadowFriction, exclusions);
 
     // Generate summary from computed patterns (already filtered)
-    const summary = generateLocalSummary(activitySentiment, temporal);
+    const summary = generateLocalSummary(activitySentiment, temporal, shadowFriction);
 
     return {
       source: 'computed',
       activitySentiment,
       temporal,
       triggers,
+      shadowFriction,
       contradictions: [], // Contradictions require full analysis, skip for on-demand
       summary,
       updatedAt: new Date()
@@ -354,6 +364,7 @@ export const getAllPatterns = async (userId, entries = [], category = null) => {
     source: 'insufficient',
     activitySentiment: [],
     temporal: {},
+    shadowFriction: [],
     contradictions: [],
     summary: [],
     updatedAt: null
@@ -363,8 +374,21 @@ export const getAllPatterns = async (userId, entries = [], category = null) => {
 /**
  * Generate a local summary from computed patterns
  */
-function generateLocalSummary(activityPatterns, temporalPatterns) {
+function generateLocalSummary(activityPatterns, temporalPatterns, shadowFrictionPatterns = []) {
   const insights = [];
+
+  // Top shadow friction insight (these are often the most valuable)
+  const topShadowFriction = shadowFrictionPatterns.find(p => p.insight);
+  if (topShadowFriction) {
+    insights.push({
+      type: 'shadow_friction',
+      icon: 'users',
+      message: topShadowFriction.insight,
+      entity: topShadowFriction.key,
+      primary: topShadowFriction.primary,
+      secondary: topShadowFriction.secondary
+    });
+  }
 
   // Top positive
   const topPositive = activityPatterns.find(p => p.sentiment === 'positive' && p.insight);
@@ -404,7 +428,7 @@ function generateLocalSummary(activityPatterns, temporalPatterns) {
     });
   }
 
-  return insights.slice(0, 5);
+  return insights.slice(0, 6);
 }
 
 /**
