@@ -580,6 +580,8 @@ export default function App() {
   const doSaveEntry = async (textInput, safetyFlagged = false, safetyUserResponse = null, temporalContext = null, voiceTone = null) => {
     if (!user) return;
 
+    console.time('⏱️ TOTAL: Save entry to Firestore');
+
     let finalTex = textInput;
     if (replyContext) {
       finalTex = `[Replying to: "${replyContext}"]\n\n${textInput}`;
@@ -626,18 +628,23 @@ export default function App() {
     let embedding = null;
     try {
       // Set a 60-second timeout for embedding generation (very long entries need more time)
+      console.time('⏱️ Embedding generation');
       const embeddingPromise = generateEmbedding(finalTex);
       const timeoutPromise = new Promise((_, reject) =>
         setTimeout(() => reject(new Error('Embedding timeout')), 60000)
       );
       embedding = await Promise.race([embeddingPromise, timeoutPromise]);
+      console.timeEnd('⏱️ Embedding generation');
     } catch (embeddingError) {
+      console.timeEnd('⏱️ Embedding generation');
       // Log but continue - we'll save the entry without embedding and backfill later
       console.warn('Embedding generation failed, will backfill later:', embeddingError.message);
     }
 
+    console.time('⏱️ Vector search');
     const related = embedding ? findRelevantMemories(embedding, entries, cat) : [];
     const recent = entries.slice(0, 5);
+    console.timeEnd('⏱️ Vector search');
 
     // Capture health context (sleep, steps, workout, stress) if available
     let healthContext = null;
@@ -748,7 +755,10 @@ export default function App() {
         entryData.has_warning_indicators = true;
       }
 
+      console.time('⏱️ Firestore save');
       const ref = await addDoc(collection(db, 'artifacts', APP_COLLECTION_ID, 'users', user.uid, 'entries'), entryData);
+      console.timeEnd('⏱️ Firestore save');
+      console.timeEnd('⏱️ TOTAL: Save entry to Firestore');
 
       setProcessing(false);
       setReplyContext(null);
@@ -785,14 +795,18 @@ export default function App() {
       // Analysis pipeline (existing logic)
       (async () => {
         try {
+          console.time('⏱️ Classification');
           const classification = await classifyEntry(finalTex);
+          console.timeEnd('⏱️ Classification');
           console.log('Entry classification:', classification);
 
+          console.time('⏱️ AI Analysis (parallel)');
           const [analysis, insight, enhancedContext] = await Promise.all([
             analyzeEntry(finalTex, classification.entry_type),
             classification.entry_type !== 'task' ? generateInsight(finalTex, related, recent, entries) : Promise.resolve(null),
             classification.entry_type !== 'task' ? extractEnhancedContext(finalTex, recent) : Promise.resolve(null)
           ]);
+          console.timeEnd('⏱️ AI Analysis (parallel)');
 
           console.log('Analysis complete:', { analysis, insight, classification, enhancedContext });
 
@@ -861,7 +875,9 @@ export default function App() {
           const cleanedUpdateData = removeUndefined(updateData);
 
           try {
+            console.time('⏱️ Firestore update (analysis)');
             await updateDoc(ref, cleanedUpdateData);
+            console.timeEnd('⏱️ Firestore update (analysis)');
 
             // Background post-processing (non-blocking)
             // Refreshes Core People cache if person mentions detected
