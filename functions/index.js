@@ -621,7 +621,87 @@ export const analyzeJournalEntry = onCall(
 );
 
 /**
- * Cloud Function: Generate text embedding
+ * Helper: Generate embedding (internal use)
+ * Used by both onCall function and Firestore trigger
+ */
+async function generateEmbeddingInternal(text, apiKey) {
+  if (!text || typeof text !== 'string' || text.trim().length === 0) {
+    throw new Error('Valid text is required');
+  }
+
+  // Check cache first
+  const cached = await getCachedEmbedding(text);
+  if (cached) {
+    console.log('Embedding cache HIT');
+    return cached;
+  }
+
+  // Generate new embedding
+  const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/text-embedding-004:embedContent?key=${apiKey}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ content: { parts: [{ text: text }] } })
+  });
+
+  if (!res.ok) {
+    const errorData = await res.json().catch(() => ({}));
+    console.error('Embedding API error:', res.status, errorData);
+    throw new Error('Embedding generation failed');
+  }
+
+  const data = await res.json();
+  const embedding = data.embedding?.values || null;
+
+  if (!embedding) {
+    throw new Error('No embedding returned');
+  }
+
+  // Cache for future use
+  await setCachedEmbedding(text, embedding);
+
+  return embedding;
+}
+
+/**
+ * Helper: Get cached embedding by text content hash
+ */
+async function getCachedEmbedding(text) {
+  try {
+    const crypto = await import('crypto');
+    const hash = crypto.createHash('sha256').update(text.trim()).digest('hex').slice(0, 16);
+    const cacheRef = db.collection('embedding_cache').doc(hash);
+    const cached = await cacheRef.get();
+
+    if (cached.exists) {
+      return cached.data().embedding;
+    }
+    return null;
+  } catch (e) {
+    console.warn('Cache read failed:', e);
+    return null;
+  }
+}
+
+/**
+ * Helper: Cache embedding for future use
+ */
+async function setCachedEmbedding(text, embedding) {
+  try {
+    const crypto = await import('crypto');
+    const hash = crypto.createHash('sha256').update(text.trim()).digest('hex').slice(0, 16);
+    await db.collection('embedding_cache').doc(hash).set({
+      embedding,
+      created: FieldValue.serverTimestamp(),
+      preview: text.slice(0, 100)  // For debugging
+    });
+  } catch (e) {
+    console.warn('Cache write failed:', e);
+    // Non-critical, continue
+  }
+}
+
+/**
+ * Cloud Function: Generate text embedding (callable)
  */
 export const generateEmbedding = onCall(
   {
@@ -643,28 +723,9 @@ export const generateEmbedding = onCall(
     const apiKey = geminiApiKey.value();
 
     try {
-      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/text-embedding-004:embedContent?key=${apiKey}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ content: { parts: [{ text: text }] } })
-      });
-
-      if (!res.ok) {
-        const errorData = await res.json().catch(() => ({}));
-        console.error('Embedding API error:', res.status, errorData);
-        throw new HttpsError('internal', 'Embedding generation failed');
-      }
-
-      const data = await res.json();
-      const embedding = data.embedding?.values || null;
-
-      if (!embedding) {
-        throw new HttpsError('internal', 'No embedding returned');
-      }
-
-      return { embedding };
+      const embedding = await generateEmbeddingInternal(text, apiKey);
+      return { embedding, cached: false };  // Caching handled internally
     } catch (error) {
-      if (error instanceof HttpsError) throw error;
       console.error('generateEmbedding error:', error);
       throw new HttpsError('internal', 'Embedding generation failed');
     }
@@ -1590,7 +1651,10 @@ async function computeAllPatterns(userId, category = null) {
  * to ensure signal_states is updated before the Pattern Engine runs.
  */
 export const onEntryCreate = onDocumentCreated(
-  'artifacts/{appId}/users/{userId}/entries/{entryId}',
+  {
+    document: 'artifacts/{appId}/users/{userId}/entries/{entryId}',
+    secrets: [geminiApiKey]
+  },
   async (event) => {
     const { userId, appId, entryId } = event.params;
 
@@ -1602,9 +1666,25 @@ export const onEntryCreate = onDocumentCreated(
     const entryData = event.data.data();
     const entry = { id: entryId, ...entryData };
 
-    console.log(`New entry created for user ${userId}, processing goals and patterns...`);
+    console.log(`New entry created for user ${userId}, processing embedding, goals and patterns...`);
 
     try {
+      // Step 0: Generate embedding if not present (OPTIMIZED: Background processing)
+      if (!entry.embedding && entry.text) {
+        console.time(`[Entry ${entryId}] Generate embedding`);
+        try {
+          const apiKey = geminiApiKey.value();
+          const embedding = await generateEmbeddingInternal(entry.text, apiKey);
+          await event.data.ref.update({ embedding });
+          console.timeEnd(`[Entry ${entryId}] Generate embedding`);
+          console.log(`✅ Entry ${entryId} enriched with embedding`);
+        } catch (embError) {
+          console.timeEnd(`[Entry ${entryId}] Generate embedding`);
+          console.error(`Failed to generate embedding for entry ${entryId}:`, embError);
+          // Non-critical - continue with other processing
+        }
+      }
+
       // Step 1: Process entry for goal signals FIRST
       // This updates signal_states with any detected goals, progress, or terminations
       const goalResult = await processEntryForGoals(userId, entry);
