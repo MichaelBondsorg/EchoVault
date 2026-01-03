@@ -10,6 +10,34 @@ The redesign introduces **4 Power Tiers** of insights, fixes the staleness probl
 
 ---
 
+## Implementation Status
+
+| Phase | Feature | Status |
+|-------|---------|--------|
+| 1 | Staleness Fix (rotation + cache invalidation) | ✅ **COMPLETE** |
+| 2 | Shadow Friction (entity + topic intersections) | ✅ **COMPLETE** |
+| 3 | Compound Triggers (health + context joins) | ⏳ Deferred (pending HealthKit stabilization) |
+| 4 | Pre-emptive Warnings (absence detection) | 📋 Planned |
+| 5 | Linguistic Shifts (self-talk analysis) | 📋 Planned |
+| 6 | Narrative Summary (AI digest) | 📋 Planned |
+| 7 | Hypothesis Framing | 📋 Planned |
+
+### Completed Files
+
+**Phase 1:**
+- `src/services/patterns/insightRotation.js` (new)
+- `src/components/dashboard/DayDashboard.jsx` (modified)
+- `src/services/background/entryPostProcessing.js` (modified)
+- `src/services/patterns/cached.js` (modified)
+- `src/components/modals/InsightsPanel.jsx` (modified)
+
+**Phase 2:**
+- `src/services/patterns/index.js` - Added `computeShadowFriction()`
+- `src/services/patterns/cached.js` - Integrated shadow friction
+- `src/components/modals/InsightsPanel.jsx` - Added "Relationship Dynamics" section
+
+---
+
 ## Phase 1: Fix Staleness (Quick Win)
 
 **Goal**: Users see different insights each visit, even with unchanged data.
