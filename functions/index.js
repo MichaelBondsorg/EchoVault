@@ -2885,3 +2885,283 @@ export const exchangeGoogleToken = onCall(
     }
   }
 );
+
+// ============================================
+// WEEKLY NARRATIVE DIGEST FUNCTIONS
+// ============================================
+
+/**
+ * Scheduled function: Generate weekly narrative digests
+ * Runs every Monday at 6:00 AM to synthesize the week's patterns into a narrative
+ */
+export const generateWeeklyDigests = onSchedule(
+  {
+    schedule: 'every monday 06:00',
+    timeZone: 'America/New_York',
+    secrets: [geminiApiKey],
+    timeoutSeconds: 540 // 9 minutes max for Cloud Functions
+  },
+  async (event) => {
+    console.log('Starting weekly digest generation...');
+
+    try {
+      // Get users who have entries in the past week
+      const oneWeekAgo = new Date();
+      oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
+
+      const usersRef = db.collection('artifacts').doc(APP_COLLECTION_ID).collection('users');
+      const usersSnapshot = await usersRef.get();
+
+      // Filter to users with 3+ entries this week (worth generating a digest)
+      const eligibleUsers = [];
+      const MIN_ENTRIES_FOR_DIGEST = 3;
+
+      for (const userDoc of usersSnapshot.docs) {
+        const entriesRef = userDoc.ref.collection('entries');
+        const recentEntries = await entriesRef
+          .where('createdAt', '>=', oneWeekAgo)
+          .limit(MIN_ENTRIES_FOR_DIGEST)
+          .get();
+
+        if (recentEntries.size >= MIN_ENTRIES_FOR_DIGEST) {
+          eligibleUsers.push(userDoc.id);
+        }
+      }
+
+      console.log(`Found ${eligibleUsers.length} eligible users for digest generation`);
+
+      if (eligibleUsers.length === 0) {
+        return { success: true, message: 'No eligible users', successCount: 0, errorCount: 0 };
+      }
+
+      // Process in batches of 5 for parallelization (avoid overwhelming Gemini API)
+      const BATCH_SIZE = 5;
+      let successCount = 0;
+      let errorCount = 0;
+
+      for (let i = 0; i < eligibleUsers.length; i += BATCH_SIZE) {
+        const batch = eligibleUsers.slice(i, i + BATCH_SIZE);
+        console.log(`Processing batch ${Math.floor(i / BATCH_SIZE) + 1}: users ${i + 1}-${Math.min(i + BATCH_SIZE, eligibleUsers.length)} of ${eligibleUsers.length}`);
+
+        const results = await Promise.allSettled(
+          batch.map(userId => generateUserWeeklyDigest(userId, geminiApiKey.value()))
+        );
+
+        results.forEach((result, idx) => {
+          if (result.status === 'fulfilled') {
+            successCount++;
+          } else {
+            console.error(`Error generating digest for user ${batch[idx]}:`, result.reason);
+            errorCount++;
+          }
+        });
+
+        // Small delay between batches to avoid rate limiting
+        if (i + BATCH_SIZE < eligibleUsers.length) {
+          await new Promise(resolve => setTimeout(resolve, 1000));
+        }
+      }
+
+      console.log(`Weekly digest generation complete: ${successCount} success, ${errorCount} errors`);
+      return { success: true, successCount, errorCount };
+    } catch (error) {
+      console.error('Weekly digest generation failed:', error);
+      return { success: false, error: error.message };
+    }
+  }
+);
+
+/**
+ * Generate weekly digest for a single user
+ */
+async function generateUserWeeklyDigest(userId, apiKey) {
+  const oneWeekAgo = new Date();
+  oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
+
+  // Fetch week's entries
+  const entriesRef = db
+    .collection('artifacts')
+    .doc(APP_COLLECTION_ID)
+    .collection('users')
+    .doc(userId)
+    .collection('entries');
+
+  const entriesSnapshot = await entriesRef
+    .where('createdAt', '>=', oneWeekAgo)
+    .orderBy('createdAt', 'desc')
+    .limit(50)
+    .get();
+
+  if (entriesSnapshot.empty) {
+    console.log(`No entries found for user ${userId} this week`);
+    return;
+  }
+
+  const entries = entriesSnapshot.docs.map(doc => ({
+    id: doc.id,
+    ...doc.data()
+  }));
+
+  // Fetch cached patterns
+  const patternsRef = db
+    .collection('artifacts')
+    .doc(APP_COLLECTION_ID)
+    .collection('users')
+    .doc(userId)
+    .collection('patterns');
+
+  const patternsSnapshot = await patternsRef.get();
+  const patterns = {};
+  patternsSnapshot.forEach(doc => {
+    patterns[doc.id] = doc.data();
+  });
+
+  // Calculate mood arc
+  const moodScores = entries
+    .filter(e => e.analysis?.mood_score !== null && e.analysis?.mood_score !== undefined)
+    .map(e => e.analysis.mood_score);
+
+  let moodArc = 'balanced';
+  let avgMood = 0.5;
+
+  if (moodScores.length >= 2) {
+    avgMood = moodScores.reduce((a, b) => a + b, 0) / moodScores.length;
+    const firstHalf = moodScores.slice(0, Math.floor(moodScores.length / 2));
+    const secondHalf = moodScores.slice(Math.floor(moodScores.length / 2));
+    const firstAvg = firstHalf.reduce((a, b) => a + b, 0) / firstHalf.length;
+    const secondAvg = secondHalf.reduce((a, b) => a + b, 0) / secondHalf.length;
+
+    if (secondAvg - firstAvg > 0.15) moodArc = 'upward';
+    else if (firstAvg - secondAvg > 0.15) moodArc = 'downward';
+    else if (avgMood > 0.65) moodArc = 'positive';
+    else if (avgMood < 0.35) moodArc = 'challenging';
+  }
+
+  // Build context for AI
+  const topPatterns = patterns.summary?.data?.slice(0, 5) || [];
+  const contradictions = patterns.contradictions?.data?.slice(0, 3) || [];
+  const activityPatterns = patterns.activity_sentiment?.data?.slice(0, 5) || [];
+
+  // Extract common themes
+  const themeCounts = {};
+  entries.forEach(e => {
+    (e.tags || []).forEach(tag => {
+      if (tag.startsWith('@')) {
+        const cleanTag = tag.split(':')[1]?.replace(/_/g, ' ') || tag;
+        themeCounts[cleanTag] = (themeCounts[cleanTag] || 0) + 1;
+      }
+    });
+  });
+  const topThemes = Object.entries(themeCounts)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 5)
+    .map(([theme]) => theme);
+
+  // Generate narrative via AI
+  const prompt = buildDigestPrompt({
+    entryCount: entries.length,
+    moodArc,
+    avgMood,
+    topPatterns,
+    contradictions,
+    activityPatterns,
+    topThemes,
+    weekStart: oneWeekAgo.toLocaleDateString()
+  });
+
+  const narrative = await callGemini(apiKey, DIGEST_SYSTEM_PROMPT, prompt, 'gemini-2.0-flash');
+
+  if (!narrative) {
+    console.error(`Failed to generate narrative for user ${userId}`);
+    return;
+  }
+
+  // Parse response (expecting JSON with narrative and lookAhead)
+  let digestData;
+  try {
+    const jsonStr = narrative.replace(/```json|```/g, '').trim();
+    digestData = JSON.parse(jsonStr);
+  } catch {
+    // Fallback: treat entire response as narrative
+    digestData = { narrative: narrative, lookAhead: null };
+  }
+
+  // Save digest
+  const digestRef = db
+    .collection('artifacts')
+    .doc(APP_COLLECTION_ID)
+    .collection('users')
+    .doc(userId)
+    .collection('digests')
+    .doc('weekly');
+
+  await digestRef.set({
+    narrative: digestData.narrative,
+    lookAhead: digestData.lookAhead || null,
+    highlightedPatterns: topThemes.slice(0, 4),
+    mood: {
+      arc: moodArc,
+      average: avgMood
+    },
+    entryCount: entries.length,
+    weekOf: oneWeekAgo,
+    generatedAt: new Date(),
+    version: 1
+  });
+
+  console.log(`Generated weekly digest for user ${userId}`);
+}
+
+const DIGEST_SYSTEM_PROMPT = `You are a compassionate journaling companion synthesizing a week of insights.
+
+Write a 2-3 paragraph narrative that:
+1. Opens with the emotional arc of the week (not just "you had X entries")
+2. Connects patterns to specific moments when relevant
+3. Notes any shifts, growth, or areas needing attention
+4. Speaks directly to the person in second person ("you")
+
+Return JSON:
+{
+  "narrative": "Your 2-3 paragraph narrative here...",
+  "lookAhead": "One forward-looking sentence or gentle suggestion (optional)"
+}
+
+Tone: Warm but not saccharine. Insightful but not clinical. Personal but not presumptuous.
+
+Do NOT:
+- Use bullet points
+- List statistics
+- Sound like a report
+- Be vague or generic
+- Start with "This week..."
+
+DO:
+- Reference specific patterns by name when meaningful
+- Acknowledge both challenges and strengths
+- Write like a thoughtful friend who's been paying attention`;
+
+function buildDigestPrompt(data) {
+  return `Generate a weekly narrative digest based on this data:
+
+Entry count: ${data.entryCount}
+Mood arc: ${data.moodArc}
+Average mood: ${Math.round(data.avgMood * 100)}%
+Week starting: ${data.weekStart}
+
+Top themes mentioned: ${data.topThemes.join(', ') || 'various topics'}
+
+Key patterns detected:
+${data.topPatterns.map(p => `- ${p.message || p.insight || 'Pattern detected'}`).join('\n') || '- Still gathering data'}
+
+${data.contradictions.length > 0 ? `
+Worth reflecting on:
+${data.contradictions.map(c => `- ${c.message}`).join('\n')}
+` : ''}
+
+${data.activityPatterns.length > 0 ? `
+Activity impacts:
+${data.activityPatterns.slice(0, 3).map(a => `- ${a.insight}`).join('\n')}
+` : ''}
+
+Write a warm, personalized narrative that synthesizes these insights into a cohesive story of the week. Focus on the emotional journey and any growth or challenges observed.`;
+}

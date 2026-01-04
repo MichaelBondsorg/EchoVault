@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   X, TrendingDown, TrendingUp, AlertTriangle, Heart, Calendar,
   Sparkles, BarChart3, Loader2, Sun, Cloud, Target,
-  AlertOctagon, Zap, Clock, Users, MessageSquare
+  AlertOctagon, Zap, Clock, Users, MessageSquare, AlertCircle
 } from 'lucide-react';
 import { analyzeLongitudinalPatterns } from '../../services/safety';
 import { getAllPatterns } from '../../services/patterns/cached';
@@ -86,6 +86,10 @@ const InsightsPanel = ({ entries, userId, category, onClose }) => {
       case 'negative_activity': return <TrendingDown size={16} className="text-red-400" />;
       // Shadow friction (entity + context intersections)
       case 'shadow_friction': return <Users size={16} className="text-violet-500" />;
+      // Absence warnings (pre-emptive)
+      case 'absence_warning': return <AlertCircle size={16} className="text-amber-500" />;
+      // Linguistic shifts (self-talk)
+      case 'linguistic_shift': return <MessageSquare size={16} className="text-indigo-500" />;
       // Trigger patterns
       case 'trigger_correlation': return <AlertTriangle size={16} className="text-amber-500" />;
       case 'trigger': return <Zap size={16} className="text-amber-500" />;
@@ -112,6 +116,10 @@ const InsightsPanel = ({ entries, userId, category, onClose }) => {
       case 'negative_activity': return 'bg-red-50 border-red-200';
       // Shadow friction
       case 'shadow_friction': return 'bg-violet-50 border-violet-200';
+      // Absence warnings
+      case 'absence_warning': return 'bg-amber-50 border-amber-200';
+      // Linguistic shifts
+      case 'linguistic_shift': return 'bg-indigo-50 border-indigo-200';
       // Triggers
       case 'trigger_correlation': return 'bg-amber-50 border-amber-200';
       case 'trigger': return 'bg-amber-50 border-amber-200';
@@ -127,8 +135,19 @@ const InsightsPanel = ({ entries, userId, category, onClose }) => {
   };
 
   // Generate a unique key for a pattern (for dismissal tracking)
+  // Uses multiple fields to avoid collision when messages start similarly
   const getPatternKey = (pattern) => {
-    return `${pattern.type}:${pattern.entity || ''}:${(pattern.message || pattern.insight || '').slice(0, 50)}`;
+    const type = pattern.type || 'unknown';
+    const entity = pattern.entity || pattern.entityName || '';
+    const message = pattern.message || pattern.insight || '';
+    const category = pattern.category || '';
+
+    // Create a simple hash from the full message to avoid collisions
+    const msgHash = message.split('').reduce((acc, char) => {
+      return ((acc << 5) - acc) + char.charCodeAt(0);
+    }, 0).toString(36);
+
+    return `${type}:${entity}:${category}:${msgHash}`;
   };
 
   // Show dismiss options for a pattern
@@ -258,8 +277,10 @@ const InsightsPanel = ({ entries, userId, category, onClose }) => {
   const hasTemporalPatterns = cachedPatterns?.temporal?.insights;
   const hasContradictions = cachedPatterns?.contradictions?.length > 0;
   const hasShadowFriction = cachedPatterns?.shadowFriction?.length > 0;
+  const hasAbsenceWarnings = cachedPatterns?.absenceWarnings?.length > 0;
+  const hasLinguisticShifts = cachedPatterns?.linguisticShifts?.length > 0;
   const hasSummary = cachedPatterns?.summary?.length > 0;
-  const hasCachedContent = hasActivityPatterns || hasTemporalPatterns || hasContradictions || hasShadowFriction || hasSummary;
+  const hasCachedContent = hasActivityPatterns || hasTemporalPatterns || hasContradictions || hasShadowFriction || hasAbsenceWarnings || hasLinguisticShifts || hasSummary;
   const hasAnyContent = hasCachedContent || clientPatterns.length > 0;
 
   return (
@@ -315,6 +336,52 @@ const InsightsPanel = ({ entries, userId, category, onClose }) => {
                     <div className="space-y-2">
                       {cachedPatterns.summary.map((insight, i) => (
                         <PatternCard key={`summary-${i}`} pattern={insight} index={i} />
+                      ))}
+                    </div>
+                  </AnimatePresence>
+                </>
+              )}
+
+              {/* Absence Warnings - Pre-emptive alerts */}
+              {hasAbsenceWarnings && (
+                <>
+                  <SectionHeader icon={AlertCircle} title="Heads Up" color="text-amber-600" />
+                  <AnimatePresence mode="popLayout">
+                    <div className="space-y-2">
+                      {cachedPatterns.absenceWarnings.slice(0, 3).map((warning, i) => (
+                        <PatternCard
+                          key={`absence-${warning.entity || i}`}
+                          pattern={{
+                            type: 'absence_warning',
+                            message: warning.message,
+                            entity: warning.entityName,
+                            confidence: warning.absenceCorrelation
+                          }}
+                          index={i}
+                        />
+                      ))}
+                    </div>
+                  </AnimatePresence>
+                </>
+              )}
+
+              {/* Linguistic Shifts - Self-talk changes */}
+              {hasLinguisticShifts && (
+                <>
+                  <SectionHeader icon={MessageSquare} title="Your Self-Talk" color="text-indigo-600" />
+                  <AnimatePresence mode="popLayout">
+                    <div className="space-y-2">
+                      {cachedPatterns.linguisticShifts.slice(0, 3).map((shift, i) => (
+                        <PatternCard
+                          key={`linguistic-${shift.category || i}`}
+                          pattern={{
+                            type: 'linguistic_shift',
+                            message: shift.message,
+                            entity: shift.category,
+                            confidence: shift.changePercent > 30 ? 0.85 : 0.7
+                          }}
+                          index={i}
+                        />
                       ))}
                     </div>
                   </AnimatePresence>

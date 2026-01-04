@@ -9,6 +9,9 @@
 import { db, doc, getDoc, collection, getDocs } from '../../config/firebase';
 import { APP_COLLECTION_ID } from '../../config/constants';
 import { computeActivitySentiment, computeTemporalPatterns, computeMoodTriggers, computeShadowFriction } from './index';
+import { computeAbsencePatterns, getActiveAbsenceWarnings } from './absencePatterns';
+import { computeLinguisticPatterns, getNotableLinguisticShifts } from './linguisticPatterns';
+import { toHypothesisStyle } from './insightTemplates';
 import { getActiveExclusions } from '../signals/signalLifecycle';
 
 // Cache staleness threshold (6 hours)
@@ -298,7 +301,7 @@ export const getAllPatterns = async (userId, entries = [], category = null) => {
     console.log('Using cached patterns');
 
     // Filter out excluded patterns
-    const activitySentiment = filterExcludedPatterns(
+    let activitySentiment = filterExcludedPatterns(
       cached.activity_sentiment?.data || [],
       exclusions
     );
@@ -306,8 +309,16 @@ export const getAllPatterns = async (userId, entries = [], category = null) => {
       cached.contradictions?.data || [],
       exclusions
     );
-    const shadowFriction = filterExcludedPatterns(
+    let shadowFriction = filterExcludedPatterns(
       cached.shadow_friction?.data || [],
+      exclusions
+    );
+    let absenceWarnings = filterExcludedPatterns(
+      cached.absence_warnings?.data || [],
+      exclusions
+    );
+    let linguisticShifts = filterExcludedPatterns(
+      cached.linguistic_shifts?.data || [],
       exclusions
     );
     const summary = filterExcludedPatterns(
@@ -315,11 +326,19 @@ export const getAllPatterns = async (userId, entries = [], category = null) => {
       exclusions
     );
 
+    // Apply hypothesis framing consistently (same as on-demand computation)
+    activitySentiment = toHypothesisStyle(activitySentiment);
+    shadowFriction = toHypothesisStyle(shadowFriction);
+    absenceWarnings = toHypothesisStyle(absenceWarnings);
+    linguisticShifts = toHypothesisStyle(linguisticShifts);
+
     return {
       source: 'cache',
       activitySentiment,
       temporal: cached.temporal?.data || {},
       shadowFriction,
+      absenceWarnings,
+      linguisticShifts,
       contradictions,
       summary,
       updatedAt: cached.summary?.updatedAt?.toDate?.() || new Date()
@@ -340,12 +359,26 @@ export const getAllPatterns = async (userId, entries = [], category = null) => {
     // Compute shadow friction (entity + context intersections)
     let shadowFriction = computeShadowFriction(filteredEntries, category);
 
+    // Compute absence patterns (pre-emptive warnings)
+    let absenceWarnings = getActiveAbsenceWarnings(filteredEntries, activitySentiment, category);
+
+    // Compute linguistic shifts (self-talk analysis)
+    let linguisticShifts = getNotableLinguisticShifts(filteredEntries, category);
+
     // Filter out excluded patterns
     activitySentiment = filterExcludedPatterns(activitySentiment, exclusions);
     shadowFriction = filterExcludedPatterns(shadowFriction, exclusions);
+    absenceWarnings = filterExcludedPatterns(absenceWarnings, exclusions);
+    linguisticShifts = filterExcludedPatterns(linguisticShifts, exclusions);
+
+    // Apply hypothesis framing for more engaging presentation
+    activitySentiment = toHypothesisStyle(activitySentiment);
+    shadowFriction = toHypothesisStyle(shadowFriction);
+    absenceWarnings = toHypothesisStyle(absenceWarnings);
+    linguisticShifts = toHypothesisStyle(linguisticShifts);
 
     // Generate summary from computed patterns (already filtered)
-    const summary = generateLocalSummary(activitySentiment, temporal, shadowFriction);
+    const summary = generateLocalSummary(activitySentiment, temporal, shadowFriction, absenceWarnings, linguisticShifts);
 
     return {
       source: 'computed',
@@ -353,6 +386,8 @@ export const getAllPatterns = async (userId, entries = [], category = null) => {
       temporal,
       triggers,
       shadowFriction,
+      absenceWarnings,
+      linguisticShifts,
       contradictions: [], // Contradictions require full analysis, skip for on-demand
       summary,
       updatedAt: new Date()
@@ -365,6 +400,8 @@ export const getAllPatterns = async (userId, entries = [], category = null) => {
     activitySentiment: [],
     temporal: {},
     shadowFriction: [],
+    absenceWarnings: [],
+    linguisticShifts: [],
     contradictions: [],
     summary: [],
     updatedAt: null
@@ -374,16 +411,39 @@ export const getAllPatterns = async (userId, entries = [], category = null) => {
 /**
  * Generate a local summary from computed patterns
  */
-function generateLocalSummary(activityPatterns, temporalPatterns, shadowFrictionPatterns = []) {
+function generateLocalSummary(activityPatterns, temporalPatterns, shadowFrictionPatterns = [], absenceWarnings = [], linguisticShifts = []) {
   const insights = [];
 
+  // Active absence warnings are highest priority (pre-emptive)
+  const activeWarning = absenceWarnings.find(p => p.isActiveWarning);
+  if (activeWarning) {
+    insights.push({
+      type: 'absence_warning',
+      icon: 'alert-circle',
+      message: activeWarning.message,
+      entity: activeWarning.entity,
+      isActiveWarning: true
+    });
+  }
+
+  // Top linguistic shift (self-talk changes)
+  const topLinguistic = linguisticShifts.find(p => p.sentiment === 'positive');
+  if (topLinguistic) {
+    insights.push({
+      type: 'linguistic_shift',
+      icon: 'message-square',
+      message: topLinguistic.message,
+      category: topLinguistic.category
+    });
+  }
+
   // Top shadow friction insight (these are often the most valuable)
-  const topShadowFriction = shadowFrictionPatterns.find(p => p.insight);
+  const topShadowFriction = shadowFrictionPatterns.find(p => p.insight || p.message);
   if (topShadowFriction) {
     insights.push({
       type: 'shadow_friction',
       icon: 'users',
-      message: topShadowFriction.insight,
+      message: topShadowFriction.message || topShadowFriction.insight,
       entity: topShadowFriction.key,
       primary: topShadowFriction.primary,
       secondary: topShadowFriction.secondary
@@ -391,23 +451,23 @@ function generateLocalSummary(activityPatterns, temporalPatterns, shadowFriction
   }
 
   // Top positive
-  const topPositive = activityPatterns.find(p => p.sentiment === 'positive' && p.insight);
+  const topPositive = activityPatterns.find(p => p.sentiment === 'positive' && (p.insight || p.message));
   if (topPositive) {
     insights.push({
       type: 'positive_activity',
       icon: 'trending-up',
-      message: topPositive.insight,
+      message: topPositive.message || topPositive.insight,
       entity: topPositive.entity
     });
   }
 
   // Top negative
-  const topNegative = activityPatterns.find(p => p.sentiment === 'negative' && p.insight);
+  const topNegative = activityPatterns.find(p => p.sentiment === 'negative' && (p.insight || p.message));
   if (topNegative) {
     insights.push({
       type: 'negative_activity',
       icon: 'trending-down',
-      message: topNegative.insight,
+      message: topNegative.message || topNegative.insight,
       entity: topNegative.entity
     });
   }

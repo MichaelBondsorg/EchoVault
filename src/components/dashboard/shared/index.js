@@ -4,5 +4,7 @@ export { default as FeedbackLoop, TaskList } from './FeedbackLoop';
 export { default as QuickStatsBar } from './QuickStatsBar';
 export { default as GoalsProgress } from './GoalsProgress';
 export { default as WeeklyDigest } from './WeeklyDigest';
+export { default as NarrativeDigest } from './NarrativeDigest';
 export { default as SituationTimeline } from './SituationTimeline';
 export { default as CurrentConditions } from './CurrentConditions';
+export { default as CollapsibleSection } from './CollapsibleSection';
