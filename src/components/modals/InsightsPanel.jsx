@@ -3,11 +3,12 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   X, TrendingDown, TrendingUp, AlertTriangle, Heart, Calendar,
   Sparkles, BarChart3, Loader2, Sun, Cloud, Target,
-  AlertOctagon, Zap, Clock
+  AlertOctagon, Zap, Clock, Users, MessageSquare
 } from 'lucide-react';
 import { analyzeLongitudinalPatterns } from '../../services/safety';
 import { getAllPatterns } from '../../services/patterns/cached';
 import { addToExclusionList, getActiveExclusions } from '../../services/signals/signalLifecycle';
+import { getRotatedInsights, markInsightShown } from '../../services/patterns/insightRotation';
 
 const InsightsPanel = ({ entries, userId, category, onClose }) => {
   const [loading, setLoading] = useState(true);
@@ -54,6 +55,25 @@ const InsightsPanel = ({ entries, userId, category, onClose }) => {
   // Fallback to client-side patterns if no cached data
   const clientPatterns = useMemo(() => analyzeLongitudinalPatterns(entries), [entries]);
 
+  // Apply rotation to activity patterns for varied display order
+  const rotatedActivityPatterns = useMemo(() => {
+    if (!cachedPatterns?.activitySentiment?.length || !userId) {
+      return cachedPatterns?.activitySentiment || [];
+    }
+
+    // Convert to insight format for rotation
+    const insightsForRotation = cachedPatterns.activitySentiment
+      .filter(p => p.insight)
+      .map(p => ({
+        ...p,
+        type: p.sentiment === 'positive' ? 'positive_activity' : 'negative_activity',
+        message: p.insight
+      }));
+
+    // Get rotated order
+    return getRotatedInsights(userId, category, insightsForRotation, 10);
+  }, [cachedPatterns?.activitySentiment, userId, category]);
+
   const getPatternIcon = (type) => {
     switch (type) {
       // Temporal patterns
@@ -64,6 +84,8 @@ const InsightsPanel = ({ entries, userId, category, onClose }) => {
       // Activity sentiment
       case 'positive_activity': return <TrendingUp size={16} className="text-green-500" />;
       case 'negative_activity': return <TrendingDown size={16} className="text-red-400" />;
+      // Shadow friction (entity + context intersections)
+      case 'shadow_friction': return <Users size={16} className="text-violet-500" />;
       // Trigger patterns
       case 'trigger_correlation': return <AlertTriangle size={16} className="text-amber-500" />;
       case 'trigger': return <Zap size={16} className="text-amber-500" />;
@@ -88,6 +110,8 @@ const InsightsPanel = ({ entries, userId, category, onClose }) => {
       // Activity sentiment
       case 'positive_activity': return 'bg-green-50 border-green-200';
       case 'negative_activity': return 'bg-red-50 border-red-200';
+      // Shadow friction
+      case 'shadow_friction': return 'bg-violet-50 border-violet-200';
       // Triggers
       case 'trigger_correlation': return 'bg-amber-50 border-amber-200';
       case 'trigger': return 'bg-amber-50 border-amber-200';
@@ -233,8 +257,9 @@ const InsightsPanel = ({ entries, userId, category, onClose }) => {
   const hasActivityPatterns = cachedPatterns?.activitySentiment?.length > 0;
   const hasTemporalPatterns = cachedPatterns?.temporal?.insights;
   const hasContradictions = cachedPatterns?.contradictions?.length > 0;
+  const hasShadowFriction = cachedPatterns?.shadowFriction?.length > 0;
   const hasSummary = cachedPatterns?.summary?.length > 0;
-  const hasCachedContent = hasActivityPatterns || hasTemporalPatterns || hasContradictions || hasSummary;
+  const hasCachedContent = hasActivityPatterns || hasTemporalPatterns || hasContradictions || hasShadowFriction || hasSummary;
   const hasAnyContent = hasCachedContent || clientPatterns.length > 0;
 
   return (
@@ -318,21 +343,43 @@ const InsightsPanel = ({ entries, userId, category, onClose }) => {
                 </>
               )}
 
-              {/* Activity sentiment patterns */}
-              {hasActivityPatterns && (
+              {/* Shadow Friction - Entity + Context intersections */}
+              {hasShadowFriction && (
+                <>
+                  <SectionHeader icon={Users} title="Relationship Dynamics" color="text-violet-600" />
+                  <AnimatePresence mode="popLayout">
+                    <div className="space-y-2">
+                      {cachedPatterns.shadowFriction.slice(0, 4).map((pattern, i) => (
+                        <PatternCard
+                          key={`friction-${pattern.key || i}`}
+                          pattern={{
+                            type: 'shadow_friction',
+                            message: pattern.message || pattern.insight,
+                            entity: pattern.key,
+                            confidence: pattern.entryCount >= 3 ? 0.8 : 0.6
+                          }}
+                          index={i}
+                        />
+                      ))}
+                    </div>
+                  </AnimatePresence>
+                </>
+              )}
+
+              {/* Activity sentiment patterns - rotated for variety */}
+              {hasActivityPatterns && rotatedActivityPatterns.length > 0 && (
                 <>
                   <SectionHeader icon={TrendingUp} title="Activities & Mood" color="text-green-600" />
                   <AnimatePresence mode="popLayout">
                     <div className="space-y-2">
-                      {cachedPatterns.activitySentiment
-                        .filter(p => p.insight)
+                      {rotatedActivityPatterns
                         .slice(0, 5)
                         .map((pattern, i) => (
                           <PatternCard
-                            key={`activity-${i}`}
+                            key={`activity-${pattern.entity || i}`}
                             pattern={{
-                              type: pattern.sentiment === 'positive' ? 'positive_activity' : 'negative_activity',
-                              message: pattern.insight,
+                              type: pattern.type || (pattern.sentiment === 'positive' ? 'positive_activity' : 'negative_activity'),
+                              message: pattern.message || pattern.insight,
                               entity: pattern.entity,
                               confidence: pattern.confidence
                             }}

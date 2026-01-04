@@ -6,10 +6,12 @@
  *
  * Tasks:
  * - Refresh Core People cache (if person tags detected)
+ * - Invalidate pattern cache for fresh insights
  * - Update value alignment metrics (if relevant)
  */
 
 import { refreshCorePeopleCache } from '../social/socialTracker';
+import { invalidatePatternCache } from '../patterns/cached';
 
 // Track last cache refresh to avoid redundant updates
 let lastCacheRefresh = null;
@@ -38,6 +40,10 @@ export const runEntryPostProcessing = async ({
   if (hasPerson && shouldRefreshCache()) {
     tasks.push(refreshCorePeopleCacheBackground(userId));
   }
+
+  // Task 2: Invalidate pattern cache for immediate insight refresh
+  // This ensures the next dashboard load picks up new patterns
+  tasks.push(invalidatePatternCacheBackground(userId));
 
   // Execute all tasks (fire and forget)
   if (tasks.length > 0) {
@@ -91,6 +97,21 @@ const refreshCorePeopleCacheBackground = async (userId) => {
     console.log('[PostProcessing] Core People cache refresh complete');
   } catch (error) {
     console.error('[PostProcessing] Core People cache refresh failed:', error);
+    // Don't rethrow - this is a background task
+  }
+};
+
+/**
+ * Background pattern cache invalidation
+ * Marks patterns as stale so they recompute on next dashboard load
+ */
+const invalidatePatternCacheBackground = async (userId) => {
+  try {
+    console.log('[PostProcessing] Invalidating pattern cache...');
+    await invalidatePatternCache(userId);
+    console.log('[PostProcessing] Pattern cache invalidated');
+  } catch (error) {
+    console.error('[PostProcessing] Pattern cache invalidation failed:', error);
     // Don't rethrow - this is a background task
   }
 };

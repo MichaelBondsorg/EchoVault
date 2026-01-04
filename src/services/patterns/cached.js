@@ -8,11 +8,14 @@
 
 import { db, doc, getDoc, collection, getDocs } from '../../config/firebase';
 import { APP_COLLECTION_ID } from '../../config/constants';
-import { computeActivitySentiment, computeTemporalPatterns, computeMoodTriggers } from './index';
+import { computeActivitySentiment, computeTemporalPatterns, computeMoodTriggers, computeShadowFriction } from './index';
 import { getActiveExclusions } from '../signals/signalLifecycle';
 
 // Cache staleness threshold (6 hours)
 const CACHE_MAX_AGE_MS = 6 * 60 * 60 * 1000;
+
+// Local storage key for cache invalidation flags
+const CACHE_INVALIDATION_KEY = 'patternCacheInvalidated';
 
 /**
  * Get cached patterns for a user
@@ -281,10 +284,17 @@ export const getAllPatterns = async (userId, entries = [], category = null) => {
     console.warn('Could not load exclusions, showing all patterns:', error);
   }
 
+  // Check if cache was recently invalidated (e.g., after new entry)
+  const forceRecompute = isCacheInvalidated(userId);
+  if (forceRecompute) {
+    console.log('Cache invalidation flag detected, will recompute');
+    clearCacheInvalidation(userId);
+  }
+
   // Try to get cached patterns first
   const cached = await getCachedPatterns(userId);
 
-  if (cached && !cached._stale) {
+  if (cached && !cached._stale && !forceRecompute) {
     console.log('Using cached patterns');
 
     // Filter out excluded patterns
@@ -296,6 +306,10 @@ export const getAllPatterns = async (userId, entries = [], category = null) => {
       cached.contradictions?.data || [],
       exclusions
     );
+    const shadowFriction = filterExcludedPatterns(
+      cached.shadow_friction?.data || [],
+      exclusions
+    );
     const summary = filterExcludedPatterns(
       cached.summary?.data || [],
       exclusions
@@ -305,6 +319,7 @@ export const getAllPatterns = async (userId, entries = [], category = null) => {
       source: 'cache',
       activitySentiment,
       temporal: cached.temporal?.data || {},
+      shadowFriction,
       contradictions,
       summary,
       updatedAt: cached.summary?.updatedAt?.toDate?.() || new Date()
@@ -322,17 +337,22 @@ export const getAllPatterns = async (userId, entries = [], category = null) => {
     const temporal = computeTemporalPatterns(filteredEntries, category);
     const triggers = computeMoodTriggers(filteredEntries, category);
 
+    // Compute shadow friction (entity + context intersections)
+    let shadowFriction = computeShadowFriction(filteredEntries, category);
+
     // Filter out excluded patterns
     activitySentiment = filterExcludedPatterns(activitySentiment, exclusions);
+    shadowFriction = filterExcludedPatterns(shadowFriction, exclusions);
 
     // Generate summary from computed patterns (already filtered)
-    const summary = generateLocalSummary(activitySentiment, temporal);
+    const summary = generateLocalSummary(activitySentiment, temporal, shadowFriction);
 
     return {
       source: 'computed',
       activitySentiment,
       temporal,
       triggers,
+      shadowFriction,
       contradictions: [], // Contradictions require full analysis, skip for on-demand
       summary,
       updatedAt: new Date()
@@ -344,6 +364,7 @@ export const getAllPatterns = async (userId, entries = [], category = null) => {
     source: 'insufficient',
     activitySentiment: [],
     temporal: {},
+    shadowFriction: [],
     contradictions: [],
     summary: [],
     updatedAt: null
@@ -353,8 +374,21 @@ export const getAllPatterns = async (userId, entries = [], category = null) => {
 /**
  * Generate a local summary from computed patterns
  */
-function generateLocalSummary(activityPatterns, temporalPatterns) {
+function generateLocalSummary(activityPatterns, temporalPatterns, shadowFrictionPatterns = []) {
   const insights = [];
+
+  // Top shadow friction insight (these are often the most valuable)
+  const topShadowFriction = shadowFrictionPatterns.find(p => p.insight);
+  if (topShadowFriction) {
+    insights.push({
+      type: 'shadow_friction',
+      icon: 'users',
+      message: topShadowFriction.insight,
+      entity: topShadowFriction.key,
+      primary: topShadowFriction.primary,
+      secondary: topShadowFriction.secondary
+    });
+  }
 
   // Top positive
   const topPositive = activityPatterns.find(p => p.sentiment === 'positive' && p.insight);
@@ -394,8 +428,65 @@ function generateLocalSummary(activityPatterns, temporalPatterns) {
     });
   }
 
-  return insights.slice(0, 5);
+  return insights.slice(0, 6);
 }
+
+/**
+ * Invalidate pattern cache for a user
+ * Sets a flag that forces patterns to recompute on next load
+ *
+ * @param {string} userId - User ID
+ */
+export const invalidatePatternCache = async (userId) => {
+  if (!userId) return;
+
+  try {
+    // Set local invalidation flag with timestamp
+    const key = `${CACHE_INVALIDATION_KEY}_${userId}`;
+    localStorage.setItem(key, Date.now().toString());
+  } catch (error) {
+    console.warn('Failed to set cache invalidation flag:', error);
+  }
+};
+
+/**
+ * Check if cache is invalidated for a user
+ *
+ * @param {string} userId - User ID
+ * @returns {boolean} True if cache was recently invalidated
+ */
+export const isCacheInvalidated = (userId) => {
+  if (!userId) return false;
+
+  try {
+    const key = `${CACHE_INVALIDATION_KEY}_${userId}`;
+    const invalidatedAt = localStorage.getItem(key);
+
+    if (!invalidatedAt) return false;
+
+    // Check if invalidation is recent (within last 5 minutes)
+    const invalidationAge = Date.now() - parseInt(invalidatedAt, 10);
+    return invalidationAge < 5 * 60 * 1000;
+  } catch (error) {
+    return false;
+  }
+};
+
+/**
+ * Clear cache invalidation flag after patterns are recomputed
+ *
+ * @param {string} userId - User ID
+ */
+export const clearCacheInvalidation = (userId) => {
+  if (!userId) return;
+
+  try {
+    const key = `${CACHE_INVALIDATION_KEY}_${userId}`;
+    localStorage.removeItem(key);
+  } catch (error) {
+    console.warn('Failed to clear cache invalidation flag:', error);
+  }
+};
 
 export default {
   getCachedPatterns,
@@ -403,5 +494,8 @@ export default {
   getActivityPatterns,
   getTemporalPatterns,
   getContradictions,
-  getAllPatterns
+  getAllPatterns,
+  invalidatePatternCache,
+  isCacheInvalidated,
+  clearCacheInvalidation
 };
