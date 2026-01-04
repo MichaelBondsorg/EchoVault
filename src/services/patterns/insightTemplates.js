@@ -182,6 +182,57 @@ const getTemplateKey = (pattern) => {
 };
 
 /**
+ * Generate dynamic observation text for linguistic shifts
+ */
+const getLinguisticObservation = (data) => {
+  // If there's already a computed insight/message, use it
+  if (data.insight || data.message) {
+    return data.insight || data.message;
+  }
+
+  // Generate based on category and direction
+  const category = data.category;
+  const direction = data.direction;
+
+  const observations = {
+    obligation: {
+      decrease: 'less "should" and "must" - more self-compassion',
+      increase: 'more "should" language - are expectations building up?'
+    },
+    agency: {
+      increase: 'more "I want" and "I choose" - growing sense of ownership',
+      decrease: 'less agency language lately'
+    },
+    negative_self: {
+      decrease: 'gentler self-talk - fewer harsh absolutes',
+      increase: 'more self-critical language appearing'
+    },
+    positive_self: {
+      increase: 'more self-encouragement and acknowledgment',
+      decrease: 'less positive self-talk lately'
+    },
+    catastrophizing: {
+      decrease: 'less black-and-white thinking',
+      increase: 'more all-or-nothing language appearing'
+    },
+    growth: {
+      increase: 'more "I\'m learning" and "I realized" - reflective growth',
+      decrease: 'fewer growth-oriented observations'
+    },
+    self_compassion: {
+      increase: 'more kindness toward yourself',
+      decrease: 'less self-compassion in your words'
+    },
+    harsh_self: {
+      decrease: 'less harsh self-judgment - that\'s healthy',
+      increase: 'more critical self-talk - be gentle with yourself'
+    }
+  };
+
+  return observations[category]?.[direction] || 'a shift in your self-talk';
+};
+
+/**
  * Interpolate variables into template string
  *
  * @param {string} template - Template with {variable} placeholders
@@ -203,7 +254,7 @@ const interpolate = (template, data) => {
       case 'intersectionDescription':
         return data.insight || data.message || '';
       case 'observation':
-        return data.insight || 'less obligation, more choice';
+        return getLinguisticObservation(data);
       default:
         return match; // Keep placeholder if no data
     }

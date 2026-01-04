@@ -2898,7 +2898,8 @@ export const generateWeeklyDigests = onSchedule(
   {
     schedule: 'every monday 06:00',
     timeZone: 'America/New_York',
-    secrets: [geminiApiKey]
+    secrets: [geminiApiKey],
+    timeoutSeconds: 540 // 9 minutes max for Cloud Functions
   },
   async (event) => {
     console.log('Starting weekly digest generation...');
@@ -2911,29 +2912,53 @@ export const generateWeeklyDigests = onSchedule(
       const usersRef = db.collection('artifacts').doc(APP_COLLECTION_ID).collection('users');
       const usersSnapshot = await usersRef.get();
 
+      // Filter to users with 3+ entries this week (worth generating a digest)
+      const eligibleUsers = [];
+      const MIN_ENTRIES_FOR_DIGEST = 3;
+
+      for (const userDoc of usersSnapshot.docs) {
+        const entriesRef = userDoc.ref.collection('entries');
+        const recentEntries = await entriesRef
+          .where('createdAt', '>=', oneWeekAgo)
+          .limit(MIN_ENTRIES_FOR_DIGEST)
+          .get();
+
+        if (recentEntries.size >= MIN_ENTRIES_FOR_DIGEST) {
+          eligibleUsers.push(userDoc.id);
+        }
+      }
+
+      console.log(`Found ${eligibleUsers.length} eligible users for digest generation`);
+
+      if (eligibleUsers.length === 0) {
+        return { success: true, message: 'No eligible users', successCount: 0, errorCount: 0 };
+      }
+
+      // Process in batches of 5 for parallelization (avoid overwhelming Gemini API)
+      const BATCH_SIZE = 5;
       let successCount = 0;
       let errorCount = 0;
 
-      for (const userDoc of usersSnapshot.docs) {
-        const userId = userDoc.id;
+      for (let i = 0; i < eligibleUsers.length; i += BATCH_SIZE) {
+        const batch = eligibleUsers.slice(i, i + BATCH_SIZE);
+        console.log(`Processing batch ${Math.floor(i / BATCH_SIZE) + 1}: users ${i + 1}-${Math.min(i + BATCH_SIZE, eligibleUsers.length)} of ${eligibleUsers.length}`);
 
-        try {
-          // Check if user has recent entries
-          const entriesRef = userDoc.ref.collection('entries');
-          const recentEntries = await entriesRef
-            .where('createdAt', '>=', oneWeekAgo)
-            .limit(1)
-            .get();
+        const results = await Promise.allSettled(
+          batch.map(userId => generateUserWeeklyDigest(userId, geminiApiKey.value()))
+        );
 
-          if (recentEntries.empty) {
-            continue; // Skip users with no recent activity
+        results.forEach((result, idx) => {
+          if (result.status === 'fulfilled') {
+            successCount++;
+          } else {
+            console.error(`Error generating digest for user ${batch[idx]}:`, result.reason);
+            errorCount++;
           }
+        });
 
-          await generateUserWeeklyDigest(userId, geminiApiKey.value());
-          successCount++;
-        } catch (error) {
-          console.error(`Error generating digest for user ${userId}:`, error);
-          errorCount++;
+        // Small delay between batches to avoid rate limiting
+        if (i + BATCH_SIZE < eligibleUsers.length) {
+          await new Promise(resolve => setTimeout(resolve, 1000));
         }
       }
 

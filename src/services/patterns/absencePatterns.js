@@ -15,9 +15,10 @@
  * @param {Object[]} entries - All entries sorted by date
  * @param {Object[]} activityPatterns - Activity sentiment patterns from computeActivitySentiment
  * @param {string} category - Category filter
+ * @param {Date} referenceDate - Reference date for "now" (defaults to current time, allows testing)
  * @returns {Object[]} Array of absence patterns
  */
-export const computeAbsencePatterns = (entries, activityPatterns, category = null) => {
+export const computeAbsencePatterns = (entries, activityPatterns, category = null, referenceDate = new Date()) => {
   const filtered = category ? entries.filter(e => e.category === category) : entries;
 
   if (filtered.length < 10) {
@@ -25,14 +26,13 @@ export const computeAbsencePatterns = (entries, activityPatterns, category = nul
     return [];
   }
 
-  // Sort entries by date
-  const sorted = [...filtered].sort((a, b) => {
-    const dateA = a.effectiveDate || a.createdAt;
-    const dateB = b.effectiveDate || b.createdAt;
-    const timeA = dateA instanceof Date ? dateA.getTime() : dateA?.toDate?.()?.getTime() || 0;
-    const timeB = dateB instanceof Date ? dateB.getTime() : dateB?.toDate?.()?.getTime() || 0;
-    return timeA - timeB;
-  });
+  // Sort entries by date and pre-compute timestamps for O(1) access
+  const sorted = [...filtered]
+    .map(e => ({
+      ...e,
+      _timestamp: getEntryTimestamp(e)
+    }))
+    .sort((a, b) => a._timestamp - b._timestamp);
 
   // Get baseline mood
   const allMoods = sorted
@@ -50,13 +50,17 @@ export const computeAbsencePatterns = (entries, activityPatterns, category = nul
 
   if (positiveEntities.length === 0) return [];
 
-  // Find mood drop events
-  const moodDrops = sorted.filter(e => {
-    const mood = e.analysis?.mood_score;
-    return mood !== null && mood !== undefined && mood < moodDropThreshold;
-  });
+  // Find mood drop events with their indices for O(1) lookback
+  const moodDropsWithIndex = sorted
+    .map((e, index) => ({ entry: e, index }))
+    .filter(({ entry }) => {
+      const mood = entry.analysis?.mood_score;
+      return mood !== null && mood !== undefined && mood < moodDropThreshold;
+    });
 
-  if (moodDrops.length < 2) return [];
+  if (moodDropsWithIndex.length < 2) return [];
+
+  const WINDOW_MS = 72 * 60 * 60 * 1000; // 72 hours in ms
 
   // For each positive entity, analyze absence before drops
   const absencePatterns = [];
@@ -65,34 +69,36 @@ export const computeAbsencePatterns = (entries, activityPatterns, category = nul
     const entityTag = entity.entity;
     let absenceBeforeDropCount = 0;
     let presenceBeforeDropCount = 0;
-    const absenceWindows = [];
 
-    moodDrops.forEach(dropEntry => {
-      const dropDate = getEntryDate(dropEntry);
-      const windowStart = subtractHours(dropDate, 72); // 72 hours before drop
+    moodDropsWithIndex.forEach(({ entry: dropEntry, index: dropIndex }) => {
+      const dropTimestamp = dropEntry._timestamp;
+      const windowStart = dropTimestamp - WINDOW_MS;
 
-      // Get entries in the 72-hour window before the drop
-      const windowEntries = sorted.filter(e => {
-        const entryDate = getEntryDate(e);
-        return entryDate >= windowStart && entryDate < dropDate;
-      });
+      // Optimized: Walk backwards from dropIndex instead of filtering entire array
+      let mentionedInWindow = false;
+      let hasEntriesInWindow = false;
 
-      if (windowEntries.length === 0) return; // Skip if no entries in window
+      for (let i = dropIndex - 1; i >= 0; i--) {
+        const entryTimestamp = sorted[i]._timestamp;
 
-      // Check if entity was mentioned in window
-      const mentionedInWindow = windowEntries.some(e =>
-        e.tags?.includes(entityTag)
-      );
+        // Stop if we've gone past the window start
+        if (entryTimestamp < windowStart) break;
+
+        hasEntriesInWindow = true;
+
+        // Check if entity was mentioned
+        if (sorted[i].tags?.includes(entityTag)) {
+          mentionedInWindow = true;
+          break; // Found mention, no need to continue
+        }
+      }
+
+      if (!hasEntriesInWindow) return; // Skip if no entries in window
 
       if (mentionedInWindow) {
         presenceBeforeDropCount++;
       } else {
         absenceBeforeDropCount++;
-        absenceWindows.push({
-          dropDate,
-          windowStart,
-          entriesInWindow: windowEntries.length
-        });
       }
     });
 
@@ -105,10 +111,10 @@ export const computeAbsencePatterns = (entries, activityPatterns, category = nul
     // Only report if absence correlates with drops > 50% of the time
     if (absenceCorrelation < 0.5) return;
 
-    // Calculate hours since last mention
+    // Calculate hours since last mention (using referenceDate for testability)
     const lastMention = findLastMention(sorted, entityTag);
     const hoursSinceLastMention = lastMention
-      ? (Date.now() - getEntryDate(lastMention).getTime()) / (1000 * 60 * 60)
+      ? (referenceDate.getTime() - lastMention._timestamp) / (1000 * 60 * 60)
       : null;
 
     // Generate insight
@@ -118,7 +124,7 @@ export const computeAbsencePatterns = (entries, activityPatterns, category = nul
     let insight = null;
     let isActiveWarning = false;
 
-    // If currently in a warning window (48-96 hours since last mention)
+    // If currently in a warning window (48-120 hours since last mention)
     if (hoursSinceLastMention !== null && hoursSinceLastMention > 48 && hoursSinceLastMention < 120) {
       insight = `It's been ${Math.round(hoursSinceLastMention / 24)} days since ${entityName}. Based on your patterns, this sometimes precedes a dip.`;
       isActiveWarning = true;
@@ -154,22 +160,18 @@ export const computeAbsencePatterns = (entries, activityPatterns, category = nul
 };
 
 /**
- * Get date from entry (handles Firestore timestamps)
+ * Get timestamp from entry (handles Firestore timestamps)
+ * Returns milliseconds since epoch for efficient comparison
  */
-const getEntryDate = (entry) => {
+const getEntryTimestamp = (entry) => {
   const dateField = entry.effectiveDate || entry.createdAt;
-  return dateField instanceof Date ? dateField : dateField?.toDate?.() || new Date();
+  if (dateField instanceof Date) return dateField.getTime();
+  if (dateField?.toDate) return dateField.toDate().getTime();
+  return 0;
 };
 
 /**
- * Subtract hours from a date
- */
-const subtractHours = (date, hours) => {
-  return new Date(date.getTime() - hours * 60 * 60 * 1000);
-};
-
-/**
- * Find last mention of an entity in entries
+ * Find last mention of an entity in entries (with pre-computed timestamps)
  */
 const findLastMention = (sortedEntries, entityTag) => {
   // Entries should be sorted ascending, so reverse to find most recent

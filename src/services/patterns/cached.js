@@ -301,7 +301,7 @@ export const getAllPatterns = async (userId, entries = [], category = null) => {
     console.log('Using cached patterns');
 
     // Filter out excluded patterns
-    const activitySentiment = filterExcludedPatterns(
+    let activitySentiment = filterExcludedPatterns(
       cached.activity_sentiment?.data || [],
       exclusions
     );
@@ -309,15 +309,15 @@ export const getAllPatterns = async (userId, entries = [], category = null) => {
       cached.contradictions?.data || [],
       exclusions
     );
-    const shadowFriction = filterExcludedPatterns(
+    let shadowFriction = filterExcludedPatterns(
       cached.shadow_friction?.data || [],
       exclusions
     );
-    const absenceWarnings = filterExcludedPatterns(
+    let absenceWarnings = filterExcludedPatterns(
       cached.absence_warnings?.data || [],
       exclusions
     );
-    const linguisticShifts = filterExcludedPatterns(
+    let linguisticShifts = filterExcludedPatterns(
       cached.linguistic_shifts?.data || [],
       exclusions
     );
@@ -325,6 +325,12 @@ export const getAllPatterns = async (userId, entries = [], category = null) => {
       cached.summary?.data || [],
       exclusions
     );
+
+    // Apply hypothesis framing consistently (same as on-demand computation)
+    activitySentiment = toHypothesisStyle(activitySentiment);
+    shadowFriction = toHypothesisStyle(shadowFriction);
+    absenceWarnings = toHypothesisStyle(absenceWarnings);
+    linguisticShifts = toHypothesisStyle(linguisticShifts);
 
     return {
       source: 'cache',

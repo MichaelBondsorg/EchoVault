@@ -135,8 +135,19 @@ const InsightsPanel = ({ entries, userId, category, onClose }) => {
   };
 
   // Generate a unique key for a pattern (for dismissal tracking)
+  // Uses multiple fields to avoid collision when messages start similarly
   const getPatternKey = (pattern) => {
-    return `${pattern.type}:${pattern.entity || ''}:${(pattern.message || pattern.insight || '').slice(0, 50)}`;
+    const type = pattern.type || 'unknown';
+    const entity = pattern.entity || pattern.entityName || '';
+    const message = pattern.message || pattern.insight || '';
+    const category = pattern.category || '';
+
+    // Create a simple hash from the full message to avoid collisions
+    const msgHash = message.split('').reduce((acc, char) => {
+      return ((acc << 5) - acc) + char.charCodeAt(0);
+    }, 0).toString(36);
+
+    return `${type}:${entity}:${category}:${msgHash}`;
   };
 
   // Show dismiss options for a pattern

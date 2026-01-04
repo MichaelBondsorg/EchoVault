@@ -206,24 +206,26 @@ export const computeLinguisticPatterns = (entries, category = null, windowDays =
     if (Math.abs(changePercent) < 20) return;
 
     const config = LINGUISTIC_MARKERS[key];
-    const insight = generateLinguisticInsight(key, changePercent, config);
+    const direction = changePercent > 0 ? 'increase' : 'decrease';
+    const sentiment = determineSentiment(key, changePercent);
 
-    if (!insight) return;
-
+    // Store raw data - let insightTemplates.js handle formatting
+    // This avoids double-wrapping messages in hypothesis templates
     patterns.push({
       type: 'linguistic_shift',
       category: key,
       valence: config.valence,
-      direction: changePercent > 0 ? 'increase' : 'decrease',
+      direction,
       changePercent: Math.abs(changePercent),
       currentRate: Number(currentRate.toFixed(2)),
       previousRate: Number(previousRate.toFixed(2)),
       currentCount: currentCounts[key] || 0,
       previousCount: previousCounts[key] || 0,
       windowDays,
-      insight,
-      message: insight,
-      sentiment: determineSentiment(key, changePercent)
+      sentiment,
+      // Raw data for template interpolation (no pre-formatted insight)
+      // insightTemplates.js will generate the final message
+      entityName: getCategoryDisplayName(key)
     });
   });
 
@@ -240,48 +242,20 @@ const getEntryDate = (entry) => {
 };
 
 /**
- * Generate insight text for a linguistic shift
+ * Get display name for a category
  */
-const generateLinguisticInsight = (category, changePercent, config) => {
-  const direction = changePercent > 0 ? 'increase' : 'decrease';
-  const absChange = Math.abs(changePercent);
-
-  const templates = {
-    obligation: {
-      decrease: `You've used ${absChange}% fewer "should" and "must" statements - a shift toward self-compassion`,
-      increase: `"Should" and "must" language has increased ${absChange}% - you may be putting pressure on yourself`
-    },
-    agency: {
-      increase: `More "I want to" and "I choose to" language (+${absChange}%) suggests growing sense of autonomy`,
-      decrease: `"I want" language has dropped ${absChange}% - feeling less in control lately?`
-    },
-    negative_self: {
-      decrease: `Negative self-talk has dropped ${absChange}% - you're being gentler with yourself`,
-      increase: `Noticing more self-critical language (+${absChange}%) - might be worth some extra self-care`
-    },
-    positive_self: {
-      increase: `Positive self-statements are up ${absChange}% - your self-talk is becoming more supportive`,
-      decrease: `Positive self-talk has decreased ${absChange}% - how are you feeling about yourself?`
-    },
-    catastrophizing: {
-      decrease: `"Everything/nothing" language has dropped ${absChange}% - less black-and-white thinking`,
-      increase: `All-or-nothing language is up ${absChange}% - noticing any overwhelm?`
-    },
-    growth: {
-      increase: `Growth-oriented language has increased ${absChange}% - you're in a learning mindset`,
-      decrease: `Growth language has decreased ${absChange}% - feeling stuck?`
-    },
-    self_compassion: {
-      increase: `Self-compassion language is up ${absChange}% - you're treating yourself more kindly`,
-      decrease: `Self-compassion phrases have dropped ${absChange}% - remember to be gentle with yourself`
-    },
-    harsh_self: {
-      decrease: `Harsh self-criticism has dropped ${absChange}% - your inner voice is softening`,
-      increase: `Noticing more harsh self-talk (+${absChange}%) - that inner critic is loud right now`
-    }
+const getCategoryDisplayName = (category) => {
+  const names = {
+    obligation: 'obligation language',
+    agency: 'agency language',
+    negative_self: 'negative self-talk',
+    positive_self: 'positive self-talk',
+    catastrophizing: 'all-or-nothing thinking',
+    growth: 'growth mindset',
+    self_compassion: 'self-compassion',
+    harsh_self: 'self-criticism'
   };
-
-  return templates[category]?.[direction] || null;
+  return names[category] || category;
 };
 
 /**
