@@ -3189,3 +3189,114 @@ ${data.activityPatterns.slice(0, 3).map(a => `- ${a.insight}`).join('\n')}
 
 Write a warm, personalized narrative that synthesizes these insights into a cohesive story of the week. Focus on the emotional journey and any growth or challenges observed.`;
 }
+
+// ============================================
+// ONE-TIME REPROCESS FUNCTION
+// ============================================
+
+/**
+ * One-time function to reprocess existing entries for improved goal extraction
+ * Call this once after deploying the updated extractEnhancedContext logic
+ */
+export const reprocessEntriesForGoals = onCall(
+  {
+    cors: true,
+    secrets: [geminiApiKey],
+    timeoutSeconds: 540, // 9 minutes max
+    maxInstances: 1 // Only one instance at a time
+  },
+  async (request) => {
+    const uid = request.auth?.uid;
+    if (!uid) {
+      throw new HttpsError('unauthenticated', 'Must be logged in');
+    }
+
+    const apiKey = geminiApiKey.value();
+    if (!apiKey) {
+      throw new HttpsError('failed-precondition', 'API key not configured');
+    }
+
+    console.log(`Starting goal reprocessing for user: ${uid}`);
+
+    const entriesRef = db
+      .collection('artifacts')
+      .doc(APP_COLLECTION_ID)
+      .collection('users')
+      .doc(uid)
+      .collection('entries');
+
+    const snapshot = await entriesRef.get();
+
+    let processed = 0;
+    let updated = 0;
+    let goalsFound = 0;
+    const errors = [];
+
+    for (const doc of snapshot.docs) {
+      const entry = doc.data();
+      const text = entry.text || '';
+
+      // Skip empty entries
+      if (!text.trim()) continue;
+
+      processed++;
+
+      try {
+        // Build recent entries context (simplified - just use empty for reprocessing)
+        const recentEntriesContext = '';
+
+        // Re-run enhanced context extraction
+        const enhancedContext = await extractEnhancedContext(apiKey, text, recentEntriesContext);
+
+        // Check if we found any goals
+        const goalTags = (enhancedContext.structured_tags || []).filter(tag =>
+          tag.toLowerCase().startsWith('@goal:')
+        );
+
+        if (goalTags.length > 0) {
+          goalsFound += goalTags.length;
+        }
+
+        // Get existing tags to merge
+        const existingTags = entry.analysis?.enhancedContext?.structured_tags || [];
+        const existingNonGoalTags = existingTags.filter(tag =>
+          !tag.toLowerCase().startsWith('@goal:')
+        );
+
+        // Merge: keep existing non-goal tags, add new goal tags
+        const mergedTags = [...new Set([...existingNonGoalTags, ...enhancedContext.structured_tags])];
+
+        // Update if we have new tags
+        const hasNewTags = enhancedContext.structured_tags.some(tag => !existingTags.includes(tag));
+
+        if (hasNewTags) {
+          await doc.ref.update({
+            'analysis.enhancedContext.structured_tags': mergedTags,
+            'analysis.enhancedContext.goal_update': enhancedContext.goal_update,
+            'tags': mergedTags // Also update top-level tags
+          });
+          updated++;
+          console.log(`Updated entry ${doc.id}: found ${goalTags.length} goals`);
+        }
+
+        // Rate limiting - small delay between API calls
+        await new Promise(resolve => setTimeout(resolve, 200));
+
+      } catch (error) {
+        console.error(`Error processing entry ${doc.id}:`, error);
+        errors.push({ entryId: doc.id, error: error.message });
+      }
+    }
+
+    const result = {
+      processed,
+      updated,
+      goalsFound,
+      errors: errors.length,
+      errorDetails: errors.slice(0, 5) // Only return first 5 errors
+    };
+
+    console.log('Reprocessing complete:', result);
+    return result;
+  }
+);
