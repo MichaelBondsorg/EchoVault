@@ -8,3 +8,8 @@ export { default as NarrativeDigest } from './NarrativeDigest';
 export { default as SituationTimeline } from './SituationTimeline';
 export { default as CurrentConditions } from './CurrentConditions';
 export { default as CollapsibleSection } from './CollapsibleSection';
+export { default as TasksSection } from './TasksSection';
+export { default as WinsSection } from './WinsSection';
+export { default as PeopleSection } from './PeopleSection';
+export { default as InsightsSection } from './InsightsSection';
+export { default as SelfTalkSection } from './SelfTalkSection';

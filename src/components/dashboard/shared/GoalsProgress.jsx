@@ -1,9 +1,10 @@
 import React, { useMemo, useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Target, ChevronDown, TrendingUp, Check, AlertTriangle, Pause, X } from 'lucide-react';
+import { Target, TrendingUp, Check, AlertTriangle, Pause, X } from 'lucide-react';
 import { db, doc, setDoc, Timestamp } from '../../../config/firebase';
 import { getDoc } from 'firebase/firestore';
 import { APP_COLLECTION_ID } from '../../../config/constants';
+import CollapsibleSection from './CollapsibleSection';
 
 /**
  * GoalsProgress - Collapsible section showing active goals with status tracking
@@ -18,7 +19,6 @@ import { APP_COLLECTION_ID } from '../../../config/constants';
  */
 
 const GoalsProgress = ({ entries, category, userId }) => {
-  const [isExpanded, setIsExpanded] = useState(true);
   const [dismissedGoals, setDismissedGoals] = useState(new Set());
   const [loadingDismissed, setLoadingDismissed] = useState(true);
 
@@ -195,97 +195,64 @@ const GoalsProgress = ({ entries, category, userId }) => {
   const completedGoals = goals.filter(g => g.status === 'achieved');
 
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 10 }}
-      animate={{ opacity: 1, y: 0 }}
-      className="bg-gradient-to-br from-primary-50 to-secondary-50 rounded-2xl border border-primary-100 overflow-hidden mb-4"
+    <CollapsibleSection
+      title="Goals"
+      icon={Target}
+      colorScheme="blue"
+      defaultExpanded={false}
     >
-      {/* Header */}
-      <button
-        onClick={() => setIsExpanded(!isExpanded)}
-        className="w-full flex items-center justify-between p-4 hover:bg-white/30 transition-colors"
-      >
-        <div className="flex items-center gap-2">
-          <div className="p-1.5 rounded-lg bg-primary-100">
-            <Target size={14} className="text-primary-600" />
-          </div>
-          <div className="text-left">
-            <h3 className="text-sm font-display font-semibold text-primary-800">
-              Your Goals
-            </h3>
-            <p className="text-xs text-primary-600">
-              {activeGoals.length} active{completedGoals.length > 0 ? ` · ${completedGoals.length} achieved` : ''}
-            </p>
-          </div>
-        </div>
-        <motion.div
-          animate={{ rotate: isExpanded ? 180 : 0 }}
-          transition={{ duration: 0.2 }}
-        >
-          <ChevronDown size={18} className="text-primary-400" />
-        </motion.div>
-      </button>
-
-      {/* Goals List */}
-      <AnimatePresence>
-        {isExpanded && (
+      <div className="space-y-2">
+        {goals.map((goal, index) => (
           <motion.div
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: 'auto', opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            transition={{ duration: 0.2 }}
-            className="overflow-hidden"
+            key={goal.tag}
+            initial={{ opacity: 0, x: -10 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: 10, height: 0 }}
+            transition={{ delay: index * 0.05 }}
+            className={`p-3 rounded-xl border ${getStatusColor(goal.status)} group relative`}
           >
-            <div className="px-4 pb-4 space-y-2">
-              {goals.map((goal, index) => (
-                <motion.div
-                  key={goal.tag}
-                  initial={{ opacity: 0, x: -10 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  exit={{ opacity: 0, x: 10, height: 0 }}
-                  transition={{ delay: index * 0.05 }}
-                  className={`p-3 rounded-xl border ${getStatusColor(goal.status)} group relative`}
+            <div className="flex items-start justify-between gap-2">
+              <div className="flex items-start gap-2 flex-1 min-w-0">
+                <div className="mt-0.5">
+                  {getStatusIcon(goal.status)}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium truncate capitalize">
+                    {goal.name}
+                  </p>
+                  <p className="text-xs opacity-70 mt-0.5">
+                    {goal.mentionCount} mention{goal.mentionCount !== 1 ? 's' : ''} · last {formatDate(goal.lastMentioned)}
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-1">
+                <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full bg-white/50`}>
+                  {getStatusLabel(goal.status)}
+                </span>
+                {/* Dismiss button - visible on hover */}
+                <motion.button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    dismissGoal(goal.tag);
+                  }}
+                  className="p-1 rounded-full opacity-0 group-hover:opacity-100 hover:bg-white/50 transition-all"
+                  whileHover={{ scale: 1.1 }}
+                  whileTap={{ scale: 0.9 }}
+                  title="Dismiss goal"
                 >
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="flex items-start gap-2 flex-1 min-w-0">
-                      <div className="mt-0.5">
-                        {getStatusIcon(goal.status)}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium truncate capitalize">
-                          {goal.name}
-                        </p>
-                        <p className="text-xs opacity-70 mt-0.5">
-                          {goal.mentionCount} mention{goal.mentionCount !== 1 ? 's' : ''} · last {formatDate(goal.lastMentioned)}
-                        </p>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-1">
-                      <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full bg-white/50`}>
-                        {getStatusLabel(goal.status)}
-                      </span>
-                      {/* Dismiss button - visible on hover */}
-                      <motion.button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          dismissGoal(goal.tag);
-                        }}
-                        className="p-1 rounded-full opacity-0 group-hover:opacity-100 hover:bg-white/50 transition-all"
-                        whileHover={{ scale: 1.1 }}
-                        whileTap={{ scale: 0.9 }}
-                        title="Dismiss goal"
-                      >
-                        <X size={12} className="text-warm-400 hover:text-warm-600" />
-                      </motion.button>
-                    </div>
-                  </div>
-                </motion.div>
-              ))}
+                  <X size={12} className="text-warm-400 hover:text-warm-600" />
+                </motion.button>
+              </div>
             </div>
           </motion.div>
-        )}
-      </AnimatePresence>
-    </motion.div>
+        ))}
+
+        {/* Summary footer */}
+        <div className="text-xs text-blue-600 pt-2 border-t border-blue-100">
+          {activeGoals.length} active{completedGoals.length > 0 ? ` · ${completedGoals.length} achieved` : ''}
+        </div>
+      </div>
+    </CollapsibleSection>
   );
 };
 
