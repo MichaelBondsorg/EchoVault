@@ -7,3 +7,4 @@ export { default as WeeklyDigest } from './WeeklyDigest';
 export { default as NarrativeDigest } from './NarrativeDigest';
 export { default as SituationTimeline } from './SituationTimeline';
 export { default as CurrentConditions } from './CurrentConditions';
+export { default as CollapsibleSection } from './CollapsibleSection';
