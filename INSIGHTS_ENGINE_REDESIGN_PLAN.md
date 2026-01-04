@@ -17,10 +17,10 @@ The redesign introduces **4 Power Tiers** of insights, fixes the staleness probl
 | 1 | Staleness Fix (rotation + cache invalidation) | ✅ **COMPLETE** |
 | 2 | Shadow Friction (entity + topic intersections) | ✅ **COMPLETE** |
 | 3 | Compound Triggers (health + context joins) | ⏳ Deferred (pending HealthKit stabilization) |
-| 4 | Pre-emptive Warnings (absence detection) | 📋 Planned |
-| 5 | Linguistic Shifts (self-talk analysis) | 📋 Planned |
-| 6 | Narrative Summary (AI digest) | 📋 Planned |
-| 7 | Hypothesis Framing | 📋 Planned |
+| 4 | Pre-emptive Warnings (absence detection) | ✅ **COMPLETE** |
+| 5 | Linguistic Shifts (self-talk analysis) | ✅ **COMPLETE** |
+| 6 | Narrative Summary (AI digest) | ✅ **COMPLETE** |
+| 7 | Hypothesis Framing | ✅ **COMPLETE** |
 
 ### Completed Files
 
@@ -35,6 +35,27 @@ The redesign introduces **4 Power Tiers** of insights, fixes the staleness probl
 - `src/services/patterns/index.js` - Added `computeShadowFriction()`
 - `src/services/patterns/cached.js` - Integrated shadow friction
 - `src/components/modals/InsightsPanel.jsx` - Added "Relationship Dynamics" section
+
+**Phase 4:**
+- `src/services/patterns/absencePatterns.js` (new) - Absence pattern detection with pre-emptive warnings
+- `src/services/patterns/cached.js` - Integrated absence warnings
+
+**Phase 5:**
+- `src/services/patterns/linguisticPatterns.js` (new) - Self-talk analysis tracking 8 linguistic categories
+- `src/services/patterns/cached.js` - Integrated linguistic shifts
+
+**Phase 6:**
+- `src/components/dashboard/shared/NarrativeDigest.jsx` (new) - Weekly narrative UI component
+- `src/components/dashboard/shared/index.js` - Added NarrativeDigest export
+- `functions/index.js` - Added `generateWeeklyDigests` Cloud Function (Monday 6am scheduled)
+
+**Phase 7:**
+- `src/services/patterns/insightTemplates.js` (new) - Hypothesis vs statement templates for all insight types
+- `src/services/patterns/cached.js` - Applied hypothesis framing via `toHypothesisStyle()`
+
+**Integration:**
+- `src/services/patterns/cached.js` - Full integration of all new patterns
+- `src/components/modals/InsightsPanel.jsx` - Added "Heads Up" (absence warnings) and "Your Self-Talk" (linguistic shifts) sections
 
 ---
 
