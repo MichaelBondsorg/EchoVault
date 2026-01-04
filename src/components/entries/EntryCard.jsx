@@ -6,7 +6,7 @@ import {
   Sun, Moon, Cloud, CloudRain, CloudSnow, CloudLightning, CloudFog, CloudDrizzle, CloudSun, CloudMoon,
   Thermometer, Activity, BedDouble
 } from 'lucide-react';
-import { safeString } from '../../utils/string';
+import { safeString, formatMentions } from '../../utils/string';
 import { formatDateForInput, getTodayForInput, parseDateInput, getDateString } from '../../utils/date';
 
 // Weather icon mapping
@@ -57,7 +57,7 @@ const EntryCard = ({ entry, onDelete, onUpdate }) => {
     setEditDate(formatDateForInput(entry.effectiveDate || entry.createdAt));
   }, [entry.effectiveDate, entry.createdAt]);
 
-  const insightMsg = entry.contextualInsight?.message ? safeString(entry.contextualInsight.message) : null;
+  const insightMsg = entry.contextualInsight?.message ? formatMentions(safeString(entry.contextualInsight.message)) : null;
   const cbt = entry.analysis?.cbt_breakdown;
   const actAnalysis = entry.analysis?.act_analysis;
   const ventSupport = entry.analysis?.vent_support;
