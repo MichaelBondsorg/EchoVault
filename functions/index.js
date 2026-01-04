@@ -116,10 +116,13 @@ async function callOpenAI(apiKey, systemPrompt, userPrompt) {
 async function classifyEntry(apiKey, text) {
   const prompt = `
     Classify this journal entry into ONE of these types:
-    - "task": Pure task/todo list, no emotional content (e.g., "Need to buy groceries, call mom")
-    - "mixed": Contains both tasks AND emotional reflection (e.g., "Feeling stressed about the deadline, need to finish report")
-    - "reflection": Emotional processing, self-reflection, no tasks (e.g., "I've been thinking about my relationship...")
+    - "task": Pure task/todo list with specific one-time actions (e.g., "Need to buy groceries, call mom, submit report by Friday")
+    - "mixed": Contains both specific tasks AND emotional reflection (e.g., "Feeling stressed about the deadline, need to finish report")
+    - "reflection": Emotional processing, self-reflection, goal-setting, or intentions - no concrete one-time tasks (e.g., "I've been thinking about my relationship...", "My goals are to exercise more...")
     - "vent": Emotional release, dysregulated state, needs validation not advice (e.g., "I can't take this anymore, everything is falling apart")
+
+    NOTE: Entries about goals, intentions, resolutions, or habits should be classified as "reflection" NOT "task".
+    Goals like "work out every day" or "eat healthier" are ongoing intentions, not one-time tasks.
 
     Return JSON only:
     {
@@ -138,11 +141,16 @@ async function classifyEntry(apiKey, text) {
     }
 
     TASK EXTRACTION RULES (only for task/mixed types):
-    - Extract ONLY explicit tasks/to-dos
+    - Extract ONLY explicit, concrete, one-time tasks/to-dos
     - Keep text concise (verb + object)
     - SKIP vague intentions ("I should exercise more" → NOT a task)
     - SKIP emotional statements ("I need to feel better" → NOT a task)
-    - If no clear tasks, return empty array
+    - SKIP ongoing goals or habits ("work out every day", "eat healthier" → NOT tasks, these are GOALS)
+    - SKIP aspirational statements ("My goals are to..." → NOT tasks, these are GOALS)
+    - Tasks are specific actions: "Buy groceries", "Call doctor", "Submit report"
+    - Goals are ongoing intentions: "Exercise more", "Work out daily", "Save money"
+    - If entry starts with "My goal(s)" or discusses intentions/resolutions, return empty array
+    - If no clear one-time tasks, return empty array
 
     RECURRENCE DETECTION:
     - Look for patterns like "every day", "weekly", "every two weeks", "biweekly", "monthly", "every X days/weeks/months"
@@ -440,8 +448,13 @@ async function extractEnhancedContext(apiKey, text, recentEntriesContext = '') {
        - Examples: @topic:work_stress, @topic:relationship, @topic:health, @topic:finances
 
     8. GOALS/INTENTIONS (@goal:description)
-       - Explicit goals: "I want to...", "I need to...", "I'm going to..."
-       - Examples: @goal:exercise_more, @goal:speak_up_at_work
+       - Explicit goals stated in any form:
+         * "I want to...", "I need to...", "I'm going to...", "I plan to..."
+         * "My goal is...", "My goals are...", "This week I want to..."
+         * "I aim to...", "I hope to...", "I'm trying to..."
+         * Any statement expressing a desired outcome or target
+       - Create SEPARATE tags for each distinct goal mentioned
+       - Examples: @goal:exercise_more, @goal:speak_up_at_work, @goal:do_pilates, @goal:work_out_daily
 
     9. ONGOING SITUATIONS (@situation:description)
        - Multi-day events or circumstances
@@ -508,16 +521,27 @@ async function generateInsight(apiKey, currentText, historyContext, moodTrajecto
     ${moodContext}${cyclicalContext}
 
     INSIGHT TYPES (choose the most appropriate):
-    - "warning": Negative pattern recurring (same trigger → same negative outcome)
-    - "encouragement": User showing resilience or growth compared to past
-    - "pattern": Neutral observation of recurring theme
-    - "reminder": Direct callback to something user mentioned before
+    - "encouragement": User showing resilience or growth compared to past (PREFERRED)
     - "progress": Positive trend or improvement over time
     - "streak": Consistent positive behavior (3+ occurrences)
+    - "pattern": Neutral observation of recurring theme
+    - "reminder": Direct callback to something user mentioned before
     - "absence": Something negative that used to appear frequently but hasn't lately
-    - "contradiction": User's current behavior contradicts their self-statement (use gently!)
     - "goal_check": Follow-up on a previously stated goal
     - "cyclical": Day-of-week or time-based pattern observation
+    - "contradiction": User's current behavior contradicts their self-statement (use gently!)
+    - "warning": ONLY for clear, actionable patterns where intervention could help
+
+    CRITICAL - RELEVANCE RULE:
+    The insight MUST be directly relevant to what the user wrote in their CURRENT entry.
+    Do NOT surface warnings about topics unrelated to the current entry.
+    If the current entry is about fitness goals, don't show warnings about relationships.
+
+    CRITICAL - BALANCED PERSPECTIVE:
+    Be pragmatic and non-judgmental about lifestyle choices.
+    Acknowledge complexity - anxiety about a topic doesn't make the topic bad.
+    Focus on the user's emotional experience, not the topic itself.
+    If the user is processing feelings about something, support that processing.
 
     TEMPORAL REFERENCE RESOLUTION (CRITICAL):
     Entries use relative time references like "yesterday", "last night", "tomorrow", "tonight", etc.
@@ -532,11 +556,11 @@ async function generateInsight(apiKey, currentText, historyContext, moodTrajecto
 
     TIME-BOXING RULES (CRITICAL):
     - "Recurring theme" requires 3+ mentions within 14 days
-    - "Warning" patterns should be within 7 days
+    - "Warning" patterns should be within 7 days AND be directly relevant to current entry
     - "Progress/streak" should compare against 30 days ago
     - Don't flag patterns from entries older than 60 days unless truly significant
 
-    If the connection feels forced, weak, or the entries are too old, return { "found": false }.
+    If the connection feels forced, weak, unrelated to the current entry, or the entries are too old, return { "found": false }.
 
     Output JSON:
     {
@@ -3165,3 +3189,114 @@ ${data.activityPatterns.slice(0, 3).map(a => `- ${a.insight}`).join('\n')}
 
 Write a warm, personalized narrative that synthesizes these insights into a cohesive story of the week. Focus on the emotional journey and any growth or challenges observed.`;
 }
+
+// ============================================
+// ONE-TIME REPROCESS FUNCTION
+// ============================================
+
+/**
+ * One-time function to reprocess existing entries for improved goal extraction
+ * Call this once after deploying the updated extractEnhancedContext logic
+ */
+export const reprocessEntriesForGoals = onCall(
+  {
+    cors: true,
+    secrets: [geminiApiKey],
+    timeoutSeconds: 540, // 9 minutes max
+    maxInstances: 1 // Only one instance at a time
+  },
+  async (request) => {
+    const uid = request.auth?.uid;
+    if (!uid) {
+      throw new HttpsError('unauthenticated', 'Must be logged in');
+    }
+
+    const apiKey = geminiApiKey.value();
+    if (!apiKey) {
+      throw new HttpsError('failed-precondition', 'API key not configured');
+    }
+
+    console.log(`Starting goal reprocessing for user: ${uid}`);
+
+    const entriesRef = db
+      .collection('artifacts')
+      .doc(APP_COLLECTION_ID)
+      .collection('users')
+      .doc(uid)
+      .collection('entries');
+
+    const snapshot = await entriesRef.get();
+
+    let processed = 0;
+    let updated = 0;
+    let goalsFound = 0;
+    const errors = [];
+
+    for (const doc of snapshot.docs) {
+      const entry = doc.data();
+      const text = entry.text || '';
+
+      // Skip empty entries
+      if (!text.trim()) continue;
+
+      processed++;
+
+      try {
+        // Build recent entries context (simplified - just use empty for reprocessing)
+        const recentEntriesContext = '';
+
+        // Re-run enhanced context extraction
+        const enhancedContext = await extractEnhancedContext(apiKey, text, recentEntriesContext);
+
+        // Check if we found any goals
+        const goalTags = (enhancedContext.structured_tags || []).filter(tag =>
+          tag.toLowerCase().startsWith('@goal:')
+        );
+
+        if (goalTags.length > 0) {
+          goalsFound += goalTags.length;
+        }
+
+        // Get existing tags to merge
+        const existingTags = entry.analysis?.enhancedContext?.structured_tags || [];
+        const existingNonGoalTags = existingTags.filter(tag =>
+          !tag.toLowerCase().startsWith('@goal:')
+        );
+
+        // Merge: keep existing non-goal tags, add new goal tags
+        const mergedTags = [...new Set([...existingNonGoalTags, ...enhancedContext.structured_tags])];
+
+        // Update if we have new tags
+        const hasNewTags = enhancedContext.structured_tags.some(tag => !existingTags.includes(tag));
+
+        if (hasNewTags) {
+          await doc.ref.update({
+            'analysis.enhancedContext.structured_tags': mergedTags,
+            'analysis.enhancedContext.goal_update': enhancedContext.goal_update,
+            'tags': mergedTags // Also update top-level tags
+          });
+          updated++;
+          console.log(`Updated entry ${doc.id}: found ${goalTags.length} goals`);
+        }
+
+        // Rate limiting - small delay between API calls
+        await new Promise(resolve => setTimeout(resolve, 200));
+
+      } catch (error) {
+        console.error(`Error processing entry ${doc.id}:`, error);
+        errors.push({ entryId: doc.id, error: error.message });
+      }
+    }
+
+    const result = {
+      processed,
+      updated,
+      goalsFound,
+      errors: errors.length,
+      errorDetails: errors.slice(0, 5) // Only return first 5 errors
+    };
+
+    console.log('Reprocessing complete:', result);
+    return result;
+  }
+);
