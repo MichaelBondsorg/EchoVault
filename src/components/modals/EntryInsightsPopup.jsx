@@ -44,33 +44,36 @@ const EntryInsightsPopup = ({
 
   const validation = getValidation();
 
-  // Determine if pattern insight is worth showing
-  // Skip generic "encouragement" which can feel hollow/dismissive
-  const isInsightWorthShowing = () => {
-    if (!insight?.found || !insight?.message) return false;
-    // Skip encouragement type - often feels like toxic positivity
-    if (insight.type === 'encouragement') return false;
-    // Show meaningful pattern insights
-    return ['progress', 'streak', 'absence', 'warning', 'pattern', 'goal_check', 'cyclical', 'contradiction'].includes(insight.type);
-  };
-
-  const showPatternInsight = isInsightWorthShowing();
-
-  // Don't show popup if there's nothing meaningful to display
+  // Check what therapeutic content is available
   const hasValidation = !!validation;
   const hasCelebration = framework === 'celebration' && celebration?.affirmation;
   const hasTherapeutic = (framework === 'cbt' && cbt?.perspective) ||
                          (framework === 'act' && actAnalysis?.defusion_phrase);
-  const hasContent = hasValidation || hasCelebration || hasTherapeutic || showPatternInsight;
+  const hasVentCooldown = framework === 'support' && ventSupport?.cooldown;
+
+  // Determine if pattern insight is worth showing as primary content
+  const isMeaningfulInsight = insight?.found && insight?.message &&
+    ['progress', 'streak', 'absence', 'warning', 'pattern', 'goal_check', 'cyclical', 'contradiction'].includes(insight.type);
+
+  // "Encouragement" insights shown only as fallback when nothing else exists
+  const hasEncouragement = insight?.found && insight?.message && insight.type === 'encouragement';
+  const needsFallback = !hasValidation && !hasCelebration && !hasTherapeutic && !hasVentCooldown && !isMeaningfulInsight;
+  const showEncouragementAsFallback = needsFallback && hasEncouragement;
+
+  // Determine what to show
+  const showPatternInsight = isMeaningfulInsight;
+  const hasContent = hasValidation || hasCelebration || hasTherapeutic || hasVentCooldown ||
+                     showPatternInsight || showEncouragementAsFallback;
 
   if (!hasContent) return null;
 
   // Dynamic header based on content type
   const getHeaderTitle = () => {
     if (hasValidation || hasCelebration) return 'Heard';
-    if (framework === 'act') return 'A thought';
+    if (framework === 'act' && actAnalysis?.defusion_phrase) return 'A thought';
     if (framework === 'cbt' && cbt?.perspective) return 'Perspective';
     if (showPatternInsight) return 'Pattern';
+    if (showEncouragementAsFallback) return 'Noted';
     return 'Reflection';
   };
 
@@ -319,6 +322,20 @@ const EntryInsightsPopup = ({
                 </motion.div>
               );
             })()}
+
+            {/* 5. FALLBACK - Encouragement when nothing else is available */}
+            {/* Styled more subtly since it's not primary content */}
+            {showEncouragementAsFallback && (
+              <motion.div
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="bg-warm-50 p-4 rounded-2xl border border-warm-100"
+              >
+                <p className="text-sm text-warm-600 font-body leading-relaxed">
+                  {formatMentions(safeString(insight.message))}
+                </p>
+              </motion.div>
+            )}
           </div>
 
           {/* Dismiss button */}
