@@ -2,7 +2,7 @@ import React from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   X, Heart, TrendingUp, Sparkles, AlertTriangle,
-  RefreshCw, Target, Calendar, Brain, Wind, Compass, Footprints
+  RefreshCw, Target, Calendar, Brain, Wind, Footprints, HelpCircle
 } from 'lucide-react';
 import { safeString, formatMentions } from '../../utils/string';
 
@@ -62,10 +62,13 @@ const EntryInsightsPopup = ({
   const needsFallback = !hasValidation && !hasCelebration && !hasTherapeutic && !hasVentCooldown && !isMeaningfulInsight;
   const showEncouragementAsFallback = needsFallback && hasEncouragement;
 
+  // Check for follow-up questions
+  const hasFollowUps = insight?.followUpQuestions?.length > 0;
+
   // Determine what to show
   const showPatternInsight = isMeaningfulInsight;
   const hasContent = hasValidation || hasCelebration || hasTherapeutic || hasVentCooldown ||
-                     showPatternInsight || showEncouragementAsFallback;
+                     showPatternInsight || showEncouragementAsFallback || hasFollowUps;
 
   if (!hasContent) return null;
 
@@ -147,7 +150,7 @@ const EntryInsightsPopup = ({
 
         {/* Content card */}
         <motion.div
-          className="relative bg-white rounded-3xl shadow-soft-xl w-full max-w-md overflow-hidden"
+          className="relative bg-white rounded-3xl shadow-soft-xl w-full max-w-sm overflow-hidden max-h-[75vh] flex flex-col"
           initial={{ opacity: 0, y: 50, scale: 0.95 }}
           animate={{ opacity: 1, y: 0, scale: 1 }}
           exit={{ opacity: 0, y: 50, scale: 0.95 }}
@@ -169,8 +172,8 @@ const EntryInsightsPopup = ({
             </motion.button>
           </div>
 
-          {/* Main content - PRIORITY ORDER */}
-          <div className="p-4 pt-3 space-y-4">
+          {/* Main content - PRIORITY ORDER (scrollable) */}
+          <div className="p-4 pt-3 space-y-4 overflow-y-auto flex-1">
 
             {/* 1. VALIDATION FIRST - Empathetic acknowledgment */}
             {validation && (
@@ -239,15 +242,6 @@ const EntryInsightsPopup = ({
                   <span className="text-teal-600 text-xs uppercase font-semibold block mb-1">Try saying:</span>
                   "{actAnalysis.defusion_phrase}"
                 </div>
-
-                {actAnalysis.values_context && (
-                  <div className="mt-3 pt-3 border-t border-teal-100 flex items-center gap-2">
-                    <Compass size={14} className="text-amber-600" />
-                    <span className="text-xs text-amber-800">
-                      <span className="font-semibold">What matters here:</span> {actAnalysis.values_context}
-                    </span>
-                  </div>
-                )}
               </motion.div>
             )}
 
@@ -338,10 +332,32 @@ const EntryInsightsPopup = ({
                 </p>
               </motion.div>
             )}
+
+            {/* 6. FOLLOW-UP QUESTIONS - Prompts for deeper reflection */}
+            {insight?.followUpQuestions?.length > 0 && (
+              <motion.div
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.3 }}
+                className="bg-secondary-50 p-3 rounded-xl border border-secondary-100"
+              >
+                <div className="flex items-center gap-2 text-secondary-600 mb-2">
+                  <HelpCircle size={14} />
+                  <span className="text-xs font-semibold uppercase">To reflect on</span>
+                </div>
+                <ul className="space-y-1.5">
+                  {insight.followUpQuestions.slice(0, 2).map((question, idx) => (
+                    <li key={idx} className="text-sm text-secondary-700 font-body leading-relaxed">
+                      {question}
+                    </li>
+                  ))}
+                </ul>
+              </motion.div>
+            )}
           </div>
 
-          {/* Dismiss button */}
-          <div className="p-4 pt-0">
+          {/* Dismiss button (fixed at bottom) */}
+          <div className="p-4 pt-2 flex-shrink-0">
             <motion.button
               onClick={onClose}
               className="w-full py-3 rounded-2xl bg-warm-100 text-warm-600 font-semibold text-sm hover:bg-warm-200 transition-colors"

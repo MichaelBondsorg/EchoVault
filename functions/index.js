@@ -461,18 +461,32 @@ async function extractEnhancedContext(apiKey, text, recentEntriesContext = '') {
        - Main discussion themes/concerns
        - Examples: @topic:work_stress, @topic:relationship, @topic:health, @topic:finances
 
-    8. GOALS/INTENTIONS (@goal:description) - IMPORTANT: Extract these!
-       - Explicit goals stated in any form:
-         * "I want to...", "I need to...", "I'm going to...", "I plan to..."
-         * "My goal is...", "My goals are...", "My goals for this week..."
-         * "I aim to...", "I hope to...", "I'm trying to..."
-         * "Going to work out", "want to exercise", "planning to..."
-         * Any statement expressing a desired outcome, intention, or target
-       - Create SEPARATE tags for each distinct goal mentioned
-       - Be GENEROUS with goal extraction - if it sounds like an intention, tag it
-       - Examples: @goal:exercise_more, @goal:work_out_daily, @goal:do_pilates, @goal:eat_healthier
-       - Entry "My goals for this week are to work out every day and do Pilates on Thursday" should produce:
-         @goal:work_out_every_day AND @goal:do_pilates_thursday
+    8. GOALS/INTENTIONS (@goal:description) - BE SELECTIVE!
+       - ONLY extract TRUE GOALS: Ongoing aspirations requiring sustained effort over time
+       - A goal is something you work toward over weeks/months, not a one-off task
+
+       TRUE GOALS (extract these):
+         * Career/life direction: "find a new job", "get promoted", "start a business"
+         * Health/fitness patterns: "exercise regularly", "lose weight", "eat healthier", "work out daily"
+         * Personal development: "learn Spanish", "read more books", "meditate daily"
+         * Financial: "save money", "pay off debt", "build emergency fund"
+         * Relationship: "spend more quality time with family", "be a better listener"
+
+       NOT GOALS - DO NOT EXTRACT (these are tasks/events):
+         * One-off actions: "walk the dog", "check job listings", "prepare for interview"
+         * Specific event prep: "prepare Anthropic interview", "do Pilates on Thursday"
+         * Daily tasks: "walk Luna", "call mom", "check Databricks roles"
+         * Single occurrences: "go to Barry's class", "see a movie", "hang out with friend"
+
+       KEY DISTINCTION:
+         * "Do Pilates on Thursday" = TASK (specific one-time action) → DO NOT tag as goal
+         * "Do more Pilates" or "Add Pilates to my routine" = GOAL (ongoing intention) → Tag as @goal:do_more_pilates
+         * "Prepare for Anthropic interview" = TASK → DO NOT tag
+         * "Find a new job" or "Land a role in AI" = GOAL → Tag as @goal:find_new_job
+
+       Examples of what TO extract: @goal:find_new_job, @goal:exercise_regularly, @goal:eat_healthier, @goal:save_money
+
+       If unsure, ERR ON THE SIDE OF NOT extracting. Tasks should go in extracted_tasks, not goals.
 
     9. ONGOING SITUATIONS (@situation:description)
        - Multi-day events or circumstances
