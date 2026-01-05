@@ -30,9 +30,9 @@ const PATTERN_VERSION = 1;
 
 // AI Model Configuration
 const AI_CONFIG = {
-  classification: { primary: 'gemini-1.5-flash', fallback: 'gpt-4o-mini' },
-  analysis: { primary: 'gemini-2.0-flash', fallback: 'gpt-4o' },
-  chat: { primary: 'gpt-4o-mini', fallback: 'gemini-1.5-flash' },
+  classification: { primary: 'gemini-3-flash-preview', fallback: 'gpt-4o-mini' },
+  analysis: { primary: 'gemini-3-flash-preview', fallback: 'gpt-4o' },
+  chat: { primary: 'gpt-4o-mini', fallback: 'gemini-3-flash-preview' },
   embedding: { primary: 'text-embedding-004', fallback: null },
   transcription: { primary: 'whisper-1', fallback: null }
 };
