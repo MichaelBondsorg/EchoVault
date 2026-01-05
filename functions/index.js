@@ -447,14 +447,18 @@ async function extractEnhancedContext(apiKey, text, recentEntriesContext = '') {
        - Main discussion themes/concerns
        - Examples: @topic:work_stress, @topic:relationship, @topic:health, @topic:finances
 
-    8. GOALS/INTENTIONS (@goal:description)
+    8. GOALS/INTENTIONS (@goal:description) - IMPORTANT: Extract these!
        - Explicit goals stated in any form:
          * "I want to...", "I need to...", "I'm going to...", "I plan to..."
-         * "My goal is...", "My goals are...", "This week I want to..."
+         * "My goal is...", "My goals are...", "My goals for this week..."
          * "I aim to...", "I hope to...", "I'm trying to..."
-         * Any statement expressing a desired outcome or target
+         * "Going to work out", "want to exercise", "planning to..."
+         * Any statement expressing a desired outcome, intention, or target
        - Create SEPARATE tags for each distinct goal mentioned
-       - Examples: @goal:exercise_more, @goal:speak_up_at_work, @goal:do_pilates, @goal:work_out_daily
+       - Be GENEROUS with goal extraction - if it sounds like an intention, tag it
+       - Examples: @goal:exercise_more, @goal:work_out_daily, @goal:do_pilates, @goal:eat_healthier
+       - Entry "My goals for this week are to work out every day and do Pilates on Thursday" should produce:
+         @goal:work_out_every_day AND @goal:do_pilates_thursday
 
     9. ONGOING SITUATIONS (@situation:description)
        - Multi-day events or circumstances
