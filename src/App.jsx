@@ -61,7 +61,7 @@ import {
 } from './components';
 
 // Dashboard Enhancement Components
-import { QuickStatsBar, GoalsProgress, WeeklyDigest, SituationTimeline } from './components/dashboard/shared';
+import { QuickStatsBar, GoalsProgress, WeeklyDigest, SituationTimeline, ReflectionPrompts } from './components/dashboard/shared';
 import DetectedStrip from './components/entries/DetectedStrip';
 
 // --- PDF LOADER (lazy-loads jsPDF from CDN) ---
@@ -1652,6 +1652,15 @@ export default function App() {
             entries={entries}
             category={cat}
             userId={user?.uid}
+          />
+        )}
+
+        {/* Reflection Prompts - Persistent cycling questions for deeper reflection */}
+        {entries.length >= 2 && (
+          <ReflectionPrompts
+            entries={entries}
+            category={cat}
+            onWritePrompt={(prompt) => setReplyContext(prompt)}
           />
         )}
 
