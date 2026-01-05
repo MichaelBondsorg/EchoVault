@@ -94,8 +94,12 @@ const GoalsProgress = ({ entries, category, userId }) => {
     const goalMap = new Map();
 
     // Get all entries with goal tags
+    // Check both entry.tags and entry.analysis.enhancedContext.structured_tags
     categoryEntries.forEach(entry => {
-      const goalTags = entry.tags?.filter(t => t.startsWith('@goal:')) || [];
+      const topLevelTags = entry.tags || [];
+      const structuredTags = entry.analysis?.enhancedContext?.structured_tags || [];
+      const allTags = [...new Set([...topLevelTags, ...structuredTags])];
+      const goalTags = allTags.filter(t => t.startsWith('@goal:'));
 
       goalTags.forEach(tag => {
         const goalName = tag.replace('@goal:', '').replace(/_/g, ' ');
