@@ -290,6 +290,7 @@ export default function App() {
                 updateData.extracted_tasks = classification.extracted_tasks;
               }
               if (analysis?.cbt_breakdown) updateData.analysis.cbt_breakdown = analysis.cbt_breakdown;
+              if (analysis?.act_analysis) updateData.analysis.act_analysis = analysis.act_analysis;
               if (analysis?.vent_support) updateData.analysis.vent_support = analysis.vent_support;
               if (analysis?.celebration) updateData.analysis.celebration = analysis.celebration;
               if (analysis?.task_acknowledgment) updateData.analysis.task_acknowledgment = analysis.task_acknowledgment;
@@ -852,6 +853,10 @@ export default function App() {
             updateData.analysis.cbt_breakdown = analysis.cbt_breakdown;
           }
 
+          if (analysis?.act_analysis && typeof analysis.act_analysis === 'object' && Object.keys(analysis.act_analysis).length > 0) {
+            updateData.analysis.act_analysis = analysis.act_analysis;
+          }
+
           if (analysis?.vent_support) {
             updateData.analysis.vent_support = analysis.vent_support;
           }
@@ -886,20 +891,26 @@ export default function App() {
             });
 
             // Show insights popup if there's meaningful content to display
-            // Priority: validation > therapeutic tools > pattern insights
+            // Priority: validation > therapeutic tools > pattern insights > encouragement fallback
             const hasValidation = analysis?.cbt_breakdown?.validation ||
                                  analysis?.vent_support?.validation;
             const hasCBTTherapeutic = analysis?.cbt_breakdown?.perspective;
             const hasACT = analysis?.act_analysis?.defusion_phrase;
             const hasCelebration = analysis?.celebration?.affirmation;
             const hasVentCooldown = analysis?.vent_support?.cooldown;
-            // Only show pattern insights if they're meaningful (not generic encouragement)
+            // Meaningful pattern insights (not encouragement)
             const hasUsefulInsight = insight?.found && insight?.message &&
                                     insight?.type !== 'encouragement';
+            // Encouragement as fallback when nothing else is available
+            const hasEncouragementFallback = insight?.found && insight?.message &&
+                                            insight?.type === 'encouragement' &&
+                                            !hasValidation && !hasCBTTherapeutic && !hasACT &&
+                                            !hasCelebration && !hasVentCooldown;
 
             const shouldShowPopup = classification.entry_type !== 'task' &&
                                    (hasValidation || hasCBTTherapeutic || hasACT ||
-                                    hasCelebration || hasVentCooldown || hasUsefulInsight);
+                                    hasCelebration || hasVentCooldown || hasUsefulInsight ||
+                                    hasEncouragementFallback);
 
             if (shouldShowPopup) {
               // Small delay so the entry appears first, then show the insight
