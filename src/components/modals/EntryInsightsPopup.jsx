@@ -38,7 +38,9 @@ const EntryInsightsPopup = ({
     if (framework === 'cbt' && cbt?.validation) {
       return cbt.validation;
     }
-    // ACT doesn't have explicit validation, but fusion_thought acknowledgment serves similar purpose
+    if (framework === 'act' && actAnalysis?.acknowledgment) {
+      return actAnalysis.acknowledgment;
+    }
     return null;
   };
 

@@ -893,7 +893,8 @@ export default function App() {
             // Show insights popup if there's meaningful content to display
             // Priority: validation > therapeutic tools > pattern insights > encouragement fallback
             const hasValidation = analysis?.cbt_breakdown?.validation ||
-                                 analysis?.vent_support?.validation;
+                                 analysis?.vent_support?.validation ||
+                                 analysis?.act_analysis?.acknowledgment;
             const hasCBTTherapeutic = analysis?.cbt_breakdown?.perspective;
             const hasACT = analysis?.act_analysis?.defusion_phrase;
             const hasCelebration = analysis?.celebration?.affirmation;
