@@ -346,6 +346,7 @@ async function analyzeEntry(apiKey, text, entryType = 'reflection') {
 
       // INCLUDE IF FRAMEWORK == 'act'
       "act_analysis": {
+        "acknowledgment": "Warm, empathetic validation of the difficult feeling (1-2 sentences). Acknowledge the struggle is real and valid BEFORE offering any technique. E.g., 'Body image pressure in certain spaces is real and can feel overwhelming. It makes sense you'd feel uncomfortable in that environment.'",
         "fusion_thought": "The thought the user is 'fused' with - taking as absolute truth about themselves or reality",
         "defusion_technique": "labeling" | "visualization" | "thanking_mind",
         "defusion_phrase": "A phrase to create psychological distance. For labeling: 'I notice I'm having the thought that...'. For visualization: 'Imagine placing this thought on a leaf floating down a stream...'. For thanking_mind: 'Thanks, mind, for that thought...'",
