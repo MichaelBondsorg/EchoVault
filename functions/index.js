@@ -312,11 +312,24 @@ async function analyzeEntry(apiKey, text, entryType = 'reflection') {
     - morning: Can suggest movement, planning, fresh starts
     - afternoon/evening: Standard suggestions appropriate
 
+    MOOD SCORING GUIDELINES (CRITICAL):
+    Score based on the EMOTIONAL STATE being expressed, NOT keyword presence.
+    - 0.0-0.2: Genuine distress - active suffering, crisis, overwhelming negative emotions
+    - 0.2-0.4: Struggling - clearly frustrated, anxious, sad, but not in crisis
+    - 0.4-0.6: Mixed/Neutral - everyday ups and downs, processing, mild concerns
+    - 0.6-0.8: Generally positive - content, hopeful, minor wins
+    - 0.8-1.0: Thriving - joy, excitement, celebration, gratitude
+
+    IMPORTANT: Simply *mentioning* words like "anxiety", "stress", or "depression" does NOT mean low score.
+    Someone can discuss anxiety topics calmly (0.5-0.6) or mention stress while feeling okay (0.5+).
+    Score based on HOW they're expressing themselves, not WHAT topics they mention.
+    Look for emotional language, tone, and context clues about their actual state.
+
     Return JSON:
     {
       "title": "Short creative title (max 6 words)",
       "tags": ["Tag1", "Tag2"],
-      "mood_score": 0.5 (0.0=bad, 1.0=good),
+      "mood_score": 0.5 (based on guidelines above),
       "framework": "cbt" | "act" | "celebration" | "general",
 
       // INCLUDE IF FRAMEWORK == 'cbt'
