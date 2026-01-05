@@ -886,13 +886,20 @@ export default function App() {
             });
 
             // Show insights popup if there's meaningful content to display
-            // Only for non-task entries with insights, CBT/ACT analysis, or celebrations
-            const hasInsight = insight?.found && insight?.message;
-            const hasCBT = analysis?.cbt_breakdown?.perspective;
+            // Priority: validation > therapeutic tools > pattern insights
+            const hasValidation = analysis?.cbt_breakdown?.validation ||
+                                 analysis?.vent_support?.validation;
+            const hasCBTTherapeutic = analysis?.cbt_breakdown?.perspective;
             const hasACT = analysis?.act_analysis?.defusion_phrase;
             const hasCelebration = analysis?.celebration?.affirmation;
+            const hasVentCooldown = analysis?.vent_support?.cooldown;
+            // Only show pattern insights if they're meaningful (not generic encouragement)
+            const hasUsefulInsight = insight?.found && insight?.message &&
+                                    insight?.type !== 'encouragement';
+
             const shouldShowPopup = classification.entry_type !== 'task' &&
-                                   (hasInsight || hasCBT || hasACT || hasCelebration);
+                                   (hasValidation || hasCBTTherapeutic || hasACT ||
+                                    hasCelebration || hasVentCooldown || hasUsefulInsight);
 
             if (shouldShowPopup) {
               // Small delay so the entry appears first, then show the insight
