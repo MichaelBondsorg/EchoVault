@@ -13,3 +13,4 @@ export { default as WinsSection } from './WinsSection';
 export { default as PeopleSection } from './PeopleSection';
 export { default as InsightsSection } from './InsightsSection';
 export { default as SelfTalkSection } from './SelfTalkSection';
+export { default as ReflectionPrompts } from './ReflectionPrompts';

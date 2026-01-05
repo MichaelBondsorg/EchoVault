@@ -2,7 +2,7 @@ import React from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   X, Heart, TrendingUp, Sparkles, AlertTriangle,
-  RefreshCw, Target, Calendar, Brain, Wind, Footprints, HelpCircle
+  RefreshCw, Target, Calendar, Brain, Wind, Footprints
 } from 'lucide-react';
 import { safeString, formatMentions } from '../../utils/string';
 
@@ -62,13 +62,10 @@ const EntryInsightsPopup = ({
   const needsFallback = !hasValidation && !hasCelebration && !hasTherapeutic && !hasVentCooldown && !isMeaningfulInsight;
   const showEncouragementAsFallback = needsFallback && hasEncouragement;
 
-  // Check for follow-up questions
-  const hasFollowUps = insight?.followUpQuestions?.length > 0;
-
   // Determine what to show
   const showPatternInsight = isMeaningfulInsight;
   const hasContent = hasValidation || hasCelebration || hasTherapeutic || hasVentCooldown ||
-                     showPatternInsight || showEncouragementAsFallback || hasFollowUps;
+                     showPatternInsight || showEncouragementAsFallback;
 
   if (!hasContent) return null;
 
@@ -330,28 +327,6 @@ const EntryInsightsPopup = ({
                 <p className="text-sm text-warm-600 font-body leading-relaxed">
                   {formatMentions(safeString(insight.message))}
                 </p>
-              </motion.div>
-            )}
-
-            {/* 6. FOLLOW-UP QUESTIONS - Prompts for deeper reflection */}
-            {insight?.followUpQuestions?.length > 0 && (
-              <motion.div
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.3 }}
-                className="bg-secondary-50 p-3 rounded-xl border border-secondary-100"
-              >
-                <div className="flex items-center gap-2 text-secondary-600 mb-2">
-                  <HelpCircle size={14} />
-                  <span className="text-xs font-semibold uppercase">To reflect on</span>
-                </div>
-                <ul className="space-y-1.5">
-                  {insight.followUpQuestions.slice(0, 2).map((question, idx) => (
-                    <li key={idx} className="text-sm text-secondary-700 font-body leading-relaxed">
-                      {question}
-                    </li>
-                  ))}
-                </ul>
               </motion.div>
             )}
           </div>
