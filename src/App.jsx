@@ -52,7 +52,7 @@ import { useWakeLock } from './hooks/useWakeLock';
 
 // Components
 import {
-  CrisisSoftBlockModal, DailySummaryModal, WeeklyReport, InsightsPanel,
+  CrisisSoftBlockModal, DailySummaryModal, WeeklyReport, InsightsPanel, EntryInsightsPopup,
   CrisisResourcesScreen, SafetyPlanScreen, DecompressionScreen, TherapistExportScreen, JournalScreen, HealthSettingsScreen,
   Chat, RealtimeConversation,
   MoodHeatmap,
@@ -132,6 +132,9 @@ export default function App() {
 
   // Insights Panel (Phase 4)
   const [showInsights, setShowInsights] = useState(false);
+
+  // Entry Insights Popup (shows after entry submission)
+  const [entryInsightsPopup, setEntryInsightsPopup] = useState(null);
 
   // Journal Screen (Day Dashboard MVP)
   const [showJournal, setShowJournal] = useState(false);
@@ -800,7 +803,12 @@ export default function App() {
 
           console.log('Analysis complete:', { analysis, insight, classification, enhancedContext });
 
-          if (analysis && analysis.mood_score !== null && analysis.mood_score < 0.35) {
+          // Only show decompression for genuinely heavy entries, not just keyword mentions
+          // Requires BOTH low mood score AND vent entry type, OR extremely low score
+          const isVentEntry = classification.entry_type === 'vent';
+          const isExtremelyLow = analysis?.mood_score !== null && analysis.mood_score < 0.2;
+          const isLowVent = isVentEntry && analysis?.mood_score !== null && analysis.mood_score < 0.3;
+          if (isExtremelyLow || isLowVent) {
             setShowDecompression(true);
           }
 
@@ -876,6 +884,26 @@ export default function App() {
               entryContent: finalTex,
               analysis: updateData.analysis
             });
+
+            // Show insights popup if there's meaningful content to display
+            // Only for non-task entries with insights, CBT/ACT analysis, or celebrations
+            const hasInsight = insight?.found && insight?.message;
+            const hasCBT = analysis?.cbt_breakdown?.perspective;
+            const hasACT = analysis?.act_analysis?.defusion_phrase;
+            const hasCelebration = analysis?.celebration?.affirmation;
+            const shouldShowPopup = classification.entry_type !== 'task' &&
+                                   (hasInsight || hasCBT || hasACT || hasCelebration);
+
+            if (shouldShowPopup) {
+              // Small delay so the entry appears first, then show the insight
+              setTimeout(() => {
+                setEntryInsightsPopup({
+                  contextualInsight: insight,
+                  analysis: updateData.analysis,
+                  entryType: classification.entry_type
+                });
+              }, 500);
+            }
           } catch (updateError) {
             console.error('Failed to update document:', updateError);
             throw updateError;
@@ -1534,6 +1562,15 @@ export default function App() {
           onClose={() => setShowInsights(false)}
         />
       )}
+
+      {/* Entry Insights Popup - shows after entry submission */}
+      <EntryInsightsPopup
+        isOpen={!!entryInsightsPopup}
+        onClose={() => setEntryInsightsPopup(null)}
+        contextualInsight={entryInsightsPopup?.contextualInsight}
+        analysis={entryInsightsPopup?.analysis}
+        entryType={entryInsightsPopup?.entryType}
+      />
 
       {showHealthSettings && (
         <HealthSettingsScreen
