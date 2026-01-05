@@ -108,11 +108,13 @@ const WeeklyDigest = ({ entries, category, userId }) => {
       .slice(0, 3)
       .map(([theme]) => theme);
 
-    // Find goals with progress
+    // Find goals with progress (clean up any tag prefixes)
     const goalsProgressed = [];
     weekEntries.forEach(e => {
       if (e.goal_update?.status === 'progress' || e.goal_update?.status === 'achieved') {
-        const goalName = e.goal_update.tag?.replace('@goal:', '').replace(/_/g, ' ');
+        // Clean up tag - remove @goal:, @situation:, or any @type: prefix
+        let goalName = e.goal_update.tag || '';
+        goalName = goalName.replace(/^@\w+:/i, '').replace(/_/g, ' ').trim();
         if (goalName && !goalsProgressed.includes(goalName)) {
           goalsProgressed.push(goalName);
         }
@@ -135,7 +137,9 @@ const WeeklyDigest = ({ entries, category, userId }) => {
     } else if (typeCounts.vent >= 2) {
       insight = 'You had a few venting moments this week. That release can be healthy.';
     } else if (goalsProgressed.length > 0) {
-      insight = `You made progress on ${goalsProgressed[0]}. Keep building that momentum!`;
+      // Title case the goal name for the message
+      const goalDisplay = goalsProgressed[0].split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+      insight = `You made progress on ${goalDisplay}. Keep building that momentum!`;
     } else if (avgMood > 0.65) {
       insight = 'You had a good week overall. What contributed to that?';
     } else {
@@ -275,9 +279,9 @@ const WeeklyDigest = ({ entries, category, userId }) => {
                 <div className="flex items-start gap-2 p-2 bg-white/40 rounded-xl">
                   <Target size={14} className="text-primary-500 mt-0.5" />
                   <div>
-                    <p className="text-xs font-medium text-warm-700">Goals progressed</p>
+                    <p className="text-xs font-medium text-warm-700">Progress made</p>
                     <p className="text-xs text-warm-600 capitalize">
-                      {weekData.goalsProgressed.join(', ')}
+                      {weekData.goalsProgressed.map(g => g.charAt(0).toUpperCase() + g.slice(1)).join(', ')}
                     </p>
                   </div>
                 </div>
