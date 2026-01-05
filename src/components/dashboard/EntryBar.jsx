@@ -11,7 +11,7 @@ import { Mic, Square, Keyboard, X, Loader2, Send } from 'lucide-react';
  * - Always visible at bottom of screen
  * - Can show prompt context when responding to a prompt
  */
-const EntryBar = ({ onVoiceSave, onTextSave, loading, disabled, promptContext, onClearPrompt }) => {
+const EntryBar = ({ onVoiceSave, onTextSave, loading, disabled, promptContext, onClearPrompt, preferredMode = 'text' }) => {
   const [mode, setMode] = useState('idle'); // idle, recording, typing
   const [recording, setRecording] = useState(false);
   const [mediaRecorder, setMediaRecorder] = useState(null);
@@ -19,6 +19,7 @@ const EntryBar = ({ onVoiceSave, onTextSave, loading, disabled, promptContext, o
   const [textValue, setTextValue] = useState('');
   const timerRef = useRef(null);
   const textInputRef = useRef(null);
+  const shouldAutoStartVoice = useRef(false);
 
   // Use refs to always have the latest callbacks
   // This prevents stale closure issues during long recordings
@@ -36,12 +37,26 @@ const EntryBar = ({ onVoiceSave, onTextSave, loading, disabled, promptContext, o
     };
   }, []);
 
-  // Auto-open text mode when prompt context is provided
+  // Auto-open appropriate mode when prompt context is provided
   useEffect(() => {
     if (promptContext && mode === 'idle') {
-      setMode('typing');
+      if (preferredMode === 'voice') {
+        // Flag that we should start voice when effect completes
+        shouldAutoStartVoice.current = true;
+      } else {
+        setMode('typing');
+      }
     }
-  }, [promptContext]);
+  }, [promptContext, preferredMode]);
+
+  // Handle auto-start voice recording (needs separate effect to avoid async issues)
+  useEffect(() => {
+    if (shouldAutoStartVoice.current && mode === 'idle' && promptContext) {
+      shouldAutoStartVoice.current = false;
+      // Small delay to ensure UI is ready
+      setTimeout(() => startRecording(), 100);
+    }
+  }, [promptContext, mode]);
 
   // Focus text input when switching to typing mode
   useEffect(() => {
@@ -299,24 +314,32 @@ const EntryBar = ({ onVoiceSave, onTextSave, loading, disabled, promptContext, o
             animate={{ y: 0 }}
             exit={{ y: 100 }}
           >
-            <div className="max-w-md mx-auto flex items-center justify-center gap-6">
-              <div className="text-warm-500 text-sm font-mono w-12">
-                {formatTime(recordingSeconds)}
-              </div>
-              <motion.button
-                onClick={handleMicClick}
-                className="h-16 w-16 rounded-full bg-red-500 flex items-center justify-center shadow-lg"
-                animate={{ scale: [1, 1.08, 1] }}
-                transition={{ duration: 1.5, repeat: Infinity }}
-              >
-                <Square className="text-white fill-white" size={24} />
-              </motion.button>
-              <div className="w-12 flex justify-center">
-                <motion.div
-                  className="h-3 w-3 rounded-full bg-red-500"
-                  animate={{ opacity: [1, 0.3, 1] }}
-                  transition={{ duration: 1, repeat: Infinity }}
-                />
+            <div className="max-w-md mx-auto">
+              {/* Prompt Context Banner */}
+              {promptContext && (
+                <div className="mb-3 px-3 py-2 bg-primary-50 rounded-xl text-xs text-primary-700 text-center">
+                  <span className="font-semibold">Responding to:</span> "{promptContext}"
+                </div>
+              )}
+              <div className="flex items-center justify-center gap-6">
+                <div className="text-warm-500 text-sm font-mono w-12">
+                  {formatTime(recordingSeconds)}
+                </div>
+                <motion.button
+                  onClick={handleMicClick}
+                  className="h-16 w-16 rounded-full bg-red-500 flex items-center justify-center shadow-lg"
+                  animate={{ scale: [1, 1.08, 1] }}
+                  transition={{ duration: 1.5, repeat: Infinity }}
+                >
+                  <Square className="text-white fill-white" size={24} />
+                </motion.button>
+                <div className="w-12 flex justify-center">
+                  <motion.div
+                    className="h-3 w-3 rounded-full bg-red-500"
+                    animate={{ opacity: [1, 0.3, 1] }}
+                    transition={{ duration: 1, repeat: Infinity }}
+                  />
+                </div>
               </div>
             </div>
           </motion.div>

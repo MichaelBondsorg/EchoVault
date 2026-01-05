@@ -1,6 +1,6 @@
 import React, { useMemo, useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { MessageCircle, ChevronLeft, ChevronRight, PenLine, X } from 'lucide-react';
+import { MessageCircle, ChevronLeft, ChevronRight, PenLine, X, Mic } from 'lucide-react';
 
 /**
  * ReflectionPrompts - Persistent dashboard widget showing follow-up questions
@@ -11,11 +11,12 @@ import { MessageCircle, ChevronLeft, ChevronRight, PenLine, X } from 'lucide-rea
  * Features:
  * - Pulls followUpQuestions from recent entries' contextualInsight
  * - Cycles through questions automatically or manually
- * - "Write about this" button triggers new entry with question as prompt
+ * - Voice-first: "Speak about this" button triggers voice recording
+ * - Also supports text entry via "Write" button
  * - Persists dismissed questions in localStorage
  */
 
-const ReflectionPrompts = ({ entries, category, onWritePrompt }) => {
+const ReflectionPrompts = ({ entries, category, onWritePrompt, onVoicePrompt }) => {
   const [currentIndex, setCurrentIndex] = useState(0);
   const [dismissedQuestions, setDismissedQuestions] = useState(new Set());
   const [isVisible, setIsVisible] = useState(true);
@@ -113,7 +114,14 @@ const ReflectionPrompts = ({ entries, category, onWritePrompt }) => {
   const goNext = () => setCurrentIndex(prev => (prev + 1) % questions.length);
   const goPrev = () => setCurrentIndex(prev => (prev - 1 + questions.length) % questions.length);
 
-  // Handle write button click
+  // Handle voice button click (primary action)
+  const handleVoice = () => {
+    if (onVoicePrompt && questions[currentIndex]) {
+      onVoicePrompt(questions[currentIndex].question);
+    }
+  };
+
+  // Handle write button click (secondary action)
   const handleWrite = () => {
     if (onWritePrompt && questions[currentIndex]) {
       onWritePrompt(questions[currentIndex].question);
@@ -203,16 +211,30 @@ const ReflectionPrompts = ({ entries, category, onWritePrompt }) => {
           <div />
         )}
 
-        {/* Write button */}
-        <motion.button
-          onClick={handleWrite}
-          className="flex items-center gap-2 px-3 py-2 bg-white/70 hover:bg-white rounded-xl text-sm font-medium text-secondary-700 transition-colors"
-          whileHover={{ scale: 1.02 }}
-          whileTap={{ scale: 0.98 }}
-        >
-          <PenLine size={14} />
-          Write about this
-        </motion.button>
+        {/* Action buttons - Voice first */}
+        <div className="flex items-center gap-2">
+          {/* Write button (secondary) */}
+          <motion.button
+            onClick={handleWrite}
+            className="flex items-center gap-1.5 px-3 py-2 bg-white/50 hover:bg-white/70 rounded-xl text-xs font-medium text-warm-500 transition-colors"
+            whileHover={{ scale: 1.02 }}
+            whileTap={{ scale: 0.98 }}
+          >
+            <PenLine size={12} />
+            Write
+          </motion.button>
+
+          {/* Voice button (primary) */}
+          <motion.button
+            onClick={handleVoice}
+            className="flex items-center gap-2 px-4 py-2 bg-primary-600 hover:bg-primary-700 rounded-xl text-sm font-medium text-white transition-colors shadow-sm"
+            whileHover={{ scale: 1.02 }}
+            whileTap={{ scale: 0.98 }}
+          >
+            <Mic size={16} />
+            Speak
+          </motion.button>
+        </div>
       </div>
     </motion.div>
   );

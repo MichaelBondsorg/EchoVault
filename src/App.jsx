@@ -114,6 +114,7 @@ export default function App() {
   const [cat, setCat] = useState('personal');
   const [processing, setProcessing] = useState(false);
   const [replyContext, setReplyContext] = useState(null);
+  const [entryPreferredMode, setEntryPreferredMode] = useState('text'); // 'voice' or 'text'
   const [showDecompression, setShowDecompression] = useState(false);
   const [offlineQueue, setOfflineQueue] = useState([]);
 
@@ -1660,7 +1661,14 @@ export default function App() {
           <ReflectionPrompts
             entries={entries}
             category={cat}
-            onWritePrompt={(prompt) => setReplyContext(prompt)}
+            onWritePrompt={(prompt) => {
+              setEntryPreferredMode('text');
+              setReplyContext(prompt);
+            }}
+            onVoicePrompt={(prompt) => {
+              setEntryPreferredMode('voice');
+              setReplyContext(prompt);
+            }}
           />
         )}
 
@@ -1718,11 +1726,13 @@ export default function App() {
           }}
           onShowInsights={() => setShowInsights(true)}
           onStartRecording={() => {
-            // Set a supportive prompt that triggers the entry bar
+            // Set voice mode and a supportive prompt
+            setEntryPreferredMode('voice');
             setReplyContext("Let it out - I'm here to listen.");
           }}
           onStartTextEntry={() => {
-            // Set a supportive prompt for text entry
+            // Set text mode and a supportive prompt
+            setEntryPreferredMode('text');
             setReplyContext("Write what's on your mind...");
           }}
         />
@@ -1748,7 +1758,11 @@ export default function App() {
         loading={processing}
         disabled={false}
         promptContext={replyContext}
-        onClearPrompt={() => setReplyContext(null)}
+        preferredMode={entryPreferredMode}
+        onClearPrompt={() => {
+          setReplyContext(null);
+          setEntryPreferredMode('text');
+        }}
       />
 
       {/* Journal Screen (Timeline) */}
