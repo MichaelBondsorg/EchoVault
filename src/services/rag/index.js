@@ -257,6 +257,15 @@ export const extractQueryEntities = (text) => {
   return [...new Set(entities)];
 };
 
+// Companion Context (AI Companion with Memory)
+export {
+  getCompanionContext,
+  formatContextForChat,
+  buildCompanionSystemPrompt,
+  estimateTokens,
+  truncateToTokens
+} from './companionContext';
+
 export default {
   hybridRetrieve,
   calculateRecencyScore,

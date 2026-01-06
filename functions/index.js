@@ -1884,6 +1884,423 @@ export const refreshPatterns = onCall(
 );
 
 // ============================================
+// MEMORY EXTRACTION FUNCTIONS (AI Companion)
+// ============================================
+
+// Keywords that should NOT be stored in memory (crisis content)
+const CRISIS_KEYWORDS = [
+  'suicide', 'kill myself', 'end my life', 'self-harm', 'cutting',
+  'overdose', 'want to die', 'better off dead', 'no reason to live'
+];
+
+/**
+ * Check if text contains crisis content
+ */
+function containsCrisisContent(text) {
+  if (!text) return false;
+  const lowerText = text.toLowerCase();
+  return CRISIS_KEYWORDS.some(keyword => lowerText.includes(keyword));
+}
+
+/**
+ * Sanitize text to remove crisis-related content before storing
+ */
+function sanitizeForMemory(text) {
+  if (!text) return text;
+  let sanitized = text;
+  CRISIS_KEYWORDS.forEach(keyword => {
+    const regex = new RegExp(keyword, 'gi');
+    sanitized = sanitized.replace(regex, '[content removed for safety]');
+  });
+  return sanitized;
+}
+
+/**
+ * Extract memory-worthy information from entry using AI
+ */
+async function extractMemoryFromEntry(apiKey, entry, existingMemory = {}) {
+  // Safety check - don't process crisis content for memory
+  if (containsCrisisContent(entry.text)) {
+    return {
+      skipped: true,
+      reason: 'crisis_content',
+      message: 'Entry contains crisis content - not storing in long-term memory'
+    };
+  }
+
+  const existingPeopleNames = existingMemory.people?.map(p => p.name) || [];
+  const existingThemes = existingMemory.themes || [];
+  const existingValues = existingMemory.values?.map(v => v.value) || [];
+
+  const prompt = `
+Analyze this journal entry and extract memory-worthy information.
+
+ENTRY TEXT:
+${entry.text}
+
+ENTRY DATE: ${entry.effectiveDate || new Date().toISOString()}
+ENTRY MOOD: ${entry.analysis?.mood_score ?? 'unknown'}
+ENTRY TYPE: ${entry.analysis?.entry_type || 'reflection'}
+
+EXISTING PEOPLE IN MEMORY: ${existingPeopleNames.length > 0 ? existingPeopleNames.join(', ') : 'None yet'}
+EXISTING THEMES: ${existingThemes.length > 0 ? existingThemes.join(', ') : 'None yet'}
+EXISTING VALUES: ${existingValues.length > 0 ? existingValues.join(', ') : 'None yet'}
+
+Extract the following (return JSON only):
+
+{
+  "newPeople": [
+    {
+      "name": "string",
+      "relationship": "string",
+      "sentiment": "number -1 to 1",
+      "topics": [{ "topic": "string", "sentiment": "number" }],
+      "significantMoment": "string or null"
+    }
+  ],
+  "peopleUpdates": [
+    { "name": "string", "sentiment": "number", "topics": [{ "topic": "string", "sentiment": "number" }] }
+  ],
+  "events": [
+    {
+      "description": "string",
+      "type": "milestone | challenge | loss | achievement | change",
+      "emotionalImpact": "number 1-10",
+      "relatedPeople": ["string"]
+    }
+  ],
+  "valuesMentioned": [
+    { "value": "string", "importance": "number 1-10", "aligned": "boolean", "gapDescription": "string or null" }
+  ],
+  "themeUpdates": [
+    { "theme": "string", "sentiment": "struggling | growing | resolved", "isNew": "boolean" }
+  ],
+  "followUps": [
+    { "question": "string", "context": "string" }
+  ]
+}
+
+RULES:
+1. Only extract what's clearly present
+2. Be conservative with events - only significant moments
+3. Don't infer relationships if not clearly stated
+4. Don't store any graphic or crisis-related content
+
+Return valid JSON only.`;
+
+  try {
+    const raw = await callGemini(apiKey, prompt, entry.text, AI_CONFIG.analysis.primary);
+    if (!raw) return { success: false, error: 'No AI response' };
+
+    const jsonStr = raw.replace(/```json|```/g, '').trim();
+    return { success: true, extraction: JSON.parse(jsonStr) };
+  } catch (e) {
+    console.error('Memory extraction failed:', e);
+    return { success: false, error: e.message };
+  }
+}
+
+/**
+ * Apply extracted memory to Firestore
+ */
+async function applyMemoryExtraction(userId, entryId, extraction) {
+  if (!extraction?.extraction) return { applied: false };
+
+  const memoryPath = `artifacts/${APP_COLLECTION_ID}/users/${userId}/memory`;
+  const batch = db.batch();
+  const results = { peopleCreated: 0, peopleUpdated: 0, eventsCreated: 0, valuesUpdated: 0 };
+
+  try {
+    // Process new people
+    if (extraction.extraction.newPeople?.length > 0) {
+      for (const person of extraction.extraction.newPeople) {
+        const personRef = db.collection(memoryPath).doc('people').collection('items').doc();
+        batch.set(personRef, {
+          name: sanitizeForMemory(person.name),
+          aliases: [],
+          relationship: person.relationship || 'unknown',
+          sentiment: {
+            overall: person.sentiment || 0,
+            recent: person.sentiment || 0,
+            trend: 'stable'
+          },
+          topics: person.topics || [],
+          firstMentioned: FieldValue.serverTimestamp(),
+          lastMentioned: FieldValue.serverTimestamp(),
+          mentionCount: 1,
+          significantMoments: person.significantMoment ? [{
+            date: FieldValue.serverTimestamp(),
+            summary: sanitizeForMemory(person.significantMoment),
+            entryId
+          }] : [],
+          status: 'active'
+        });
+        results.peopleCreated++;
+      }
+    }
+
+    // Process events
+    if (extraction.extraction.events?.length > 0) {
+      for (const event of extraction.extraction.events) {
+        const eventRef = db.collection(memoryPath).doc('events').collection('items').doc();
+        batch.set(eventRef, {
+          description: sanitizeForMemory(event.description),
+          date: FieldValue.serverTimestamp(),
+          type: event.type || 'milestone',
+          emotionalImpact: event.emotionalImpact || 5,
+          resolved: false,
+          relatedPeople: event.relatedPeople || [],
+          entryId,
+          createdAt: FieldValue.serverTimestamp()
+        });
+        results.eventsCreated++;
+      }
+    }
+
+    // Process values
+    if (extraction.extraction.valuesMentioned?.length > 0) {
+      for (const value of extraction.extraction.valuesMentioned) {
+        const valueRef = db.collection(memoryPath).doc('values').collection('items').doc();
+        batch.set(valueRef, {
+          value: value.value,
+          importance: value.importance || 5,
+          firstIdentified: FieldValue.serverTimestamp(),
+          lastMentioned: FieldValue.serverTimestamp(),
+          source: 'ai_inferred',
+          userConfirmed: false,
+          alignmentScore: value.aligned ? 1 : 0.5,
+          gaps: value.gapDescription ? [{
+            detected: FieldValue.serverTimestamp(),
+            description: sanitizeForMemory(value.gapDescription),
+            entryId,
+            resolved: false
+          }] : [],
+          relatedActivities: [],
+          relatedPeople: []
+        });
+        results.valuesUpdated++;
+      }
+    }
+
+    // Update core memory with follow-ups
+    if (extraction.extraction.followUps?.length > 0) {
+      const coreRef = db.collection(memoryPath).doc('core');
+      const coreSnap = await coreRef.get();
+      const existingFollowUps = coreSnap.exists
+        ? coreSnap.data()?.conversationState?.pendingFollowUps || []
+        : [];
+
+      const newFollowUps = extraction.extraction.followUps.map(f => ({
+        question: sanitizeForMemory(f.question),
+        context: sanitizeForMemory(f.context),
+        createdAt: new Date(),
+        askedAt: null
+      }));
+
+      batch.set(coreRef, {
+        lastUpdated: FieldValue.serverTimestamp(),
+        schema_version: 1,
+        conversationState: {
+          pendingFollowUps: [...existingFollowUps, ...newFollowUps].slice(-5)
+        }
+      }, { merge: true });
+    }
+
+    await batch.commit();
+    return { applied: true, results };
+  } catch (e) {
+    console.error('Failed to apply memory extraction:', e);
+    return { applied: false, error: e.message };
+  }
+}
+
+/**
+ * Trigger: Extract memory from new entries
+ * Runs after entry analysis is complete (has mood_score)
+ */
+export const onEntryCreateMemoryExtraction = onDocumentCreated(
+  {
+    document: 'artifacts/{appId}/users/{userId}/entries/{entryId}',
+    secrets: [geminiApiKey]
+  },
+  async (event) => {
+    const { userId, appId, entryId } = event.params;
+
+    if (appId !== APP_COLLECTION_ID) return null;
+
+    const entryData = event.data.data();
+    const entry = { id: entryId, ...entryData };
+
+    // Skip if no text
+    if (!entry.text?.trim()) return null;
+
+    // Skip crisis content entirely
+    if (containsCrisisContent(entry.text)) {
+      console.log(`Entry ${entryId} contains crisis content - skipping memory extraction`);
+      return { skipped: true, reason: 'crisis_content' };
+    }
+
+    console.log(`Extracting memory from entry ${entryId} for user ${userId}`);
+
+    try {
+      const apiKey = geminiApiKey.value();
+
+      // Get existing memory for context
+      const memoryPath = `artifacts/${APP_COLLECTION_ID}/users/${userId}/memory`;
+      const peopleSnap = await db.collection(memoryPath).doc('people').collection('items').get();
+      const existingPeople = peopleSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+
+      const valuesSnap = await db.collection(memoryPath).doc('values').collection('items').get();
+      const existingValues = valuesSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+
+      // Extract memory
+      const extraction = await extractMemoryFromEntry(apiKey, entry, {
+        people: existingPeople,
+        values: existingValues
+      });
+
+      if (extraction.skipped) {
+        return { success: true, skipped: true, reason: extraction.reason };
+      }
+
+      if (!extraction.success) {
+        console.error(`Memory extraction failed for entry ${entryId}:`, extraction.error);
+        return { success: false, error: extraction.error };
+      }
+
+      // Apply extraction to Firestore
+      const result = await applyMemoryExtraction(userId, entryId, extraction);
+
+      console.log(`Memory extraction complete for entry ${entryId}:`, result.results);
+      return { success: true, ...result };
+    } catch (error) {
+      console.error(`Error extracting memory for entry ${entryId}:`, error);
+      return { success: false, error: error.message };
+    }
+  }
+);
+
+/**
+ * Callable: Manual memory refresh for a user
+ * Reprocesses recent entries for memory extraction
+ */
+export const refreshMemory = onCall(
+  {
+    cors: true,
+    secrets: [geminiApiKey],
+    maxInstances: 5,
+    timeoutSeconds: 300
+  },
+  async (request) => {
+    if (!request.auth) {
+      throw new HttpsError('unauthenticated', 'Must be logged in');
+    }
+
+    const userId = request.auth.uid;
+    const { limit: entryLimit = 10 } = request.data || {};
+
+    console.log(`Manual memory refresh for user ${userId}, processing ${entryLimit} recent entries`);
+
+    try {
+      const apiKey = geminiApiKey.value();
+
+      // Get recent entries
+      const entriesRef = db
+        .collection('artifacts')
+        .doc(APP_COLLECTION_ID)
+        .collection('users')
+        .doc(userId)
+        .collection('entries');
+
+      const entriesSnap = await entriesRef
+        .orderBy('createdAt', 'desc')
+        .limit(entryLimit)
+        .get();
+
+      let processed = 0;
+      let extracted = 0;
+
+      for (const doc of entriesSnap.docs) {
+        const entry = { id: doc.id, ...doc.data() };
+
+        if (!entry.text?.trim() || containsCrisisContent(entry.text)) {
+          continue;
+        }
+
+        const extraction = await extractMemoryFromEntry(apiKey, entry, {});
+
+        if (extraction.success && !extraction.skipped) {
+          await applyMemoryExtraction(userId, entry.id, extraction);
+          extracted++;
+        }
+
+        processed++;
+
+        // Rate limiting
+        await new Promise(resolve => setTimeout(resolve, 200));
+      }
+
+      return { success: true, processed, extracted };
+    } catch (error) {
+      console.error(`Memory refresh failed for user ${userId}:`, error);
+      throw new HttpsError('internal', 'Memory refresh failed');
+    }
+  }
+);
+
+/**
+ * Callable: Run relevance decay - archive old memories
+ */
+export const runMemoryDecay = onCall(
+  {
+    cors: true,
+    maxInstances: 5
+  },
+  async (request) => {
+    if (!request.auth) {
+      throw new HttpsError('unauthenticated', 'Must be logged in');
+    }
+
+    const userId = request.auth.uid;
+    const sixMonthsAgo = new Date();
+    sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
+
+    console.log(`Running memory decay for user ${userId}`);
+
+    try {
+      const memoryPath = `artifacts/${APP_COLLECTION_ID}/users/${userId}/memory`;
+      const peopleSnap = await db.collection(memoryPath).doc('people').collection('items').get();
+
+      let archivedCount = 0;
+      const batch = db.batch();
+
+      for (const doc of peopleSnap.docs) {
+        const person = doc.data();
+        if (person.status !== 'archived') {
+          const lastMentioned = person.lastMentioned?.toDate?.() || new Date(person.lastMentioned);
+          if (lastMentioned < sixMonthsAgo) {
+            batch.update(doc.ref, {
+              status: 'archived',
+              archivedAt: FieldValue.serverTimestamp()
+            });
+            archivedCount++;
+          }
+        }
+      }
+
+      if (archivedCount > 0) {
+        await batch.commit();
+      }
+
+      return { success: true, archivedCount };
+    } catch (error) {
+      console.error(`Memory decay failed for user ${userId}:`, error);
+      throw new HttpsError('internal', 'Memory decay failed');
+    }
+  }
+);
+
+// ============================================
 // BURNOUT DETECTION FUNCTIONS
 // ============================================
 
