@@ -111,7 +111,7 @@ const countSelfReferences = (text) => {
 /**
  * Extract entities from tags by type
  */
-const extractEntitiesByType = (tags, prefix) => {
+export const extractEntitiesByType = (tags, prefix) => {
   if (!tags?.length) return [];
   return tags
     .filter(t => t.startsWith(prefix))
