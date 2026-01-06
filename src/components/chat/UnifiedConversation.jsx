@@ -560,7 +560,7 @@ const UnifiedConversation = ({
       {/* Voice input overlay */}
       {isRecording && (
         <VoiceInputOverlay
-          onComplete={handleVoiceInput}
+          onSave={handleVoiceInput}
           onCancel={() => setIsRecording(false)}
         />
       )}
@@ -572,89 +572,60 @@ const UnifiedConversation = ({
    */
   const renderVoice = () => (
     <div className="flex flex-col items-center justify-center h-full p-8">
-      {/* Last message */}
+      {/* Conversation history - last few messages */}
       {messages.length > 0 && (
-        <div className="mb-8 text-center max-w-md">
-          <p className="text-white/80 text-lg">
-            {messages[messages.length - 1].content}
-          </p>
+        <div className="mb-8 text-center max-w-md max-h-48 overflow-y-auto">
+          {messages.slice(-3).map((msg, idx) => (
+            <p key={idx} className={`text-lg mb-2 ${msg.role === 'user' ? 'text-blue-300' : 'text-white/80'}`}>
+              {msg.role === 'user' ? 'You: ' : ''}{msg.content}
+            </p>
+          ))}
         </div>
       )}
 
-      {/* Voice visualization */}
-      <div className="relative mb-8">
-        <motion.div
-          animate={{
-            scale: isRecording ? [1, 1.1, 1] : isSpeaking ? [1, 1.05, 1] : 1
-          }}
-          transition={{ repeat: Infinity, duration: 1.5 }}
-          className={`w-32 h-32 rounded-full flex items-center justify-center ${
-            isRecording
-              ? 'bg-red-500'
-              : isSpeaking
-              ? 'bg-blue-500'
-              : 'bg-white/20'
-          }`}
-        >
-          {isRecording ? (
-            <MicOff size={48} className="text-white" />
-          ) : isSpeaking ? (
-            <Volume2 size={48} className="text-white" />
-          ) : (
-            <Mic size={48} className="text-white" />
-          )}
-        </motion.div>
-      </div>
+      {/* Status indicator */}
+      {isLoading && (
+        <div className="mb-8 flex items-center gap-2 text-white/60">
+          <Loader2 size={20} className="animate-spin" />
+          <span>Thinking...</span>
+        </div>
+      )}
 
-      {/* Status */}
-      <p className="text-white/60 mb-8">
-        {isRecording
-          ? 'Listening...'
-          : isSpeaking
-          ? 'Speaking...'
-          : isLoading
-          ? 'Thinking...'
-          : 'Tap to speak'}
-      </p>
-
-      {/* Controls */}
-      <div className="flex gap-4">
-        {!isRecording && !isSpeaking && !isLoading && (
-          <button
-            onClick={() => setIsRecording(true)}
-            className="px-6 py-3 bg-white rounded-full text-gray-900 font-medium hover:bg-white/90 transition-colors"
+      {isSpeaking && (
+        <div className="mb-8">
+          <motion.div
+            animate={{ scale: [1, 1.1, 1] }}
+            transition={{ repeat: Infinity, duration: 1.5 }}
+            className="w-24 h-24 rounded-full bg-blue-500 flex items-center justify-center mb-4"
           >
-            Start Speaking
-          </button>
-        )}
-
-        {isRecording && (
+            <Volume2 size={40} className="text-white" />
+          </motion.div>
+          <p className="text-white/60 text-center">Speaking...</p>
           <button
-            onClick={() => setIsRecording(false)}
-            className="px-6 py-3 bg-red-500 rounded-full text-white font-medium hover:bg-red-600 transition-colors"
+            onClick={() => speakText('')}
+            className="mt-4 px-6 py-2 bg-white/20 rounded-full text-white hover:bg-white/30 transition-colors"
           >
             Stop
           </button>
-        )}
+        </div>
+      )}
 
-        {isSpeaking && (
-          <button
-            onClick={() => speakText('')}
-            className="px-6 py-3 bg-white/20 rounded-full text-white font-medium hover:bg-white/30 transition-colors"
-          >
-            Stop Speaking
-          </button>
-        )}
-      </div>
-
-      {/* Voice input handler */}
-      {isRecording && (
-        <div className="absolute inset-0 pointer-events-none">
+      {/* Voice recorder - only show when not loading or speaking */}
+      {!isLoading && !isSpeaking && (
+        <div className="flex flex-col items-center">
+          <p className="text-white/60 mb-6">Tap to speak</p>
           <VoiceRecorder
-            onComplete={handleVoiceInput}
-            autoStart
-            onCancel={() => setIsRecording(false)}
+            onSave={handleVoiceInput}
+            onSwitch={() => setMode(MODES.CHAT)}
+            loading={isLoading}
+            minimal
           />
+          <button
+            onClick={() => setMode(MODES.CHAT)}
+            className="mt-6 text-white/40 hover:text-white/60 transition-colors text-sm"
+          >
+            Switch to text chat
+          </button>
         </div>
       )}
     </div>
@@ -985,28 +956,27 @@ const TextInputForSession = ({ placeholder, onSubmit, optional }) => {
 };
 
 /**
- * Voice input overlay
+ * Voice input overlay for chat mode
  */
-const VoiceInputOverlay = ({ onComplete, onCancel }) => (
+const VoiceInputOverlay = ({ onSave, onCancel }) => (
   <motion.div
     initial={{ opacity: 0 }}
     animate={{ opacity: 1 }}
     exit={{ opacity: 0 }}
-    className="absolute inset-0 bg-black/80 flex items-center justify-center z-10"
+    className="absolute inset-0 bg-black/80 flex flex-col items-center justify-center z-10"
   >
-    <div className="text-center">
-      <VoiceRecorder
-        onComplete={onComplete}
-        autoStart
-        onCancel={onCancel}
-      />
-      <button
-        onClick={onCancel}
-        className="mt-4 text-white/60 hover:text-white transition-colors"
-      >
-        Cancel
-      </button>
-    </div>
+    <p className="text-white/60 mb-6">Tap to record your message</p>
+    <VoiceRecorder
+      onSave={onSave}
+      onSwitch={onCancel}
+      minimal
+    />
+    <button
+      onClick={onCancel}
+      className="mt-6 text-white/60 hover:text-white transition-colors"
+    >
+      Cancel
+    </button>
   </motion.div>
 );
 
