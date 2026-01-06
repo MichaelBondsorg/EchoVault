@@ -64,6 +64,11 @@ This document outlines the implementation plan for Phase 1 improvements to EchoV
 #### 8. Testing Strategy
 - **Added**: "Synthetic Journal Timelines" - pre-written entry sets with known patterns (e.g., "Burnout Sequence") for verification
 
+#### 9. Additional Refinements (Second Review)
+- **Session Buffer Volatility**: Store in `sessionStorage` or fast-expiring `localStorage` to survive page refresh until Cloud Function commits
+- **Cascade Delete Performance**: Handle via background worker to avoid UI hang during entry deletion
+- **Values Inference**: Distinguish "User-Defined" vs "AI-Inferred" values; AI should be more cautious about Value-Behavior Gaps for inferred values
+
 ---
 
 ## Current State Analysis
@@ -189,6 +194,11 @@ memory/values/{valueId} {
   firstIdentified: Timestamp,
   lastMentioned: Timestamp,
 
+  // NEW: Source distinction (Gemini refinement)
+  // AI should be more cautious about Value-Behavior Gaps for inferred values
+  source: "user_defined" | "ai_inferred",
+  userConfirmed: boolean, // Has user confirmed an AI-inferred value?
+
   // Value-Behavior Gap tracking (key ACT concept)
   alignmentScore: number, // 0-1, how aligned recent behavior is with this value
   gaps: [
@@ -196,7 +206,9 @@ memory/values/{valueId} {
       detected: Timestamp,
       description: string, // "Stated family is important but haven't mentioned them in 2 weeks"
       entryId: string,
-      resolved: boolean
+      resolved: boolean,
+      // Only surface gaps for user_defined OR userConfirmed values
+      // For ai_inferred + !userConfirmed, ask "Is X important to you?" first
     }
   ],
 
