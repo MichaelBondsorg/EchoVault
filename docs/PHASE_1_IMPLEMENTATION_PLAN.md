@@ -16,6 +16,53 @@ This document outlines the implementation plan for Phase 1 improvements to EchoV
 - [Feature 2: Advanced Pattern Detection](#feature-2-advanced-pattern-detection)
 - [Implementation Timeline](#implementation-timeline)
 - [Files to Create/Modify](#files-to-createmodify)
+- [Review Feedback (Gemini)](#review-feedback-gemini)
+
+---
+
+## Review Feedback (Gemini)
+
+> **Note**: This section documents feedback from external review and how it has been incorporated into the plan.
+
+### Key Changes Based on Review
+
+#### 1. Memory Graph Enhancements
+- **Added**: `memory/values` collection for ACT framework support (Value-Behavior Gaps)
+- **Added**: `schema_version` field with Lazy Update migration strategy
+- **Changed**: Conversation summaries now store only "Key Disclosures" and "Unresolved Questions" (no full transcripts)
+- **Added**: "Relevance Decay" mechanism - archive entities not mentioned in 6+ months
+
+#### 2. Session Buffer for Sync Gap
+- **Problem**: If user journals then immediately opens chat, memory won't reflect new entry (async extraction)
+- **Solution**: Implement "Session Buffer" - pass current entry's raw analysis as "volatile memory" to chat until Cloud Function commits permanent update
+
+#### 3. RAG Token Budget Optimization
+- **Changed**: Token budget from 8,000 → **4,000-5,000** (sweet spot for reasoning accuracy)
+- **Added**: De-duplication step between Tier 2 and Tier 3 to avoid wasted tokens
+- **Changed**: Full text only for Top 3 most similar entries; use extracted insights/entities for others
+
+#### 4. Pattern Detection Thresholds
+- **Changed**: Confidence threshold from 0.6 → **0.75** before showing insight to user
+- **Added**: "Pending Validation" state - lower confidence patterns shown as questions ("I've noticed a possible link between X and Y, does that resonate?")
+- **Changed**: Sequence windows from fixed 3-day → **Event-Based Windows** (entries between mood events)
+- **Added**: "Clinical Plausibility Filter" - AI checks if correlation makes sense in ACT/CBT framework
+
+#### 5. User Feedback Loop
+- **Added**: Users can "Dismiss" or "Confirm" insights
+- **Added**: Feedback adjusts confidence scores in pattern engine
+
+#### 6. Privacy & Safety
+- **Added**: Encrypted sub-collection for names/relationships (PII protection)
+- **Added**: Cascade delete - when entry deleted, scrub corresponding memories
+- **Critical**: Memory extraction must NOT store crisis keywords or graphic descriptions - trigger Soft Block instead
+- **Note**: Firestore is sufficient until user exceeds 2,000 entries (no vector DB needed for Phase 1)
+
+#### 7. Performance Optimizations
+- **Added**: "Batch Extraction" for users who journal multiple times per day
+- **Confirmed**: Heavy pattern mining must run server-side (Cloud Functions)
+
+#### 8. Testing Strategy
+- **Added**: "Synthetic Journal Timelines" - pre-written entry sets with known patterns (e.g., "Burnout Sequence") for verification
 
 ---
 
@@ -103,7 +150,7 @@ Transform the current chat into a **persistent AI companion** that truly knows t
 // Core memory document
 memory/core {
   lastUpdated: Timestamp,
-  version: number,
+  schema_version: number, // For lazy update migrations
 
   // Communication preferences learned over time
   preferences: {
@@ -135,9 +182,32 @@ memory/core {
   }
 }
 
+// NEW: User Values (ACT Framework Support)
+memory/values/{valueId} {
+  value: string, // "family", "creativity", "health", "career_growth"
+  importance: number, // 1-10 user-rated or AI-inferred
+  firstIdentified: Timestamp,
+  lastMentioned: Timestamp,
+
+  // Value-Behavior Gap tracking (key ACT concept)
+  alignmentScore: number, // 0-1, how aligned recent behavior is with this value
+  gaps: [
+    {
+      detected: Timestamp,
+      description: string, // "Stated family is important but haven't mentioned them in 2 weeks"
+      entryId: string,
+      resolved: boolean
+    }
+  ],
+
+  relatedActivities: string[], // Activities that align with this value
+  relatedPeople: string[] // People connected to this value
+}
+
 // People the user mentions
+// NOTE: name and relationship stored in encrypted sub-collection for PII protection
 memory/people/{personId} {
-  name: string,
+  name: string, // Consider encrypting - see memory/people_pii/{personId}
   aliases: string[], // "mom", "mother", "Sarah"
   relationship: string, // "mother", "coworker", "friend"
 
@@ -155,7 +225,11 @@ memory/people/{personId} {
   mentionCount: number,
   significantMoments: [
     { date: Timestamp, summary: string, entryId: string }
-  ]
+  ],
+
+  // NEW: Relevance Decay (Gemini feedback)
+  status: "active" | "archived", // Archive if not mentioned in 6+ months
+  archivedAt: Timestamp | null
 }
 
 // Significant life events
@@ -177,20 +251,34 @@ memory/events/{eventId} {
 }
 
 // Conversation summaries
+// NOTE: Store only key disclosures and unresolved questions, NOT full transcripts (Gemini feedback)
 memory/conversations/{conversationId} {
   date: Timestamp,
   mode: "chat" | "voice" | "guided",
   sessionType: string, // "morning_checkin", "free_chat", etc.
 
-  summary: string,
-  keyTopics: string[],
+  // Focused summary (no full transcripts)
+  keyDisclosures: string[], // Important things user shared
+  unresolvedQuestions: string[], // Questions that need follow-up
   emotionalArc: { start: number, end: number },
 
   // For companion continuity
   insightsShared: string[],
-  questionsAsked: string[],
   userBreakthroughs: string[],
   followUpNeeded: string[]
+}
+
+// NEW: Session Buffer for immediate context (volatile, not persisted long-term)
+// Solves "Sync Gap" - when user journals then immediately opens chat
+// This is passed directly to chat component, not stored in Firestore
+sessionBuffer: {
+  recentEntry: {
+    id: string,
+    text: string,
+    analysis: object, // Raw analysis from entry save
+    timestamp: Timestamp
+  },
+  expiresAt: Timestamp // Clear after Cloud Function commits permanent memory
 }
 ```
 
@@ -270,54 +358,79 @@ export const getCompanionContext = async ({
   queryEmbedding,
   entries,
   category,
-  maxTokens = 8000
+  sessionBuffer = null, // NEW: Volatile memory for recent unsaved entry
+  maxTokens = 4500 // CHANGED: Reduced from 8000 for better reasoning (Gemini feedback)
 }) => {
   const tokenBudget = { used: 0, max: maxTokens };
-  const context = { memory: null, recent: [], similar: [], entityMatched: [] };
+  const context = { memory: null, sessionBuffer: null, recent: [], similar: [], entityMatched: [] };
+  const includedEntryIds = new Set(); // NEW: For de-duplication
+
+  // NEW: Session Buffer (volatile memory for sync gap)
+  if (sessionBuffer?.recentEntry && !isExpired(sessionBuffer.expiresAt)) {
+    context.sessionBuffer = {
+      text: sessionBuffer.recentEntry.text,
+      analysis: sessionBuffer.recentEntry.analysis,
+      note: "This is the user's most recent entry (just saved)"
+    };
+    tokenBudget.used += estimateTokens(context.sessionBuffer);
+    includedEntryIds.add(sessionBuffer.recentEntry.id);
+  }
 
   // Tier 1: Memory Graph (always included, ~500 tokens)
-  const memory = await getMemoryGraph(userId);
+  // Exclude archived entities (not mentioned in 6+ months)
+  const memory = await getMemoryGraph(userId, { excludeArchived: true });
   context.memory = formatMemoryForContext(memory);
   tokenBudget.used += estimateTokens(context.memory);
 
   // Tier 2: Recent entries (last 7 days)
   const recentEntries = entries
-    .filter(e => daysSince(e.effectiveDate) <= 7)
+    .filter(e => daysSince(e.effectiveDate) <= 7 && !includedEntryIds.has(e.id))
     .sort((a, b) => b.effectiveDate - a.effectiveDate)
     .slice(0, 10);
 
+  recentEntries.forEach(e => includedEntryIds.add(e.id)); // Track for de-duplication
+
   context.recent = recentEntries.map(e => ({
     ...e,
-    text: truncateToTokens(e.text, 300) // Smart truncation
+    text: truncateToTokens(e.text, 300)
   }));
   tokenBudget.used += estimateTokens(context.recent);
 
   // Tier 3: Semantically similar (dynamic limit based on remaining budget)
+  // CHANGED: De-duplicate against Tier 2 (Gemini feedback)
   const remainingBudget = tokenBudget.max - tokenBudget.used;
-  const similarLimit = Math.min(30, Math.floor(remainingBudget / 400));
+  const similarLimit = Math.min(20, Math.floor(remainingBudget / 400));
 
   const similarEntries = entries
-    .filter(e => e.embedding && !recentEntries.includes(e))
+    .filter(e => e.embedding && !includedEntryIds.has(e.id)) // De-duplicate
     .map(e => ({ ...e, similarity: cosineSimilarity(queryEmbedding, e.embedding) }))
-    .filter(e => e.similarity > 0.25) // Lower threshold for more coverage
+    .filter(e => e.similarity > 0.25)
     .sort((a, b) => b.similarity - a.similarity)
     .slice(0, similarLimit);
 
-  context.similar = similarEntries.map(e => ({
+  similarEntries.forEach(e => includedEntryIds.add(e.id));
+
+  // CHANGED: Full text only for TOP 3 most similar; use insights/entities for rest (Gemini feedback)
+  context.similar = similarEntries.map((e, index) => ({
     ...e,
-    text: e.similarity > 0.5 ? e.text : summarizeEntry(e) // Full text for high similarity
+    text: index < 3 ? e.text : formatEntryInsightsOnly(e) // Full text only for top 3
   }));
 
-  // Tier 4: Entity-matched from query
+  // Tier 4: Entity-matched from query (already de-duplicated)
   const queryEntities = extractQueryEntities(query);
   if (queryEntities.length > 0) {
     const entityMatched = await findByEntity(entries, queryEntities, 10);
-    context.entityMatched = entityMatched.filter(
-      e => !recentEntries.includes(e) && !similarEntries.includes(e)
-    );
+    context.entityMatched = entityMatched.filter(e => !includedEntryIds.has(e.id));
   }
 
   return context;
+};
+
+// NEW: Format entry as insights only (for lower-similarity entries)
+const formatEntryInsightsOnly = (entry) => {
+  return `[${entry.effectiveDate}] Mood: ${entry.analysis?.mood_score}, ` +
+         `Topics: ${entry.analysis?.tags?.join(', ') || 'none'}, ` +
+         `Type: ${entry.analysis?.entry_type}`;
 };
 ```
 
@@ -792,7 +905,9 @@ export const extractFeatures = (entry, allEntries, context) => {
 ```javascript
 // New file: src/services/patterns/advanced/associationRules.js
 
-export const mineAssociationRules = (entries, minSupport = 0.1, minConfidence = 0.6) => {
+// CHANGED: Confidence threshold increased to 0.75 for user-facing insights (Gemini feedback)
+// Lower confidence patterns go to "Pending Validation" state
+export const mineAssociationRules = (entries, minSupport = 0.1, minConfidence = 0.75) => {
   // Convert entries to transactions
   const transactions = entries.map(entry => {
     const features = extractFeatures(entry);
@@ -834,20 +949,76 @@ export const mineAssociationRules = (entries, minSupport = 0.1, minConfidence = 
     const moodDelta = avgMood - baselineMood;
 
     if (Math.abs(moodDelta) > 0.15 && matchingTransactions.length >= 5) {
+      const confidence = Math.abs(moodDelta);
+
+      // NEW: Clinical Plausibility Filter (Gemini feedback)
+      const isPlausible = checkClinicalPlausibility(itemArray, moodDelta);
+
       rules.push({
         antecedent: itemArray,
         consequent: moodDelta > 0 ? 'mood_boost' : 'mood_drop',
         support: matchingTransactions.length / transactions.length,
-        confidence: Math.abs(moodDelta),
+        confidence,
         moodDelta,
         avgMood,
         count: matchingTransactions.length,
-        explanation: generateRuleExplanation(itemArray, moodDelta)
+        explanation: generateRuleExplanation(itemArray, moodDelta),
+
+        // NEW: Validation state (Gemini feedback)
+        // High confidence (>=0.75) = show as fact
+        // Lower confidence (0.5-0.75) = show as question ("Does this resonate?")
+        // Below 0.5 = don't show to user yet
+        validationState: confidence >= 0.75 ? 'confirmed' :
+                        confidence >= 0.5 ? 'pending_validation' : 'hidden',
+        isPlausible,
+
+        // NEW: User feedback tracking
+        userFeedback: null, // Will be set to 'confirmed' | 'dismissed' by user
+        feedbackAt: null
       });
     }
   }
 
-  return rules.sort((a, b) => Math.abs(b.moodDelta) - Math.abs(a.moodDelta));
+  return rules
+    .filter(r => r.isPlausible) // Only clinically plausible rules
+    .sort((a, b) => Math.abs(b.moodDelta) - Math.abs(a.moodDelta));
+};
+
+// NEW: Check if correlation makes sense in ACT/CBT framework (Gemini feedback)
+const checkClinicalPlausibility = (items, moodDelta) => {
+  // Plausible patterns (backed by psychology research)
+  const plausiblePatterns = [
+    { items: ['sleep:poor'], expectedDelta: 'negative' },
+    { items: ['sleep:good'], expectedDelta: 'positive' },
+    { items: ['workout:true'], expectedDelta: 'positive' },
+    { items: ['alone:true'], expectedDelta: 'any' }, // Context-dependent
+    { items: ['topic:work'], expectedDelta: 'any' },
+    { items: ['topic:family'], expectedDelta: 'any' },
+    { items: ['topic:health'], expectedDelta: 'any' },
+    // Add more based on ACT/CBT literature
+  ];
+
+  // Flag potentially spurious correlations
+  const spuriousIndicators = [
+    // Weather alone rarely causes significant mood changes
+    items.length === 1 && items[0].startsWith('weather:'),
+    // Day of week alone is weak
+    items.length === 1 && items[0].startsWith('day:'),
+  ];
+
+  if (spuriousIndicators.some(Boolean)) {
+    return false;
+  }
+
+  // Multi-factor patterns are generally more plausible
+  if (items.length >= 2) {
+    return true;
+  }
+
+  // Check against known plausible single-factor patterns
+  return plausiblePatterns.some(p =>
+    p.items.some(pi => items.includes(pi))
+  );
 };
 
 const generateRuleExplanation = (items, moodDelta) => {
@@ -878,39 +1049,50 @@ const generateRuleExplanation = (items, moodDelta) => {
 ```javascript
 // New file: src/services/patterns/advanced/sequencePatterns.js
 
-export const mineSequencePatterns = (entries, windowDays = 3) => {
+// CHANGED: Use Event-Based Windows instead of fixed 3-day windows (Gemini feedback)
+// More effective for detecting recovery patterns in mental health context
+
+export const mineSequencePatterns = (entries) => {
   const sequences = [];
 
   const sortedEntries = [...entries].sort((a, b) =>
     new Date(a.effectiveDate) - new Date(b.effectiveDate)
   );
 
-  for (let i = windowDays; i < sortedEntries.length; i++) {
-    const currentEntry = sortedEntries[i];
-    const currentMood = currentEntry.analysis?.mood_score;
+  // NEW: Find mood events (significant highs and lows) as window boundaries
+  const moodEvents = findMoodEvents(sortedEntries);
 
-    if (currentMood === undefined) continue;
+  // Analyze sequences between mood events (event-based windows)
+  for (let i = 1; i < moodEvents.length; i++) {
+    const previousEvent = moodEvents[i - 1];
+    const currentEvent = moodEvents[i];
 
-    const previousMood = sortedEntries[i - 1]?.analysis?.mood_score;
-    const moodDrop = previousMood - currentMood;
+    // Get entries between these two mood events
+    const windowEntries = sortedEntries.filter(e =>
+      new Date(e.effectiveDate) > previousEvent.date &&
+      new Date(e.effectiveDate) <= currentEvent.date
+    );
 
-    if (moodDrop > 0.2) {
-      const sequence = [];
-      for (let j = i - windowDays; j < i; j++) {
-        const entry = sortedEntries[j];
-        sequence.push({
-          dayOffset: j - i,
-          entities: entry.tags || [],
-          mood: entry.analysis?.mood_score,
-          entryType: entry.analysis?.entry_type,
-          topics: extractTopics(entry.tags)
-        });
-      }
+    if (windowEntries.length < 2) continue;
+
+    // Only interested in sequences leading to mood drops
+    if (currentEvent.type === 'low' && previousEvent.type !== 'low') {
+      const sequence = windowEntries.map(e => ({
+        date: e.effectiveDate,
+        entities: e.tags || [],
+        mood: e.analysis?.mood_score,
+        entryType: e.analysis?.entry_type,
+        topics: extractTopics(e.tags)
+      }));
 
       sequences.push({
         sequence,
-        outcome: { mood: currentMood, drop: moodDrop },
-        endEntryId: currentEntry.id
+        outcome: {
+          mood: currentEvent.mood,
+          drop: previousEvent.mood - currentEvent.mood
+        },
+        startEvent: previousEvent,
+        endEvent: currentEvent
       });
     }
   }
@@ -922,9 +1104,53 @@ export const mineSequencePatterns = (entries, windowDays = 3) => {
     pattern: extractCommonPattern(cluster),
     occurrences: cluster.length,
     avgMoodDrop: average(cluster.map(s => s.outcome.drop)),
+    avgDaysToDecline: average(cluster.map(s =>
+      daysBetween(s.startEvent.date, s.endEvent.date)
+    )),
     confidence: cluster.length / sequences.length,
-    explanation: generateSequenceExplanation(cluster)
+    explanation: generateSequenceExplanation(cluster),
+
+    // NEW: Validation state (same as association rules)
+    validationState: cluster.length >= 3 ? 'confirmed' : 'pending_validation'
   }));
+};
+
+// NEW: Find significant mood events as window boundaries
+const findMoodEvents = (entries) => {
+  const events = [];
+  const windowSize = 3; // Look at 3 entries to determine local min/max
+
+  for (let i = windowSize; i < entries.length - windowSize; i++) {
+    const currentMood = entries[i].analysis?.mood_score;
+    if (currentMood === undefined) continue;
+
+    const prevMoods = entries.slice(i - windowSize, i).map(e => e.analysis?.mood_score).filter(Boolean);
+    const nextMoods = entries.slice(i + 1, i + windowSize + 1).map(e => e.analysis?.mood_score).filter(Boolean);
+
+    const avgPrev = average(prevMoods);
+    const avgNext = average(nextMoods);
+
+    // Local minimum (low point)
+    if (currentMood < avgPrev - 0.15 && currentMood < avgNext - 0.15) {
+      events.push({
+        type: 'low',
+        date: new Date(entries[i].effectiveDate),
+        mood: currentMood,
+        entryId: entries[i].id
+      });
+    }
+    // Local maximum (high point)
+    else if (currentMood > avgPrev + 0.15 && currentMood > avgNext + 0.15) {
+      events.push({
+        type: 'high',
+        date: new Date(entries[i].effectiveDate),
+        mood: currentMood,
+        entryId: entries[i].id
+      });
+    }
+  }
+
+  return events.sort((a, b) => a.date - b.date);
 };
 ```
 
@@ -1137,18 +1363,41 @@ export const detectAnomalies = (entries) => {
 - Memory extraction should be async (Cloud Function) to not block entry save
 - Pattern computation should run server-side for entries > 100
 - Consider caching memory graph in localStorage for faster load
+- **NEW (Gemini)**: Implement "Batch Extraction" for users who journal multiple times per day
+  - Run memory update once at end of "active period" rather than per-entry
+- **Confirmed**: Heavy pattern mining MUST run server-side (Cloud Functions) - no client-side
+- **NEW**: Session Buffer for immediate context (see Data Model section)
 
 ### Privacy
 - Memory graph contains sensitive info (names, relationships)
-- Consider encryption at rest for memory documents
+- **NEW (Gemini)**: Store names/relationships in encrypted sub-collection
+  - `memory/people_pii/{personId}` for sensitive fields
+  - Use client-side encryption with user's key
 - Allow users to delete specific memories
+- **NEW (Gemini)**: Cascade delete - when entry is deleted, scrub corresponding memory references
+- **Note**: Firestore is sufficient until 2,000+ entries (no vector DB needed for Phase 1)
 
 ### Safety
+- **CRITICAL (Gemini)**: Memory extraction must NOT store crisis keywords or graphic descriptions
+  - If crisis content detected, trigger Soft Block instead of storing in memory
+  - Do not create "follow-up questions" about crisis content
 - Memory should not store crisis-related content long-term
 - Ensure companion doesn't reference painful events inappropriately
 - Add safeguards for follow-up questions about sensitive topics
+- **NEW**: Relevance Decay - archive entities not mentioned in 6+ months
+  - Prevents memory bloat
+  - Archived entities excluded from Tier 1 context
 
 ### Testing
 - Unit tests for feature extraction
 - Integration tests for memory extraction accuracy
 - End-to-end tests for conversation continuity
+- **NEW (Gemini)**: "Synthetic Journal Timelines"
+  - Pre-written entry sets with known patterns (e.g., "Burnout Sequence", "Recovery Arc")
+  - Use to verify pattern engine detects intended correlations
+  - Include edge cases: sparse data, conflicting patterns, crisis content handling
+- **NEW**: Pattern confidence threshold testing
+  - Verify insights only shown at >= 0.75 confidence
+  - Verify "pending_validation" state for 0.5-0.75 confidence
+- **NEW**: User feedback loop testing
+  - Verify "Dismiss" and "Confirm" actions update pattern confidence
