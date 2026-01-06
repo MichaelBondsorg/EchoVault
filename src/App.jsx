@@ -59,6 +59,7 @@ import {
   MarkdownLite, GetHelpButton, HamburgerMenu,
   DayDashboard, EntryBar
 } from './components';
+import UnifiedConversation from './components/chat/UnifiedConversation';
 
 // Dashboard Enhancement Components
 import { QuickStatsBar, GoalsProgress, WeeklyDigest, SituationTimeline, ReflectionPrompts } from './components/dashboard/shared';
@@ -1619,6 +1620,7 @@ export default function App() {
               onRequestPermission={requestPermission}
               onOpenChat={() => setView('chat')}
               onOpenVoice={() => setView('realtime')}
+              onOpenCompanion={() => setView('companion')}
               onOpenJournal={() => setShowJournal(true)}
               onOpenHealthSettings={() => setShowHealthSettings(true)}
               onLogout={() => signOut(auth)}
@@ -1786,6 +1788,19 @@ export default function App() {
           category={cat}
           onSaveEntry={(data) => {
             // Save the voice transcript as a journal entry
+            if (data?.text) {
+              saveEntry(data.text);
+            }
+          }}
+        />
+      )}
+      {view === 'companion' && (
+        <UnifiedConversation
+          entries={visible}
+          category={cat}
+          onClose={() => setView('feed')}
+          onSaveEntry={(data) => {
+            // Save guided session or conversation as journal entry
             if (data?.text) {
               saveEntry(data.text);
             }
