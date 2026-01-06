@@ -27,3 +27,6 @@ export * from './patterns';
 
 // Vector Search Services (Phase 3)
 export * from './vectorSearch';
+
+// Memory Services (AI Companion)
+export * from './memory';

@@ -625,6 +625,37 @@ export const computeShadowFriction = (entries, category = null) => {
   return patterns.sort((a, b) => Math.abs(b.deltaFromPrimary) - Math.abs(a.deltaFromPrimary));
 };
 
+// Advanced Pattern Detection (Phase 1)
+export {
+  // Feature extraction
+  extractFeatures,
+  extractAllFeatures,
+  categorizeSleep,
+  calculateBaselines,
+
+  // Association rules
+  mineAssociationRules,
+  getConfirmedRules,
+  getPendingValidationRules,
+  formatRulesAsInsights,
+
+  // Sequence patterns
+  mineSequencePatterns,
+  analyzeRecoveryPatterns,
+  findMoodEvents,
+
+  // Anomaly detection
+  detectAnomalies,
+  getRecentAnomalies,
+  formatAnomalyForUI,
+
+  // Insight generator
+  generateAdvancedInsights,
+  formatForDashboard,
+  formatForChat,
+  PRIORITY_LEVELS
+} from './advanced';
+
 export default {
   computeActivitySentiment,
   computeTemporalPatterns,
