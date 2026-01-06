@@ -29,7 +29,7 @@ import {
   increment,
   Timestamp
 } from 'firebase/firestore';
-import { db } from '../../firebase';
+import { db } from '../../config/firebase';
 
 // Collection paths
 const APP_COLLECTION_ID = 'echo-vault-v5-fresh';
