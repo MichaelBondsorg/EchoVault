@@ -30,3 +30,6 @@ export * from './vectorSearch';
 
 // Memory Services (AI Companion)
 export * from './memory';
+
+// Guided Services (Sessions & Mindfulness)
+export * from './guided';
