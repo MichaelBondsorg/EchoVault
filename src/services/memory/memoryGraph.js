@@ -36,16 +36,32 @@ const APP_COLLECTION_ID = 'echo-vault-v5-fresh';
 const MEMORY_SCHEMA_VERSION = 1;
 
 /**
- * Get the base memory path for a user
+ * Get the base memory collection path for a user
+ * Structure: artifacts/{appId}/users/{userId}/memory (collection)
  */
 export const getMemoryPath = (userId) =>
   `artifacts/${APP_COLLECTION_ID}/users/${userId}/memory`;
 
 /**
+ * Get the core memory document path
+ * Structure: artifacts/{appId}/users/{userId}/memory/core (document)
+ */
+export const getCorePath = (userId) =>
+  `artifacts/${APP_COLLECTION_ID}/users/${userId}/memory/core`;
+
+/**
+ * Get subcollection path under core document
+ * Structure: artifacts/{appId}/users/{userId}/memory/core/{subcollection} (collection)
+ * Valid subcollections: people, events, values, conversations
+ */
+export const getMemorySubcollectionPath = (userId, subcollection) =>
+  `artifacts/${APP_COLLECTION_ID}/users/${userId}/memory/core/${subcollection}`;
+
+/**
  * Get or initialize the core memory document
  */
 export const getCoreMemory = async (userId) => {
-  const coreRef = doc(db, getMemoryPath(userId), 'core');
+  const coreRef = doc(db, getCorePath(userId));
   const coreSnap = await getDoc(coreRef);
 
   if (!coreSnap.exists()) {
@@ -78,7 +94,7 @@ export const getCoreMemory = async (userId) => {
  * Update core memory preferences
  */
 export const updateCoreMemory = async (userId, updates) => {
-  const coreRef = doc(db, getMemoryPath(userId), 'core');
+  const coreRef = doc(db, getCorePath(userId));
   await updateDoc(coreRef, {
     ...updates,
     lastUpdated: serverTimestamp()
@@ -130,7 +146,7 @@ export const markFollowUpAsked = async (userId, followUpIndex) => {
  * @param {boolean} options.excludeArchived - Exclude archived people (default: true)
  */
 export const getPeople = async (userId, options = { excludeArchived: true }) => {
-  const peopleRef = collection(db, getMemoryPath(userId), 'people');
+  const peopleRef = collection(db, getMemorySubcollectionPath(userId, 'people'));
 
   let q = query(peopleRef, orderBy('lastMentioned', 'desc'));
 
@@ -139,14 +155,14 @@ export const getPeople = async (userId, options = { excludeArchived: true }) => 
   }
 
   const snapshot = await getDocs(q);
-  return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+  return snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
 };
 
 /**
  * Get a specific person by ID
  */
 export const getPerson = async (userId, personId) => {
-  const personRef = doc(db, getMemoryPath(userId), 'people', personId);
+  const personRef = doc(db, getMemorySubcollectionPath(userId, 'people'), personId);
   const personSnap = await getDoc(personRef);
 
   if (!personSnap.exists()) return null;
@@ -177,7 +193,7 @@ export const upsertPerson = async (userId, personData) => {
 
   if (existing) {
     // Update existing person
-    const personRef = doc(db, getMemoryPath(userId), 'people', existing.id);
+    const personRef = doc(db, getMemorySubcollectionPath(userId, 'people'), existing.id);
 
     const updates = {
       lastMentioned: serverTimestamp(),
@@ -241,7 +257,7 @@ export const upsertPerson = async (userId, personData) => {
     return { id: existing.id, updated: true };
   } else {
     // Create new person
-    const personRef = doc(collection(db, getMemoryPath(userId), 'people'));
+    const personRef = doc(collection(db, getMemorySubcollectionPath(userId, 'people')));
 
     const newPerson = {
       name,
@@ -270,7 +286,7 @@ export const upsertPerson = async (userId, personData) => {
  * Archive a person (relevance decay after 6+ months)
  */
 export const archivePerson = async (userId, personId) => {
-  const personRef = doc(db, getMemoryPath(userId), 'people', personId);
+  const personRef = doc(db, getMemorySubcollectionPath(userId, 'people'), personId);
   await updateDoc(personRef, {
     status: 'archived',
     archivedAt: serverTimestamp()
@@ -285,7 +301,7 @@ export const archivePerson = async (userId, personId) => {
  * Get all events from memory
  */
 export const getEvents = async (userId, options = {}) => {
-  const eventsRef = collection(db, getMemoryPath(userId), 'events');
+  const eventsRef = collection(db, getMemorySubcollectionPath(userId, 'events'));
 
   let q = query(eventsRef, orderBy('date', 'desc'));
 
@@ -305,7 +321,7 @@ export const getEvents = async (userId, options = {}) => {
  * Add an event to memory
  */
 export const addEvent = async (userId, eventData) => {
-  const eventRef = doc(collection(db, getMemoryPath(userId), 'events'));
+  const eventRef = doc(collection(db, getMemorySubcollectionPath(userId, 'events')));
 
   const event = {
     description: eventData.description,
@@ -331,7 +347,7 @@ export const addEvent = async (userId, eventData) => {
  * Update an event
  */
 export const updateEvent = async (userId, eventId, updates) => {
-  const eventRef = doc(db, getMemoryPath(userId), 'events', eventId);
+  const eventRef = doc(db, getMemorySubcollectionPath(userId, 'events'), eventId);
   await updateDoc(eventRef, {
     ...updates,
     updatedAt: serverTimestamp()
@@ -346,7 +362,7 @@ export const updateEvent = async (userId, eventId, updates) => {
  * Get all values from memory
  */
 export const getValues = async (userId) => {
-  const valuesRef = collection(db, getMemoryPath(userId), 'values');
+  const valuesRef = collection(db, getMemorySubcollectionPath(userId, 'values'));
   const q = query(valuesRef, orderBy('importance', 'desc'));
 
   const snapshot = await getDocs(q);
@@ -372,7 +388,7 @@ export const upsertValue = async (userId, valueData) => {
   const existing = await findValueByName(userId, value);
 
   if (existing) {
-    const valueRef = doc(db, getMemoryPath(userId), 'values', existing.id);
+    const valueRef = doc(db, getMemorySubcollectionPath(userId, 'values'), existing.id);
 
     const updates = {
       lastMentioned: serverTimestamp()
@@ -400,7 +416,7 @@ export const upsertValue = async (userId, valueData) => {
     await updateDoc(valueRef, updates);
     return { id: existing.id, updated: true };
   } else {
-    const valueRef = doc(collection(db, getMemoryPath(userId), 'values'));
+    const valueRef = doc(collection(db, getMemorySubcollectionPath(userId, 'values')));
 
     const newValue = {
       value,
@@ -424,7 +440,7 @@ export const upsertValue = async (userId, valueData) => {
  * Record a value-behavior gap
  */
 export const recordValueGap = async (userId, valueId, gap) => {
-  const valueRef = doc(db, getMemoryPath(userId), 'values', valueId);
+  const valueRef = doc(db, getMemorySubcollectionPath(userId, 'values'), valueId);
   const valueSnap = await getDoc(valueRef);
 
   if (!valueSnap.exists()) return null;
@@ -460,7 +476,7 @@ export const recordValueGap = async (userId, valueId, gap) => {
  * User confirms an AI-inferred value
  */
 export const confirmValue = async (userId, valueId) => {
-  const valueRef = doc(db, getMemoryPath(userId), 'values', valueId);
+  const valueRef = doc(db, getMemorySubcollectionPath(userId, 'values'), valueId);
   await updateDoc(valueRef, {
     userConfirmed: true
   });
@@ -474,7 +490,7 @@ export const confirmValue = async (userId, valueId) => {
  * Save a conversation summary
  */
 export const saveConversation = async (userId, conversationData) => {
-  const convRef = doc(collection(db, getMemoryPath(userId), 'conversations'));
+  const convRef = doc(collection(db, getMemorySubcollectionPath(userId, 'conversations')));
 
   const conversation = {
     date: serverTimestamp(),
@@ -507,7 +523,7 @@ export const saveConversation = async (userId, conversationData) => {
  * Get recent conversations
  */
 export const getRecentConversations = async (userId, count = 5) => {
-  const convsRef = collection(db, getMemoryPath(userId), 'conversations');
+  const convsRef = collection(db, getMemorySubcollectionPath(userId, 'conversations'));
   const q = query(convsRef, orderBy('date', 'desc'), limit(count));
 
   const snapshot = await getDocs(q);
@@ -654,7 +670,7 @@ export const cascadeDeleteEntry = async (userId, entryId) => {
   let deletedCount = 0;
 
   // Get all events that reference this entry
-  const eventsRef = collection(db, getMemoryPath(userId), 'events');
+  const eventsRef = collection(db, getMemorySubcollectionPath(userId, 'events'));
   const eventsQuery = query(eventsRef, where('entryId', '==', entryId));
   const eventSnaps = await getDocs(eventsQuery);
 
@@ -667,7 +683,7 @@ export const cascadeDeleteEntry = async (userId, entryId) => {
   const people = await getPeople(userId, { excludeArchived: false });
   for (const person of people) {
     if (person.significantMoments?.some(m => m.entryId === entryId)) {
-      const personRef = doc(db, getMemoryPath(userId), 'people', person.id);
+      const personRef = doc(db, getMemorySubcollectionPath(userId, 'people'), person.id);
       batch.update(personRef, {
         significantMoments: person.significantMoments.filter(m => m.entryId !== entryId)
       });
@@ -679,7 +695,7 @@ export const cascadeDeleteEntry = async (userId, entryId) => {
   const values = await getValues(userId);
   for (const value of values) {
     if (value.gaps?.some(g => g.entryId === entryId)) {
-      const valueRef = doc(db, getMemoryPath(userId), 'values', value.id);
+      const valueRef = doc(db, getMemorySubcollectionPath(userId, 'values'), value.id);
       batch.update(valueRef, {
         gaps: value.gaps.filter(g => g.entryId !== entryId)
       });

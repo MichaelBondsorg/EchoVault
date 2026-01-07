@@ -214,20 +214,22 @@ const UnifiedConversation = ({
         sessionBuffer
       });
 
-      // Build system prompt with memory
-      const systemPrompt = buildCompanionSystemPrompt(memory);
+      // Build system prompt with memory and context
+      const baseSystemPrompt = buildCompanionSystemPrompt(memory);
       const contextPrompt = formatContextForChat(contextResult);
+      const fullSystemPrompt = `${baseSystemPrompt}\n\nCONTEXT:\n${contextPrompt}`;
 
-      // Build messages for API
-      const apiMessages = [
-        { role: 'system', content: systemPrompt },
-        { role: 'system', content: `CONTEXT:\n${contextPrompt}` },
-        ...conversationHistory.slice(-10), // Last 10 messages
-        { role: 'user', content: text }
-      ];
+      // Build user prompt with conversation history
+      const historyContext = conversationHistory.slice(-10).map(m =>
+        `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.content}`
+      ).join('\n');
 
-      // Call AI
-      const response = await callOpenAI(apiMessages);
+      const userPrompt = historyContext
+        ? `Previous conversation:\n${historyContext}\n\nUser: ${text}`
+        : text;
+
+      // Call AI (expects systemPrompt, userPrompt as separate strings)
+      const response = await callOpenAI(fullSystemPrompt, userPrompt);
 
       if (response) {
         const assistantMessage = { role: 'assistant', content: response };
