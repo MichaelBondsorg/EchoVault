@@ -1798,6 +1798,7 @@ export default function App() {
         <UnifiedConversation
           entries={visible}
           category={cat}
+          userId={user?.uid}
           onClose={() => setView('feed')}
           onSaveEntry={(data) => {
             // Save guided session or conversation as journal entry
