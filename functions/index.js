@@ -3286,9 +3286,12 @@ export const exchangeGoogleToken = onCall(
       console.log('Token verified for:', tokenInfo.email);
 
       // Verify the token is for our app (check audience)
+      // OAuth Client IDs should be set via environment variables in Firebase Functions
+      const webClientId = process.env.GOOGLE_WEB_CLIENT_ID || '581319345416-9h59io8iev888kej6riag3tqnvik6na0.apps.googleusercontent.com';
+      const iosClientId = process.env.GOOGLE_IOS_CLIENT_ID || '581319345416-sf58st9q2hvst5kakt4tn3sgulor6r7m.apps.googleusercontent.com';
       const validAudiences = [
-        '581319345416-9h59io8iev888kej6riag3tqnvik6na0.apps.googleusercontent.com', // Web client
-        '581319345416-sf58st9q2hvst5kakt4tn3sgulor6r7m.apps.googleusercontent.com', // iOS client
+        webClientId, // Web client
+        iosClientId, // iOS client
       ];
 
       if (!validAudiences.includes(tokenInfo.aud)) {

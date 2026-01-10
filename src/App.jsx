@@ -144,11 +144,7 @@ export default function App() {
   // Health Settings Screen
   const [showHealthSettings, setShowHealthSettings] = useState(false);
 
-  // Temporal Context (Phase 2) - for backdating entries
-  // DEPRECATED: Old temporal confirmation modal state - replaced by signal extraction (DetectedStrip)
-  // const [pendingTemporalEntry, setPendingTemporalEntry] = useState(null);
-
-  // Signal extraction (temporal redesign) - detected signals for confirmation
+  // Signal extraction - detected signals for confirmation
   const [detectedSignals, setDetectedSignals] = useState([]);
   const [showDetectedStrip, setShowDetectedStrip] = useState(false);
   const [signalExtractionEntryId, setSignalExtractionEntryId] = useState(null);
@@ -1035,21 +1031,6 @@ export default function App() {
     }
   };
 
-  // DEPRECATED: Old temporal confirmation modal handler - replaced by signal extraction (DetectedStrip)
-  // The backdating flow is now handled via signal extraction where users confirm/dismiss
-  // detected temporal signals rather than choosing to backdate the entire entry.
-  // const handleTemporalConfirm = async (confirmed) => {
-  //   if (!pendingTemporalEntry) return;
-  //   const { text, temporal } = pendingTemporalEntry;
-  //   setPendingTemporalEntry(null);
-  //   setProcessing(true);
-  //   if (confirmed) {
-  //     await doSaveEntry(text, false, null, temporal);
-  //   } else {
-  //     await doSaveEntry(text, false, null, null);
-  //   }
-  // };
-
   // Handle signal confirmation (DetectedStrip)
   const handleSignalConfirmAll = useCallback(async () => {
     if (!user || detectedSignals.length === 0) return;
@@ -1231,9 +1212,9 @@ export default function App() {
         // Note: webClientId is needed for Firebase idToken, iosClientId for native iOS
         await SocialLogin.initialize({
           google: {
-            webClientId: '581319345416-9h59io8iev888kej6riag3tqnvik6na0.apps.googleusercontent.com',
-            iOSClientId: '581319345416-sf58st9q2hvst5kakt4tn3sgulor6r7m.apps.googleusercontent.com',
-            iOSServerClientId: '581319345416-9h59io8iev888kej6riag3tqnvik6na0.apps.googleusercontent.com',
+            webClientId: import.meta.env.VITE_GOOGLE_WEB_CLIENT_ID,
+            iOSClientId: import.meta.env.VITE_GOOGLE_IOS_CLIENT_ID,
+            iOSServerClientId: import.meta.env.VITE_GOOGLE_IOS_SERVER_CLIENT_ID,
           }
         });
 
@@ -1324,7 +1305,10 @@ export default function App() {
               // SDK is hanging - use REST API fallback (Gemini's suggestion)
               console.log('[EchoVault] SDK hanging, trying REST API fallback...');
 
-              const API_KEY = 'AIzaSyBuhwHcdxEuYHf6F5SVlWR5BLRio_7kqAg';
+              const API_KEY = import.meta.env.VITE_FIREBASE_API_KEY;
+              if (!API_KEY) {
+                throw new Error('Firebase API key is required for authentication');
+              }
               const restUrl = `https://identitytoolkit.googleapis.com/v1/accounts:signInWithCustomToken?key=${API_KEY}`;
 
               const restResponse = await fetch(restUrl, {
@@ -1504,58 +1488,6 @@ export default function App() {
           }}
         />
       )}
-
-      {/* DEPRECATED: Temporal Context Confirmation Modal
-          This modal has been replaced by the signal extraction system (DetectedStrip).
-          Instead of asking users to backdate entire entries, we now extract temporal
-          signals and let users confirm/dismiss them individually.
-
-      {pendingTemporalEntry && (
-        <Modal onClose={() => {
-          setPendingTemporalEntry(null);
-          setProcessing(false);
-        }}>
-          <ModalHeader onClose={() => {
-            setPendingTemporalEntry(null);
-            setProcessing(false);
-          }}>
-            <span className="text-warm-800">Add to a different day?</span>
-          </ModalHeader>
-          <ModalBody>
-            <p className="text-warm-600 mb-4 font-body">
-              It sounds like you're talking about{' '}
-              <span className="font-semibold text-primary-600">
-                {formatEffectiveDate(pendingTemporalEntry.temporal.effectiveDate)}
-              </span>
-              {pendingTemporalEntry.temporal.originalPhrase && (
-                <span className="text-warm-500">
-                  {' '}("{pendingTemporalEntry.temporal.originalPhrase}")
-                </span>
-              )}
-            </p>
-            <p className="text-warm-500 text-sm font-body">
-              Would you like this entry added to that day's summary instead of today?
-            </p>
-            <div className="flex gap-3 mt-6">
-              <Button
-                variant="secondary"
-                className="flex-1"
-                onClick={() => handleTemporalConfirm(false)}
-              >
-                Keep as Today
-              </Button>
-              <Button
-                variant="primary"
-                className="flex-1"
-                onClick={() => handleTemporalConfirm(true)}
-              >
-                Add to {formatEffectiveDate(pendingTemporalEntry.temporal.effectiveDate)}
-              </Button>
-            </div>
-          </ModalBody>
-        </Modal>
-      )}
-      */}
 
       {crisisResources && (
         <CrisisResourcesScreen

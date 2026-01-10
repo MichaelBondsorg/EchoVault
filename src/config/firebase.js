@@ -13,7 +13,9 @@ import { getFunctions, httpsCallable } from 'firebase/functions';
 import { Capacitor } from '@capacitor/core';
 
 const firebaseConfig = {
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || "AIzaSyBuhwHcdxEuYHf6F5SVlWR5BLRio_7kqAg",
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || (() => {
+    throw new Error('VITE_FIREBASE_API_KEY environment variable is required');
+  })(),
   authDomain: "echo-vault-app.firebaseapp.com",
   projectId: "echo-vault-app",
   storageBucket: "echo-vault-app.firebasestorage.app",

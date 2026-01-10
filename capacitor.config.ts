@@ -1,4 +1,8 @@
 import type { CapacitorConfig } from '@capacitor/cli';
+import * as dotenv from 'dotenv';
+
+// Load environment variables from .env file
+dotenv.config();
 
 const config: CapacitorConfig = {
   appId: 'com.echovault.app',
@@ -40,9 +44,9 @@ const config: CapacitorConfig = {
     },
     SocialLogin: {
       google: {
-        webClientId: '581319345416-9h59io8iev888kej6riag3tqnvik6na0.apps.googleusercontent.com',
-        iOSClientId: '581319345416-sf58st9q2hvst5kakt4tn3sgulor6r7m.apps.googleusercontent.com',
-        iOSServerClientId: '581319345416-9h59io8iev888kej6riag3tqnvik6na0.apps.googleusercontent.com',
+        webClientId: process.env.VITE_GOOGLE_WEB_CLIENT_ID || '',
+        iOSClientId: process.env.VITE_GOOGLE_IOS_CLIENT_ID || '',
+        iOSServerClientId: process.env.VITE_GOOGLE_IOS_SERVER_CLIENT_ID || '',
       },
     },
   },
