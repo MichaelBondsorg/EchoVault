@@ -7,6 +7,7 @@ const VoiceRecorder = ({ onSave, onSwitch, loading, minimal }) => {
   const [mr, setMr] = useState(null);
   const [secs, setSecs] = useState(0);
   const timer = useRef(null);
+  const streamRef = useRef(null); // FIX: Store media stream for cleanup on unmount
 
   // Use ref to always have the latest onSave callback
   // This prevents stale closure issues during long recordings
@@ -15,9 +16,17 @@ const VoiceRecorder = ({ onSave, onSwitch, loading, minimal }) => {
     onSaveRef.current = onSave;
   }, [onSave]);
 
+  // FIX: Cleanup effect ensures stream is stopped on unmount, even if recording is active
   useEffect(() => {
     return () => {
+      console.log('[VoiceRecorder] Unmount cleanup, runId:post-fix');
       if (timer.current) clearInterval(timer.current);
+      // FIX: Ensure stream is cleaned up even if recording is active
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach(t => t.stop());
+        streamRef.current = null;
+        console.log('[VoiceRecorder] Stream cleaned up on unmount, runId:post-fix');
+      }
     };
   }, []);
 
@@ -30,6 +39,7 @@ const VoiceRecorder = ({ onSave, onSwitch, loading, minimal }) => {
     try {
       console.log('[VoiceRecorder] Starting microphone capture...');
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      streamRef.current = stream; // FIX: Store stream in ref for cleanup
       const mime = MediaRecorder.isTypeSupported("audio/webm") ? "audio/webm" : "audio/mp4";
       console.log('[VoiceRecorder] Using MIME type:', mime);
 
@@ -49,15 +59,22 @@ const VoiceRecorder = ({ onSave, onSwitch, loading, minimal }) => {
         setRec(false);
         clearInterval(timer.current);
         stream.getTracks().forEach(t => t.stop());
+        streamRef.current = null; // FIX: Clear ref after cleanup
       };
 
       r.onstop = () => {
         console.log('[VoiceRecorder] Stopped. Total chunks:', chunks.length);
 
+        // Helper to cleanup stream and clear ref
+        const cleanupStream = () => {
+          stream.getTracks().forEach(t => t.stop());
+          streamRef.current = null; // FIX: Clear ref after cleanup
+        };
+
         if (chunks.length === 0) {
           console.error('[VoiceRecorder] No audio data captured!');
           alert('No audio was captured. Please try again.');
-          stream.getTracks().forEach(t => t.stop());
+          cleanupStream();
           return;
         }
 
@@ -67,7 +84,7 @@ const VoiceRecorder = ({ onSave, onSwitch, loading, minimal }) => {
         if (blob.size === 0) {
           console.error('[VoiceRecorder] Blob is empty!');
           alert('Recording failed - no data. Please try again.');
-          stream.getTracks().forEach(t => t.stop());
+          cleanupStream();
           return;
         }
 
@@ -76,7 +93,7 @@ const VoiceRecorder = ({ onSave, onSwitch, loading, minimal }) => {
         reader.onerror = (e) => {
           console.error('[VoiceRecorder] FileReader error:', e);
           alert('Failed to process recording. Please try again.');
-          stream.getTracks().forEach(t => t.stop());
+          cleanupStream();
         };
 
         reader.onloadend = () => {
@@ -85,7 +102,7 @@ const VoiceRecorder = ({ onSave, onSwitch, loading, minimal }) => {
           if (!reader.result || reader.result.length < 100) {
             console.error('[VoiceRecorder] FileReader result is empty');
             alert('Recording processing failed. Please try again.');
-            stream.getTracks().forEach(t => t.stop());
+            cleanupStream();
             return;
           }
 
@@ -95,7 +112,7 @@ const VoiceRecorder = ({ onSave, onSwitch, loading, minimal }) => {
           if (!base64 || base64.length < 100) {
             console.error('[VoiceRecorder] Base64 conversion failed');
             alert('Recording processing failed. Please try again.');
-            stream.getTracks().forEach(t => t.stop());
+            cleanupStream();
             return;
           }
 
@@ -105,7 +122,7 @@ const VoiceRecorder = ({ onSave, onSwitch, loading, minimal }) => {
         };
 
         reader.readAsDataURL(blob);
-        stream.getTracks().forEach(t => t.stop());
+        cleanupStream();
       };
 
       // Start with timeslice for incremental data capture (crucial for mobile)

@@ -15,7 +15,8 @@ import {
   GoogleAuthProvider, signInWithPopup, signInWithCredential,
   exchangeGoogleTokenFn,
   collection, addDoc, query, orderBy, onSnapshot,
-  Timestamp, deleteDoc, doc, updateDoc, limit, setDoc
+  Timestamp, deleteDoc, doc, updateDoc, limit, setDoc,
+  runTransaction
 } from './config/firebase';
 import { Capacitor, registerPlugin } from '@capacitor/core';
 import {
@@ -520,32 +521,50 @@ export default function App() {
 
   // Handle entry update with date change cache invalidation
   // Options parameter keeps control logic separate from data (Fix A: Control Coupling)
+  // FIX: Use runTransaction to atomically read and increment signalExtractionVersion
   const handleEntryUpdate = useCallback(async (entryId, updates, options = {}) => {
     if (!user) return;
 
     const entryRef = doc(db, 'artifacts', APP_COLLECTION_ID, 'users', user.uid, 'entries', entryId);
+    const entry = entries.find(e => e.id === entryId);
 
     // Only increment signalExtractionVersion if text has meaningfully changed
     // This prevents re-extraction on typo fixes, tag edits, or punctuation changes
     if (updates.text !== undefined) {
-      const entry = entries.find(e => e.id === entryId);
       const oldText = entry?.text || '';
       if (hasTextMeaningfullyChanged(oldText, updates.text)) {
-        const currentVersion = entry?.signalExtractionVersion || 1;
-        updates.signalExtractionVersion = currentVersion + 1;
-        console.log(`Text meaningfully changed, triggering re-extraction (version ${currentVersion + 1})`);
+        console.log('[handleEntryUpdate] Text meaningfully changed, using transaction for version increment, runId:post-fix');
+
+        // FIX: Use runTransaction to atomically read current version from Firestore and increment
+        // This prevents race conditions on concurrent edits
+        await runTransaction(db, async (transaction) => {
+          const entryDoc = await transaction.get(entryRef);
+          const currentVersion = entryDoc.data()?.signalExtractionVersion || 1;
+          updates.signalExtractionVersion = currentVersion + 1;
+          console.log(`[handleEntryUpdate] Incrementing version ${currentVersion} -> ${currentVersion + 1}, runId:post-fix`);
+          transaction.update(entryRef, updates);
+        });
+
+        // Handle date change cache invalidation after transaction
+        if (options.dateChanged) {
+          const { oldDate, newDate } = options.dateChanged;
+          const category = entry?.category || cat;
+          handleEntryDateChange(user.uid, entryId, oldDate, newDate, category)
+            .then(result => console.log('Cache invalidation complete:', result))
+            .catch(err => console.error('Cache invalidation failed:', err));
+        }
+        return; // Transaction already applied updates
       } else {
         console.log('Text change is minor (typo/punctuation), skipping re-extraction');
       }
     }
 
-    // Perform the update
+    // Non-text changes or minor text changes - use regular update
     await updateDoc(entryRef, updates);
 
     // Check if this is a date change that needs cache invalidation
     if (options.dateChanged) {
       const { oldDate, newDate } = options.dateChanged;
-      const entry = entries.find(e => e.id === entryId);
       const category = entry?.category || cat;
 
       // Invalidate caches in the background
