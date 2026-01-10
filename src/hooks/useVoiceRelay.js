@@ -413,12 +413,36 @@ export const useVoiceRelay = () => {
     }
   }, [sessionId]);
 
-  // Cleanup on unmount
+  // Cleanup on unmount - FIX: Removed disconnect from deps to prevent unnecessary re-runs
+  // Cleanup logic is now inline to ensure it only runs on unmount
   useEffect(() => {
     return () => {
-      disconnect();
+      console.log('[useVoiceRelay] Cleanup on unmount, runId:post-fix');
+
+      // Inline cleanup (same as disconnect) to avoid dependency issues
+      cleanupTokenRefresh();
+
+      if (audioProcessorRef.current) {
+        audioProcessorRef.current.disconnect();
+        audioProcessorRef.current = null;
+      }
+
+      if (mediaStreamRef.current) {
+        mediaStreamRef.current.getTracks().forEach((track) => track.stop());
+        mediaStreamRef.current = null;
+      }
+
+      if (audioContextRef.current) {
+        audioContextRef.current.close();
+        audioContextRef.current = null;
+      }
+
+      if (wsRef.current) {
+        wsRef.current.close();
+        wsRef.current = null;
+      }
     };
-  }, [disconnect]);
+  }, []); // Empty deps - only run on unmount
 
   return {
     status,
