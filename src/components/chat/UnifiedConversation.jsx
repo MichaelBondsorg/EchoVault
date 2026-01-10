@@ -30,8 +30,12 @@ import {
   Sparkles,
   Heart,
   Brain,
-  Loader2
+  Loader2,
+  Phone
 } from 'lucide-react';
+
+// Hooks
+import { useVoiceRelay } from '../../hooks/useVoiceRelay';
 
 // Services
 import { callOpenAI, generateEmbedding, transcribeAudio } from '../../services/ai';
@@ -95,11 +99,26 @@ const UnifiedConversation = ({
   const [isLoading, setIsLoading] = useState(false);
   const [conversationHistory, setConversationHistory] = useState([]);
 
-  // Voice state
+  // Voice state (for chat mode voice input overlay)
   const [isRecording, setIsRecording] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [voiceEnabled, setVoiceEnabled] = useState(true);
   const audioRef = useRef(null);
+
+  // Natural voice conversation via useVoiceRelay
+  const {
+    status: voiceStatus,
+    transcript: voiceTranscript,
+    error: voiceError,
+    connect: voiceConnect,
+    disconnect: voiceDisconnect,
+    startRecording: voiceStartRecording,
+    endTurn: voiceEndTurn,
+    endSession: voiceEndSession,
+    clearError: voiceClearError,
+    clearTranscript: voiceClearTranscript
+  } = useVoiceRelay();
+  const [voiceIsRecording, setVoiceIsRecording] = useState(false);
 
   // Guided session state
   const [selectedSession, setSelectedSession] = useState(null);
@@ -148,6 +167,51 @@ const UnifiedConversation = ({
       }
     };
   }, []);
+
+  // Connect to voice relay when entering VOICE mode
+  useEffect(() => {
+    if (mode === MODES.VOICE && voiceStatus === 'disconnected') {
+      console.log('[Voice] Entering voice mode, connecting...');
+      voiceClearError();
+      voiceClearTranscript();
+      voiceConnect('free', 'realtime');
+    }
+  }, [mode, voiceStatus]);
+
+  // Cleanup voice relay when leaving VOICE mode or unmounting
+  useEffect(() => {
+    return () => {
+      if (voiceStatus !== 'disconnected') {
+        console.log('[Voice] Cleaning up voice connection');
+        voiceDisconnect();
+      }
+    };
+  }, []);
+
+  // Auto-stop recording when AI starts speaking
+  useEffect(() => {
+    if (voiceStatus === 'speaking' && voiceIsRecording) {
+      setVoiceIsRecording(false);
+    }
+  }, [voiceStatus, voiceIsRecording]);
+
+  // Toggle voice recording (push-to-talk style for reliability)
+  const toggleVoiceRecording = useCallback(() => {
+    if (voiceIsRecording) {
+      setVoiceIsRecording(false);
+      voiceEndTurn();
+    } else {
+      setVoiceIsRecording(true);
+      voiceStartRecording();
+    }
+  }, [voiceIsRecording, voiceStartRecording, voiceEndTurn]);
+
+  // End voice conversation
+  const handleEndVoice = useCallback(async () => {
+    await voiceEndSession(false);
+    voiceDisconnect();
+    setMode(MODES.PICKER);
+  }, [voiceEndSession, voiceDisconnect]);
 
   // Get companion name from memory
   const companionName = memory?.core?.preferences?.preferredName || 'there';
@@ -214,20 +278,22 @@ const UnifiedConversation = ({
         sessionBuffer
       });
 
-      // Build system prompt with memory
-      const systemPrompt = buildCompanionSystemPrompt(memory);
+      // Build system prompt with memory and context
+      const baseSystemPrompt = buildCompanionSystemPrompt(memory);
       const contextPrompt = formatContextForChat(contextResult);
+      const fullSystemPrompt = `${baseSystemPrompt}\n\nCONTEXT:\n${contextPrompt}`;
 
-      // Build messages for API
-      const apiMessages = [
-        { role: 'system', content: systemPrompt },
-        { role: 'system', content: `CONTEXT:\n${contextPrompt}` },
-        ...conversationHistory.slice(-10), // Last 10 messages
-        { role: 'user', content: text }
-      ];
+      // Build user prompt with conversation history
+      const historyContext = conversationHistory.slice(-10).map(m =>
+        `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.content}`
+      ).join('\n');
 
-      // Call AI
-      const response = await callOpenAI(apiMessages);
+      const userPrompt = historyContext
+        ? `Previous conversation:\n${historyContext}\n\nUser: ${text}`
+        : text;
+
+      // Call AI (expects systemPrompt, userPrompt as separate strings)
+      const response = await callOpenAI(fullSystemPrompt, userPrompt);
 
       if (response) {
         const assistantMessage = { role: 'assistant', content: response };
@@ -402,10 +468,7 @@ const UnifiedConversation = ({
           </button>
 
           <button
-            onClick={() => {
-              setMode(MODES.VOICE);
-              setIsRecording(true);
-            }}
+            onClick={() => setMode(MODES.VOICE)}
             className="w-full p-4 bg-white/5 rounded-xl flex items-center gap-4 hover:bg-white/10 transition-colors"
           >
             <div className="w-12 h-12 rounded-lg bg-white/10 flex items-center justify-center">
@@ -413,7 +476,7 @@ const UnifiedConversation = ({
             </div>
             <div className="flex-1 text-left">
               <h4 className="text-white font-medium">Voice Conversation</h4>
-              <p className="text-white/60 text-sm">Speak naturally, I'll respond</p>
+              <p className="text-white/60 text-sm">Natural turn-taking, like a real conversation</p>
             </div>
           </button>
         </div>
@@ -568,68 +631,147 @@ const UnifiedConversation = ({
   );
 
   /**
-   * Render voice conversation interface
+   * Render voice conversation interface using natural voice relay
    */
-  const renderVoice = () => (
-    <div className="flex flex-col items-center justify-center h-full p-8">
-      {/* Conversation history - last few messages */}
-      {messages.length > 0 && (
-        <div className="mb-8 text-center max-w-md max-h-48 overflow-y-auto">
-          {messages.slice(-3).map((msg, idx) => (
-            <p key={idx} className={`text-lg mb-2 ${msg.role === 'user' ? 'text-blue-300' : 'text-white/80'}`}>
-              {msg.role === 'user' ? 'You: ' : ''}{msg.content}
-            </p>
+  const renderVoice = () => {
+    const statusColors = {
+      disconnected: 'bg-gray-400',
+      connecting: 'bg-yellow-400 animate-pulse',
+      connected: 'bg-green-400',
+      speaking: 'bg-indigo-500 animate-pulse',
+      listening: 'bg-green-500 animate-pulse'
+    };
+
+    const statusLabels = {
+      disconnected: 'Ready to start',
+      connecting: 'Connecting...',
+      connected: 'Connected',
+      speaking: 'AI is speaking...',
+      listening: 'Listening...'
+    };
+
+    return (
+      <div className="flex flex-col h-full">
+        {/* Status bar */}
+        <div className="px-6 py-3 flex items-center gap-3">
+          <div className={`w-3 h-3 rounded-full ${statusColors[voiceStatus]}`} />
+          <span className="text-white/80 text-sm">{statusLabels[voiceStatus]}</span>
+        </div>
+
+        {/* Conversation transcript */}
+        <div className="flex-1 overflow-y-auto px-6 py-4">
+          {voiceTranscript.map((msg, i) => (
+            <div
+              key={i}
+              className={`mb-4 ${msg.role === 'user' ? 'text-right' : 'text-left'}`}
+            >
+              <div
+                className={`inline-block max-w-[85%] px-4 py-3 rounded-2xl ${
+                  msg.role === 'user'
+                    ? 'bg-white/20 text-white rounded-br-none'
+                    : 'bg-white/10 text-white/90 rounded-bl-none'
+                }`}
+              >
+                <p className="text-sm">{msg.text}</p>
+              </div>
+            </div>
           ))}
-        </div>
-      )}
 
-      {/* Status indicator */}
-      {isLoading && (
-        <div className="mb-8 flex items-center gap-2 text-white/60">
-          <Loader2 size={20} className="animate-spin" />
-          <span>Thinking...</span>
+          {voiceStatus === 'speaking' && (
+            <div className="flex justify-center">
+              <div className="flex gap-1">
+                {[...Array(3)].map((_, i) => (
+                  <div
+                    key={i}
+                    className="w-2 h-8 bg-white/60 rounded-full animate-pulse"
+                    style={{ animationDelay: `${i * 150}ms` }}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
         </div>
-      )}
 
-      {isSpeaking && (
-        <div className="mb-8">
-          <motion.div
-            animate={{ scale: [1, 1.1, 1] }}
-            transition={{ repeat: Infinity, duration: 1.5 }}
-            className="w-24 h-24 rounded-full bg-blue-500 flex items-center justify-center mb-4"
-          >
-            <Volume2 size={40} className="text-white" />
-          </motion.div>
-          <p className="text-white/60 text-center">Speaking...</p>
+        {/* Error display */}
+        {voiceError && (
+          <div className="mx-6 mb-4 p-3 bg-red-500/20 border border-red-400/30 rounded-lg">
+            <p className="text-red-200 text-sm">{voiceError}</p>
+            <button
+              onClick={voiceClearError}
+              className="text-red-300 text-xs mt-1 underline"
+            >
+              Dismiss
+            </button>
+          </div>
+        )}
+
+        {/* Main controls */}
+        <div className="p-6 pb-[max(2rem,env(safe-area-inset-bottom))] flex flex-col items-center">
+          {voiceStatus === 'connecting' ? (
+            <div className="w-24 h-24 rounded-full bg-gradient-to-br from-yellow-500 to-orange-600 shadow-lg flex items-center justify-center animate-pulse">
+              <div className="w-8 h-8 border-4 border-white/30 border-t-white rounded-full animate-spin" />
+            </div>
+          ) : voiceStatus !== 'disconnected' ? (
+            <div className="flex items-center gap-6">
+              {/* End call button */}
+              <button
+                onClick={handleEndVoice}
+                className="w-16 h-16 rounded-full bg-red-500 shadow-lg shadow-red-500/30 flex items-center justify-center hover:scale-105 transition-transform"
+              >
+                <Phone size={24} className="text-white rotate-[135deg]" />
+              </button>
+
+              {/* Push-to-talk button */}
+              <button
+                onMouseDown={toggleVoiceRecording}
+                onMouseUp={() => voiceIsRecording && toggleVoiceRecording()}
+                onTouchStart={toggleVoiceRecording}
+                onTouchEnd={() => voiceIsRecording && toggleVoiceRecording()}
+                disabled={voiceStatus === 'speaking'}
+                className={`w-24 h-24 rounded-full shadow-lg flex items-center justify-center transition-all ${
+                  voiceIsRecording
+                    ? 'bg-green-500 shadow-green-500/30 scale-110'
+                    : voiceStatus === 'speaking'
+                    ? 'bg-gray-500 opacity-50 cursor-not-allowed'
+                    : 'bg-gradient-to-br from-indigo-500 to-purple-600 shadow-purple-500/30 hover:scale-105'
+                }`}
+              >
+                {voiceIsRecording ? (
+                  <MicOff size={36} className="text-white animate-pulse" />
+                ) : (
+                  <Mic size={36} className="text-white" />
+                )}
+              </button>
+            </div>
+          ) : null}
+
+          <p className="text-white/60 text-sm mt-4">
+            {voiceStatus === 'connecting'
+              ? 'Connecting to voice service...'
+              : voiceStatus === 'speaking'
+              ? 'Wait for response...'
+              : voiceIsRecording
+              ? 'Release to send'
+              : voiceStatus === 'disconnected'
+              ? 'Starting voice...'
+              : 'Hold to speak'}
+          </p>
+
           <button
-            onClick={() => speakText('')}
-            className="mt-4 px-6 py-2 bg-white/20 rounded-full text-white hover:bg-white/30 transition-colors"
-          >
-            Stop
-          </button>
-        </div>
-      )}
-
-      {/* Voice recorder - only show when not loading or speaking */}
-      {!isLoading && !isSpeaking && (
-        <div className="flex flex-col items-center">
-          <p className="text-white/60 mb-6">Tap to speak</p>
-          <VoiceRecorder
-            onSave={handleVoiceInput}
-            onSwitch={() => setMode(MODES.CHAT)}
-            loading={isLoading}
-            minimal
-          />
-          <button
-            onClick={() => setMode(MODES.CHAT)}
-            className="mt-6 text-white/40 hover:text-white/60 transition-colors text-sm"
+            onClick={() => {
+              if (voiceStatus !== 'disconnected') {
+                voiceDisconnect();
+              }
+              setMode(MODES.CHAT);
+            }}
+            className="mt-4 text-white/40 hover:text-white/60 transition-colors text-sm"
           >
             Switch to text chat
           </button>
         </div>
-      )}
-    </div>
-  );
+      </div>
+    );
+  };
 
   /**
    * Render guided session interface

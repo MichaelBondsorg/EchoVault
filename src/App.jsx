@@ -54,7 +54,6 @@ import { useWakeLock } from './hooks/useWakeLock';
 import {
   CrisisSoftBlockModal, DailySummaryModal, WeeklyReport, InsightsPanel, EntryInsightsPopup,
   CrisisResourcesScreen, SafetyPlanScreen, DecompressionScreen, TherapistExportScreen, JournalScreen, HealthSettingsScreen,
-  Chat, RealtimeConversation,
   MoodHeatmap,
   MarkdownLite, GetHelpButton, HamburgerMenu,
   DayDashboard, EntryBar
@@ -1618,8 +1617,6 @@ export default function App() {
               onShowInsights={() => setShowInsights(true)}
               onShowExport={() => setShowExport(true)}
               onRequestPermission={requestPermission}
-              onOpenChat={() => setView('chat')}
-              onOpenVoice={() => setView('realtime')}
               onOpenCompanion={() => setView('companion')}
               onOpenJournal={() => setShowJournal(true)}
               onOpenHealthSettings={() => setShowHealthSettings(true)}
@@ -1780,20 +1777,6 @@ export default function App() {
         )}
       </AnimatePresence>
 
-      {view === 'chat' && <Chat entries={visible} onClose={() => setView('feed')} category={cat} />}
-      {view === 'realtime' && (
-        <RealtimeConversation
-          entries={visible}
-          onClose={() => setView('feed')}
-          category={cat}
-          onSaveEntry={(data) => {
-            // Save the voice transcript as a journal entry
-            if (data?.text) {
-              saveEntry(data.text);
-            }
-          }}
-        />
-      )}
       {view === 'companion' && (
         <UnifiedConversation
           entries={visible}
