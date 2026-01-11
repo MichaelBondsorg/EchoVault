@@ -87,16 +87,17 @@ const AppLayout = ({
   const [entryMode, setEntryMode] = useState('text'); // 'voice' or 'text'
 
   // Direct handlers for FAB actions - show modal immediately
+  // NOTE: Don't set replyContext here - FAB entries are fresh, not responses to prompts
   const handleVoiceClick = () => {
     setEntryMode('voice');
+    setReplyContext?.(null); // Clear any existing reply context
     setShowEntryModal(true);
-    onVoiceEntry?.(); // Also call parent to set replyContext for EntryBar
   };
 
   const handleTextClick = () => {
     setEntryMode('text');
+    setReplyContext?.(null); // Clear any existing reply context
     setShowEntryModal(true);
-    onTextEntry?.(); // Also call parent to set replyContext for EntryBar
   };
 
   const handleCloseEntryModal = () => {
