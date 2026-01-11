@@ -95,7 +95,7 @@ const QuickLogModal = ({ isOpen, onClose, onSave }) => {
         <>
           {/* Backdrop */}
           <motion.div
-            className="fixed inset-0 bg-black/30 backdrop-blur-sm z-50"
+            className="fixed inset-0 bg-black/30 backdrop-blur-sm z-[60]"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
@@ -103,7 +103,7 @@ const QuickLogModal = ({ isOpen, onClose, onSave }) => {
           />
 
           {/* Modal Container - centered using flex */}
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 pointer-events-none">
+          <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 pointer-events-none">
             <motion.div
               className="
                 w-full max-w-sm
