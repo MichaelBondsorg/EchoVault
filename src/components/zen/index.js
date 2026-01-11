@@ -9,5 +9,9 @@ export { default as AppLayout } from './AppLayout';
 export { default as BentoGrid } from './BentoGrid';
 export { default as WidgetDrawer } from './WidgetDrawer';
 
+// Welcoming Experience
+export { default as SanctuaryWalkthrough } from './SanctuaryWalkthrough';
+export { FABTooltip, CustomizeTooltip, useZenTooltips } from './ZenTooltips';
+
 // Bento Widgets
 export * from './widgets';
