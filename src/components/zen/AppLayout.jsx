@@ -257,15 +257,21 @@ const AppLayout = ({
             {/* Backdrop */}
             <motion.div
               className="fixed inset-0 bg-black/30 backdrop-blur-sm z-[60]"
+              style={{ minHeight: '100dvh' }}
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
+              onTouchEnd={handleCloseEntryModal}
               onClick={handleCloseEntryModal}
             />
 
-            {/* Entry Bar Modal */}
+            {/* Entry Bar Modal - iOS safe positioning */}
             <motion.div
-              className="fixed inset-x-4 bottom-28 z-[60]"
+              className="fixed left-4 right-4 z-[60]"
+              style={{
+                bottom: 'calc(7rem + env(safe-area-inset-bottom, 0px))',
+                WebkitOverflowScrolling: 'touch',
+              }}
               initial={{ opacity: 0, y: 50 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: 50 }}

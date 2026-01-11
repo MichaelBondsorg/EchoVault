@@ -91,7 +91,12 @@ const BottomNavbar = ({ onVoiceEntry, onTextEntry, onQuickMood }) => {
             {fabActions.map((action, index) => (
               <motion.button
                 key={action.label}
-                onTap={() => handleFabAction(action.action)}
+                role="button"
+                tabIndex={0}
+                onTouchEnd={(e) => {
+                  e.preventDefault();
+                  handleFabAction(action.action);
+                }}
                 onClick={() => handleFabAction(action.action)}
                 className={`
                   flex items-center gap-3 px-4 py-3
@@ -99,8 +104,13 @@ const BottomNavbar = ({ onVoiceEntry, onTextEntry, onQuickMood }) => {
                   rounded-full shadow-glass-md
                   font-medium text-sm
                   cursor-pointer
-                  touch-manipulation
+                  select-none
                 `}
+                style={{
+                  WebkitTapHighlightColor: 'transparent',
+                  touchAction: 'manipulation',
+                  WebkitUserSelect: 'none',
+                }}
                 initial={{ opacity: 0, y: 20, scale: 0.8 }}
                 animate={{ opacity: 1, y: 0, scale: 1 }}
                 exit={{ opacity: 0, y: 20, scale: 0.8 }}

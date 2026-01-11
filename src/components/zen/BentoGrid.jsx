@@ -67,16 +67,29 @@ const SortableWidget = ({
       {/* Delete button - positioned outside the card with negative margins */}
       {isEditing && onDelete && (
         <motion.button
+          role="button"
+          tabIndex={0}
           className="
             absolute -top-2 -right-2 z-50
-            w-7 h-7
-            bg-red-500 hover:bg-red-600
+            w-8 h-8
+            bg-red-500 hover:bg-red-600 active:bg-red-700
             text-white
             rounded-full
             shadow-lg
             flex items-center justify-center
             transition-colors
+            select-none
           "
+          style={{
+            WebkitTapHighlightColor: 'transparent',
+            touchAction: 'manipulation',
+            WebkitUserSelect: 'none',
+          }}
+          onTouchEnd={(e) => {
+            e.stopPropagation();
+            e.preventDefault();
+            onDelete();
+          }}
           onClick={(e) => {
             e.stopPropagation();
             e.preventDefault();
