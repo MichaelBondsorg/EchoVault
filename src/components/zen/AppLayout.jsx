@@ -8,6 +8,7 @@ import TopBar from './TopBar';
 import BottomNavbar from './BottomNavbar';
 import CompanionNudge from './CompanionNudge';
 import QuickLogModal from './QuickLogModal';
+import DaySummaryModal from './DaySummaryModal';
 import SanctuaryWalkthrough from './SanctuaryWalkthrough';
 import { FABTooltip, useZenTooltips } from './ZenTooltips';
 
@@ -86,6 +87,34 @@ const AppLayout = ({
   const [showEntryModal, setShowEntryModal] = useState(false);
   const [entryMode, setEntryMode] = useState('text'); // 'voice' or 'text'
   const [isFreshEntry, setIsFreshEntry] = useState(true); // true = FAB entry, false = responding to prompt
+  const [currentPrompt, setCurrentPrompt] = useState(null); // Track prompt being answered for auto-dismiss
+  const [daySummary, setDaySummary] = useState({ isOpen: false, date: null, dayData: null }); // Day summary modal
+
+  // Handler for day click from 30-day journey
+  const handleDayClick = (date, dayData) => {
+    setDaySummary({ isOpen: true, date, dayData });
+  };
+
+  const handleCloseDaySummary = () => {
+    setDaySummary({ isOpen: false, date: null, dayData: null });
+  };
+
+  // Function to dismiss a reflection prompt (add to localStorage)
+  const dismissReflectionPrompt = (prompt) => {
+    if (!prompt || !category) return;
+    const key = `reflections_dismissed_${category}`;
+    try {
+      const stored = localStorage.getItem(key);
+      const dismissed = stored ? JSON.parse(stored) : [];
+      const promptKey = prompt.toLowerCase();
+      if (!dismissed.includes(promptKey)) {
+        dismissed.push(promptKey);
+        localStorage.setItem(key, JSON.stringify(dismissed));
+      }
+    } catch (e) {
+      console.error('Failed to dismiss reflection:', e);
+    }
+  };
 
   // Direct handlers for FAB actions - show modal immediately
   // NOTE: Don't set replyContext here - FAB entries are fresh, not responses to prompts
@@ -103,10 +132,42 @@ const AppLayout = ({
     setShowEntryModal(true);
   };
 
+  // Handler for responding to a reflection prompt (from Reflect card)
+  // This DOES use the replyContext and shows "[Replying to ...]"
+  const handlePromptResponse = (prompt, mode = 'text') => {
+    setEntryMode(mode);
+    setIsFreshEntry(false); // Mark as response to prompt
+    setCurrentPrompt(prompt); // Track for auto-dismiss after submission
+    setReplyContext?.(prompt); // Set the prompt as context
+    setShowEntryModal(true);
+  };
+
   const handleCloseEntryModal = () => {
     setShowEntryModal(false);
     setIsFreshEntry(true); // Reset for next time
+    setCurrentPrompt(null); // Clear tracked prompt
     setReplyContext?.(null);
+  };
+
+  // Handler for successful entry submission - dismisses prompt if responding to one
+  const handleEntrySubmitted = async (submitFn, ...args) => {
+    try {
+      await submitFn?.(...args);
+      // If this was a response to a reflection prompt, dismiss it
+      if (currentPrompt && !isFreshEntry) {
+        dismissReflectionPrompt(currentPrompt);
+      }
+      handleCloseEntryModal();
+    } catch (e) {
+      console.error('Entry submission failed:', e);
+      handleCloseEntryModal();
+    }
+  };
+
+  // Handler for Quick Mood - also clears any stale replyContext
+  const handleOpenQuickMood = () => {
+    setReplyContext?.(null); // Clear any stale context
+    setShowQuickLog(true);
   };
 
   // Zen tooltips management
@@ -184,8 +245,8 @@ const AppLayout = ({
                 onShowInsights={onShowInsights}
                 onStartRecording={onStartRecording}
                 onStartTextEntry={onStartTextEntry}
-                setEntryPreferredMode={setEntryPreferredMode}
-                setReplyContext={setReplyContext}
+                onPromptResponse={handlePromptResponse}
+                onDayClick={handleDayClick}
               />
             }
           />
@@ -245,7 +306,7 @@ const AppLayout = ({
       <BottomNavbar
         onVoiceEntry={handleVoiceClick}
         onTextEntry={handleTextClick}
-        onQuickMood={() => setShowQuickLog(true)}
+        onQuickMood={handleOpenQuickMood}
       />
 
       {/* Quick Log Modal */}
@@ -284,14 +345,8 @@ const AppLayout = ({
               <div className="bg-white/95 backdrop-blur-xl rounded-3xl shadow-glass-lg overflow-hidden">
                 <EntryBar
                   embedded={true}
-                  onVoiceSave={async (base64, mime) => {
-                    await onAudioSubmit?.(base64, mime);
-                    handleCloseEntryModal();
-                  }}
-                  onTextSave={async (text) => {
-                    await onTextSubmit?.(text);
-                    handleCloseEntryModal();
-                  }}
+                  onVoiceSave={(base64, mime) => handleEntrySubmitted(onAudioSubmit, base64, mime)}
+                  onTextSave={(text) => handleEntrySubmitted(onTextSubmit, text)}
                   loading={processing}
                   preferredMode={entryMode}
                   promptContext={isFreshEntry ? null : replyContext}
@@ -325,6 +380,19 @@ const AppLayout = ({
 
       {/* FAB Tooltip (shows after walkthrough) */}
       {!showWalkthrough && <FABTooltip />}
+
+      {/* Day Summary Modal (from 30-day journey) */}
+      <DaySummaryModal
+        isOpen={daySummary.isOpen}
+        onClose={handleCloseDaySummary}
+        date={daySummary.date}
+        dayData={daySummary.dayData}
+        onEntryClick={(entry) => {
+          handleCloseDaySummary();
+          // Could navigate to entry detail or open in modal
+          console.log('Entry clicked:', entry.id);
+        }}
+      />
 
       {/* Additional modals passed from App.jsx */}
       {children}
