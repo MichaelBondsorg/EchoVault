@@ -102,8 +102,15 @@ const QuickLogModal = ({ isOpen, onClose, onSave }) => {
             onClick={handleClose}
           />
 
-          {/* Modal Container - centered using flex */}
-          <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 pointer-events-none">
+          {/* Modal Container - centered using flex with iOS-safe viewport */}
+          <div
+            className="fixed inset-0 z-[60] flex items-center justify-center p-4 pointer-events-none"
+            style={{
+              // Use dvh for iOS Safari dynamic viewport height
+              minHeight: '100dvh',
+              minHeight: '-webkit-fill-available',
+            }}
+          >
             <motion.div
               className="
                 w-full max-w-sm
@@ -114,6 +121,12 @@ const QuickLogModal = ({ isOpen, onClose, onSave }) => {
                 overflow-hidden
                 pointer-events-auto
               "
+              style={{
+                // Ensure modal doesn't exceed viewport on iOS
+                maxHeight: 'calc(100dvh - 2rem)',
+                maxHeight: 'calc(100vh - 2rem)',
+                WebkitOverflowScrolling: 'touch',
+              }}
               initial={{ opacity: 0, scale: 0.9, y: 20 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.9, y: 20 }}

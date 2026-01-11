@@ -49,8 +49,14 @@ const BottomNavbar = ({ onVoiceEntry, onTextEntry, onQuickMood }) => {
 
   const handleFabAction = async (action) => {
     await triggerHaptic();
+    // Close FAB first, then trigger action after a small delay
+    // This prevents framer-motion animation from blocking the action
     setFabExpanded(false);
-    action?.();
+    setTimeout(() => {
+      if (action && typeof action === 'function') {
+        action();
+      }
+    }, 50);
   };
 
   const handleNavClick = async (path) => {
@@ -85,13 +91,26 @@ const BottomNavbar = ({ onVoiceEntry, onTextEntry, onQuickMood }) => {
             {fabActions.map((action, index) => (
               <motion.button
                 key={action.label}
+                role="button"
+                tabIndex={0}
+                onTouchEnd={(e) => {
+                  e.preventDefault();
+                  handleFabAction(action.action);
+                }}
                 onClick={() => handleFabAction(action.action)}
                 className={`
                   flex items-center gap-3 px-4 py-3
                   ${action.color} text-white
                   rounded-full shadow-glass-md
                   font-medium text-sm
+                  cursor-pointer
+                  select-none
                 `}
+                style={{
+                  WebkitTapHighlightColor: 'transparent',
+                  touchAction: 'manipulation',
+                  WebkitUserSelect: 'none',
+                }}
                 initial={{ opacity: 0, y: 20, scale: 0.8 }}
                 animate={{ opacity: 1, y: 0, scale: 1 }}
                 exit={{ opacity: 0, y: 20, scale: 0.8 }}
