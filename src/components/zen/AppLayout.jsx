@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect } from 'react';
 import { Routes, Route } from 'react-router-dom';
-import { AnimatePresence } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 
 // Zen components
 import MoodBackgroundProvider from './MoodBackgroundProvider';
@@ -16,6 +16,9 @@ import { HomePage, JournalPage, InsightsPage, SettingsPage } from '../../pages';
 
 // Screens (modals that overlay the entire app)
 import UnifiedConversation from '../chat/UnifiedConversation';
+
+// Entry components
+import EntryBar from '../entries/EntryBar';
 
 /**
  * AppLayout - Main application shell with Zen & Bento navigation
@@ -53,6 +56,11 @@ const AppLayout = ({
   // Entry bar context
   setEntryPreferredMode,
   setReplyContext,
+  replyContext,
+  entryPreferredMode,
+  onAudioSubmit,
+  onTextSubmit,
+  processing,
 
   // Dashboard handlers
   onPromptClick,
@@ -72,6 +80,14 @@ const AppLayout = ({
   const [showQuickLog, setShowQuickLog] = useState(false);
   const [showCompanion, setShowCompanion] = useState(false);
   const [showWalkthrough, setShowWalkthrough] = useState(false);
+  const [showEntryModal, setShowEntryModal] = useState(false);
+
+  // Show entry modal when replyContext is set (from FAB)
+  useEffect(() => {
+    if (replyContext) {
+      setShowEntryModal(true);
+    }
+  }, [replyContext]);
 
   // Zen tooltips management
   const { shouldShowWalkthrough, markWalkthroughComplete } = useZenTooltips();
@@ -218,6 +234,55 @@ const AppLayout = ({
         onClose={() => setShowQuickLog(false)}
         onSave={onQuickMoodSave}
       />
+
+      {/* Entry Modal (Voice/Text from FAB) */}
+      <AnimatePresence>
+        {showEntryModal && (
+          <>
+            {/* Backdrop */}
+            <motion.div
+              className="fixed inset-0 bg-black/30 backdrop-blur-sm z-50"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => {
+                setShowEntryModal(false);
+                setReplyContext(null);
+              }}
+            />
+
+            {/* Entry Bar Modal */}
+            <motion.div
+              className="fixed inset-x-4 bottom-24 z-50"
+              initial={{ opacity: 0, y: 50 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 50 }}
+            >
+              <div className="bg-white/95 backdrop-blur-xl rounded-3xl shadow-glass-lg overflow-hidden">
+                <EntryBar
+                  onAudio={async (base64, mime) => {
+                    await onAudioSubmit?.(base64, mime);
+                    setShowEntryModal(false);
+                    setReplyContext(null);
+                  }}
+                  onText={async (text) => {
+                    await onTextSubmit?.(text);
+                    setShowEntryModal(false);
+                    setReplyContext(null);
+                  }}
+                  processing={processing}
+                  preferredMode={entryPreferredMode}
+                  replyContext={replyContext}
+                  onClearReply={() => {
+                    setShowEntryModal(false);
+                    setReplyContext(null);
+                  }}
+                />
+              </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
 
       {/* AI Companion (full screen) */}
       <AnimatePresence>
