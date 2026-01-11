@@ -1,17 +1,16 @@
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Plus, Sun, MessageCircle, BarChart3, Target, CheckSquare, Calendar, TrendingUp, GitBranch } from 'lucide-react';
+import { X, Plus, Sun, Sparkles, BarChart3, Target, CheckSquare, Calendar, GitBranch } from 'lucide-react';
 import { WIDGET_DEFINITIONS } from '../../hooks/useDashboardLayout';
 
 // Map widget IDs to icons
 const WIDGET_ICONS = {
   hero_card: Sun,
-  prompt_card: MessageCircle,
+  prompt_card: Sparkles,
   quick_stats: BarChart3,
-  mood_trend: TrendingUp,
+  mood_heatmap: Calendar,
+  ongoing_stories: GitBranch,
   goals: Target,
   tasks: CheckSquare,
-  weekly_digest: Calendar,
-  situation_timeline: GitBranch,
 };
 
 /**
@@ -77,8 +76,12 @@ const WidgetDrawer = ({
 
             {/* Widget List */}
             <div
-              className="p-4 overflow-y-auto"
-              style={{ maxHeight: 'calc(70vh - 100px)' }}
+              className="p-4 overflow-y-auto overscroll-contain"
+              style={{
+                maxHeight: 'calc(70vh - 100px)',
+                WebkitOverflowScrolling: 'touch',
+              }}
+              onTouchMove={(e) => e.stopPropagation()}
             >
               {availableWidgets.length > 0 ? (
                 <div className="space-y-3">
