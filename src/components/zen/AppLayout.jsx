@@ -85,23 +85,27 @@ const AppLayout = ({
   const [showWalkthrough, setShowWalkthrough] = useState(false);
   const [showEntryModal, setShowEntryModal] = useState(false);
   const [entryMode, setEntryMode] = useState('text'); // 'voice' or 'text'
+  const [isFreshEntry, setIsFreshEntry] = useState(true); // true = FAB entry, false = responding to prompt
 
   // Direct handlers for FAB actions - show modal immediately
   // NOTE: Don't set replyContext here - FAB entries are fresh, not responses to prompts
   const handleVoiceClick = () => {
     setEntryMode('voice');
+    setIsFreshEntry(true); // Mark as fresh entry (not a response)
     setReplyContext?.(null); // Clear any existing reply context
     setShowEntryModal(true);
   };
 
   const handleTextClick = () => {
     setEntryMode('text');
+    setIsFreshEntry(true); // Mark as fresh entry (not a response)
     setReplyContext?.(null); // Clear any existing reply context
     setShowEntryModal(true);
   };
 
   const handleCloseEntryModal = () => {
     setShowEntryModal(false);
+    setIsFreshEntry(true); // Reset for next time
     setReplyContext?.(null);
   };
 
@@ -290,7 +294,7 @@ const AppLayout = ({
                   }}
                   loading={processing}
                   preferredMode={entryMode}
-                  promptContext={replyContext}
+                  promptContext={isFreshEntry ? null : replyContext}
                   onClearPrompt={handleCloseEntryModal}
                 />
               </div>
