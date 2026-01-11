@@ -65,6 +65,9 @@ import UnifiedConversation from './components/chat/UnifiedConversation';
 import { QuickStatsBar, GoalsProgress, WeeklyDigest, SituationTimeline, ReflectionPrompts } from './components/dashboard/shared';
 import DetectedStrip from './components/entries/DetectedStrip';
 
+// Zen & Bento Components
+import { AppLayout } from './components/zen';
+
 // --- PDF LOADER (lazy-loads jsPDF from CDN) ---
 let jsPDFPromise = null;
 const loadJsPDF = () => {
@@ -1427,8 +1430,89 @@ export default function App() {
 
   console.log('[EchoVault] Rendering main app (user logged in)');
 
+  // Handler for quick mood log from TopBar orb
+  const handleQuickMoodSave = async (quickLog) => {
+    if (!user) return;
+    console.log('[QuickMood] Saving quick check-in:', quickLog);
+
+    // Create a simple entry from the quick mood log
+    const vibeText = quickLog.vibeTags?.length > 0
+      ? ` Feeling: ${quickLog.vibeTags.join(', ')}.`
+      : '';
+    const moodLabel = quickLog.moodScore >= 0.7 ? 'good' :
+                      quickLog.moodScore >= 0.4 ? 'okay' : 'low';
+    const entryText = `Quick check-in: Mood is ${moodLabel}.${vibeText}`;
+
+    await saveEntry(entryText);
+  };
+
+  // Handler for voice entry from FAB
+  const handleVoiceEntry = () => {
+    setEntryPreferredMode('voice');
+    setReplyContext("Let it out - I'm here to listen.");
+  };
+
+  // Handler for text entry from FAB
+  const handleTextEntry = () => {
+    setEntryPreferredMode('text');
+    setReplyContext("Write what's on your mind...");
+  };
+
   return (
-    <div className="min-h-screen bg-gradient-to-b from-warm-50 to-white pb-40 pt-[env(safe-area-inset-top)]">
+    <AppLayout
+      // User & Data
+      user={user}
+      entries={entries}
+      category={cat}
+
+      // Entry handling
+      onVoiceEntry={handleVoiceEntry}
+      onTextEntry={handleTextEntry}
+      onQuickMoodSave={handleQuickMoodSave}
+      onSaveEntry={(data) => {
+        if (data?.text) {
+          saveEntry(data.text);
+        }
+      }}
+
+      // Navigation handlers
+      onShowInsights={() => setShowInsights(true)}
+      onShowSafetyPlan={() => setShowSafetyPlan(true)}
+      onShowExport={() => setShowExport(true)}
+      onShowHealthSettings={() => setShowHealthSettings(true)}
+      onRequestNotifications={requestPermission}
+      onLogout={() => signOut(auth)}
+
+      // Entry bar context (for prompts)
+      setEntryPreferredMode={setEntryPreferredMode}
+      setReplyContext={setReplyContext}
+
+      // Dashboard handlers
+      onPromptClick={(prompt) => setReplyContext(prompt)}
+      onToggleTask={async (task, source, index) => {
+        console.log('Completing task:', task, source, index);
+        if (user?.uid) {
+          await completeActionItem(user.uid, cat, source, index);
+        }
+      }}
+      onStartRecording={() => {
+        setEntryPreferredMode('voice');
+        setReplyContext("Let it out - I'm here to listen.");
+      }}
+      onStartTextEntry={() => {
+        setEntryPreferredMode('text');
+        setReplyContext("Write what's on your mind...");
+      }}
+      onDayClick={(date, dayData) => setDailySummaryModal({ date, dayData })}
+      onDelete={id => deleteDoc(doc(db, 'artifacts', APP_COLLECTION_ID, 'users', user.uid, 'entries', id))}
+      onUpdate={handleEntryUpdate}
+
+      // Permissions
+      notificationPermission={permission}
+    >
+      {/* Modals and overlays - passed as children to AppLayout */}
+
+      {/* Decompression Screen */}
       <AnimatePresence>
         {showDecompression && <DecompressionScreen onClose={() => setShowDecompression(false)} />}
       </AnimatePresence>
@@ -1473,12 +1557,13 @@ export default function App() {
 
       {/* Offline Indicator */}
       {!isOnline && (
-        <div className="fixed top-[env(safe-area-inset-top)] left-0 right-0 z-50 bg-amber-500 text-white px-4 py-2 text-center text-sm font-medium">
+        <div className="fixed top-[calc(env(safe-area-inset-top)+60px)] left-0 right-0 z-50 bg-amber-500 text-white px-4 py-2 text-center text-sm font-medium">
           You're offline. Entries will be saved locally and synced when you're back online.
           {offlineQueue.length > 0 && ` (${offlineQueue.length} pending)`}
         </div>
       )}
 
+      {/* Crisis Soft Block Modal */}
       {crisisModal && (
         <CrisisSoftBlockModal
           onResponse={handleCrisisResponse}
@@ -1489,6 +1574,7 @@ export default function App() {
         />
       )}
 
+      {/* Crisis Resources Screen */}
       {crisisResources && (
         <CrisisResourcesScreen
           level={crisisResources}
@@ -1500,6 +1586,7 @@ export default function App() {
         />
       )}
 
+      {/* Safety Plan Screen */}
       {showSafetyPlan && (
         <SafetyPlanScreen
           plan={safetyPlan}
@@ -1508,6 +1595,7 @@ export default function App() {
         />
       )}
 
+      {/* Daily Summary Modal */}
       {dailySummaryModal && (
         <DailySummaryModal
           date={dailySummaryModal.date}
@@ -1518,6 +1606,7 @@ export default function App() {
         />
       )}
 
+      {/* Therapist Export Screen */}
       {showExport && (
         <TherapistExportScreen
           entries={entries}
@@ -1525,6 +1614,7 @@ export default function App() {
         />
       )}
 
+      {/* Insights Panel */}
       {showInsights && (
         <InsightsPanel
           entries={entries}
@@ -1534,7 +1624,7 @@ export default function App() {
         />
       )}
 
-      {/* Entry Insights Popup - shows after entry submission */}
+      {/* Entry Insights Popup */}
       <EntryInsightsPopup
         isOpen={!!entryInsightsPopup}
         onClose={() => setEntryInsightsPopup(null)}
@@ -1543,205 +1633,12 @@ export default function App() {
         entryType={entryInsightsPopup?.entryType}
       />
 
+      {/* Health Settings Screen */}
       {showHealthSettings && (
         <HealthSettingsScreen
           onClose={() => setShowHealthSettings(false)}
         />
       )}
-
-      <motion.div
-        className="bg-white/95 backdrop-blur-sm border-b border-warm-100 p-4 sticky top-0 z-20 shadow-soft"
-        initial={{ y: -20, opacity: 0 }}
-        animate={{ y: 0, opacity: 1 }}
-      >
-        <div className="flex justify-between items-center mb-4">
-          <motion.h1
-            className="font-display font-bold text-lg flex gap-2 text-warm-800"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-          >
-            <Brain className="text-primary-600"/> EchoVault
-          </motion.h1>
-          <div className="flex gap-2">
-            <GetHelpButton onClick={() => setShowSafetyPlan(true)} />
-            <HamburgerMenu
-              onShowInsights={() => setShowInsights(true)}
-              onShowExport={() => setShowExport(true)}
-              onRequestPermission={requestPermission}
-              onOpenCompanion={() => setView('companion')}
-              onOpenJournal={() => setShowJournal(true)}
-              onOpenHealthSettings={() => setShowHealthSettings(true)}
-              onLogout={() => signOut(auth)}
-              notificationPermission={permission}
-            />
-          </div>
-        </div>
-        <div className="flex bg-warm-100 p-1 rounded-2xl">
-          <motion.button
-            onClick={() => setCat('personal')}
-            className={`flex-1 flex justify-center items-center gap-2 py-2 text-xs font-bold rounded-xl transition-all ${cat === 'personal' ? 'bg-white shadow-soft text-primary-600' : 'text-warm-500'}`}
-            whileHover={{ scale: 1.02 }}
-            whileTap={{ scale: 0.98 }}
-          >
-            <UserIcon size={14}/> Personal
-          </motion.button>
-          <motion.button
-            onClick={() => setCat('work')}
-            className={`flex-1 flex justify-center items-center gap-2 py-2 text-xs font-bold rounded-xl transition-all ${cat === 'work' ? 'bg-white shadow-soft text-primary-600' : 'text-warm-500'}`}
-            whileHover={{ scale: 1.02 }}
-            whileTap={{ scale: 0.98 }}
-          >
-            <Briefcase size={14}/> Work
-          </motion.button>
-        </div>
-      </motion.div>
-
-      <div className="max-w-md mx-auto p-4 pb-28">
-        {/* Weekly Digest - Auto-collapsing weekly summary */}
-        {entries.length >= 3 && (
-          <WeeklyDigest
-            entries={entries}
-            category={cat}
-            userId={user?.uid}
-          />
-        )}
-
-        {/* Reflection Prompts - Persistent cycling questions for deeper reflection */}
-        {entries.length >= 2 && (
-          <ReflectionPrompts
-            entries={entries}
-            category={cat}
-            onWritePrompt={(prompt) => {
-              setEntryPreferredMode('text');
-              setReplyContext(prompt);
-            }}
-            onVoicePrompt={(prompt) => {
-              setEntryPreferredMode('voice');
-              setReplyContext(prompt);
-            }}
-          />
-        )}
-
-        {/* Quick Stats Bar - Mood trend, streak, entry distribution */}
-        {entries.length > 0 && (
-          <QuickStatsBar
-            entries={entries}
-            category={cat}
-          />
-        )}
-
-        {/* Mood Heatmap */}
-        {entries.length > 0 && (
-          <MoodHeatmap
-            entries={visible}
-            onDayClick={(date, dayData) => setDailySummaryModal({ date, dayData })}
-          />
-        )}
-
-        {/* Goals Progress - Active goals with status tracking */}
-        {entries.length > 0 && (
-          <GoalsProgress
-            entries={entries}
-            category={cat}
-            userId={user?.uid}
-          />
-        )}
-
-        {/* Situation Timeline - Connected multi-entry stories */}
-        {entries.length > 0 && (
-          <SituationTimeline
-            entries={entries}
-            category={cat}
-            onEntryClick={(entryId) => {
-              // Could navigate to entry or show modal
-              console.log('Navigate to entry:', entryId);
-            }}
-          />
-        )}
-
-        {/* Day Dashboard */}
-        <DayDashboard
-          entries={entries}
-          category={cat}
-          userId={user?.uid}
-          user={user}
-          onPromptClick={(prompt) => {
-            setReplyContext(prompt);
-          }}
-          onToggleTask={async (task, source, index) => {
-            console.log('Completing task:', task, source, index);
-            if (user?.uid) {
-              await completeActionItem(user.uid, cat, source, index);
-            }
-          }}
-          onShowInsights={() => setShowInsights(true)}
-          onStartRecording={() => {
-            // Set voice mode and a supportive prompt
-            setEntryPreferredMode('voice');
-            setReplyContext("Let it out - I'm here to listen.");
-          }}
-          onStartTextEntry={() => {
-            // Set text mode and a supportive prompt
-            setEntryPreferredMode('text');
-            setReplyContext("Write what's on your mind...");
-          }}
-        />
-
-        {/* Install Prompt for new users */}
-        {entries.length === 0 && (
-          <motion.div
-            className="mt-8 p-4 bg-primary-50 rounded-2xl text-sm text-primary-800 text-left border border-primary-100"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={{ delay: 0.3 }}
-          >
-            <p className="font-bold mb-1 flex items-center gap-2"><Share size={14}/> Install on iPhone</p>
-            <p className="font-body">Tap <strong>Share</strong> → <strong>Add to Home Screen</strong>.</p>
-          </motion.div>
-        )}
-      </div>
-
-      {/* Entry Bar - Always visible at bottom */}
-      <EntryBar
-        onVoiceSave={handleAudioWrapper}
-        onTextSave={saveEntry}
-        loading={processing}
-        disabled={false}
-        promptContext={replyContext}
-        preferredMode={entryPreferredMode}
-        onClearPrompt={() => {
-          setReplyContext(null);
-          setEntryPreferredMode('text');
-        }}
-      />
-
-      {/* Journal Screen (Timeline) */}
-      <AnimatePresence>
-        {showJournal && (
-          <JournalScreen
-            entries={entries}
-            category={cat}
-            onClose={() => setShowJournal(false)}
-            onDelete={id => deleteDoc(doc(db, 'artifacts', APP_COLLECTION_ID, 'users', user.uid, 'entries', id))}
-            onUpdate={handleEntryUpdate}
-          />
-        )}
-      </AnimatePresence>
-
-      {view === 'companion' && (
-        <UnifiedConversation
-          entries={visible}
-          category={cat}
-          userId={user?.uid}
-          onClose={() => setView('feed')}
-          onSaveEntry={(data) => {
-            // Save guided session or conversation as journal entry
-            if (data?.text) {
-              saveEntry(data.text);
-            }
-          }}
-        />
-      )}
-    </div>
+    </AppLayout>
   );
 }
