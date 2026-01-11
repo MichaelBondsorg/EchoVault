@@ -48,13 +48,34 @@ export default {
           800: '#292524',
           900: '#1c1917',
         },
-        // Mood Colors
+        // Mood Colors (Entry-level)
         mood: {
           great: '#10b981',
           good: '#6ee7b7',
           neutral: '#fcd34d',
           low: '#93c5fd',
           struggling: '#a5b4fc',
+        },
+        // Ambient Mood Colors (Background gradients)
+        ambient: {
+          // Great/Good → Warm Ambers / Soft Teals
+          warm: {
+            from: '#fcd9a1',    // Warm amber
+            via: '#99f6e0',     // Soft teal
+            to: '#d1fae5',      // Emerald tint
+          },
+          // Neutral → Balanced Grays / Light Blues
+          balanced: {
+            from: '#e2e8f0',    // Slate gray
+            via: '#dbeafe',     // Light blue
+            to: '#f1f5f9',      // Gray tint
+          },
+          // Low/Struggling → Calm Deep Blues / Soft Purples
+          calm: {
+            from: '#bfdbfe',    // Blue
+            via: '#c7d2fe',     // Indigo
+            to: '#ddd6fe',      // Purple tint
+          },
         },
         // Accent - Sunrise Orange (hope, warmth)
         accent: {
@@ -81,6 +102,9 @@ export default {
         'breathe': 'breathe 4s ease-in-out infinite',
         'shimmer': 'shimmer 2s linear infinite',
         'glow': 'glow 2s ease-in-out infinite',
+        // Edit mode animations
+        'shake': 'shake 0.5s ease-in-out infinite',
+        'sparkle': 'sparkle 2s ease-in-out infinite',
       },
       keyframes: {
         fadeIn: {
@@ -127,6 +151,16 @@ export default {
           '0%, 100%': { boxShadow: '0 0 20px rgba(20, 184, 166, 0.3)' },
           '50%': { boxShadow: '0 0 30px rgba(20, 184, 166, 0.5)' },
         },
+        // Edit mode shake animation
+        shake: {
+          '0%, 100%': { transform: 'rotate(-1deg)' },
+          '50%': { transform: 'rotate(1deg)' },
+        },
+        // Companion nudge sparkle animation
+        sparkle: {
+          '0%, 100%': { opacity: '0.8', transform: 'scale(1)' },
+          '50%': { opacity: '1', transform: 'scale(1.1)' },
+        },
       },
       // Enhanced Shadows
       boxShadow: {
@@ -138,6 +172,10 @@ export default {
         'glow-lg': '0 0 30px rgba(20, 184, 166, 0.4)',
         'glow-accent': '0 0 20px rgba(251, 146, 60, 0.3)',
         'inner-soft': 'inset 0 2px 4px 0 rgba(0, 0, 0, 0.05)',
+        // Glassmorphism shadows
+        'glass-sm': '0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06)',
+        'glass-md': '0 8px 30px rgba(0, 0, 0, 0.12)',
+        'glass-lg': '0 12px 40px rgba(0, 0, 0, 0.15)',
       },
       // Larger Border Radius
       borderRadius: {
