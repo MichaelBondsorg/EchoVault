@@ -19,12 +19,13 @@ import {
 import { CSS } from '@dnd-kit/utilities';
 import { Haptics, ImpactStyle } from '@capacitor/haptics';
 import { Capacitor } from '@capacitor/core';
-import { Settings2 } from 'lucide-react';
+import { Settings2, X } from 'lucide-react';
 
 import { getWidgetComponent } from './widgets';
 
 /**
  * SortableWidget - Wrapper for draggable widgets
+ * Includes delete button positioned outside the card bounds
  */
 const SortableWidget = ({
   widget,
@@ -53,13 +54,43 @@ const SortableWidget = ({
       ref={setNodeRef}
       style={style}
       className={`
+        relative
         ${widget.size === '1x1' ? 'col-span-1' : 'col-span-2'}
         ${widget.size === '2x2' ? 'row-span-2' : ''}
         ${isDragging ? 'cursor-grabbing' : isEditing ? 'cursor-grab' : ''}
       `}
       {...(isEditing ? { ...attributes, ...listeners } : {})}
     >
+      {/* Widget content */}
       {children}
+
+      {/* Delete button - positioned outside the card with negative margins */}
+      {isEditing && onDelete && (
+        <motion.button
+          className="
+            absolute -top-2 -right-2 z-50
+            w-7 h-7
+            bg-red-500 hover:bg-red-600
+            text-white
+            rounded-full
+            shadow-lg
+            flex items-center justify-center
+            transition-colors
+          "
+          onClick={(e) => {
+            e.stopPropagation();
+            e.preventDefault();
+            onDelete();
+          }}
+          onPointerDown={(e) => e.stopPropagation()}
+          initial={{ scale: 0 }}
+          animate={{ scale: 1 }}
+          exit={{ scale: 0 }}
+          whileTap={{ scale: 0.9 }}
+        >
+          <X size={16} />
+        </motion.button>
+      )}
     </div>
   );
 };
@@ -171,8 +202,8 @@ const BentoGrid = ({
           items={layout.map(w => w.id)}
           strategy={rectSortingStrategy}
         >
-          {/* Grid container */}
-          <div className="grid grid-cols-2 gap-3">
+          {/* Grid container - overflow-visible to allow delete buttons to extend outside */}
+          <div className="grid grid-cols-2 gap-4 overflow-visible">
             <AnimatePresence>
               {layout.map((widget) => {
                 const WidgetComponent = getWidgetComponent(widget.type);

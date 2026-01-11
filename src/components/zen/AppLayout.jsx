@@ -62,6 +62,10 @@ const AppLayout = ({
   onTextSubmit,
   processing,
 
+  // Quick Log Modal (state lifted to App.jsx)
+  showQuickLog,
+  setShowQuickLog,
+
   // Dashboard handlers
   onPromptClick,
   onToggleTask,
@@ -77,7 +81,6 @@ const AppLayout = ({
   // Additional modals that may be shown
   children,
 }) => {
-  const [showQuickLog, setShowQuickLog] = useState(false);
   const [showCompanion, setShowCompanion] = useState(false);
   const [showWalkthrough, setShowWalkthrough] = useState(false);
   const [showEntryModal, setShowEntryModal] = useState(false);

@@ -67,6 +67,7 @@ import DetectedStrip from './components/entries/DetectedStrip';
 
 // Zen & Bento Components
 import { AppLayout } from './components/zen';
+import QuickLogModal from './components/zen/QuickLogModal';
 
 // --- PDF LOADER (lazy-loads jsPDF from CDN) ---
 let jsPDFPromise = null;
@@ -146,6 +147,9 @@ export default function App() {
 
   // Health Settings Screen
   const [showHealthSettings, setShowHealthSettings] = useState(false);
+
+  // Quick Log Modal (lifted to App level to prevent unmount issues)
+  const [showQuickLog, setShowQuickLog] = useState(false);
 
   // Signal extraction - detected signals for confirmation
   const [detectedSignals, setDetectedSignals] = useState([]);
@@ -1491,6 +1495,10 @@ export default function App() {
       onAudioSubmit={handleAudioWrapper}
       onTextSubmit={saveEntry}
       processing={processing}
+
+      // Quick Log Modal (state lifted to App.jsx)
+      showQuickLog={showQuickLog}
+      setShowQuickLog={setShowQuickLog}
 
       // Dashboard handlers
       onPromptClick={(prompt) => setReplyContext(prompt)}
