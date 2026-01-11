@@ -1486,6 +1486,11 @@ export default function App() {
       // Entry bar context (for prompts)
       setEntryPreferredMode={setEntryPreferredMode}
       setReplyContext={setReplyContext}
+      replyContext={replyContext}
+      entryPreferredMode={entryPreferredMode}
+      onAudioSubmit={handleAudioWrapper}
+      onTextSubmit={saveEntry}
+      processing={processing}
 
       // Dashboard handlers
       onPromptClick={(prompt) => setReplyContext(prompt)}

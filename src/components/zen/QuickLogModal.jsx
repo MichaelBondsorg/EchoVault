@@ -102,22 +102,23 @@ const QuickLogModal = ({ isOpen, onClose, onSave }) => {
             onClick={handleClose}
           />
 
-          {/* Modal */}
-          <motion.div
-            className="
-              fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2
-              z-50 w-[90%] max-w-sm
-              bg-white/80 backdrop-blur-xl
-              border border-white/30
-              rounded-3xl
-              shadow-glass-lg
-              overflow-hidden
-            "
-            initial={{ opacity: 0, scale: 0.9, y: 20 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.9, y: 20 }}
-            transition={{ type: 'spring', damping: 25 }}
-          >
+          {/* Modal Container - centered using flex */}
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 pointer-events-none">
+            <motion.div
+              className="
+                w-full max-w-sm
+                bg-white/90 backdrop-blur-xl
+                border border-white/30
+                rounded-3xl
+                shadow-glass-lg
+                overflow-hidden
+                pointer-events-auto
+              "
+              initial={{ opacity: 0, scale: 0.9, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 20 }}
+              transition={{ type: 'spring', damping: 25 }}
+            >
             {/* Header */}
             <div className="flex items-center justify-between p-4 border-b border-white/20">
               <h2 className="font-display font-bold text-lg text-warm-800">
@@ -238,7 +239,8 @@ const QuickLogModal = ({ isOpen, onClose, onSave }) => {
                 Save Check-in
               </motion.button>
             </div>
-          </motion.div>
+            </motion.div>
+          </div>
         </>
       )}
     </AnimatePresence>

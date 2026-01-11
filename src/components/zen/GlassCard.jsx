@@ -66,7 +66,7 @@ const GlassCard = ({
       {isEditing && onDelete && (
         <motion.button
           className="
-            absolute -top-2 -right-2 z-10
+            absolute top-2 right-2 z-10
             w-7 h-7
             bg-red-500 hover:bg-red-600
             text-white text-sm font-bold
