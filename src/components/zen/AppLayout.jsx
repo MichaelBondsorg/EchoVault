@@ -81,13 +81,25 @@ const AppLayout = ({
   const [showCompanion, setShowCompanion] = useState(false);
   const [showWalkthrough, setShowWalkthrough] = useState(false);
   const [showEntryModal, setShowEntryModal] = useState(false);
+  const [entryMode, setEntryMode] = useState('text'); // 'voice' or 'text'
 
-  // Show entry modal when replyContext is set (from FAB)
-  useEffect(() => {
-    if (replyContext) {
-      setShowEntryModal(true);
-    }
-  }, [replyContext]);
+  // Direct handlers for FAB actions - show modal immediately
+  const handleVoiceClick = () => {
+    setEntryMode('voice');
+    setShowEntryModal(true);
+    onVoiceEntry?.(); // Also call parent to set replyContext for EntryBar
+  };
+
+  const handleTextClick = () => {
+    setEntryMode('text');
+    setShowEntryModal(true);
+    onTextEntry?.(); // Also call parent to set replyContext for EntryBar
+  };
+
+  const handleCloseEntryModal = () => {
+    setShowEntryModal(false);
+    setReplyContext?.(null);
+  };
 
   // Zen tooltips management
   const { shouldShowWalkthrough, markWalkthroughComplete } = useZenTooltips();
@@ -223,8 +235,8 @@ const AppLayout = ({
       />
 
       <BottomNavbar
-        onVoiceEntry={onVoiceEntry}
-        onTextEntry={onTextEntry}
+        onVoiceEntry={handleVoiceClick}
+        onTextEntry={handleTextClick}
         onQuickMood={() => setShowQuickLog(true)}
       />
 
@@ -241,19 +253,16 @@ const AppLayout = ({
           <>
             {/* Backdrop */}
             <motion.div
-              className="fixed inset-0 bg-black/30 backdrop-blur-sm z-50"
+              className="fixed inset-0 bg-black/30 backdrop-blur-sm z-[60]"
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              onClick={() => {
-                setShowEntryModal(false);
-                setReplyContext(null);
-              }}
+              onClick={handleCloseEntryModal}
             />
 
             {/* Entry Bar Modal */}
             <motion.div
-              className="fixed inset-x-4 bottom-24 z-50"
+              className="fixed inset-x-4 bottom-28 z-[60]"
               initial={{ opacity: 0, y: 50 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: 50 }}
@@ -263,21 +272,16 @@ const AppLayout = ({
                   embedded={true}
                   onVoiceSave={async (base64, mime) => {
                     await onAudioSubmit?.(base64, mime);
-                    setShowEntryModal(false);
-                    setReplyContext?.(null);
+                    handleCloseEntryModal();
                   }}
                   onTextSave={async (text) => {
                     await onTextSubmit?.(text);
-                    setShowEntryModal(false);
-                    setReplyContext?.(null);
+                    handleCloseEntryModal();
                   }}
                   loading={processing}
-                  preferredMode={entryPreferredMode}
+                  preferredMode={entryMode}
                   promptContext={replyContext}
-                  onClearPrompt={() => {
-                    setShowEntryModal(false);
-                    setReplyContext?.(null);
-                  }}
+                  onClearPrompt={handleCloseEntryModal}
                 />
               </div>
             </motion.div>
