@@ -244,21 +244,34 @@ export const useVoiceRelay = () => {
   }, [sessionId]);
 
   /**
-   * Play audio response
+   * Play audio response (handles raw PCM16 at 24kHz from OpenAI Realtime API)
    */
   const playAudio = async (base64Audio) => {
     if (!audioContextRef.current) return;
 
     try {
-      // Decode base64
+      // Decode base64 to bytes
       const binaryString = atob(base64Audio);
       const bytes = new Uint8Array(binaryString.length);
       for (let i = 0; i < binaryString.length; i++) {
         bytes[i] = binaryString.charCodeAt(i);
       }
 
-      // Try to decode as audio
-      const audioBuffer = await audioContextRef.current.decodeAudioData(bytes.buffer.slice(0));
+      // Convert bytes to Int16Array (PCM16 format)
+      const pcm16 = new Int16Array(bytes.buffer);
+
+      // Convert PCM16 to Float32 for Web Audio API
+      const float32 = new Float32Array(pcm16.length);
+      for (let i = 0; i < pcm16.length; i++) {
+        float32[i] = pcm16[i] / 32768.0; // Normalize to [-1, 1]
+      }
+
+      // Create AudioBuffer at 24kHz (OpenAI Realtime API sample rate)
+      const sampleRate = 24000;
+      const audioBuffer = audioContextRef.current.createBuffer(1, float32.length, sampleRate);
+      audioBuffer.getChannelData(0).set(float32);
+
+      // Play the audio
       const source = audioContextRef.current.createBufferSource();
       source.buffer = audioBuffer;
       source.connect(audioContextRef.current.destination);
