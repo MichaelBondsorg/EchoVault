@@ -260,22 +260,23 @@ const AppLayout = ({
             >
               <div className="bg-white/95 backdrop-blur-xl rounded-3xl shadow-glass-lg overflow-hidden">
                 <EntryBar
-                  onAudio={async (base64, mime) => {
+                  embedded={true}
+                  onVoiceSave={async (base64, mime) => {
                     await onAudioSubmit?.(base64, mime);
                     setShowEntryModal(false);
-                    setReplyContext(null);
+                    setReplyContext?.(null);
                   }}
-                  onText={async (text) => {
+                  onTextSave={async (text) => {
                     await onTextSubmit?.(text);
                     setShowEntryModal(false);
-                    setReplyContext(null);
+                    setReplyContext?.(null);
                   }}
-                  processing={processing}
+                  loading={processing}
                   preferredMode={entryPreferredMode}
-                  replyContext={replyContext}
-                  onClearReply={() => {
+                  promptContext={replyContext}
+                  onClearPrompt={() => {
                     setShowEntryModal(false);
-                    setReplyContext(null);
+                    setReplyContext?.(null);
                   }}
                 />
               </div>
