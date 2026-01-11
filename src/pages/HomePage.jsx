@@ -20,8 +20,8 @@ const HomePage = ({
   onShowInsights,
   onStartRecording,
   onStartTextEntry,
-  setEntryPreferredMode,
-  setReplyContext,
+  onPromptResponse, // Opens entry modal with prompt context
+  onDayClick, // Opens day summary modal from 30-day journey
 }) => {
   const [showWidgetDrawer, setShowWidgetDrawer] = useState(false);
 
@@ -43,15 +43,12 @@ const HomePage = ({
     user,
     entries,
     category,
-    onWritePrompt: (prompt) => {
-      setEntryPreferredMode?.('text');
-      setReplyContext?.(prompt);
-    },
-    onVoicePrompt: (prompt) => {
-      setEntryPreferredMode?.('voice');
-      setReplyContext?.(prompt);
-    },
+    // Reflection prompts - open entry modal with reply context
+    onWritePrompt: (prompt) => onPromptResponse?.(prompt, 'text'),
+    onVoicePrompt: (prompt) => onPromptResponse?.(prompt, 'voice'),
     onToggleTask,
+    // 30-day journey - open day summary modal
+    onDayClick,
   };
 
   // Handle add widget button in edit mode

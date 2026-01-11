@@ -1,5 +1,5 @@
-import { useMemo } from 'react';
-import { motion } from 'framer-motion';
+import { useMemo, useState } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { Calendar } from 'lucide-react';
 import GlassCard from '../GlassCard';
 
@@ -88,6 +88,35 @@ const MoodHeatmapWidget = ({
     return 'Low';
   };
 
+  // Tooltip state for desktop hover
+  const [hoveredDay, setHoveredDay] = useState(null);
+  const [tooltipPos, setTooltipPos] = useState({ x: 0, y: 0 });
+
+  const handleMouseEnter = (e, day) => {
+    if (isEditing) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    setTooltipPos({ x: rect.left + rect.width / 2, y: rect.top });
+    setHoveredDay(day);
+  };
+
+  const handleMouseLeave = () => {
+    setHoveredDay(null);
+  };
+
+  // Get theme summary for a day
+  const getDayTheme = (day) => {
+    if (day.count === 0) return null;
+    const themes = [];
+    day.entries?.forEach(entry => {
+      if (entry.contextualInsight?.briefSummary) {
+        themes.push(entry.contextualInsight.briefSummary);
+      } else if (entry.analysis?.themes?.[0]) {
+        themes.push(entry.analysis.themes[0]);
+      }
+    });
+    return themes[0] || null;
+  };
+
   return (
     <GlassCard
       size={size}
@@ -109,11 +138,14 @@ const MoodHeatmapWidget = ({
         </div>
 
         {/* Heatmap Grid - 6 rows x 5 columns */}
-        <div className="flex-1 grid grid-cols-10 gap-1">
+        <div className="flex-1 grid grid-cols-10 gap-1 relative">
           {days.map((day, i) => (
             <motion.button
               key={day.dateStr}
               onClick={() => !isEditing && day.count > 0 && onDayClick?.(day.date, day)}
+              onMouseEnter={(e) => handleMouseEnter(e, day)}
+              onMouseLeave={handleMouseLeave}
+              onTouchStart={() => {}} // Prevent hover on touch
               disabled={isEditing || day.count === 0}
               className={`
                 aspect-square rounded-sm
@@ -122,13 +154,57 @@ const MoodHeatmapWidget = ({
                 ${day.date.toDateString() === new Date().toDateString() ? 'ring-2 ring-primary-500' : ''}
                 transition-all
               `}
+              style={{
+                WebkitTapHighlightColor: 'transparent',
+                touchAction: 'manipulation',
+              }}
               initial={{ opacity: 0, scale: 0.8 }}
               animate={{ opacity: 1, scale: 1 }}
               transition={{ delay: i * 0.01 }}
-              title={`${day.date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}: ${day.count} entries`}
-              whileHover={day.count > 0 ? { scale: 1.2 } : {}}
+              whileHover={day.count > 0 ? { scale: 1.3, zIndex: 10 } : {}}
             />
           ))}
+
+          {/* Hover Tooltip (desktop only) */}
+          <AnimatePresence>
+            {hoveredDay && (
+              <motion.div
+                className="
+                  fixed z-[100] px-3 py-2
+                  bg-warm-800 text-white text-xs
+                  rounded-lg shadow-lg
+                  pointer-events-none
+                  max-w-[200px]
+                "
+                style={{
+                  left: tooltipPos.x,
+                  top: tooltipPos.y - 8,
+                  transform: 'translate(-50%, -100%)',
+                }}
+                initial={{ opacity: 0, y: 5 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: 5 }}
+              >
+                <div className="font-medium">
+                  {hoveredDay.date.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
+                </div>
+                <div className="text-warm-300">
+                  {hoveredDay.count} {hoveredDay.count === 1 ? 'entry' : 'entries'}
+                  {hoveredDay.mood !== null && ` - ${getMoodLabel(hoveredDay.mood)}`}
+                </div>
+                {getDayTheme(hoveredDay) && (
+                  <div className="text-warm-400 mt-1 line-clamp-2">
+                    {getDayTheme(hoveredDay)}
+                  </div>
+                )}
+                {hoveredDay.count > 0 && (
+                  <div className="text-primary-300 mt-1 text-[10px]">
+                    Click to view details
+                  </div>
+                )}
+              </motion.div>
+            )}
+          </AnimatePresence>
         </div>
 
         {/* Legend */}
