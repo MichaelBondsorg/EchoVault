@@ -11,7 +11,7 @@ import { Mic, Square, Keyboard, X, Loader2, Send } from 'lucide-react';
  * - Always visible at bottom of screen
  * - Can show prompt context when responding to a prompt
  */
-const EntryBar = ({ onVoiceSave, onTextSave, loading, disabled, promptContext, onClearPrompt, preferredMode = 'text' }) => {
+const EntryBar = ({ onVoiceSave, onTextSave, loading, disabled, promptContext, onClearPrompt, preferredMode = 'text', embedded = false }) => {
   const [mode, setMode] = useState('idle'); // idle, recording, typing
   const [recording, setRecording] = useState(false);
   const [mediaRecorder, setMediaRecorder] = useState(null);
@@ -234,8 +234,13 @@ const EntryBar = ({ onVoiceSave, onTextSave, loading, disabled, promptContext, o
     return `${mins}:${String(s).padStart(2, '0')}`;
   };
 
+  // Container classes - fixed positioning only when not embedded
+  const containerClasses = embedded
+    ? "relative"
+    : "fixed bottom-0 left-0 right-0 z-20 pb-[max(0.5rem,env(safe-area-inset-bottom))]";
+
   return (
-    <div className="fixed bottom-0 left-0 right-0 z-20 pb-[max(0.5rem,env(safe-area-inset-bottom))]">
+    <div className={containerClasses}>
       <AnimatePresence mode="wait">
         {/* Loading Overlay */}
         {loading && (
