@@ -18,7 +18,7 @@ import { HomePage, JournalPage, InsightsPage, SettingsPage } from '../../pages';
 import UnifiedConversation from '../chat/UnifiedConversation';
 
 // Entry components
-import EntryBar from '../entries/EntryBar';
+import EntryBar from '../dashboard/EntryBar';
 
 /**
  * AppLayout - Main application shell with Zen & Bento navigation
