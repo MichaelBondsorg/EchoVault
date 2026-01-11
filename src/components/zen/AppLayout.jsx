@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { Routes, Route } from 'react-router-dom';
 import { AnimatePresence } from 'framer-motion';
 
@@ -8,6 +8,8 @@ import TopBar from './TopBar';
 import BottomNavbar from './BottomNavbar';
 import CompanionNudge from './CompanionNudge';
 import QuickLogModal from './QuickLogModal';
+import SanctuaryWalkthrough from './SanctuaryWalkthrough';
+import { FABTooltip, useZenTooltips } from './ZenTooltips';
 
 // Pages
 import { HomePage, JournalPage, InsightsPage, SettingsPage } from '../../pages';
@@ -24,6 +26,7 @@ import UnifiedConversation from '../chat/UnifiedConversation';
  * - Bottom navigation with expandable FAB
  * - Companion nudge (AI assistant shortcut)
  * - Route-based page rendering
+ * - Sanctuary walkthrough (first-time user experience)
  *
  * @param {Object} props - All props passed from App.jsx
  */
@@ -68,6 +71,31 @@ const AppLayout = ({
 }) => {
   const [showQuickLog, setShowQuickLog] = useState(false);
   const [showCompanion, setShowCompanion] = useState(false);
+  const [showWalkthrough, setShowWalkthrough] = useState(false);
+
+  // Zen tooltips management
+  const { shouldShowWalkthrough, markWalkthroughComplete } = useZenTooltips();
+
+  // Check if we should show the walkthrough on mount
+  useEffect(() => {
+    if (shouldShowWalkthrough()) {
+      // Small delay to let the app render first
+      const timer = setTimeout(() => setShowWalkthrough(true), 500);
+      return () => clearTimeout(timer);
+    }
+  }, [shouldShowWalkthrough]);
+
+  // Handle walkthrough completion
+  const handleWalkthroughComplete = () => {
+    markWalkthroughComplete();
+    setShowWalkthrough(false);
+  };
+
+  // Handle walkthrough skip
+  const handleWalkthroughSkip = () => {
+    markWalkthroughComplete();
+    setShowWalkthrough(false);
+  };
 
   // Calculate latest mood score from entries for background
   const latestMoodScore = useMemo(() => {
@@ -203,6 +231,16 @@ const AppLayout = ({
           />
         )}
       </AnimatePresence>
+
+      {/* Sanctuary Walkthrough (first-time experience) */}
+      <SanctuaryWalkthrough
+        isOpen={showWalkthrough}
+        onComplete={handleWalkthroughComplete}
+        onSkip={handleWalkthroughSkip}
+      />
+
+      {/* FAB Tooltip (shows after walkthrough) */}
+      {!showWalkthrough && <FABTooltip />}
 
       {/* Additional modals passed from App.jsx */}
       {children}

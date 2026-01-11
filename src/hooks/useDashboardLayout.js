@@ -20,9 +20,9 @@ export const WIDGET_DEFINITIONS = {
     id: 'prompt_card',
     type: 'prompt',
     name: 'Reflection Prompts',
-    description: 'Questions to inspire deeper reflection',
+    description: 'Personalized questions from your entries',
     defaultSize: '2x1',
-    icon: 'MessageCircle',
+    icon: 'Sparkles',
   },
   quick_stats: {
     id: 'quick_stats',
@@ -32,13 +32,21 @@ export const WIDGET_DEFINITIONS = {
     defaultSize: '2x1',
     icon: 'BarChart3',
   },
-  mood_trend: {
-    id: 'mood_trend',
-    type: 'trend',
-    name: 'Mood Trend',
-    description: 'Visual mood chart over time',
-    defaultSize: '1x1',
-    icon: 'TrendingUp',
+  mood_heatmap: {
+    id: 'mood_heatmap',
+    type: 'heatmap',
+    name: '30-Day Journey',
+    description: 'Visual mood calendar over 30 days',
+    defaultSize: '2x1',
+    icon: 'Calendar',
+  },
+  ongoing_stories: {
+    id: 'ongoing_stories',
+    type: 'stories',
+    name: 'Ongoing Stories',
+    description: 'Connected multi-entry situations',
+    defaultSize: '2x1',
+    icon: 'GitBranch',
   },
   goals: {
     id: 'goals',
@@ -55,22 +63,6 @@ export const WIDGET_DEFINITIONS = {
     description: 'Your pending action items',
     defaultSize: '1x1',
     icon: 'CheckSquare',
-  },
-  weekly_digest: {
-    id: 'weekly_digest',
-    type: 'digest',
-    name: 'Weekly Digest',
-    description: 'Summary of your week',
-    defaultSize: '2x1',
-    icon: 'Calendar',
-  },
-  situation_timeline: {
-    id: 'situation_timeline',
-    type: 'timeline',
-    name: 'Situation Timeline',
-    description: 'Connected multi-entry stories',
-    defaultSize: '2x2',
-    icon: 'GitBranch',
   },
 };
 
