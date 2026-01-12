@@ -1,6 +1,7 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Calendar, TrendingUp, MessageSquare, ChevronRight } from 'lucide-react';
+import { X, Calendar, TrendingUp, MessageSquare, ChevronRight, Sparkles, Loader2 } from 'lucide-react';
+import { generateDaySummary } from '../../services/analysis';
 
 /**
  * DaySummaryModal - Shows detailed summary for a selected day
@@ -18,6 +19,39 @@ const DaySummaryModal = ({
   dayData,
   onEntryClick,
 }) => {
+  // AI Summary state
+  const [aiSummary, setAiSummary] = useState(null);
+  const [summaryLoading, setSummaryLoading] = useState(false);
+  const [summaryError, setSummaryError] = useState(null);
+
+  // Fetch AI summary when modal opens
+  useEffect(() => {
+    if (isOpen && dayData?.entries?.length > 0 && !aiSummary && !summaryLoading) {
+      setSummaryLoading(true);
+      setSummaryError(null);
+
+      generateDaySummary(dayData.entries)
+        .then((result) => {
+          setAiSummary(result);
+          setSummaryLoading(false);
+        })
+        .catch((error) => {
+          console.error('Failed to generate day summary:', error);
+          setSummaryError('Unable to generate summary');
+          setSummaryLoading(false);
+        });
+    }
+  }, [isOpen, dayData, aiSummary, summaryLoading]);
+
+  // Reset summary when modal closes
+  useEffect(() => {
+    if (!isOpen) {
+      setAiSummary(null);
+      setSummaryLoading(false);
+      setSummaryError(null);
+    }
+  }, [isOpen]);
+
   if (!isOpen || !dayData) return null;
 
   const { entries = [], mood } = dayData;
@@ -166,6 +200,33 @@ const DaySummaryModal = ({
                 className="flex-1 overflow-y-auto p-4 space-y-4"
                 style={{ WebkitOverflowScrolling: 'touch' }}
               >
+                {/* AI Summary */}
+                <div className="bg-gradient-to-br from-primary-50 to-secondary-50 rounded-2xl p-3 border border-primary-100">
+                  <div className="flex items-center gap-2 mb-2">
+                    <Sparkles size={14} className="text-primary-500" />
+                    <span className="text-xs font-semibold text-primary-600 uppercase tracking-wide">
+                      AI Summary
+                    </span>
+                  </div>
+                  {summaryLoading && (
+                    <div className="flex items-center gap-2 text-warm-500 text-sm py-2">
+                      <Loader2 size={14} className="animate-spin" />
+                      <span>Analyzing your day...</span>
+                    </div>
+                  )}
+                  {summaryError && (
+                    <p className="text-sm text-warm-500 italic">{summaryError}</p>
+                  )}
+                  {aiSummary?.summary && (
+                    <p className="text-sm text-warm-700 leading-relaxed">
+                      {aiSummary.summary}
+                    </p>
+                  )}
+                  {!summaryLoading && !summaryError && !aiSummary?.summary && entries.length === 0 && (
+                    <p className="text-sm text-warm-500 italic">No entries to summarize</p>
+                  )}
+                </div>
+
                 {/* Overall Mood */}
                 <div className="bg-warm-50 rounded-2xl p-3">
                   <div className="flex items-center justify-between">

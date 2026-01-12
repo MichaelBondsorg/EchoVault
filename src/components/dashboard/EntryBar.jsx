@@ -37,26 +37,35 @@ const EntryBar = ({ onVoiceSave, onTextSave, loading, disabled, promptContext, o
     };
   }, []);
 
-  // Auto-open appropriate mode when prompt context is provided
+  // Auto-open appropriate mode when embedded (from FAB) or prompt context is provided
+  // For embedded mode, auto-start based on preferredMode without requiring promptContext
   useEffect(() => {
-    if (promptContext && mode === 'idle') {
-      if (preferredMode === 'voice') {
-        // Flag that we should start voice when effect completes
+    if (mode === 'idle') {
+      // In embedded mode (FAB), auto-start based on preferredMode
+      if (embedded && preferredMode === 'voice') {
         shouldAutoStartVoice.current = true;
-      } else {
+      } else if (embedded && preferredMode === 'text') {
         setMode('typing');
       }
+      // With promptContext (from Reflect card), also auto-start
+      else if (promptContext) {
+        if (preferredMode === 'voice') {
+          shouldAutoStartVoice.current = true;
+        } else {
+          setMode('typing');
+        }
+      }
     }
-  }, [promptContext, preferredMode]);
+  }, [promptContext, preferredMode, embedded]);
 
   // Handle auto-start voice recording (needs separate effect to avoid async issues)
   useEffect(() => {
-    if (shouldAutoStartVoice.current && mode === 'idle' && promptContext) {
+    if (shouldAutoStartVoice.current && mode === 'idle') {
       shouldAutoStartVoice.current = false;
       // Small delay to ensure UI is ready
       setTimeout(() => startRecording(), 100);
     }
-  }, [promptContext, mode]);
+  }, [promptContext, mode, embedded]);
 
   // Focus text input when switching to typing mode
   useEffect(() => {
@@ -245,15 +254,18 @@ const EntryBar = ({ onVoiceSave, onTextSave, loading, disabled, promptContext, o
         {/* Loading Overlay */}
         {loading && (
           <motion.div
-            className="absolute inset-0 bg-white/95 backdrop-blur-sm flex justify-center items-center z-30"
+            className="absolute inset-0 bg-white/95 backdrop-blur-sm flex flex-col justify-center items-center z-30 p-4"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
           >
-            <div className="flex items-center gap-2 text-primary-600 font-medium">
+            <div className="flex items-center gap-2 text-primary-600 font-medium mb-2">
               <Loader2 className="animate-spin" size={20} />
-              <span>Processing...</span>
+              <span>Processing your voice...</span>
             </div>
+            <p className="text-xs text-warm-500 text-center max-w-xs">
+              Please keep the app open until processing is complete.
+            </p>
           </motion.div>
         )}
 

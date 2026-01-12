@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, Plus, Sun, Sparkles, BarChart3, Target, CheckSquare, Calendar, GitBranch } from 'lucide-react';
 import { WIDGET_DEFINITIONS } from '../../hooks/useDashboardLayout';
@@ -28,6 +29,29 @@ const WidgetDrawer = ({
   availableWidgets = [],
   onAddWidget,
 }) => {
+  // Lock body scroll when drawer is open to prevent background scrolling
+  useEffect(() => {
+    if (isOpen) {
+      // Save current scroll position and lock body
+      const scrollY = window.scrollY;
+      document.body.style.position = 'fixed';
+      document.body.style.top = `-${scrollY}px`;
+      document.body.style.left = '0';
+      document.body.style.right = '0';
+      document.body.style.overflow = 'hidden';
+
+      return () => {
+        // Restore scroll position when closing
+        document.body.style.position = '';
+        document.body.style.top = '';
+        document.body.style.left = '';
+        document.body.style.right = '';
+        document.body.style.overflow = '';
+        window.scrollTo(0, scrollY);
+      };
+    }
+  }, [isOpen]);
+
   return (
     <AnimatePresence>
       {isOpen && (
@@ -80,7 +104,9 @@ const WidgetDrawer = ({
               style={{
                 maxHeight: 'calc(70vh - 100px)',
                 WebkitOverflowScrolling: 'touch',
+                touchAction: 'pan-y',
               }}
+              onTouchStart={(e) => e.stopPropagation()}
               onTouchMove={(e) => e.stopPropagation()}
             >
               {availableWidgets.length > 0 ? (

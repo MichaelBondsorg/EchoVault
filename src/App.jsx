@@ -50,6 +50,7 @@ import { useIOSMeta } from './hooks/useIOSMeta';
 import { useNotifications } from './hooks/useNotifications';
 import { useNetworkStatus } from './hooks/useNetworkStatus';
 import { useWakeLock } from './hooks/useWakeLock';
+import { useBackgroundAudio } from './hooks/useBackgroundAudio';
 
 // Components
 import {
@@ -113,6 +114,7 @@ export default function App() {
   const { permission, requestPermission } = useNotifications();
   const { isOnline, wasOffline, clearWasOffline } = useNetworkStatus();
   const { requestWakeLock, releaseWakeLock } = useWakeLock();
+  const { backupAudio, clearBackup, isProcessing: isBackgroundProcessing } = useBackgroundAudio();
   const [user, setUser] = useState(null);
   const [entries, setEntries] = useState([]);
   const [view, setView] = useState('feed');
@@ -155,6 +157,32 @@ export default function App() {
   const [detectedSignals, setDetectedSignals] = useState([]);
   const [showDetectedStrip, setShowDetectedStrip] = useState(false);
   const [signalExtractionEntryId, setSignalExtractionEntryId] = useState(null);
+
+  // Warn user if they try to close/navigate away while processing audio
+  useEffect(() => {
+    const handleBeforeUnload = (e) => {
+      if (processing || isBackgroundProcessing) {
+        e.preventDefault();
+        e.returnValue = 'Audio is being processed. Are you sure you want to leave?';
+        return e.returnValue;
+      }
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden' && processing) {
+        console.log('[EchoVault] App backgrounded while processing audio - processing will continue');
+        // Audio backup is already in localStorage, so it can be recovered
+      }
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [processing, isBackgroundProcessing]);
 
   // Cleanup stale audio backups on app startup (older than 24 hours)
   useEffect(() => {
