@@ -38,7 +38,10 @@ export const analyzeJournalEntryCloud = async (text, options = {}) => {
       historyContext: options.historyContext || '',
       moodTrajectory: options.moodTrajectory || null,
       cyclicalPatterns: options.cyclicalPatterns || null,
-      operations: options.operations || ['classify', 'analyze', 'extractContext', 'generateInsight']
+      pendingPrompts: options.pendingPrompts || [],
+      operations: options.operations || ['classify', 'analyze', 'extractContext', 'generateInsight'],
+      // Pass user's local hour for correct time-of-day context (server runs in UTC)
+      userLocalHour: new Date().getHours()
     });
     return result.data;
   } catch (e) {

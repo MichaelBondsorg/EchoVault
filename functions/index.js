@@ -195,7 +195,9 @@ async function classifyEntry(apiKey, text) {
 /**
  * Analyze entry and route to appropriate therapeutic framework
  */
-async function analyzeEntry(apiKey, text, entryType = 'reflection') {
+async function analyzeEntry(apiKey, text, entryType = 'reflection', userLocalHour = null) {
+  // Use user's local hour if provided, otherwise fall back to server time
+  const currentHour = userLocalHour !== null ? userLocalHour : new Date().getHours();
   if (entryType === 'task') {
     return {
       title: text.substring(0, 50) + (text.length > 50 ? '...' : ''),
@@ -207,7 +209,6 @@ async function analyzeEntry(apiKey, text, entryType = 'reflection') {
   }
 
   if (entryType === 'vent') {
-    const currentHour = new Date().getHours();
     const isLateNight = currentHour >= 22 || currentHour < 5;
 
     const ventPrompt = `
@@ -283,7 +284,6 @@ async function analyzeEntry(apiKey, text, entryType = 'reflection') {
     }
   }
 
-  const currentHour = new Date().getHours();
   const timeContext = currentHour >= 22 || currentHour < 5 ? 'late_night'
     : currentHour < 12 ? 'morning'
     : currentHour < 17 ? 'afternoon'
@@ -651,7 +651,7 @@ export const analyzeJournalEntry = onCall(
       throw new HttpsError('unauthenticated', 'User must be authenticated');
     }
 
-    const { text, recentEntriesContext, historyContext, moodTrajectory, cyclicalPatterns, pendingPrompts, operations } = request.data;
+    const { text, recentEntriesContext, historyContext, moodTrajectory, cyclicalPatterns, pendingPrompts, operations, userLocalHour } = request.data;
 
     if (!text || typeof text !== 'string') {
       throw new HttpsError('invalid-argument', 'Text is required');
@@ -670,7 +670,7 @@ export const analyzeJournalEntry = onCall(
 
       if (ops.includes('analyze')) {
         const entryType = results.classification?.entry_type || 'reflection';
-        results.analysis = await analyzeEntry(apiKey, text, entryType);
+        results.analysis = await analyzeEntry(apiKey, text, entryType, userLocalHour);
       }
 
       if (ops.includes('extractContext')) {
