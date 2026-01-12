@@ -37,6 +37,7 @@ import {
 import { checkCrisisKeywords, checkWarningIndicators, checkLongitudinalRisk } from './services/safety';
 import { retrofitEntriesInBackground } from './services/entries';
 import { inferCategory } from './services/prompts';
+import { getActiveReflectionPrompts, dismissReflectionPrompt } from './services/prompts/activePrompts';
 import { detectTemporalContext, needsConfirmation, formatEffectiveDate } from './services/temporal';
 import { completeActionItem, handleEntryDateChange, calculateStreak } from './services/dashboard';
 import { processEntrySignals } from './services/signals/processEntrySignals';
@@ -286,13 +287,21 @@ export default function App() {
             try {
               const recent = entries.slice(0, 5);
               const related = []; // No embedding yet - will be added by Firestore trigger
+              const pendingPrompts = getActiveReflectionPrompts(entries, offlineEntry.category);
 
               const classification = await classifyEntry(offlineEntry.text);
               const [analysis, insight, enhancedContext] = await Promise.all([
                 analyzeEntry(offlineEntry.text, classification.entry_type),
-                classification.entry_type !== 'task' ? generateInsight(offlineEntry.text, related, recent, entries) : Promise.resolve(null),
+                classification.entry_type !== 'task' ? generateInsight(offlineEntry.text, related, recent, entries, pendingPrompts) : Promise.resolve(null),
                 classification.entry_type !== 'task' ? extractEnhancedContext(offlineEntry.text, recent) : Promise.resolve(null)
               ]);
+
+              // Auto-dismiss addressed prompts
+              if (insight?.addressedPrompts?.length > 0) {
+                insight.addressedPrompts.forEach(prompt => {
+                  dismissReflectionPrompt(prompt, offlineEntry.category);
+                });
+              }
 
               const topicTags = analysis?.tags || [];
               const structuredTags = enhancedContext?.structured_tags || [];
@@ -845,15 +854,27 @@ export default function App() {
           console.timeEnd('⏱️ Classification');
           console.log('Entry classification:', classification);
 
+          // Get active reflection prompts for AI detection of answered prompts
+          const pendingPrompts = getActiveReflectionPrompts(entries, cat);
+          console.log('[Analysis] Pending prompts for detection:', pendingPrompts.length);
+
           console.time('⏱️ AI Analysis (parallel)');
           const [analysis, insight, enhancedContext] = await Promise.all([
             analyzeEntry(finalTex, classification.entry_type),
-            classification.entry_type !== 'task' ? generateInsight(finalTex, related, recent, entries) : Promise.resolve(null),
+            classification.entry_type !== 'task' ? generateInsight(finalTex, related, recent, entries, pendingPrompts) : Promise.resolve(null),
             classification.entry_type !== 'task' ? extractEnhancedContext(finalTex, recent) : Promise.resolve(null)
           ]);
           console.timeEnd('⏱️ AI Analysis (parallel)');
 
           console.log('Analysis complete:', { analysis, insight, classification, enhancedContext });
+
+          // Auto-dismiss addressed prompts based on AI detection
+          if (insight?.addressedPrompts?.length > 0) {
+            console.log('[Analysis] AI detected addressed prompts:', insight.addressedPrompts);
+            insight.addressedPrompts.forEach(prompt => {
+              dismissReflectionPrompt(prompt, cat);
+            });
+          }
 
           // Only show decompression for genuinely heavy entries, not just keyword mentions
           // Requires BOTH low mood score AND vent entry type, OR extremely low score
