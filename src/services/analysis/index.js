@@ -160,8 +160,14 @@ export const detectCyclicalPatterns = (entries) => {
 /**
  * Generate contextual insight by analyzing patterns in history
  * Now uses Cloud Function
+ *
+ * @param {string} current - Current entry text
+ * @param {Array} relevantHistory - Semantically relevant past entries
+ * @param {Array} recentHistory - Recent entries
+ * @param {Array} allEntries - All entries for pattern detection
+ * @param {Array} pendingPrompts - Optional: pending reflection prompts to check if addressed
  */
-export const generateInsight = async (current, relevantHistory, recentHistory, allEntries = []) => {
+export const generateInsight = async (current, relevantHistory, recentHistory, allEntries = [], pendingPrompts = []) => {
   const historyMap = new Map();
   [...recentHistory, ...relevantHistory].forEach(e => historyMap.set(e.id, e));
   const uniqueHistory = Array.from(historyMap.values());
@@ -188,6 +194,7 @@ export const generateInsight = async (current, relevantHistory, recentHistory, a
       historyContext,
       moodTrajectory,
       cyclicalPatterns,
+      pendingPrompts: pendingPrompts.length > 0 ? pendingPrompts : undefined,
       operations: ['generateInsight']
     });
 
@@ -290,6 +297,72 @@ export const getSmartChatContext = async (entries, question, questionEmbedding) 
   });
 
   return Array.from(allMatches.values()).slice(0, 20);
+};
+
+/**
+ * Generate a summary of entries for a specific day
+ * Used by the 30-Day Journey modal
+ *
+ * @param {Array} dayEntries - All entries for the day
+ * @returns {Object} - { summary, moodDrivers, themes }
+ */
+export const generateDaySummary = async (dayEntries) => {
+  if (!dayEntries || dayEntries.length === 0) {
+    return null;
+  }
+
+  // Build context from day's entries
+  const entriesContext = dayEntries.map(e => {
+    const time = e.effectiveDate || e.createdAt;
+    const d = time?.toDate?.() || new Date(time);
+    const timeStr = d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+    const moodStr = e.analysis?.mood_score !== undefined
+      ? ` [mood: ${(e.analysis.mood_score * 100).toFixed(0)}%]`
+      : '';
+    const themes = e.analysis?.themes?.join(', ') || '';
+    return `[${timeStr}]${moodStr}${themes ? ` {${themes}}` : ''}\n${e.text || e.contextualInsight?.briefSummary || 'Voice entry'}`;
+  }).join('\n\n---\n\n');
+
+  // Calculate average mood
+  const moodScores = dayEntries
+    .filter(e => e.analysis?.mood_score !== undefined)
+    .map(e => e.analysis.mood_score);
+  const avgMood = moodScores.length > 0
+    ? moodScores.reduce((a, b) => a + b, 0) / moodScores.length
+    : null;
+
+  try {
+    const result = await askJournalAIFn({
+      question: `Summarize this day's journal entries. What were the main themes? What contributed positively or negatively to the mood? Keep it concise (2-3 sentences).
+
+Average mood score: ${avgMood !== null ? (avgMood * 100).toFixed(0) + '%' : 'unknown'}
+
+Entries:
+${entriesContext}`,
+      entriesContext: '' // Context is in the question
+    });
+
+    if (!result?.data?.response) {
+      return {
+        summary: 'Unable to generate summary.',
+        moodDrivers: { positive: [], negative: [] },
+        themes: []
+      };
+    }
+
+    return {
+      summary: result.data.response,
+      avgMood,
+      entryCount: dayEntries.length
+    };
+  } catch (e) {
+    console.error('generateDaySummary error:', e);
+    return {
+      summary: 'Unable to generate summary at this time.',
+      avgMood,
+      entryCount: dayEntries.length
+    };
+  }
 };
 
 /**

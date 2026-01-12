@@ -535,7 +535,7 @@ async function extractEnhancedContext(apiKey, text, recentEntriesContext = '') {
 /**
  * Generate contextual insight
  */
-async function generateInsight(apiKey, currentText, historyContext, moodTrajectory = null, cyclicalPatterns = null) {
+async function generateInsight(apiKey, currentText, historyContext, moodTrajectory = null, cyclicalPatterns = null, pendingPrompts = []) {
   const today = new Date();
   const dayOfWeek = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][today.getDay()];
 
@@ -545,6 +545,16 @@ async function generateInsight(apiKey, currentText, historyContext, moodTrajecto
 
   const cyclicalContext = cyclicalPatterns?.pattern
     ? `\nCYCLICAL PATTERN DETECTED: ${cyclicalPatterns.pattern}`
+    : '';
+
+  // Add pending prompts detection section if there are any
+  const pendingPromptsSection = pendingPrompts && pendingPrompts.length > 0
+    ? `\n\n    PENDING REFLECTION PROMPTS DETECTION:
+    The user has these pending reflection prompts that were shown to them:
+    ${pendingPrompts.map((p, i) => `${i + 1}. "${p}"`).join('\n    ')}
+
+    If this entry MEANINGFULLY RESPONDS to any of these prompts (not just mentions keywords, but actually answers the question), include them in your response as "addressedPrompts".
+    Only include prompts that are clearly addressed by this entry.`
     : '';
 
   const prompt = `
@@ -593,13 +603,15 @@ async function generateInsight(apiKey, currentText, historyContext, moodTrajecto
     - Don't flag patterns from entries older than 60 days unless truly significant
 
     If the connection feels forced, weak, unrelated to the current entry, or the entries are too old, return { "found": false }.
+    ${pendingPromptsSection}
 
     Output JSON:
     {
       "found": true,
       "type": "warning" | "encouragement" | "pattern" | "reminder" | "progress" | "streak" | "absence" | "contradiction" | "goal_check" | "cyclical",
       "message": "Concise, insightful observation (1-2 sentences max)",
-      "followUpQuestions": ["Relevant question 1?", "Relevant question 2?"]
+      "followUpQuestions": ["Relevant question 1?", "Relevant question 2?"],
+      "addressedPrompts": ["Exact prompt text that was answered"] // optional, only if pending prompts were addressed
     }
   `;
 
@@ -639,7 +651,7 @@ export const analyzeJournalEntry = onCall(
       throw new HttpsError('unauthenticated', 'User must be authenticated');
     }
 
-    const { text, recentEntriesContext, historyContext, moodTrajectory, cyclicalPatterns, operations } = request.data;
+    const { text, recentEntriesContext, historyContext, moodTrajectory, cyclicalPatterns, pendingPrompts, operations } = request.data;
 
     if (!text || typeof text !== 'string') {
       throw new HttpsError('invalid-argument', 'Text is required');
@@ -666,7 +678,7 @@ export const analyzeJournalEntry = onCall(
       }
 
       if (ops.includes('generateInsight') && historyContext) {
-        results.insight = await generateInsight(apiKey, text, historyContext, moodTrajectory, cyclicalPatterns);
+        results.insight = await generateInsight(apiKey, text, historyContext, moodTrajectory, cyclicalPatterns, pendingPrompts);
       }
 
       return results;
