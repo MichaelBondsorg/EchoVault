@@ -24,13 +24,53 @@ const DaySummaryModal = ({
   const [summaryLoading, setSummaryLoading] = useState(false);
   const [summaryError, setSummaryError] = useState(null);
 
+  // Extract entries safely for hooks (before early return)
+  const entries = dayData?.entries || [];
+  const mood = dayData?.mood;
+
+  // Extract themes from entries - MUST be before early return
+  const themes = useMemo(() => {
+    if (!entries || entries.length === 0) return [];
+    const allThemes = [];
+    entries.forEach(entry => {
+      if (entry.analysis?.themes) {
+        allThemes.push(...entry.analysis.themes);
+      }
+      if (entry.contextualInsight?.briefSummary) {
+        allThemes.push(entry.contextualInsight.briefSummary);
+      }
+    });
+    return [...new Set(allThemes)].slice(0, 5);
+  }, [entries]);
+
+  // Extract mood contributors - MUST be before early return
+  const moodContributors = useMemo(() => {
+    if (!entries || entries.length === 0) return { positive: [], negative: [] };
+    const contributors = { positive: [], negative: [] };
+    entries.forEach(entry => {
+      const score = entry.analysis?.mood_score;
+      const summary = entry.contextualInsight?.briefSummary || entry.analysis?.themes?.[0];
+      if (summary) {
+        if (score >= 0.5) {
+          contributors.positive.push(summary);
+        } else if (score < 0.4) {
+          contributors.negative.push(summary);
+        }
+      }
+    });
+    return {
+      positive: [...new Set(contributors.positive)].slice(0, 3),
+      negative: [...new Set(contributors.negative)].slice(0, 3),
+    };
+  }, [entries]);
+
   // Fetch AI summary when modal opens
   useEffect(() => {
-    if (isOpen && dayData?.entries?.length > 0 && !aiSummary && !summaryLoading) {
+    if (isOpen && entries.length > 0 && !aiSummary && !summaryLoading) {
       setSummaryLoading(true);
       setSummaryError(null);
 
-      generateDaySummary(dayData.entries)
+      generateDaySummary(entries)
         .then((result) => {
           setAiSummary(result);
           setSummaryLoading(false);
@@ -41,7 +81,7 @@ const DaySummaryModal = ({
           setSummaryLoading(false);
         });
     }
-  }, [isOpen, dayData, aiSummary, summaryLoading]);
+  }, [isOpen, entries, aiSummary, summaryLoading]);
 
   // Reset summary when modal closes
   useEffect(() => {
@@ -52,9 +92,8 @@ const DaySummaryModal = ({
     }
   }, [isOpen]);
 
+  // Early return AFTER all hooks
   if (!isOpen || !dayData) return null;
-
-  const { entries = [], mood } = dayData;
 
   // Format date nicely
   const formattedDate = date?.toLocaleDateString('en-US', {
@@ -81,43 +120,6 @@ const DaySummaryModal = ({
     if (score >= 0.15) return 'text-mood-low';
     return 'text-mood-struggling';
   };
-
-  // Extract themes from entries
-  const themes = useMemo(() => {
-    const allThemes = [];
-    entries.forEach(entry => {
-      // From analysis themes
-      if (entry.analysis?.themes) {
-        allThemes.push(...entry.analysis.themes);
-      }
-      // From contextual insight
-      if (entry.contextualInsight?.briefSummary) {
-        allThemes.push(entry.contextualInsight.briefSummary);
-      }
-    });
-    // Dedupe and take first 5
-    return [...new Set(allThemes)].slice(0, 5);
-  }, [entries]);
-
-  // Extract mood contributors (what affected mood positively/negatively)
-  const moodContributors = useMemo(() => {
-    const contributors = { positive: [], negative: [] };
-    entries.forEach(entry => {
-      const score = entry.analysis?.mood_score;
-      const summary = entry.contextualInsight?.briefSummary || entry.analysis?.themes?.[0];
-      if (summary) {
-        if (score >= 0.5) {
-          contributors.positive.push(summary);
-        } else if (score < 0.4) {
-          contributors.negative.push(summary);
-        }
-      }
-    });
-    return {
-      positive: [...new Set(contributors.positive)].slice(0, 3),
-      negative: [...new Set(contributors.negative)].slice(0, 3),
-    };
-  }, [entries]);
 
   // Format entry time
   const formatTime = (entry) => {
