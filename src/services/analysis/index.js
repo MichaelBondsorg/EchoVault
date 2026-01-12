@@ -333,7 +333,9 @@ export const generateDaySummary = async (dayEntries) => {
 
   try {
     const result = await askJournalAIFn({
-      question: `Summarize this day's journal entries. What were the main themes? What contributed positively or negatively to the mood? Keep it concise (2-3 sentences).
+      question: `Summarize this day's journal entries in plain text. What were the main themes? What contributed positively or negatively to the mood? Keep it concise (2-3 sentences).
+
+IMPORTANT: Do NOT use any markdown formatting (no #, *, -, or other special characters). Write in plain conversational prose only.
 
 Average mood score: ${avgMood !== null ? (avgMood * 100).toFixed(0) + '%' : 'unknown'}
 
@@ -350,8 +352,17 @@ ${entriesContext}`,
       };
     }
 
+    // Strip any remaining markdown formatting
+    let summary = result.data.response
+      .replace(/^#{1,6}\s*/gm, '') // Remove heading markers
+      .replace(/\*\*/g, '')        // Remove bold markers
+      .replace(/\*/g, '')          // Remove italic/bullet markers
+      .replace(/^-\s*/gm, '')      // Remove list markers
+      .replace(/`/g, '')           // Remove code markers
+      .trim();
+
     return {
-      summary: result.data.response,
+      summary,
       avgMood,
       entryCount: dayEntries.length
     };
