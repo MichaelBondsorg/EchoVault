@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, Plus, Sun, Sparkles, BarChart3, Target, CheckSquare, Calendar, GitBranch } from 'lucide-react';
 import { WIDGET_DEFINITIONS } from '../../hooks/useDashboardLayout';
@@ -29,6 +29,9 @@ const WidgetDrawer = ({
   availableWidgets = [],
   onAddWidget,
 }) => {
+  const scrollRef = useRef(null);
+  const startYRef = useRef(0);
+
   // Lock body scroll when drawer is open to prevent background scrolling
   useEffect(() => {
     if (isOpen) {
@@ -51,6 +54,30 @@ const WidgetDrawer = ({
       };
     }
   }, [isOpen]);
+
+  // Handle touch move to prevent scroll bleed at boundaries
+  const handleTouchStart = useCallback((e) => {
+    startYRef.current = e.touches[0].clientY;
+  }, []);
+
+  const handleTouchMove = useCallback((e) => {
+    const scrollEl = scrollRef.current;
+    if (!scrollEl) return;
+
+    const currentY = e.touches[0].clientY;
+    const deltaY = startYRef.current - currentY;
+    const { scrollTop, scrollHeight, clientHeight } = scrollEl;
+
+    // At the top and trying to scroll up
+    const atTop = scrollTop <= 0 && deltaY < 0;
+    // At the bottom and trying to scroll down
+    const atBottom = scrollTop + clientHeight >= scrollHeight && deltaY > 0;
+
+    // Prevent default only when at boundaries to stop background scroll
+    if (atTop || atBottom) {
+      e.preventDefault();
+    }
+  }, []);
 
   return (
     <AnimatePresence>
@@ -100,14 +127,15 @@ const WidgetDrawer = ({
 
             {/* Widget List */}
             <div
-              className="p-4 overflow-y-auto overscroll-contain"
+              ref={scrollRef}
+              className="p-4 overflow-y-auto"
               style={{
                 maxHeight: 'calc(70vh - 100px)',
                 WebkitOverflowScrolling: 'touch',
-                touchAction: 'pan-y',
+                overscrollBehavior: 'contain',
               }}
-              onTouchStart={(e) => e.stopPropagation()}
-              onTouchMove={(e) => e.stopPropagation()}
+              onTouchStart={handleTouchStart}
+              onTouchMove={handleTouchMove}
             >
               {availableWidgets.length > 0 ? (
                 <div className="space-y-3">

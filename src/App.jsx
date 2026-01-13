@@ -39,7 +39,7 @@ import { retrofitEntriesInBackground } from './services/entries';
 import { inferCategory } from './services/prompts';
 import { getActiveReflectionPrompts, dismissReflectionPrompt } from './services/prompts/activePrompts';
 import { detectTemporalContext, needsConfirmation, formatEffectiveDate } from './services/temporal';
-import { completeActionItem, handleEntryDateChange, calculateStreak } from './services/dashboard';
+import { handleEntryDateChange, calculateStreak } from './services/dashboard';
 import { processEntrySignals } from './services/signals/processEntrySignals';
 import { updateSignalStatus, batchUpdateSignalStatus } from './services/signals';
 import { runEntryPostProcessing } from './services/background';
@@ -1551,11 +1551,30 @@ export default function App() {
 
       // Dashboard handlers
       onPromptClick={(prompt) => setReplyContext(prompt)}
-      onToggleTask={async (task, source, index) => {
-        console.log('Completing task:', task, source, index);
-        if (user?.uid) {
-          await completeActionItem(user.uid, cat, source, index);
+      onToggleTask={async (taskText, entryId, taskIndex) => {
+        console.log('Completing task:', taskText, 'in entry:', entryId, 'at index:', taskIndex);
+        if (!user?.uid || !entryId) return;
+
+        // Find the entry and update its extracted_tasks
+        const entry = entries.find(e => e.id === entryId);
+        if (!entry || !entry.extracted_tasks) return;
+
+        const updatedTasks = [...entry.extracted_tasks];
+        const task = updatedTasks[taskIndex];
+        if (!task) return;
+
+        // Mark as completed (same logic as EntryCard)
+        if (typeof task === 'string') {
+          updatedTasks[taskIndex] = { text: task, completed: true, completedAt: new Date().toISOString() };
+        } else {
+          updatedTasks[taskIndex] = {
+            ...task,
+            completed: true,
+            completedAt: new Date().toISOString()
+          };
         }
+
+        await handleEntryUpdate(entryId, { extracted_tasks: updatedTasks });
       }}
       onStartRecording={() => {
         setEntryPreferredMode('voice');
