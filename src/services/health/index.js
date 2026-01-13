@@ -2,6 +2,7 @@
  * Health Services - Main Export
  *
  * Cross-platform health data integration:
+ * - Whoop: Cloud-to-cloud (all platforms)
  * - iOS: HealthKit
  * - Android: Google Fit
  * - Web: Cached data + manual input
@@ -34,6 +35,19 @@ export {
   analyzeHealthMoodCorrelations
 } from './healthMoodCorrelation';
 
+// Whoop integration (cloud-to-cloud, works on all platforms)
+export {
+  isWhoopLinked,
+  initiateWhoopOAuth,
+  disconnectWhoop,
+  handleWhoopOAuthSuccess,
+  getWhoopSummary,
+  getWhoopHistory,
+  getWhoopRecoveryInsight,
+  getWhoopStrainInsight
+} from './whoop';
+
 // Platform-specific (typically don't need direct access)
 export * as healthKit from './healthKit';
 export * as googleFit from './googleFit';
+export * as whoop from './whoop';

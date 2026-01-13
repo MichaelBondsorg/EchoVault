@@ -17,6 +17,12 @@ export const config = {
   // Firebase (optional - uses default credentials in Cloud Run)
   firebaseServiceAccount: process.env.FIREBASE_SERVICE_ACCOUNT,
 
+  // Whoop Integration
+  whoopClientId: process.env.WHOOP_CLIENT_ID || '',
+  whoopClientSecret: process.env.WHOOP_CLIENT_SECRET || '',
+  whoopRedirectUri: process.env.WHOOP_REDIRECT_URI || 'https://echo-vault-app.web.app/__/auth/handler',
+  whoopTokenEncryptionKey: process.env.WHOOP_TOKEN_ENCRYPTION_KEY || '',
+
   // Realtime API settings
   realtimeModel: 'gpt-4o-realtime-preview-2024-12-17',
   realtimeVoice: 'alloy', // Options: alloy, echo, fable, onyx, nova, shimmer

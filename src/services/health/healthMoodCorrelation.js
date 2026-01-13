@@ -57,7 +57,9 @@ export const analyzeHealthMoodCorrelations = (entries, healthHistory) => {
     sleep: analyzeSleepCorrelation(paired),
     steps: analyzeStepsCorrelation(paired),
     workout: analyzeWorkoutCorrelation(paired),
-    stress: analyzeStressCorrelation(paired)
+    stress: analyzeStressCorrelation(paired),
+    recovery: analyzeRecoveryCorrelation(paired),
+    strain: analyzeStrainCorrelation(paired)
   };
 
   // Generate insights
@@ -256,6 +258,91 @@ const analyzeStressCorrelation = (pairs) => {
 };
 
 /**
+ * Analyze Whoop recovery - mood correlation
+ * Recovery score (0-100) indicates readiness
+ */
+const analyzeRecoveryCorrelation = (pairs) => {
+  const validPairs = pairs.filter(p => p.health.recovery?.score !== null && p.health.recovery?.score !== undefined);
+
+  if (validPairs.length < 5) {
+    return { available: false, reason: 'insufficient_recovery_data' };
+  }
+
+  const recoveryScores = validPairs.map(p => p.health.recovery.score);
+  const moods = validPairs.map(p => p.moodScore);
+
+  const correlation = pearsonCorrelation(recoveryScores, moods);
+
+  // Compare by recovery status (green: 67+, yellow: 34-66, red: <34)
+  const greenRecovery = validPairs.filter(p => p.health.recovery.score >= 67);
+  const redRecovery = validPairs.filter(p => p.health.recovery.score < 34);
+
+  const avgMoodGreen = greenRecovery.length > 0
+    ? greenRecovery.reduce((sum, p) => sum + p.moodScore, 0) / greenRecovery.length
+    : null;
+  const avgMoodRed = redRecovery.length > 0
+    ? redRecovery.reduce((sum, p) => sum + p.moodScore, 0) / redRecovery.length
+    : null;
+
+  const moodDifference = avgMoodGreen !== null && avgMoodRed !== null
+    ? avgMoodGreen - avgMoodRed
+    : null;
+
+  const percentDifference = moodDifference !== null && avgMoodRed > 0
+    ? Math.round((moodDifference / avgMoodRed) * 100)
+    : null;
+
+  return {
+    available: true,
+    correlation: Math.round(correlation * 100) / 100,
+    strength: getCorrelationStrength(correlation),
+    avgRecovery: Math.round(recoveryScores.reduce((a, b) => a + b, 0) / recoveryScores.length),
+    moodWhenRecovered: avgMoodGreen !== null ? Math.round(avgMoodGreen * 100) / 100 : null,
+    moodWhenDepleted: avgMoodRed !== null ? Math.round(avgMoodRed * 100) / 100 : null,
+    percentBoost: percentDifference,
+    sampleSize: validPairs.length
+  };
+};
+
+/**
+ * Analyze Whoop strain - mood correlation
+ * Strain (0-21) measures exertion level
+ */
+const analyzeStrainCorrelation = (pairs) => {
+  const validPairs = pairs.filter(p => p.health.strain?.score !== null && p.health.strain?.score !== undefined);
+
+  if (validPairs.length < 5) {
+    return { available: false, reason: 'insufficient_strain_data' };
+  }
+
+  const strainScores = validPairs.map(p => p.health.strain.score);
+  const moods = validPairs.map(p => p.moodScore);
+
+  const correlation = pearsonCorrelation(strainScores, moods);
+
+  // Compare high strain vs low strain days (10 is moderate threshold)
+  const highStrainDays = validPairs.filter(p => p.health.strain.score >= 10);
+  const lowStrainDays = validPairs.filter(p => p.health.strain.score < 10);
+
+  const avgMoodHighStrain = highStrainDays.length > 0
+    ? highStrainDays.reduce((sum, p) => sum + p.moodScore, 0) / highStrainDays.length
+    : null;
+  const avgMoodLowStrain = lowStrainDays.length > 0
+    ? lowStrainDays.reduce((sum, p) => sum + p.moodScore, 0) / lowStrainDays.length
+    : null;
+
+  return {
+    available: true,
+    correlation: Math.round(correlation * 100) / 100,
+    strength: getCorrelationStrength(correlation),
+    avgStrain: Math.round(strainScores.reduce((a, b) => a + b, 0) / strainScores.length * 10) / 10,
+    moodOnHighStrainDays: avgMoodHighStrain !== null ? Math.round(avgMoodHighStrain * 100) / 100 : null,
+    moodOnLowStrainDays: avgMoodLowStrain !== null ? Math.round(avgMoodLowStrain * 100) / 100 : null,
+    sampleSize: validPairs.length
+  };
+};
+
+/**
  * Get correlation strength label
  */
 const getCorrelationStrength = (r) => {
@@ -329,6 +416,43 @@ const generateHealthInsights = (correlations, pairs) => {
           priority: 'high',
           icon: 'Heart',
           message: `Your HRV shows stress levels predict your mood. On relaxed days, mood is ${(diff * 100).toFixed(0)}% higher.`,
+          actionable: true
+        });
+      }
+    }
+  }
+
+  // Whoop Recovery insight
+  if (correlations.recovery?.available && correlations.recovery.percentBoost !== null) {
+    if (correlations.recovery.percentBoost > 10) {
+      insights.push({
+        type: 'recovery',
+        priority: 'high',
+        icon: 'TrendingUp',
+        message: `Your Whoop recovery score strongly predicts mood. When recovered (green), mood is ${correlations.recovery.percentBoost}% higher.`,
+        actionable: true
+      });
+    }
+  }
+
+  // Whoop Strain insight
+  if (correlations.strain?.available) {
+    if (correlations.strain.moodOnHighStrainDays && correlations.strain.moodOnLowStrainDays) {
+      const diff = correlations.strain.moodOnHighStrainDays - correlations.strain.moodOnLowStrainDays;
+      if (diff > 0.05) {
+        insights.push({
+          type: 'strain',
+          priority: 'medium',
+          icon: 'Zap',
+          message: `Higher daily strain correlates with better mood. Active days show ${Math.round(diff * 100)}% higher mood.`,
+          actionable: true
+        });
+      } else if (diff < -0.1) {
+        insights.push({
+          type: 'strain',
+          priority: 'medium',
+          icon: 'Zap',
+          message: `High strain days may be pushing you too hard. Consider balancing activity with recovery.`,
           actionable: true
         });
       }

@@ -48,7 +48,7 @@ const SettingsPage = ({
         {
           icon: Smartphone,
           label: 'Health Integration',
-          description: 'Apple Health / Google Fit',
+          description: 'Whoop / Apple Health / Google Fit',
           onClick: onOpenHealthSettings,
         },
       ],

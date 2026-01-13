@@ -14,14 +14,28 @@
 import { getHealthDataStrategy, cacheHealthData, getCachedHealthData, detectPlatform } from './platformHealth';
 import { getHealthKitSummary, getHealthKitHistory, requestHealthKitPermissions, checkHealthKitPermissions } from './healthKit';
 import { getGoogleFitSummary, getGoogleFitHistory, requestGoogleFitPermissions, checkGoogleFitPermissions } from './googleFit';
+import { isWhoopLinked, getWhoopSummary, getWhoopHistory } from './whoop';
 
 /**
  * Get current health summary using best available method
+ *
+ * Priority: Whoop (cloud) > Native HealthKit/GoogleFit > Cache > Manual
  *
  * @param {Date} date - Date to query (default: today)
  * @returns {Object} Health summary with source info
  */
 export const getHealthSummary = async (date = new Date()) => {
+  // Check for Whoop first (works on all platforms)
+  try {
+    const whoopLinked = await isWhoopLinked();
+    if (whoopLinked) {
+      return await getWhoopSummary(date);
+    }
+  } catch (error) {
+    console.warn('Whoop check failed, falling back to native:', error);
+  }
+
+  // Fall back to native/cache strategy
   const strategy = await getHealthDataStrategy();
 
   switch (strategy.strategy) {
@@ -53,10 +67,22 @@ export const getHealthSummary = async (date = new Date()) => {
 /**
  * Get health history for correlation analysis
  *
+ * Priority: Whoop (cloud) > Native HealthKit/GoogleFit
+ *
  * @param {number} days - Days to query
  * @returns {Object} Health history
  */
 export const getHealthHistory = async (days = 14) => {
+  // Check for Whoop first (works on all platforms)
+  try {
+    const whoopLinked = await isWhoopLinked();
+    if (whoopLinked) {
+      return await getWhoopHistory(days);
+    }
+  } catch (error) {
+    console.warn('Whoop history failed, falling back to native:', error);
+  }
+
   const { platform } = detectPlatform();
 
   if (platform === 'ios') {
@@ -71,7 +97,7 @@ export const getHealthHistory = async (days = 14) => {
   return {
     available: false,
     reason: 'web_platform',
-    note: 'Historical health data only available on mobile'
+    note: 'Historical health data only available on mobile or with Whoop'
   };
 };
 
@@ -179,6 +205,28 @@ export const saveManualHealthInput = async (input) => {
  * @returns {Object} Availability info for UI
  */
 export const getHealthDataStatus = async () => {
+  // Check Whoop status first
+  let whoopLinked = false;
+  try {
+    whoopLinked = await isWhoopLinked();
+  } catch {
+    // Ignore Whoop check errors
+  }
+
+  if (whoopLinked) {
+    return {
+      isAvailable: true,
+      strategy: 'whoop',
+      platform: 'cloud',
+      isNative: false,
+      isWhoop: true,
+      canRequestPermission: false,
+      hasCachedData: false,
+      cacheAge: null,
+      message: 'Connected to Whoop'
+    };
+  }
+
   const strategy = await getHealthDataStrategy();
   const { platform, isNative } = detectPlatform();
 
@@ -187,6 +235,7 @@ export const getHealthDataStatus = async () => {
     strategy: strategy.strategy,
     platform,
     isNative,
+    isWhoop: false,
     canRequestPermission: isNative && strategy.permissionStatus !== 'granted',
     hasCachedData: strategy.strategy === 'cache',
     cacheAge: strategy.cacheAge || null,
@@ -225,6 +274,19 @@ const getStatusMessage = (strategy) => {
  * Call this on app resume or periodically
  */
 export const refreshHealthCache = async () => {
+  // Check Whoop first
+  try {
+    const whoopLinked = await isWhoopLinked();
+    if (whoopLinked) {
+      const summary = await getWhoopSummary();
+      if (summary.available) {
+        return { refreshed: true, summary, source: 'whoop' };
+      }
+    }
+  } catch (error) {
+    console.warn('Whoop refresh failed:', error);
+  }
+
   const { isNative, platform } = detectPlatform();
 
   if (!isNative) {
