@@ -19,6 +19,7 @@ import {
   runTransaction
 } from './config/firebase';
 import { Capacitor, registerPlugin } from '@capacitor/core';
+import { App as CapacitorApp } from '@capacitor/app';
 import {
   APP_COLLECTION_ID, CURRENT_CONTEXT_VERSION,
   DEFAULT_SAFETY_PLAN
@@ -43,7 +44,7 @@ import { handleEntryDateChange, calculateStreak } from './services/dashboard';
 import { processEntrySignals } from './services/signals/processEntrySignals';
 import { updateSignalStatus, batchUpdateSignalStatus } from './services/signals';
 import { runEntryPostProcessing } from './services/background';
-import { getEntryHealthContext } from './services/health';
+import { getEntryHealthContext, handleWhoopOAuthSuccess } from './services/health';
 import { getEntryEnvironmentContext } from './services/environment';
 
 // Hooks
@@ -219,6 +220,46 @@ export default function App() {
       console.warn('Error cleaning up audio backups:', e);
     }
   }, []);
+
+  // Deep link handler for OAuth callbacks (Whoop integration)
+  useEffect(() => {
+    const handleDeepLink = async (event) => {
+      try {
+        const url = new URL(event.url);
+        console.log('[EchoVault] Deep link received:', url.toString());
+
+        // Handle OAuth success callback
+        if (url.host === 'auth-success') {
+          const provider = url.searchParams.get('provider');
+          if (provider === 'whoop') {
+            console.log('[EchoVault] Whoop OAuth success');
+            await handleWhoopOAuthSuccess();
+            // Refresh health settings if open
+            if (showHealthSettings) {
+              setShowHealthSettings(false);
+              setTimeout(() => setShowHealthSettings(true), 100);
+            }
+          }
+        }
+
+        // Handle OAuth error callback
+        if (url.host === 'auth-error') {
+          const provider = url.searchParams.get('provider');
+          const error = url.searchParams.get('error');
+          console.error(`[EchoVault] OAuth error for ${provider}:`, error);
+        }
+      } catch (error) {
+        console.error('[EchoVault] Error handling deep link:', error);
+      }
+    };
+
+    // Listen for deep links
+    const listener = CapacitorApp.addListener('appUrlOpen', handleDeepLink);
+
+    return () => {
+      listener.then(l => l.remove());
+    };
+  }, [showHealthSettings]);
 
   // Process offline queue when back online
   useEffect(() => {

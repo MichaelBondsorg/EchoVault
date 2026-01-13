@@ -6,6 +6,13 @@ import { URL } from 'url';
 import { config, validateConfig } from './config/index.js';
 import { verifyToken } from './auth/firebase.js';
 import {
+  getAuthorizationUrl,
+  completeOAuthFlow,
+  disconnectWhoop,
+  getHealthSummary as getWhoopHealthSummary,
+  hasWhoopLinked,
+} from './services/whoop/index.js';
+import {
   createSession,
   getSession,
   getSessionByUser,
@@ -60,6 +67,191 @@ app.get('/', (req, res) => {
 
 app.get('/health', (req, res) => {
   res.json({ status: 'healthy' });
+});
+
+// ============================================================================
+// HTTP Authentication Middleware
+// ============================================================================
+
+interface AuthenticatedRequest extends express.Request {
+  userId?: string;
+}
+
+/**
+ * Middleware to verify Firebase ID token from Authorization header
+ */
+const authenticateHttp = async (
+  req: AuthenticatedRequest,
+  res: express.Response,
+  next: express.NextFunction
+): Promise<void> => {
+  const authHeader = req.headers.authorization;
+
+  if (!authHeader?.startsWith('Bearer ')) {
+    res.status(401).json({ error: 'Missing or invalid authorization header' });
+    return;
+  }
+
+  const token = authHeader.substring(7);
+  const authResult = await verifyToken(token);
+
+  if (!authResult.success || !authResult.userId) {
+    res.status(401).json({ error: 'Invalid or expired token' });
+    return;
+  }
+
+  req.userId = authResult.userId;
+  next();
+};
+
+// ============================================================================
+// Whoop OAuth Endpoints
+// ============================================================================
+
+/**
+ * GET /auth/whoop
+ * Initiates OAuth flow by returning the authorization URL
+ */
+app.get('/auth/whoop', authenticateHttp, (req: AuthenticatedRequest, res) => {
+  try {
+    // Use userId as state for CSRF protection
+    const state = Buffer.from(
+      JSON.stringify({ userId: req.userId, timestamp: Date.now() })
+    ).toString('base64');
+
+    const authUrl = getAuthorizationUrl(state);
+    res.json({ authUrl });
+  } catch (error) {
+    console.error('Error generating Whoop auth URL:', error);
+    res.status(500).json({ error: 'Failed to generate authorization URL' });
+  }
+});
+
+/**
+ * GET /auth/whoop/callback
+ * Handles OAuth callback from Whoop
+ * Exchanges code for tokens and stores them
+ */
+app.get('/auth/whoop/callback', async (req, res) => {
+  try {
+    const { code, state, error } = req.query;
+
+    // Check for OAuth errors
+    if (error) {
+      console.error('Whoop OAuth error:', error);
+      // Redirect to app with error
+      res.redirect(`echovault://auth-error?provider=whoop&error=${error}`);
+      return;
+    }
+
+    if (!code || !state) {
+      res.redirect('echovault://auth-error?provider=whoop&error=missing_params');
+      return;
+    }
+
+    // Decode state to get userId
+    let stateData: { userId: string; timestamp: number };
+    try {
+      stateData = JSON.parse(Buffer.from(state as string, 'base64').toString());
+    } catch {
+      res.redirect('echovault://auth-error?provider=whoop&error=invalid_state');
+      return;
+    }
+
+    // Validate state timestamp (5 minute expiry)
+    if (Date.now() - stateData.timestamp > 5 * 60 * 1000) {
+      res.redirect('echovault://auth-error?provider=whoop&error=state_expired');
+      return;
+    }
+
+    // Complete the OAuth flow
+    await completeOAuthFlow(stateData.userId, code as string);
+
+    console.log(`Whoop linked successfully for user ${stateData.userId}`);
+
+    // Redirect to app with success
+    res.redirect('echovault://auth-success?provider=whoop');
+  } catch (error) {
+    console.error('Error completing Whoop OAuth:', error);
+    res.redirect('echovault://auth-error?provider=whoop&error=token_exchange_failed');
+  }
+});
+
+/**
+ * DELETE /auth/whoop
+ * Disconnects Whoop from user account
+ */
+app.delete('/auth/whoop', authenticateHttp, async (req: AuthenticatedRequest, res) => {
+  try {
+    await disconnectWhoop(req.userId!);
+    console.log(`Whoop disconnected for user ${req.userId}`);
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Error disconnecting Whoop:', error);
+    res.status(500).json({ error: 'Failed to disconnect Whoop' });
+  }
+});
+
+/**
+ * GET /auth/whoop/status
+ * Check if user has Whoop linked
+ */
+app.get('/auth/whoop/status', authenticateHttp, async (req: AuthenticatedRequest, res) => {
+  try {
+    const linked = await hasWhoopLinked(req.userId!);
+    res.json({ linked });
+  } catch (error) {
+    console.error('Error checking Whoop status:', error);
+    res.status(500).json({ error: 'Failed to check Whoop status' });
+  }
+});
+
+// ============================================================================
+// Whoop Health Data Endpoints
+// ============================================================================
+
+/**
+ * GET /health/whoop/summary
+ * Returns aggregated health data from Whoop
+ */
+app.get('/health/whoop/summary', authenticateHttp, async (req: AuthenticatedRequest, res) => {
+  try {
+    // Parse date from query param, default to today
+    const dateParam = req.query.date as string | undefined;
+    const date = dateParam ? new Date(dateParam) : new Date();
+
+    // Check if user has Whoop linked
+    const linked = await hasWhoopLinked(req.userId!);
+    if (!linked) {
+      res.status(404).json({
+        available: false,
+        error: 'Whoop not connected',
+        source: 'whoop',
+      });
+      return;
+    }
+
+    const summary = await getWhoopHealthSummary(req.userId!, date);
+    res.json(summary);
+  } catch (error) {
+    console.error('Error fetching Whoop summary:', error);
+
+    // Handle rate limiting gracefully
+    if (error instanceof Error && error.message === 'RATE_LIMITED') {
+      res.status(429).json({
+        available: false,
+        error: 'Rate limited. Please try again later.',
+        source: 'whoop',
+      });
+      return;
+    }
+
+    res.status(500).json({
+      available: false,
+      error: 'Failed to fetch Whoop data',
+      source: 'whoop',
+    });
+  }
 });
 
 // Create HTTP server

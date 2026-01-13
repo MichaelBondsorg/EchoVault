@@ -1,8 +1,10 @@
 /**
  * Health Settings Screen
  *
- * Simple UI to connect/disconnect Apple Health or Google Fit.
- * Shows what data is collected and current connection status.
+ * UI to connect health data sources:
+ * - Whoop (cloud-to-cloud, works everywhere)
+ * - Apple Health (iOS native)
+ * - Google Fit (Android native)
  */
 
 import React, { useState, useEffect } from 'react';
@@ -19,14 +21,23 @@ import {
   Smartphone,
   RefreshCw,
   ChevronRight,
-  Shield
+  Shield,
+  Link2,
+  Unlink,
+  ExternalLink,
+  TrendingUp
 } from 'lucide-react';
+import { Browser } from '@capacitor/browser';
 
 import {
   getHealthDataStatus,
   requestHealthPermissions,
   getHealthSummary,
-  refreshHealthCache
+  refreshHealthCache,
+  isWhoopLinked,
+  initiateWhoopOAuth,
+  disconnectWhoop,
+  getWhoopRecoveryInsight
 } from '../../services/health';
 
 const HealthSettingsScreen = ({ onClose }) => {
@@ -34,6 +45,11 @@ const HealthSettingsScreen = ({ onClose }) => {
   const [loading, setLoading] = useState(true);
   const [connecting, setConnecting] = useState(false);
   const [todayData, setTodayData] = useState(null);
+
+  // Whoop-specific state
+  const [whoopLinked, setWhoopLinked] = useState(false);
+  const [whoopConnecting, setWhoopConnecting] = useState(false);
+  const [whoopDisconnecting, setWhoopDisconnecting] = useState(false);
 
   // Load current status on mount
   useEffect(() => {
@@ -43,6 +59,10 @@ const HealthSettingsScreen = ({ onClose }) => {
   const loadStatus = async () => {
     setLoading(true);
     try {
+      // Check Whoop status
+      const whoopStatus = await isWhoopLinked();
+      setWhoopLinked(whoopStatus);
+
       const healthStatus = await getHealthDataStatus();
       setStatus(healthStatus);
 
@@ -85,6 +105,37 @@ const HealthSettingsScreen = ({ onClose }) => {
       console.error('Failed to refresh:', error);
     }
     setLoading(false);
+  };
+
+  // Whoop OAuth flow
+  const handleConnectWhoop = async () => {
+    setWhoopConnecting(true);
+    try {
+      const authUrl = await initiateWhoopOAuth();
+      // Open Whoop authorization in browser
+      await Browser.open({ url: authUrl });
+      // Browser will redirect back via deep link when complete
+    } catch (error) {
+      console.error('Failed to initiate Whoop OAuth:', error);
+      alert('Failed to connect to Whoop. Please try again.');
+    }
+    setWhoopConnecting(false);
+  };
+
+  const handleDisconnectWhoop = async () => {
+    if (!confirm('Are you sure you want to disconnect Whoop?')) return;
+
+    setWhoopDisconnecting(true);
+    try {
+      await disconnectWhoop();
+      setWhoopLinked(false);
+      setTodayData(null);
+      await loadStatus();
+    } catch (error) {
+      console.error('Failed to disconnect Whoop:', error);
+      alert('Failed to disconnect. Please try again.');
+    }
+    setWhoopDisconnecting(false);
   };
 
   // What platform-specific name to show
@@ -254,7 +305,7 @@ const HealthSettingsScreen = ({ onClose }) => {
                   <div className="text-center">
                     <Moon className="w-4 h-4 mx-auto text-indigo-500 mb-1" />
                     <p className="text-sm font-semibold text-warm-800">
-                      {todayData.sleep?.totalHours ?? '—'}h
+                      {todayData.sleep?.totalHours?.toFixed(1) ?? '—'}h
                     </p>
                     <p className="text-[10px] text-warm-500">Sleep</p>
                   </div>
@@ -280,8 +331,113 @@ const HealthSettingsScreen = ({ onClose }) => {
                     <p className="text-[10px] text-warm-500">BPM</p>
                   </div>
                 </div>
+
+                {/* Whoop Recovery Score (if available) */}
+                {todayData.recovery && (
+                  <div className={`mt-3 p-3 rounded-xl flex items-center gap-3 ${
+                    todayData.recovery.status === 'green' ? 'bg-green-50' :
+                    todayData.recovery.status === 'yellow' ? 'bg-yellow-50' : 'bg-red-50'
+                  }`}>
+                    <TrendingUp className={`w-5 h-5 ${
+                      todayData.recovery.status === 'green' ? 'text-green-600' :
+                      todayData.recovery.status === 'yellow' ? 'text-yellow-600' : 'text-red-500'
+                    }`} />
+                    <div>
+                      <p className="text-sm font-semibold text-warm-800">
+                        Recovery: {todayData.recovery.score}%
+                      </p>
+                      <p className="text-xs text-warm-600">
+                        {getWhoopRecoveryInsight(todayData.recovery)?.message}
+                      </p>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
+          </motion.div>
+        )}
+
+        {/* Whoop Cloud Connection - Available on ALL platforms */}
+        {!loading && (
+          <motion.div
+            className="bg-white rounded-2xl border border-warm-200 overflow-hidden"
+            initial={{ y: 20, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            transition={{ delay: 0.05 }}
+          >
+            <div className="p-4">
+              <div className="flex items-center gap-3 mb-4">
+                <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-teal-500 to-cyan-600 flex items-center justify-center">
+                  <Activity className="w-5 h-5 text-white" />
+                </div>
+                <div className="flex-1">
+                  <h2 className="font-semibold text-warm-800">Whoop</h2>
+                  <p className="text-sm text-warm-500">
+                    Cloud sync • Works everywhere
+                  </p>
+                </div>
+                {whoopLinked && (
+                  <CheckCircle className="w-5 h-5 text-green-500" />
+                )}
+              </div>
+
+              {whoopLinked ? (
+                <>
+                  <div className="flex items-center gap-3 p-3 rounded-xl bg-green-50 border border-green-200">
+                    <CheckCircle className="w-6 h-6 text-green-500" />
+                    <div>
+                      <p className="font-medium text-green-800">Connected</p>
+                      <p className="text-sm text-green-600">
+                        Syncing recovery, sleep, strain & workouts
+                      </p>
+                    </div>
+                  </div>
+
+                  <button
+                    onClick={handleDisconnectWhoop}
+                    disabled={whoopDisconnecting}
+                    className="w-full mt-3 py-2.5 px-4 border border-warm-200 text-warm-600 font-medium rounded-xl flex items-center justify-center gap-2 hover:bg-warm-50 disabled:opacity-50"
+                  >
+                    {whoopDisconnecting ? (
+                      <>
+                        <RefreshCw className="w-4 h-4 animate-spin" />
+                        Disconnecting...
+                      </>
+                    ) : (
+                      <>
+                        <Unlink className="w-4 h-4" />
+                        Disconnect Whoop
+                      </>
+                    )}
+                  </button>
+                </>
+              ) : (
+                <>
+                  <p className="text-sm text-warm-600 mb-3">
+                    Connect your Whoop to automatically sync recovery, HRV, sleep, and workout data — even on web.
+                  </p>
+
+                  <button
+                    onClick={handleConnectWhoop}
+                    disabled={whoopConnecting}
+                    className="w-full py-3 px-4 bg-gradient-to-r from-teal-500 to-cyan-600 text-white font-semibold rounded-xl flex items-center justify-center gap-2 disabled:opacity-50"
+                  >
+                    {whoopConnecting ? (
+                      <>
+                        <RefreshCw className="w-5 h-5 animate-spin" />
+                        Connecting...
+                      </>
+                    ) : (
+                      <>
+                        <Link2 className="w-5 h-5" />
+                        Connect Whoop
+                        <ExternalLink className="w-4 h-4 ml-1 opacity-70" />
+                      </>
+                    )}
+                  </button>
+                </>
+              )}
+            </div>
           </motion.div>
         )}
 

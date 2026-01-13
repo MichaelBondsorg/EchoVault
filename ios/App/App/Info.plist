@@ -91,5 +91,18 @@
 	<!-- ITSAppUsesNonExemptEncryption - Required for App Store -->
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
+
+	<!-- URL Schemes - Deep linking for OAuth callbacks -->
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>com.echovault.app</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>echovault</string>
+			</array>
+		</dict>
+	</array>
 </dict>
 </plist>
