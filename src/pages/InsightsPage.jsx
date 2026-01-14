@@ -39,8 +39,28 @@ const InsightsPage = ({
     lastGenerated
   } = useNexusInsights(user, { autoRefresh: true });
 
-  // Filter out dismissed insights
-  const activeInsights = insights.filter(i => !dismissedInsights.has(i.id || i.message));
+  // Helper to check if an insight has meaningful content
+  const hasQualityContent = (insight) => {
+    // Must have either a meaningful body, summary, or recommendation
+    const hasBody = insight.body && insight.body.length > 30;
+    const hasSummary = insight.summary && insight.summary.length > 20 && !insight.summary.includes('Detected from');
+    const hasRecommendation = insight.recommendation?.intervention || insight.recommendation?.reasoning;
+
+    // Filter out generic/placeholder titles
+    const hasGenericTitle = insight.title?.toLowerCase().includes('pattern') &&
+                           insight.title?.split(' ').length <= 2; // e.g., "health Pattern"
+
+    if (hasGenericTitle && !hasBody && !hasSummary) {
+      return false;
+    }
+
+    return hasBody || hasSummary || hasRecommendation;
+  };
+
+  // Filter out dismissed insights and low-quality insights
+  const activeInsights = insights
+    .filter(i => !dismissedInsights.has(i.id || i.message))
+    .filter(hasQualityContent);
 
   const handleDismissInsight = (insight, e) => {
     e.stopPropagation();

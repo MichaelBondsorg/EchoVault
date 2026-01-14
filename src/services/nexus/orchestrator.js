@@ -32,6 +32,135 @@ import { generateRecommendations } from './layer4/recommendationEngine';
 import { getWhoopSummary, getWhoopHistory, isWhoopLinked } from '../health/whoop';
 
 // ============================================================
+// PATTERN DISPLAY HELPERS
+// ============================================================
+
+/**
+ * Pattern ID to human-readable display info
+ * Returns meaningful title, summary, and body for each pattern type
+ */
+const PATTERN_DISPLAY_MAP = {
+  // Career patterns
+  career_anticipation: {
+    title: 'Career Anticipation Pattern',
+    getContent: (mood) => ({
+      summary: 'You tend to experience heightened anticipation around job opportunities',
+      body: mood > 0.5
+        ? `When you're in interview or application mode, your mood stays relatively positive (averaging ${Math.round(mood * 100)}%). This suggests you handle career uncertainty well.`
+        : `Interview and application periods tend to affect your mood (averaging ${Math.round(mood * 100)}%). Consider building routines that help you stay grounded during these times.`
+    })
+  },
+  career_waiting: {
+    title: 'Waiting Period Pattern',
+    getContent: (mood) => ({
+      summary: 'Waiting for career outcomes has a noticeable impact on you',
+      body: mood > 0.5
+        ? `You maintain a positive outlook (${Math.round(mood * 100)}% average mood) even during uncertain waiting periods. That's a valuable coping mechanism.`
+        : `Waiting for responses tends to weigh on you (${Math.round(mood * 100)}% average mood). Having activities that provide a sense of progress elsewhere can help.`
+    })
+  },
+  career_outcome_positive: {
+    title: 'Positive Career News Pattern',
+    getContent: (mood) => ({
+      summary: 'Good career news gives you a significant boost',
+      body: `When you receive positive career updates, your mood reflects it (averaging ${Math.round(mood * 100)}%). Celebrating these wins is important for sustaining motivation.`
+    })
+  },
+  career_outcome_negative: {
+    title: 'Career Setback Pattern',
+    getContent: (mood) => ({
+      summary: 'Rejections have a measurable impact on your wellbeing',
+      body: `Career setbacks affect your mood (averaging ${Math.round(mood * 100)}% during these periods). Remember that rejection is part of the process and doesn't reflect your worth.`
+    })
+  },
+  // Relationship patterns
+  relationship_connection: {
+    title: 'Connection Pattern',
+    getContent: (mood) => ({
+      summary: 'Quality time with loved ones stabilizes your mood',
+      body: `When you connect with people you care about, your mood averages ${Math.round(mood * 100)}%. These moments of connection appear to be valuable for your emotional wellbeing.`
+    })
+  },
+  relationship_strain: {
+    title: 'Relationship Tension Pattern',
+    getContent: (mood) => ({
+      summary: 'Interpersonal tensions affect your emotional state',
+      body: `When there's friction in your relationships, your mood reflects it (averaging ${Math.round(mood * 100)}%). Addressing tensions directly tends to resolve them faster.`
+    })
+  },
+  // Health patterns
+  exercise_completion: {
+    title: 'Exercise Pattern',
+    getContent: (mood) => ({
+      summary: `Working out ${mood > 0.5 ? 'boosts' : 'accompanies'} your mood`,
+      body: mood > 0.5
+        ? `On days when you exercise, your mood averages ${Math.round(mood * 100)}%. Physical activity appears to be a positive force in your routine.`
+        : `Your mood averages ${Math.round(mood * 100)}% on workout days. This could mean you exercise when stressed, or that certain workouts are more draining than energizing.`
+    })
+  },
+  exercise_avoidance: {
+    title: 'Rest Day Pattern',
+    getContent: (mood) => ({
+      summary: 'How skipping workouts relates to your mood',
+      body: mood > 0.5
+        ? `On days you skip exercise, your mood still averages ${Math.round(mood * 100)}%. Rest days don't seem to negatively impact you.`
+        : `When you skip workouts, your mood averages ${Math.round(mood * 100)}%. This could be correlation (you skip when already tired) rather than causation.`
+    })
+  },
+  // Somatic patterns
+  physical_discomfort: {
+    title: 'Physical Discomfort Pattern',
+    getContent: (mood) => ({
+      summary: 'Body discomfort correlates with your emotional state',
+      body: `When you mention pain, soreness, or tension, your mood averages ${Math.round(mood * 100)}%. Physical and emotional wellbeing are deeply connected.`
+    })
+  },
+  fatigue: {
+    title: 'Energy Pattern',
+    getContent: (mood) => ({
+      summary: 'Fatigue shows up in both body and mood',
+      body: `On low-energy days, your mood averages ${Math.round(mood * 100)}%. Prioritizing sleep and recovery on these days could help.`
+    })
+  },
+  // Emotional patterns
+  anxiety_signal: {
+    title: 'Stress Response Pattern',
+    getContent: (mood) => ({
+      summary: 'Anxiety and stress have a measurable presence',
+      body: `When anxiety appears in your entries, your mood averages ${Math.round(mood * 100)}%. Recognizing these patterns is the first step to managing them.`
+    })
+  },
+  positive_momentum: {
+    title: 'Positive Momentum Pattern',
+    getContent: (mood) => ({
+      summary: 'You have a pattern of experiencing genuine positivity',
+      body: `When you're feeling good, your mood shows it (averaging ${Math.round(mood * 100)}%). Take note of what contributes to these moments.`
+    })
+  }
+};
+
+/**
+ * Get display info for a pattern
+ */
+const getPatternDisplayInfo = (patternId, moodMean) => {
+  const patternConfig = PATTERN_DISPLAY_MAP[patternId];
+
+  if (!patternConfig) {
+    // Unknown pattern - don't show generic fallback
+    return { hasContent: false };
+  }
+
+  const content = patternConfig.getContent(moodMean);
+
+  return {
+    hasContent: true,
+    title: patternConfig.title,
+    summary: content.summary,
+    body: content.body
+  };
+};
+
+// ============================================================
 // MAIN ORCHESTRATION
 // ============================================================
 
@@ -405,14 +534,27 @@ export const generateInsights = async (userId, options = {}) => {
         .sort((a, b) => Math.abs(b.mood.mean - 0.5) - Math.abs(a.mood.mean - 0.5))[0];
 
       if (topPattern) {
-        insights.push({
-          id: `pattern_${topPattern.patternId}`,
-          type: 'pattern_alert',
-          title: `${topPattern.category} Pattern`,
-          summary: `Detected from ${topPattern.occurrences} entries`,
-          body: `This pattern appears frequently in your entries with an average mood of ${Math.round(topPattern.mood.mean * 100)}%.`,
-          priority: 2
-        });
+        // Get a meaningful display name and description
+        const patternInfo = getPatternDisplayInfo(topPattern.patternId, topPattern.mood.mean);
+
+        // Only add if we have a meaningful pattern (not just category)
+        if (patternInfo.hasContent) {
+          insights.push({
+            id: `pattern_${topPattern.patternId}`,
+            type: 'pattern_alert',
+            title: patternInfo.title,
+            summary: patternInfo.summary,
+            body: patternInfo.body,
+            evidence: {
+              narrative: [`Detected in ${topPattern.occurrences} entries`],
+              statistical: {
+                sampleSize: topPattern.occurrences,
+                averageMood: Math.round(topPattern.mood.mean * 100)
+              }
+            },
+            priority: 2
+          });
+        }
       }
     }
 

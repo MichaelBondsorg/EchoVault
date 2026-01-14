@@ -139,7 +139,7 @@ const generateReasoning = (intervention, currentState, context) => {
   const templates = {
     'career_waiting': {
       'sterling_walk': `You're in a waiting period with elevated stress markers. Sterling walks have historically recovered your HRV by ${intervention.effectiveness?.global?.hrvDelta?.mean || 12}ms within 24 hours.`,
-      'yoga': `During career uncertainty, yoga has been your most effective physical reset, with a ${Math.round((intervention.effectiveness?.global?.score || 0.8) * 100)}% effectiveness rate.`,
+      'yoga': `During career uncertainty, yoga has been your most effective physical reset. On days you do yoga, your mood tends to improve.`,
       'creative': `Working on creative projects provides a sense of agency when career outcomes feel out of your control.`
     },
     'low_mood': {
@@ -148,8 +148,40 @@ const generateReasoning = (intervention, currentState, context) => {
     }
   };
 
-  return templates[currentState?.primary]?.[intervention.name] ||
-    `Based on your history, ${intervention.name.replace(/_/g, ' ')} has a ${Math.round((intervention.effectiveness?.global?.score || 0.7) * 100)}% effectiveness rate.`;
+  // Check for a template match
+  if (templates[currentState?.primary]?.[intervention.name]) {
+    return templates[currentState.primary][intervention.name];
+  }
+
+  // Generate a meaningful fallback based on what data we have
+  const score = intervention.effectiveness?.global?.score;
+  const moodDelta = intervention.effectiveness?.global?.moodDelta?.mean;
+  const hrvDelta = intervention.effectiveness?.global?.hrvDelta?.mean;
+  const interventionName = intervention.name.replace(/_/g, ' ');
+
+  // If we have mood delta data, explain in terms of mood improvement
+  if (moodDelta && Math.abs(moodDelta) > 5) {
+    const direction = moodDelta > 0 ? 'improved' : 'lower';
+    return `On days you do ${interventionName}, your mood is typically ${Math.round(Math.abs(moodDelta))} points ${direction} than average.`;
+  }
+
+  // If we have HRV data, explain in terms of recovery
+  if (hrvDelta && Math.abs(hrvDelta) > 3) {
+    return `${interventionName.charAt(0).toUpperCase() + interventionName.slice(1)} tends to ${hrvDelta > 0 ? 'improve' : 'affect'} your HRV recovery the next day.`;
+  }
+
+  // If we have an effectiveness score with enough data
+  if (score && score !== 0.5) {
+    const percentage = Math.round(score * 100);
+    if (percentage >= 70) {
+      return `${interventionName.charAt(0).toUpperCase() + interventionName.slice(1)} has been consistently helpful for your mood and energy.`;
+    } else if (percentage >= 55) {
+      return `${interventionName.charAt(0).toUpperCase() + interventionName.slice(1)} sometimes helps with mood, depending on the day.`;
+    }
+  }
+
+  // Generic fallback - but be honest about limited data
+  return `${interventionName.charAt(0).toUpperCase() + interventionName.slice(1)} is worth trying. We're still learning what works best for you.`;
 };
 
 /**
@@ -162,10 +194,17 @@ const suggestTiming = (intervention, currentTimeOfDay) => {
     barrys: 'Morning classes tend to set a better tone for your day',
     rest_day: 'Today and tomorrow if needed',
     social: 'This evening',
-    creative: 'When you have 30+ uninterrupted minutes'
+    creative: 'When you have 30+ uninterrupted minutes',
+    gym: currentTimeOfDay === 'morning' ? 'This morning' : 'Before the end of the day',
+    pilates: 'Morning or early afternoon',
+    walk: 'Anytime - even a short walk helps',
+    spencer_time: 'This evening when you both have downtime',
+    acts_of_service: 'When you notice an opportunity'
   };
 
-  return optimalTiming[intervention.name] || 'When you have time today';
+  // Return specific timing or a contextual fallback
+  return optimalTiming[intervention.name] ||
+    (currentTimeOfDay === 'evening' ? 'Tomorrow when you have time' : 'Later today if possible');
 };
 
 /**
