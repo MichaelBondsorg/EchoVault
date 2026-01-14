@@ -8,3 +8,4 @@
 export * from './synthesizer';
 export * from './crossThreadDetector';
 export * from './beliefDissonance';
+export * from './counterfactual';

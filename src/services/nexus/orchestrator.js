@@ -18,12 +18,13 @@ import { extractSomaticSignals } from './layer1/somaticExtractor';
 import { detectCurrentState, updateCurrentState } from './layer2/stateDetector';
 import { getBaselines, calculateAndSaveBaselines, compareToBaseline } from './layer2/baselineManager';
 
-// Layer 3 (stubs for now)
-import { generateCausalSynthesis, generateNarrativeArcInsight } from './layer3/synthesizer';
+// Layer 3
+import { generateCausalSynthesis, generateNarrativeArcInsight, INSIGHT_TYPES } from './layer3/synthesizer';
 import { detectMetaPatterns, generateMetaPatternInsight } from './layer3/crossThreadDetector';
-import { extractBeliefsFromEntry, saveBeliefs, getBeliefs } from './layer3/beliefDissonance';
+import { extractBeliefsFromEntry, refineBeliefsWithLLM, validateBeliefAgainstData, generateDissonanceInsight, saveBeliefs, getBeliefs } from './layer3/beliefDissonance';
+import { identifyMissingInterventions, generateCounterfactualInsight, findGoodDayActivities } from './layer3/counterfactual';
 
-// Layer 4 (stubs for now)
+// Layer 4
 import { updateInterventionData, getInterventionData } from './layer4/interventionTracker';
 import { generateRecommendations } from './layer4/recommendationEngine';
 
@@ -224,14 +225,160 @@ export const generateInsights = async (userId, options = {}) => {
       interventionData
     };
 
-    // Generate primary causal synthesis insight (Phase 2)
+    // Generate primary causal synthesis insight
     if (entries.length >= 10 && (!dataStatus.isCalibrating || entries.length >= 20)) {
-      const synthesis = await generateCausalSynthesis(userId, synthesisContext);
-      if (synthesis.success && synthesis.insight) {
-        insights.push({
-          ...synthesis.insight,
-          priority: 1
+      try {
+        const synthesis = await generateCausalSynthesis(userId, synthesisContext);
+        if (synthesis.success && synthesis.insight) {
+          insights.push({
+            ...synthesis.insight,
+            priority: 1
+          });
+        }
+      } catch (error) {
+        console.warn('[Orchestrator] Causal synthesis failed:', error.message);
+      }
+    }
+
+    // Generate narrative arc insight if applicable
+    if (settings.features.narrativeArcTracking?.enabled !== false) {
+      const longestThread = threads
+        .filter(t => t.predecessorId)
+        .sort((a, b) => (b.entryCount || 0) - (a.entryCount || 0))[0];
+
+      if (longestThread) {
+        try {
+          const arcInsight = await generateNarrativeArcInsight(userId, longestThread.id);
+          if (arcInsight) {
+            insights.push({
+              ...arcInsight,
+              priority: 2
+            });
+          }
+        } catch (error) {
+          console.warn('[Orchestrator] Arc insight failed:', error.message);
+        }
+      }
+    }
+
+    // Detect and generate meta-pattern insights
+    try {
+      const metaPatterns = await detectMetaPatterns(userId, threads, entries);
+      if (metaPatterns.length > 0) {
+        const metaInsight = await generateMetaPatternInsight(
+          userId,
+          metaPatterns[0],
+          synthesisContext
+        );
+        if (metaInsight) {
+          insights.push({
+            ...metaInsight,
+            priority: 2
+          });
+        }
+      }
+    } catch (error) {
+      console.warn('[Orchestrator] Meta-pattern detection failed:', error.message);
+    }
+
+    // Generate belief dissonance insight (if enabled)
+    if (settings.features.beliefDissonanceInsights?.enabled !== false && entries.length >= 10) {
+      try {
+        // Extract new beliefs from recent entries
+        for (const entry of entries.slice(0, 5)) {
+          const rawBeliefs = extractBeliefsFromEntry(entry.content || entry.text || '', entry.id);
+          if (rawBeliefs.length > 0) {
+            const refined = await refineBeliefsWithLLM(rawBeliefs, entry.content || entry.text);
+            await saveBeliefs(userId, refined);
+          }
+        }
+
+        // Validate existing beliefs and generate insights
+        const allBeliefs = await getBeliefs(userId);
+        const recentMood = entries[0]?.mood || entries[0]?.analysis?.mood_score;
+
+        for (const belief of allBeliefs.slice(0, 3)) {
+          const validation = await validateBeliefAgainstData(belief, { entries, baselines, threads });
+
+          if (validation.dissonanceScore > 0.5) {
+            const dissonanceInsight = await generateDissonanceInsight(
+              belief,
+              validation,
+              recentMood
+            );
+
+            if (dissonanceInsight && !dissonanceInsight.queued) {
+              insights.push({
+                ...dissonanceInsight,
+                priority: 3
+              });
+              break;  // Only one dissonance insight per generation
+            }
+          }
+        }
+      } catch (error) {
+        console.warn('[Orchestrator] Belief dissonance failed:', error.message);
+      }
+    }
+
+    // ========== LAYER 4: INTERVENTION OPTIMIZATION ==========
+
+    // Update intervention effectiveness data
+    try {
+      await updateInterventionData(userId, entries, whoopHistory);
+    } catch (error) {
+      console.warn('[Orchestrator] Intervention update failed:', error.message);
+    }
+
+    // Generate recommendations
+    if (settings.features.interventionRecommendations?.enabled !== false) {
+      try {
+        const recommendations = await generateRecommendations(userId, {
+          currentState,
+          whoopToday,
+          recentMood: entries[0]?.mood || 50,
+          timeOfDay: getTimeOfDay()
         });
+
+        if (recommendations.length > 0) {
+          insights.push({
+            id: `recommendation_${Date.now()}`,
+            type: 'intervention',
+            title: 'Recommended Action',
+            ...recommendations[0],
+            priority: 1
+          });
+        }
+      } catch (error) {
+        console.warn('[Orchestrator] Recommendations failed:', error.message);
+      }
+    }
+
+    // Generate counterfactual insight for recent low mood days
+    if (settings.features.counterfactualInsights?.enabled !== false) {
+      try {
+        const lowMoodEntry = entries.find(e => {
+          const mood = e.mood || e.analysis?.mood_score;
+          return mood && mood < 40;
+        });
+
+        if (lowMoodEntry && interventionData) {
+          const goodDayActivities = findGoodDayActivities(entries);
+          const activityNames = goodDayActivities.map(a => a.activity);
+          const missing = identifyMissingInterventions(lowMoodEntry, interventionData, activityNames);
+
+          if (missing.length > 0) {
+            const counterfactual = await generateCounterfactualInsight(lowMoodEntry, missing, {});
+            if (counterfactual) {
+              insights.push({
+                ...counterfactual,
+                priority: 3
+              });
+            }
+          }
+        }
+      } catch (error) {
+        console.warn('[Orchestrator] Counterfactual insight failed:', error.message);
       }
     }
 
