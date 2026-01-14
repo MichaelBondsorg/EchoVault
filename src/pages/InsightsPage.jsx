@@ -271,24 +271,32 @@ const NexusInsightCard = ({ insight, onDismiss }) => {
               <X size={14} className="text-warm-400" />
             </button>
           </div>
-          <p className="text-sm text-warm-700 mt-1 leading-relaxed">
-            {insight.message || insight.insight || insight.description || 'New pattern detected'}
-          </p>
-          {insight.suggestion && (
-            <p className="text-xs text-warm-500 mt-2 italic">
-              {insight.suggestion}
+          {/* Title if available */}
+          {insight.title && (
+            <p className="font-medium text-warm-800 mt-1">
+              {insight.title}
             </p>
           )}
-          {insight.confidence && (
+          {/* Main content - check multiple possible field names */}
+          <p className="text-sm text-warm-700 mt-1 leading-relaxed">
+            {insight.summary || insight.message || insight.body || insight.insight || insight.description || 'New pattern detected'}
+          </p>
+          {/* Recommendation action if available */}
+          {(insight.recommendation?.action || insight.suggestion) && (
+            <p className="text-xs text-warm-500 mt-2 italic">
+              💡 {insight.recommendation?.action || insight.suggestion}
+            </p>
+          )}
+          {(insight.confidence || insight.evidence?.statistical?.confidence || insight.recommendation?.confidence) && (
             <div className="flex items-center gap-2 mt-2">
               <div className="h-1 flex-1 bg-warm-200 rounded-full overflow-hidden">
                 <div
                   className={`h-full ${style.iconBg.replace('/20', '')}`}
-                  style={{ width: `${Math.round(insight.confidence * 100)}%` }}
+                  style={{ width: `${Math.round((insight.confidence || insight.evidence?.statistical?.confidence || insight.recommendation?.confidence) * 100)}%` }}
                 />
               </div>
               <span className="text-xs text-warm-400">
-                {Math.round(insight.confidence * 100)}% confidence
+                {Math.round((insight.confidence || insight.evidence?.statistical?.confidence || insight.recommendation?.confidence) * 100)}% confidence
               </span>
             </div>
           )}
