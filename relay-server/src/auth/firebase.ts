@@ -488,4 +488,4 @@ const extractExcerpt = (text: string, queryWords: string[]): string => {
   return excerpt;
 };
 
-export { firestore, APP_COLLECTION_ID };
+export { admin, firestore, APP_COLLECTION_ID };
