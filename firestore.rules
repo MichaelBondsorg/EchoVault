@@ -53,8 +53,13 @@ service cloud.firestore {
         allow read, write: if isOwner(userId);
       }
 
-      // NEW: Nexus 2.0 subcollection (insights, beliefs, interventions, threads, baselines, states)
+      // NEW: Nexus 2.0 subcollection (insights, beliefs, interventions, baselines, states)
       match /nexus/{docId} {
+        allow read, write: if isOwner(userId);
+      }
+
+      // NEW: Threads subcollection (life narrative threads for Nexus)
+      match /threads/{threadId} {
         allow read, write: if isOwner(userId);
       }
 
