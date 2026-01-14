@@ -65,6 +65,7 @@ import {
 } from './components';
 import UnifiedConversation from './components/chat/UnifiedConversation';
 import NexusSettings from './components/settings/NexusSettings';
+import EntityManagementPage from './pages/EntityManagementPage';
 
 // Dashboard Enhancement Components
 import { QuickStatsBar, GoalsProgress, WeeklyDigest, SituationTimeline, ReflectionPrompts } from './components/dashboard/shared';
@@ -156,6 +157,9 @@ export default function App() {
 
   // Nexus Settings Screen
   const [showNexusSettings, setShowNexusSettings] = useState(false);
+
+  // Entity Management Screen
+  const [showEntityManagement, setShowEntityManagement] = useState(false);
 
   // Quick Log Modal (lifted to App level to prevent unmount issues)
   const [showQuickLog, setShowQuickLog] = useState(false);
@@ -1598,6 +1602,7 @@ export default function App() {
       onShowExport={() => setShowExport(true)}
       onShowHealthSettings={() => setShowHealthSettings(true)}
       onShowNexusSettings={() => setShowNexusSettings(true)}
+      onShowEntityManagement={() => setShowEntityManagement(true)}
       onRequestNotifications={requestPermission}
       onLogout={() => signOut(auth)}
 
@@ -1803,6 +1808,16 @@ export default function App() {
             </div>
             <NexusSettings user={user} />
           </div>
+        </div>
+      )}
+
+      {/* Entity Management Screen */}
+      {showEntityManagement && (
+        <div className="fixed inset-0 z-50 overflow-y-auto">
+          <EntityManagementPage
+            userId={user?.uid}
+            onBack={() => setShowEntityManagement(false)}
+          />
         </div>
       )}
     </AppLayout>

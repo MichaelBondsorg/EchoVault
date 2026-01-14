@@ -1,7 +1,7 @@
 import { motion } from 'framer-motion';
 import {
   User, Bell, Heart, Shield, Download, LogOut,
-  ChevronRight, Smartphone, Brain
+  ChevronRight, Smartphone, Brain, Users
 } from 'lucide-react';
 
 /**
@@ -20,6 +20,7 @@ const SettingsPage = ({
   onOpenNexusSettings,
   onOpenSafetyPlan,
   onOpenExport,
+  onOpenEntityManagement,
   onRequestNotifications,
   onLogout,
   notificationPermission,
@@ -45,6 +46,12 @@ const SettingsPage = ({
           description: notificationPermission === 'granted' ? 'Enabled' : 'Tap to enable',
           onClick: notificationPermission !== 'granted' ? onRequestNotifications : null,
           badge: notificationPermission !== 'granted' ? 'Off' : null,
+        },
+        {
+          icon: Users,
+          label: 'People & Things',
+          description: 'Edit names, relationships, and entities',
+          onClick: onOpenEntityManagement,
         },
         {
           icon: Brain,

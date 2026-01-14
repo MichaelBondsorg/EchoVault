@@ -1,6 +1,6 @@
 import React, { useMemo } from 'react';
 import { motion } from 'framer-motion';
-import { Users, TrendingUp, TrendingDown, Minus, AlertTriangle } from 'lucide-react';
+import { Users, TrendingUp, TrendingDown, Minus, AlertTriangle, Pencil } from 'lucide-react';
 import CollapsibleSection from './CollapsibleSection';
 
 /**
@@ -12,7 +12,7 @@ import CollapsibleSection from './CollapsibleSection';
  * - Shadow friction warnings (context-specific issues)
  */
 
-const PeopleSection = ({ entries, category, shadowFriction = [] }) => {
+const PeopleSection = ({ entries, category, shadowFriction = [], onEditPerson }) => {
   const people = useMemo(() => {
     const categoryEntries = entries.filter(e => e.category === category);
 
@@ -180,16 +180,32 @@ const PeopleSection = ({ entries, category, shadowFriction = [] }) => {
                 </div>
               </div>
 
-              {/* Mood delta badge */}
-              {person.moodDeltaPercent !== null && Math.abs(person.moodDeltaPercent) > 5 && (
-                <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
-                  person.moodDeltaPercent > 0
-                    ? 'bg-green-100 text-green-700'
-                    : 'bg-red-100 text-red-700'
-                }`}>
-                  {person.moodDeltaPercent > 0 ? '+' : ''}{person.moodDeltaPercent}%
-                </span>
-              )}
+              <div className="flex items-center gap-2">
+                {/* Mood delta badge */}
+                {person.moodDeltaPercent !== null && Math.abs(person.moodDeltaPercent) > 5 && (
+                  <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+                    person.moodDeltaPercent > 0
+                      ? 'bg-green-100 text-green-700'
+                      : 'bg-red-100 text-red-700'
+                  }`}>
+                    {person.moodDeltaPercent > 0 ? '+' : ''}{person.moodDeltaPercent}%
+                  </span>
+                )}
+
+                {/* Edit button */}
+                {onEditPerson && (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onEditPerson(person);
+                    }}
+                    className="p-1.5 rounded-lg hover:bg-violet-100 transition-colors"
+                    title="Edit"
+                  >
+                    <Pencil size={14} className="text-violet-500" />
+                  </button>
+                )}
+              </div>
             </div>
 
             {/* Shadow friction warning */}

@@ -184,6 +184,7 @@ export const findPersonByName = async (userId, name) => {
 
 /**
  * Add or update a person in memory
+ * Respects userCorrected flag - won't overwrite user's manual corrections
  */
 export const upsertPerson = async (userId, personData) => {
   const { name, relationship, sentiment, topics, entryId } = personData;
@@ -201,7 +202,12 @@ export const upsertPerson = async (userId, personData) => {
       status: 'active' // Reactivate if was archived
     };
 
-    // Update sentiment if provided
+    // Only update relationship/entityType if NOT user-corrected
+    if (!existing.userCorrected && relationship) {
+      updates.relationship = relationship;
+    }
+
+    // Update sentiment if provided (always update - this is behavioral data)
     if (sentiment !== undefined) {
       updates['sentiment.recent'] = sentiment;
       // Recalculate overall (weighted average favoring recent)
@@ -217,7 +223,7 @@ export const upsertPerson = async (userId, personData) => {
       }
     }
 
-    // Add new topics
+    // Add new topics (always update - this is behavioral data)
     if (topics && topics.length > 0) {
       const existingTopics = existing.topics || [];
       const topicMap = new Map(existingTopics.map(t => [t.topic, t]));
@@ -241,7 +247,7 @@ export const upsertPerson = async (userId, personData) => {
       updates.topics = Array.from(topicMap.values());
     }
 
-    // Add significant moment if this entry is notable
+    // Add significant moment if this entry is notable (always update)
     if (entryId && personData.significantMoment) {
       updates.significantMoments = [
         ...(existing.significantMoments || []).slice(-9), // Keep last 10
@@ -254,7 +260,7 @@ export const upsertPerson = async (userId, personData) => {
     }
 
     await updateDoc(personRef, updates);
-    return { id: existing.id, updated: true };
+    return { id: existing.id, updated: true, userCorrected: existing.userCorrected };
   } else {
     // Create new person
     const personRef = doc(collection(db, getMemorySubcollectionPath(userId, 'people')));
@@ -733,6 +739,190 @@ export const runRelevanceDecay = async (userId) => {
   return { archivedCount };
 };
 
+// ============================================
+// ENTITY MANAGEMENT (User Corrections)
+// ============================================
+
+/**
+ * Valid entity types
+ */
+export const ENTITY_TYPES = ['person', 'pet', 'place', 'thing', 'activity'];
+
+/**
+ * Valid relationship types by entity type
+ */
+export const RELATIONSHIP_TYPES = {
+  person: ['friend', 'family', 'partner', 'coworker', 'therapist', 'acquaintance', 'unknown'],
+  pet: ['pet', 'family_pet'],
+  place: ['home', 'work', 'frequent', 'occasional'],
+  thing: ['owned', 'used', 'important'],
+  activity: ['hobby', 'exercise', 'work', 'social', 'self_care']
+};
+
+/**
+ * Get all entities (people collection with entity type support)
+ * Returns entities grouped by type
+ */
+export const getAllEntities = async (userId, options = { excludeArchived: true }) => {
+  const people = await getPeople(userId, options);
+
+  // Group by entityType (default to 'person' for legacy data)
+  const grouped = {
+    person: [],
+    pet: [],
+    place: [],
+    thing: [],
+    activity: []
+  };
+
+  people.forEach(entity => {
+    const type = entity.entityType || 'person';
+    if (grouped[type]) {
+      grouped[type].push(entity);
+    } else {
+      grouped.person.push(entity);
+    }
+  });
+
+  return grouped;
+};
+
+/**
+ * Update an entity with user corrections
+ * Preserves userCorrected flag to prevent AI from overwriting
+ */
+export const updateEntity = async (userId, entityId, updates) => {
+  const entityRef = doc(db, getMemorySubcollectionPath(userId, 'people'), entityId);
+  const entitySnap = await getDoc(entityRef);
+
+  if (!entitySnap.exists()) {
+    throw new Error(`Entity ${entityId} not found`);
+  }
+
+  const existing = entitySnap.data();
+
+  // Build update object
+  const updateData = {
+    ...updates,
+    userCorrected: true,
+    correctedAt: serverTimestamp(),
+    updatedAt: serverTimestamp()
+  };
+
+  // Handle name change - update aliases to include old name
+  if (updates.name && updates.name !== existing.name) {
+    const aliases = existing.aliases || [];
+    if (!aliases.includes(existing.name)) {
+      updateData.aliases = [...aliases, existing.name];
+    }
+  }
+
+  // Handle aliases updates (merge with existing)
+  if (updates.aliases) {
+    const existingAliases = existing.aliases || [];
+    updateData.aliases = [...new Set([...existingAliases, ...updates.aliases])];
+  }
+
+  await updateDoc(entityRef, updateData);
+
+  return { id: entityId, ...existing, ...updateData };
+};
+
+/**
+ * Delete an entity permanently
+ */
+export const deleteEntity = async (userId, entityId) => {
+  const entityRef = doc(db, getMemorySubcollectionPath(userId, 'people'), entityId);
+  await deleteDoc(entityRef);
+  return { deleted: true, id: entityId };
+};
+
+/**
+ * Merge two entities (combine source into target, delete source)
+ * Useful for fixing duplicate entries
+ */
+export const mergeEntities = async (userId, sourceId, targetId) => {
+  const [source, target] = await Promise.all([
+    getPerson(userId, sourceId),
+    getPerson(userId, targetId)
+  ]);
+
+  if (!source) throw new Error(`Source entity ${sourceId} not found`);
+  if (!target) throw new Error(`Target entity ${targetId} not found`);
+
+  // Merge data
+  const mergedAliases = [...new Set([
+    ...(target.aliases || []),
+    source.name,
+    ...(source.aliases || [])
+  ])].filter(a => a !== target.name);
+
+  const mergedTopics = [...(target.topics || [])];
+  (source.topics || []).forEach(sourceTopic => {
+    const existing = mergedTopics.find(t => t.topic === sourceTopic.topic);
+    if (existing) {
+      existing.frequency = (existing.frequency || 1) + (sourceTopic.frequency || 1);
+    } else {
+      mergedTopics.push(sourceTopic);
+    }
+  });
+
+  const mergedMoments = [
+    ...(target.significantMoments || []),
+    ...(source.significantMoments || [])
+  ].slice(-10);
+
+  // Update target with merged data
+  await updateEntity(userId, targetId, {
+    aliases: mergedAliases,
+    topics: mergedTopics,
+    significantMoments: mergedMoments,
+    mentionCount: (target.mentionCount || 0) + (source.mentionCount || 0)
+  });
+
+  // Delete source
+  await deleteEntity(userId, sourceId);
+
+  return {
+    merged: true,
+    targetId,
+    sourceId,
+    newAliasCount: mergedAliases.length
+  };
+};
+
+/**
+ * Create a new entity manually
+ */
+export const createEntity = async (userId, entityData) => {
+  const entityRef = doc(collection(db, getMemorySubcollectionPath(userId, 'people')));
+
+  const newEntity = {
+    name: entityData.name,
+    aliases: entityData.aliases || [],
+    entityType: entityData.entityType || 'person',
+    relationship: entityData.relationship || 'unknown',
+    sentiment: {
+      overall: 0,
+      recent: 0,
+      trend: 'stable'
+    },
+    topics: [],
+    firstMentioned: serverTimestamp(),
+    lastMentioned: serverTimestamp(),
+    mentionCount: 0,
+    significantMoments: [],
+    status: 'active',
+    archivedAt: null,
+    userCorrected: true,
+    correctedAt: serverTimestamp(),
+    notes: entityData.notes || null
+  };
+
+  await setDoc(entityRef, newEntity);
+  return { id: entityRef.id, ...newEntity };
+};
+
 export default {
   // Core
   getCoreMemory,
@@ -770,5 +960,14 @@ export default {
 
   // Maintenance
   cascadeDeleteEntry,
-  runRelevanceDecay
+  runRelevanceDecay,
+
+  // Entity Management
+  ENTITY_TYPES,
+  RELATIONSHIP_TYPES,
+  getAllEntities,
+  updateEntity,
+  deleteEntity,
+  mergeEntities,
+  createEntity
 };
