@@ -1,5 +1,38 @@
 # EchoVault - Claude Code Project Guide
 
+## Working with Me (Michael)
+
+### My Background
+- **Solo developer** - I'm the only person working on this codebase
+- **Product-focused** - I understand technical concepts but prefer clear explanations over jargon
+- **Active development** - Building toward App Store launch soon
+
+### How I Want Claude to Work
+
+**Communication Style:**
+- Provide detailed explanations of what you're doing and why
+- Explain technical concepts when they come up
+- Be proactive - identify issues, suggest improvements, flag concerns
+
+**Code Changes:**
+- Be conservative - ask before making significant changes
+- **NEVER commit automatically** - stage changes and explain them, let me review first
+- When in doubt, ask rather than assume
+
+**Git Workflow:**
+- Work on feature branches, never push directly to `main`
+- `main` branch triggers automatic deployments via GitHub Actions
+- I'll review changes before committing, then merge to main to deploy
+
+**Focus Areas:**
+- Signal lifecycle (goals, insights, patterns) is my current primary focus
+- Debugging is my biggest pain point - help me understand what's happening
+
+**Safety-Critical Code:**
+- You CAN modify crisis detection and safety code
+- You MUST explain thoroughly what you're changing and why
+- Always preserve the core safety functionality
+
 ## Project Overview
 
 EchoVault is a mental health journaling application (v2.0.0) that helps users process emotions, track patterns, set goals, and receive AI-powered therapeutic insights. It's a cross-platform app supporting web, iOS, and Android.
@@ -57,11 +90,76 @@ EchoVault is a mental health journaling application (v2.0.0) that helps users pr
 
 ## Architecture Patterns
 
-### Signal Lifecycle State Machine
-Signals (goals, insights, patterns) follow strict state transitions:
-- **Goals**: proposed → active → achieved/abandoned/paused
-- **Insights**: pending → verified/dismissed/actioned
-- **Patterns**: detected → confirmed/rejected/resolved
+### Signal Lifecycle State Machine (Primary Focus Area)
+
+The signal lifecycle system (`src/services/signals/signalLifecycle.js`) is the heart of EchoVault's intelligence. It transforms AI observations into actionable, user-manageable items.
+
+**What is a Signal?**
+A signal is an AI-detected observation from journal entries: a goal the user mentioned, a pattern in their behavior, or an insight about their emotional state.
+
+**Signal Types:**
+
+| Type | Purpose | Example |
+|------|---------|---------|
+| `goal` | User intentions/commitments | "I want to exercise more" |
+| `insight` | Behavioral observations | "You tend to feel anxious on Mondays" |
+| `pattern` | Recurring behaviors | "Sleep quality correlates with mood" |
+| `contradiction` | Conflicting goals/behaviors | Says wants to relax but overcommits |
+
+**State Transitions (Immutable Rules):**
+
+```
+GOALS:
+  proposed ──→ active ──→ achieved (terminal)
+      │           │
+      │           ├──→ abandoned (terminal)
+      │           │
+      │           └──→ paused ──→ active
+      │                   │
+      └───────────────────┴──→ abandoned (terminal)
+
+INSIGHTS:
+  pending ──→ verified ──→ actioned (terminal)
+      │           │
+      │           └──→ dismissed (terminal)
+      │
+      └──→ dismissed (terminal)
+      │
+      └──→ actioned (terminal)
+
+PATTERNS:
+  detected ──→ confirmed ──→ resolved (terminal)
+      │            │
+      │            └──→ rejected (terminal)
+      │
+      └──→ rejected (terminal)
+```
+
+**Key Concepts:**
+- **Terminal states**: No further transitions allowed (achieved, abandoned, dismissed, rejected, resolved, actioned)
+- **State history**: Every transition is logged with timestamp and context
+- **Exclusions**: Users can exclude certain pattern types from future detection
+- **Side effects**: Goal termination automatically resolves related contradictions
+
+**Firestore Collections:**
+```
+users/{userId}/
+├── signal_states/     # All signals with lifecycle tracking
+└── insight_exclusions/  # User-dismissed pattern types
+```
+
+**Key Functions:**
+- `createSignalState(userId, signalData)` - Create new signal
+- `transitionSignalState(userId, signalId, newState, context)` - Change state (validates transition)
+- `getActiveGoals(userId)` - Get non-terminal goals
+- `getPendingInsights(userId)` - Get insights awaiting user action
+- `isPatternExcluded(userId, patternType)` - Check if user dismissed this pattern type
+
+**Debugging Signal Issues:**
+1. Check signal exists: `getSignalState(userId, signalId)`
+2. View state history: Look at `stateHistory` array on the signal document
+3. Validate transition: `isValidTransition(currentState, targetState)`
+4. Check for exclusions: `getActiveExclusions(userId)`
 
 ### Entry Processing Pipeline
 1. Capture (voice/text) → 2. Transcription → 3. Classification → 4. Analysis → 5. Signal extraction → 6. Storage → 7. Post-processing
@@ -156,13 +254,56 @@ cd relay-server && npm run dev   # Local development
 - Test changes to analysis that might affect crisis flagging
 - Maintain therapeutic framework integrity (ACT, CBT, DBT, RAIN)
 
+## Debugging Guide
+
+Since debugging is a pain point, here's how to approach common issues:
+
+### General Debugging Steps
+1. **Check the console** - Most services have `console.log` statements
+2. **Check Firestore** - Use Firebase Console to inspect document state
+3. **Check Cloud Function logs** - `firebase functions:log`
+4. **Check state history** - Signals have `stateHistory` arrays showing all transitions
+
+### Common Issues
+
+**Signal not transitioning:**
+```javascript
+// Check current state and valid transitions
+import { getSignalState, isValidTransition, SIGNAL_STATES } from './services/signals/signalLifecycle';
+const signal = await getSignalState(userId, signalId);
+console.log('Current state:', signal.state);
+console.log('Can transition to active?', isValidTransition(signal.state, SIGNAL_STATES.GOAL_ACTIVE));
+```
+
+**Entry not being analyzed:**
+- Check network tab for Cloud Function call
+- Verify `analyzeJournalEntryFn` response
+- Check `classification` and `analysis` fields on the entry document
+
+**Voice not working:**
+- Check WebSocket connection in Network tab
+- Verify relay server is running (`relay-server/src/index.ts`)
+- Check `useVoiceRelay` hook for connection state
+
+**Offline issues:**
+- Check `useNetworkStatus` hook
+- Verify IndexedDB in DevTools > Application
+- Check pending writes in Firestore SDK
+
+### Useful Console Commands
+```javascript
+// In browser console after logging in
+// Get current user's signals
+const user = firebase.auth().currentUser;
+// Then use services to inspect state
+```
+
 ## Known Technical Debt
 
 - [ ] `App.jsx` is oversized (71KB) - needs decomposition
 - [ ] `functions/index.js` is monolithic - consider splitting
 - [ ] Limited TypeScript usage (only relay-server)
 - [ ] Test coverage is minimal
-- [ ] No README.md for project documentation
 
 ## Environment Setup
 

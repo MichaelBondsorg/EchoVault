@@ -10,14 +10,12 @@
       "Bash(git log:*)",
       "Bash(git branch:*)",
       "Bash(git add:*)",
-      "Bash(git commit:*)",
-      "Bash(git push:*)",
       "Bash(git fetch:*)",
       "Bash(git pull:*)",
       "Bash(git checkout:*)",
-      "Bash(firebase:*)",
+      "Bash(firebase emulators:*)",
+      "Bash(firebase functions:log:*)",
       "Bash(ls:*)",
-      "Bash(cd:*)",
       "Read",
       "Edit",
       "Write",
@@ -26,7 +24,9 @@
     ],
     "deny": [
       "Bash(rm -rf:*)",
-      "Bash(firebase functions:secrets:*)"
+      "Bash(firebase functions:secrets:*)",
+      "Bash(firebase deploy:*)",
+      "Bash(git push:*)"
     ]
   },
   "env": {
