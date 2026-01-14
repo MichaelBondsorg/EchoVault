@@ -1,0 +1,35 @@
+{
+  "$schema": "https://claude.ai/schemas/settings.json",
+  "permissions": {
+    "allow": [
+      "Bash(npm run:*)",
+      "Bash(npm test:*)",
+      "Bash(npx vitest:*)",
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(git branch:*)",
+      "Bash(git add:*)",
+      "Bash(git fetch:*)",
+      "Bash(git pull:*)",
+      "Bash(git checkout:*)",
+      "Bash(firebase emulators:*)",
+      "Bash(firebase functions:log:*)",
+      "Bash(ls:*)",
+      "Read",
+      "Edit",
+      "Write",
+      "Glob",
+      "Grep"
+    ],
+    "deny": [
+      "Bash(rm -rf:*)",
+      "Bash(firebase functions:secrets:*)",
+      "Bash(firebase deploy:*)",
+      "Bash(git push:*)"
+    ]
+  },
+  "env": {
+    "FIREBASE_PROJECT": "echo-vault-app"
+  }
+}
