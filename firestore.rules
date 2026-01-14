@@ -73,6 +73,11 @@ service cloud.firestore {
         allow read, write: if isOwner(userId);
       }
 
+      // Safety plan subcollection
+      match /safetyPlan/{planId} {
+        allow read, write: if isOwner(userId);
+      }
+
       // RAG embeddings subcollection
       match /rag_embeddings/{embeddingId} {
         allow read, write: if isOwner(userId);

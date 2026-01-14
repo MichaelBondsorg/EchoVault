@@ -135,17 +135,17 @@ const WidgetDrawer = ({
             onTouchMove={(e) => e.preventDefault()}
           />
 
-          {/* Drawer */}
+          {/* Drawer - z-[60] to appear above bottom nav (z-50) */}
           <motion.div
             className="
-              fixed bottom-0 left-0 right-0 z-50
+              fixed left-0 right-0 z-[60]
               bg-white/90 backdrop-blur-xl
               rounded-t-3xl
               shadow-glass-lg
               max-h-[70vh]
               overflow-hidden
             "
-            style={{ touchAction: 'none' }}
+            style={{ bottom: '80px', touchAction: 'none' }}
             initial={{ y: '100%' }}
             animate={{ y: 0 }}
             exit={{ y: '100%' }}
