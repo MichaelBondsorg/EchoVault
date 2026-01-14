@@ -15,7 +15,8 @@ This document details the implementation of the **Causal Nexus** feature - an in
 | Action | File | Risk Level |
 |--------|------|------------|
 | **CREATE** | `src/hooks/useCausalNexus.js` | None (new) |
-| **CREATE** | `src/services/causalnexus/threadManager.js` | None (new) |
+| **CREATE** | `src/services/threads/threadManager.js` | None (new) |
+| **CREATE** | `src/services/threads/index.js` | None (new) |
 | **CREATE** | `src/services/causalnexus/correlationEngine.js` | None (new) |
 | **CREATE** | `src/services/causalnexus/index.js` | None (new) |
 | **CREATE** | `src/components/zen/widgets/CausalBiteWidget.jsx` | None (new) |
@@ -24,6 +25,234 @@ This document details the implementation of the **Causal Nexus** feature - an in
 | **MODIFY** | `src/services/patterns/insightRotation.js` | Low |
 | **MODIFY** | `src/components/zen/widgets/index.js` | Low |
 | **MODIFY** | `src/hooks/useDashboardLayout.js` | Low |
+| **MODIFY** | `src/services/memory/memoryGraph.js` | Low |
+| **MODIFY** | `src/services/leadership/leadershipThreads.js` | Medium (bug fix) |
+
+---
+
+## ADDENDUM: Architectural Refinements (Post-Review)
+
+Based on technical review, the following refinements have been incorporated:
+
+### A1. Thread Service Consolidation
+
+**Issue**: `leadershipThreads.js` already implements a threading system for mentee tracking. Creating a parallel `threadManager.js` fragments the architecture.
+
+**Solution**: Create a unified `src/services/threads/` module that supports multiple thread categories:
+
+```javascript
+// Thread Categories (unified schema)
+const THREAD_CATEGORIES = {
+  // Causal Nexus threads
+  CAREER: 'career',
+  HEALTH: 'health',
+  RELATIONSHIP: 'relationship',
+  GROWTH: 'growth',
+  SOMATIC: 'somatic',
+
+  // Leadership threads (migrated)
+  MENTORSHIP: 'mentorship',
+  GROWTH_TRACKING: 'growth_tracking',
+  CONFLICT_RESOLUTION: 'conflict_resolution'
+};
+```
+
+**Migration Path**:
+1. New unified `threads` collection: `users/{uid}/threads/{threadId}`
+2. Leadership threads remain in `leadership_threads` temporarily
+3. Future migration script moves `leadership_threads` → `threads` with category mapping
+4. `leadershipThreads.js` becomes a thin wrapper calling unified service
+
+### A2. APP_COLLECTION_ID Bug Fix
+
+**Issue**: `leadershipThreads.js` hardcodes `'echo-journal'` instead of importing from config.
+
+**Current (Broken)**:
+```javascript
+// src/services/leadership/leadershipThreads.js:31
+const APP_COLLECTION_ID = 'echo-journal';  // WRONG
+```
+
+**Fix Required**:
+```javascript
+import { APP_COLLECTION_ID } from '../../config/constants';
+```
+
+**Note**: This is writing to a completely different Firestore location. Existing leadership threads may be orphaned in the wrong collection.
+
+### A3. Memory Graph Integration
+
+**Issue**: Threads represent "longitudinal memory" but aren't included in `getMemoryGraph()`.
+
+**Modification** to `src/services/memory/memoryGraph.js`:
+
+```javascript
+// Line 541 - BEFORE:
+export const getMemoryGraph = async (userId, options = { excludeArchived: true }) => {
+  const [core, people, events, values, conversations] = await Promise.all([
+    getCoreMemory(userId),
+    getPeople(userId, options),
+    getEvents(userId, { limit: 20 }),
+    getValues(userId),
+    getRecentConversations(userId, 5)
+  ]);
+
+  return {
+    core,
+    people,
+    events,
+    values,
+    conversations,
+    summary: generateMemorySummary({ core, people, events, values })
+  };
+};
+
+// Line 541 - AFTER:
+import { getActiveThreads } from '../threads';
+
+export const getMemoryGraph = async (userId, options = { excludeArchived: true }) => {
+  const [core, people, events, values, conversations, threads] = await Promise.all([
+    getCoreMemory(userId),
+    getPeople(userId, options),
+    getEvents(userId, { limit: 20 }),
+    getValues(userId),
+    getRecentConversations(userId, 5),
+    getActiveThreads(userId, { limit: 10 })  // NEW
+  ]);
+
+  return {
+    core,
+    people,
+    events,
+    values,
+    conversations,
+    threads,  // NEW
+    summary: generateMemorySummary({ core, people, events, values, threads })
+  };
+};
+```
+
+**Update `generateMemorySummary()`**:
+```javascript
+const generateMemorySummary = ({ core, people, events, values, threads }) => {
+  const parts = [];
+  // ... existing code ...
+
+  // Add thread context
+  if (threads?.length > 0) {
+    const activeStorylines = threads
+      .slice(0, 3)
+      .map(t => t.displayName)
+      .join(', ');
+    parts.push(`Currently tracking: ${activeStorylines}.`);
+  }
+
+  return parts.join(' ');
+};
+```
+
+### A4. Similarity Threshold Adjustment
+
+**Issue**: 0.85 threshold too restrictive for natural language variations.
+
+**Changes**:
+1. Lower semantic threshold to **0.75**
+2. Use Levenshtein only for **exact slug matching** (not primary matching)
+3. Prioritize embedding-based semantic matching
+
+```javascript
+// BEFORE:
+const SIMILARITY_THRESHOLD = 0.85;
+
+// AFTER:
+const SEMANTIC_SIMILARITY_THRESHOLD = 0.75;
+const LEVENSHTEIN_EXACT_THRESHOLD = 0.95; // Only for near-exact matches
+
+export const findSimilarThread = async (proposedName, activeThreads, proposedEmbedding = null) => {
+  // 1. First: Try semantic embedding match (primary)
+  if (proposedEmbedding) {
+    for (const thread of activeThreads) {
+      if (thread.embedding) {
+        const similarity = cosineSimilarity(proposedEmbedding, thread.embedding);
+        if (similarity >= SEMANTIC_SIMILARITY_THRESHOLD) {
+          console.log(`[ThreadManager] Semantic match: "${proposedName}" → "${thread.displayName}" (${(similarity * 100).toFixed(1)}%)`);
+          return thread;
+        }
+      }
+    }
+  }
+
+  // 2. Fallback: Levenshtein for near-exact matches only
+  for (const thread of activeThreads) {
+    const similarity = calculateNameSimilarity(proposedName, thread.displayName);
+    if (similarity >= LEVENSHTEIN_EXACT_THRESHOLD) {
+      console.log(`[ThreadManager] Exact match: "${proposedName}" → "${thread.displayName}"`);
+      return thread;
+    }
+  }
+
+  return null;
+};
+```
+
+### A5. Minimum Content Threshold
+
+**Issue**: Short entries (e.g., "Good day") waste LLM calls.
+
+**Change** in `entryPostProcessing.js`:
+
+```javascript
+// BEFORE:
+if (entryId && entryContent.length > 20) {
+  tasks.push(identifyThreadBackground(...));
+}
+
+// AFTER:
+const MIN_CONTENT_LENGTH_FOR_THREAD = 50;
+
+if (entryId && entryContent.length >= MIN_CONTENT_LENGTH_FOR_THREAD) {
+  tasks.push(identifyThreadBackground(...));
+}
+```
+
+### A6. Updated Implementation Checklist
+
+```
+Phase 0: Pre-requisites (Bug Fixes)
+[ ] Fix APP_COLLECTION_ID in leadershipThreads.js
+[ ] Verify no orphaned data in 'echo-journal' collection
+[ ] Add threads to getMemoryGraph() return
+
+Phase 1: Unified Thread Service
+[ ] Create src/services/threads/threadManager.js (unified)
+[ ] Create src/services/threads/index.js
+[ ] Implement SEMANTIC_SIMILARITY_THRESHOLD = 0.75
+[ ] Prioritize embedding match over Levenshtein
+
+Phase 2: Causal Nexus Engine
+[ ] Create src/services/causalnexus/correlationEngine.js
+[ ] Create src/services/causalnexus/index.js
+[ ] Implement all 8 correlation patterns
+
+Phase 3: Integration
+[ ] Modify entryPostProcessing.js (MIN_CONTENT_LENGTH = 50)
+[ ] Modify App.jsx (add entryId)
+[ ] Modify insightRotation.js (thread cooldowns)
+
+Phase 4: UI
+[ ] Create CausalBiteWidget.jsx
+[ ] Register in widgets/index.js
+[ ] Add to useDashboardLayout.js
+
+Phase 5: Memory Integration
+[ ] Update memoryGraph.js to include threads
+[ ] Update generateMemorySummary() for thread context
+
+Phase 6: Backfill & Testing
+[ ] Create backfill-threads.js script
+[ ] Test all 8 correlation patterns
+[ ] Test degraded states
+```
 
 ---
 
@@ -161,7 +390,7 @@ export {
 } from './correlationEngine';
 ```
 
-### 3.2 `src/services/causalnexus/threadManager.js`
+### 3.2 `src/services/threads/threadManager.js` (Unified Thread Service)
 
 ```javascript
 /**
@@ -185,7 +414,8 @@ import {
   Timestamp,
   arrayUnion
 } from 'firebase/firestore';
-import { db, APP_COLLECTION_ID } from '../firebase';
+import { db } from '../../config/firebase';
+import { APP_COLLECTION_ID } from '../../config/constants';
 import { callGemini } from '../ai/gemini';
 import { generateEmbedding, cosineSimilarity } from '../ai/embeddings';
 
@@ -193,9 +423,18 @@ import { generateEmbedding, cosineSimilarity } from '../ai/embeddings';
 // CONSTANTS
 // ============================================================
 
-const THREAD_CATEGORIES = ['career', 'health', 'relationship', 'growth', 'somatic'];
-const SIMILARITY_THRESHOLD = 0.85;
+const THREAD_CATEGORIES = [
+  // Causal Nexus categories
+  'career', 'health', 'relationship', 'growth', 'somatic',
+  // Leadership categories (unified)
+  'mentorship', 'growth_tracking', 'conflict_resolution'
+];
+
+// Similarity thresholds (refined per review)
+const SEMANTIC_SIMILARITY_THRESHOLD = 0.75;  // Lowered from 0.85
+const LEVENSHTEIN_EXACT_THRESHOLD = 0.95;    // Only for near-exact matches
 const MAX_SENTIMENT_HISTORY = 3;
+const MIN_CONTENT_LENGTH_FOR_THREAD = 50;    // Skip short entries
 
 const SOMATIC_TAXONOMY = [
   'pain',        // Physical pain (knee, back, etc.)
@@ -328,6 +567,8 @@ const calculateNameSimilarity = (name1, name2) => {
 
 /**
  * Find a similar existing thread using similarity buffer
+ * PRIORITY: Semantic embedding match > Levenshtein exact match
+ *
  * @param {string} proposedName - LLM-proposed thread name
  * @param {Array} activeThreads - Current active threads
  * @param {string} [proposedEmbedding] - Optional embedding for semantic match
@@ -336,29 +577,30 @@ const calculateNameSimilarity = (name1, name2) => {
 export const findSimilarThread = async (proposedName, activeThreads, proposedEmbedding = null) => {
   if (!activeThreads || activeThreads.length === 0) return null;
 
-  // First: Try Levenshtein distance matching
-  for (const thread of activeThreads) {
-    const similarity = calculateNameSimilarity(proposedName, thread.displayName);
-    if (similarity >= SIMILARITY_THRESHOLD) {
-      console.log(`[ThreadManager] Levenshtein match: "${proposedName}" → "${thread.displayName}" (${(similarity * 100).toFixed(1)}%)`);
-      return thread;
-    }
-  }
-
-  // Second: Try semantic embedding match if available
+  // FIRST: Try semantic embedding match (primary - more flexible)
   if (proposedEmbedding) {
     try {
       for (const thread of activeThreads) {
         if (thread.embedding) {
           const similarity = cosineSimilarity(proposedEmbedding, thread.embedding);
-          if (similarity >= SIMILARITY_THRESHOLD) {
+          if (similarity >= SEMANTIC_SIMILARITY_THRESHOLD) {
             console.log(`[ThreadManager] Semantic match: "${proposedName}" → "${thread.displayName}" (${(similarity * 100).toFixed(1)}%)`);
             return thread;
           }
         }
       }
     } catch (error) {
-      console.warn('[ThreadManager] Semantic matching failed, using Levenshtein only:', error);
+      console.warn('[ThreadManager] Semantic matching failed:', error);
+    }
+  }
+
+  // SECOND: Fallback to Levenshtein for near-exact matches only
+  // (e.g., "Job Hunt" vs "job hunt" - same words, different case)
+  for (const thread of activeThreads) {
+    const similarity = calculateNameSimilarity(proposedName, thread.displayName);
+    if (similarity >= LEVENSHTEIN_EXACT_THRESHOLD) {
+      console.log(`[ThreadManager] Exact match: "${proposedName}" → "${thread.displayName}" (${(similarity * 100).toFixed(1)}%)`);
+      return thread;
     }
   }
 
@@ -1364,7 +1606,7 @@ export default CausalBiteWidget;
 
 ```javascript
 // ADD these imports at top
-import { identifyThreadAssociation } from '../causalnexus';
+import { identifyThreadAssociation } from '../threads';
 
 // MODIFY runEntryPostProcessing function - ADD Task 3
 
@@ -1389,7 +1631,9 @@ export const runEntryPostProcessing = async ({
   tasks.push(invalidatePatternCacheBackground(userId));
 
   // Task 3: Thread identification - NEW
-  if (entryId && entryContent.length > 20) {
+  // Skip short entries to save LLM costs (refined per review)
+  const MIN_CONTENT_LENGTH_FOR_THREAD = 50;
+  if (entryId && entryContent.length >= MIN_CONTENT_LENGTH_FOR_THREAD) {
     tasks.push(identifyThreadBackground(userId, entryId, entryContent, analysis));
   }
 
