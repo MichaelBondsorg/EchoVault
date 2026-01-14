@@ -64,6 +64,14 @@ export const WIDGET_DEFINITIONS = {
     defaultSize: '1x1',
     icon: 'CheckSquare',
   },
+  nexus_insights: {
+    id: 'nexus_insights',
+    type: 'nexus',
+    name: 'AI Insights',
+    description: 'Personalized patterns and recommendations',
+    defaultSize: '2x1',
+    icon: 'Sparkles',
+  },
 };
 
 /**

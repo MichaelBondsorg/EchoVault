@@ -6,6 +6,7 @@ export { default as TasksWidget } from './TasksWidget';
 export { default as GoalsWidget } from './GoalsWidget';
 export { default as MoodHeatmapWidget } from './MoodHeatmapWidget';
 export { default as StoriesWidget } from './StoriesWidget';
+export { default as NexusInsightsWidget } from './NexusInsightsWidget';
 
 // Widget type to component mapping
 import HeroWidget from './HeroWidget';
@@ -15,6 +16,7 @@ import TasksWidget from './TasksWidget';
 import GoalsWidget from './GoalsWidget';
 import MoodHeatmapWidget from './MoodHeatmapWidget';
 import StoriesWidget from './StoriesWidget';
+import NexusInsightsWidget from './NexusInsightsWidget';
 
 export const WIDGET_COMPONENTS = {
   hero: HeroWidget,
@@ -24,6 +26,7 @@ export const WIDGET_COMPONENTS = {
   goals: GoalsWidget,
   heatmap: MoodHeatmapWidget,
   stories: StoriesWidget,
+  nexus: NexusInsightsWidget,
   // Future widgets
   trend: null,
   digest: null,
