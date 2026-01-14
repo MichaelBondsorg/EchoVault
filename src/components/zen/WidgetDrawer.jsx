@@ -95,7 +95,7 @@ const WidgetDrawer = ({
     <AnimatePresence>
       {isOpen && (
         <>
-          {/* Backdrop - touch-action: none prevents scroll passthrough */}
+          {/* Backdrop - blocks all scroll/touch events */}
           <motion.div
             className="fixed inset-0 bg-black/30 backdrop-blur-sm z-40"
             style={{ touchAction: 'none' }}
@@ -104,6 +104,10 @@ const WidgetDrawer = ({
             exit={{ opacity: 0 }}
             onClick={onClose}
             onTouchMove={(e) => e.preventDefault()}
+            onWheel={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+            }}
           />
 
           {/* Drawer */}
@@ -116,7 +120,7 @@ const WidgetDrawer = ({
               max-h-[70vh]
               overflow-hidden
             "
-            style={{ touchAction: 'none' }}
+            style={{ touchAction: 'none', isolation: 'isolate' }}
             initial={{ y: '100%' }}
             animate={{ y: 0 }}
             exit={{ y: '100%' }}
@@ -125,6 +129,13 @@ const WidgetDrawer = ({
               // Only allow touch move within the scroll container
               if (!scrollRef.current?.contains(e.target)) {
                 e.preventDefault();
+              }
+            }}
+            onWheel={(e) => {
+              // Block wheel events that aren't in the scroll container
+              if (!scrollRef.current?.contains(e.target)) {
+                e.preventDefault();
+                e.stopPropagation();
               }
             }}
           >
@@ -149,15 +160,20 @@ const WidgetDrawer = ({
             {/* Widget List */}
             <div
               ref={scrollRef}
-              className="p-4 overflow-y-auto"
+              className="p-4 overflow-y-auto overflow-x-hidden"
               style={{
                 maxHeight: 'calc(70vh - 100px)',
                 WebkitOverflowScrolling: 'touch',
                 overscrollBehavior: 'contain',
                 touchAction: 'pan-y',
+                isolation: 'isolate',
               }}
               onTouchStart={handleTouchStart}
               onTouchMove={handleTouchMove}
+              onWheel={(e) => {
+                // Ensure wheel events stay within this container
+                e.stopPropagation();
+              }}
             >
               {availableWidgets.length > 0 ? (
                 <div className="space-y-3">
