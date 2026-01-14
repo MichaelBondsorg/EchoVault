@@ -27,7 +27,7 @@ import {
   ExternalLink,
   TrendingUp
 } from 'lucide-react';
-import { Browser } from '@capacitor/browser';
+import { Capacitor } from '@capacitor/core';
 
 import {
   getHealthDataStatus,
@@ -112,9 +112,16 @@ const HealthSettingsScreen = ({ onClose }) => {
     setWhoopConnecting(true);
     try {
       const authUrl = await initiateWhoopOAuth();
-      // Open Whoop authorization in browser
-      await Browser.open({ url: authUrl });
-      // Browser will redirect back via deep link when complete
+
+      // Open Whoop authorization - use Capacitor Browser on native, window.open on web
+      if (Capacitor.isNativePlatform()) {
+        const { Browser } = await import('@capacitor/browser');
+        await Browser.open({ url: authUrl });
+        // Browser will redirect back via deep link when complete
+      } else {
+        // On web, open in same window - OAuth callback will redirect back
+        window.location.href = authUrl;
+      }
     } catch (error) {
       console.error('Failed to initiate Whoop OAuth:', error);
       alert('Failed to connect to Whoop. Please try again.');
