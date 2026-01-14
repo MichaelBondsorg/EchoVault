@@ -20,7 +20,8 @@ export const useNexusInsights = (user, options = {}) => {
     refreshInterval = 30 * 60 * 1000  // 30 minutes
   } = options;
 
-  const [insights, setInsights] = useState([]);
+  const [activeInsights, setActiveInsights] = useState([]);
+  const [historyInsights, setHistoryInsights] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState(null);
@@ -38,8 +39,9 @@ export const useNexusInsights = (user, options = {}) => {
       try {
         const cached = await getCachedInsights(user.uid);
 
-        if (cached && cached.insights.length > 0) {
-          setInsights(cached.insights);
+        if (cached) {
+          setActiveInsights(cached.insights || []);
+          setHistoryInsights(cached.history || []);
           setLastGenerated(cached.generatedAt);
 
           // Check if we need to regenerate
@@ -83,9 +85,15 @@ export const useNexusInsights = (user, options = {}) => {
       const result = await generateInsights(user.uid);
 
       if (result.success) {
-        setInsights(result.insights);
+        setActiveInsights(result.insights);
         setDataStatus(result.dataStatus);
         setLastGenerated(result.generatedAt);
+
+        // Re-fetch cached to get updated history
+        const cached = await getCachedInsights(user.uid);
+        if (cached?.history) {
+          setHistoryInsights(cached.history);
+        }
       } else {
         setError(result.errors?.[0] || 'Failed to generate insights');
       }
@@ -97,21 +105,55 @@ export const useNexusInsights = (user, options = {}) => {
     }
   }, [user?.uid, refreshing]);
 
+  // Combine active + history, dedupe, and filter by confidence
+  const allInsights = (() => {
+    const seenIds = new Set();
+    const combined = [];
+
+    // Add active first (they're most current)
+    for (const insight of activeInsights) {
+      if (insight.id && !seenIds.has(insight.id)) {
+        seenIds.add(insight.id);
+        combined.push({ ...insight, isActive: true });
+      }
+    }
+
+    // Add history (non-duplicates)
+    for (const insight of historyInsights) {
+      if (insight.id && !seenIds.has(insight.id)) {
+        seenIds.add(insight.id);
+        combined.push({ ...insight, isActive: false });
+      }
+    }
+
+    // Filter by confidence ≥50% (if confidence exists)
+    return combined.filter(i => {
+      // Calibration insights always show
+      if (i.type === 'calibration') return true;
+      // If no confidence specified, include it
+      const confidence = i.confidence || i.evidence?.statistical?.confidence;
+      if (confidence === undefined) return true;
+      return confidence >= 0.5;
+    });
+  })();
+
   // Get primary insight
-  const primaryInsight = insights.find(i => i.priority === 1) || insights[0];
+  const primaryInsight = activeInsights.find(i => i.priority === 1) || activeInsights[0];
 
   // Get insights by type
   const getInsightsByType = useCallback((type) => {
-    return insights.filter(i => i.type === type);
-  }, [insights]);
+    return allInsights.filter(i => i.type === type);
+  }, [allInsights]);
 
   // Get calibration status
-  const calibrationInsight = insights.find(i => i.type === 'calibration');
+  const calibrationInsight = activeInsights.find(i => i.type === 'calibration');
   const isCalibrating = !!calibrationInsight;
 
   return {
-    // State
-    insights,
+    // State - allInsights includes active + history with confidence ≥50%
+    insights: allInsights,
+    activeInsights,
+    historyInsights,
     primaryInsight,
     loading,
     refreshing,
@@ -126,8 +168,10 @@ export const useNexusInsights = (user, options = {}) => {
     getInsightsByType,
 
     // Helpers
-    hasInsights: insights.length > 0,
-    insightCount: insights.length
+    hasInsights: allInsights.length > 0,
+    insightCount: allInsights.length,
+    activeCount: activeInsights.length,
+    historyCount: historyInsights.length
   };
 };
 

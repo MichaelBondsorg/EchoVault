@@ -181,6 +181,7 @@ export const getCachedInsights = async (userId) => {
     const data = insightDoc.data();
     return {
       insights: data.active || [],
+      history: data.history || [],
       generatedAt: data.generatedAt,
       stale: data.stale || false,
       expiresAt: data.expiresAt
@@ -633,8 +634,51 @@ const saveInsights = async (userId, insights) => {
     db, 'artifacts', APP_COLLECTION_ID, 'users', userId, 'nexus', 'insights'
   );
 
+  // Get existing history
+  let existingHistory = [];
+  try {
+    const existingDoc = await getDoc(insightRef);
+    if (existingDoc.exists()) {
+      existingHistory = existingDoc.data().history || [];
+    }
+  } catch (e) {
+    console.warn('[Orchestrator] Could not read existing history:', e);
+  }
+
+  // Merge new insights into history (dedupe by id, keep latest)
+  const historyMap = new Map();
+
+  // Add existing history
+  for (const insight of existingHistory) {
+    if (insight.id) {
+      historyMap.set(insight.id, insight);
+    }
+  }
+
+  // Add/update with new insights
+  for (const insight of insights) {
+    if (insight.id) {
+      historyMap.set(insight.id, {
+        ...insight,
+        lastSeen: Timestamp.now()
+      });
+    }
+  }
+
+  // Convert back to array, sort by priority, limit to 50 most recent
+  const updatedHistory = Array.from(historyMap.values())
+    .sort((a, b) => {
+      // Sort by lastSeen (most recent first), then by priority
+      const aTime = a.lastSeen?.toMillis?.() || 0;
+      const bTime = b.lastSeen?.toMillis?.() || 0;
+      if (bTime !== aTime) return bTime - aTime;
+      return (a.priority || 99) - (b.priority || 99);
+    })
+    .slice(0, 50);
+
   await setDoc(insightRef, {
     active: insights,
+    history: updatedHistory,
     generatedAt: Timestamp.now(),
     expiresAt: Timestamp.fromMillis(Date.now() + 24 * 60 * 60 * 1000), // 24h
     stale: false

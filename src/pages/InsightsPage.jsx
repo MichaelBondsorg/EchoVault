@@ -26,9 +26,10 @@ const InsightsPage = ({
   const [dismissedInsights, setDismissedInsights] = useState(new Set());
   const [expandedInsight, setExpandedInsight] = useState(null);
 
-  // Nexus 2.0 insights
+  // Nexus 2.0 insights (includes active + historical, filtered by confidence ≥50%)
   const {
-    insights,
+    insights: allInsights,
+    insightCount: totalInsightCount,
     isCalibrating,
     calibrationProgress,
     loading,
@@ -41,24 +42,38 @@ const InsightsPage = ({
 
   // Helper to check if an insight has meaningful content
   const hasQualityContent = (insight) => {
-    // Must have either a meaningful body, summary, or recommendation
-    const hasBody = insight.body && insight.body.length > 30;
-    const hasSummary = insight.summary && insight.summary.length > 20 && !insight.summary.includes('Detected from');
-    const hasRecommendation = insight.recommendation?.intervention || insight.recommendation?.reasoning;
+    // Generic body templates to filter out
+    const genericBodyPatterns = [
+      'appears frequently in your entries with an average mood',
+      'detected from',
+      'this pattern'
+    ];
 
-    // Filter out generic/placeholder titles
-    const hasGenericTitle = insight.title?.toLowerCase().includes('pattern') &&
-                           insight.title?.split(' ').length <= 2; // e.g., "health Pattern"
+    const bodyLower = (insight.body || '').toLowerCase();
+    const hasGenericBody = genericBodyPatterns.some(p => bodyLower.includes(p));
 
-    if (hasGenericTitle && !hasBody && !hasSummary) {
+    // Filter out generic pattern titles like "health Pattern", "career Pattern"
+    const titleLower = (insight.title || '').toLowerCase();
+    const isGenericPatternTitle = titleLower.endsWith('pattern') &&
+                                  titleLower.split(' ').length <= 2;
+
+    // If it's a generic pattern title with generic body, filter it out
+    if (isGenericPatternTitle) {
       return false;
     }
+
+    // Must have either a meaningful body, summary, or recommendation
+    const hasBody = insight.body && insight.body.length > 30 && !hasGenericBody;
+    const hasSummary = insight.summary && insight.summary.length > 20 &&
+                       !insight.summary.toLowerCase().includes('detected from');
+    const hasRecommendation = insight.recommendation?.intervention ||
+                              insight.recommendation?.reasoning;
 
     return hasBody || hasSummary || hasRecommendation;
   };
 
   // Filter out dismissed insights and low-quality insights
-  const activeInsights = insights
+  const filteredInsights = allInsights
     .filter(i => !dismissedInsights.has(i.id || i.message))
     .filter(hasQualityContent);
 
@@ -113,12 +128,12 @@ const InsightsPage = ({
         calibrationProgress={calibrationProgress}
         dataStatus={dataStatus}
         lastGenerated={lastGenerated}
-        insightCount={activeInsights.length}
+        insightCount={filteredInsights.length}
         error={error}
       />
 
       {/* Insights List */}
-      {activeInsights.length > 0 && (
+      {filteredInsights.length > 0 && (
         <div className="space-y-3">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
@@ -128,12 +143,12 @@ const InsightsPage = ({
               </h3>
             </div>
             <span className="text-xs text-warm-400">
-              {activeInsights.length} insight{activeInsights.length !== 1 ? 's' : ''}
+              {filteredInsights.length} insight{filteredInsights.length !== 1 ? 's' : ''}
             </span>
           </div>
 
           <AnimatePresence mode="popLayout">
-            {activeInsights.map((insight, index) => (
+            {filteredInsights.map((insight, index) => (
               <NexusInsightCard
                 key={insight.id || index}
                 insight={insight}
@@ -147,7 +162,7 @@ const InsightsPage = ({
       )}
 
       {/* Empty state */}
-      {!loading && activeInsights.length === 0 && !isCalibrating && (
+      {!loading && filteredInsights.length === 0 && !isCalibrating && (
         <motion.div
           className="
             p-8 text-center
