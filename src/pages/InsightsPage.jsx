@@ -184,6 +184,16 @@ const InsightsPage = ({
   );
 };
 
+// Helper to safely get string content (some fields might be objects)
+const getStringContent = (...fields) => {
+  for (const field of fields) {
+    if (typeof field === 'string' && field.length > 0) {
+      return field;
+    }
+  }
+  return null;
+};
+
 /**
  * NexusInsightCard - Individual insight display
  */
@@ -272,32 +282,32 @@ const NexusInsightCard = ({ insight, onDismiss }) => {
             </button>
           </div>
           {/* Title if available - for recommendations, use intervention name */}
-          {(insight.title || insight.intervention) && (
+          {getStringContent(insight.title, insight.intervention) && (
             <p className="font-medium text-warm-800 mt-1">
-              {insight.title || `Try: ${insight.intervention}`}
+              {getStringContent(insight.title) || `Try: ${insight.intervention}`}
             </p>
           )}
           {/* Main content - check multiple possible field names including recommendation fields */}
           <p className="text-sm text-warm-700 mt-1 leading-relaxed">
-            {insight.summary ||
-             insight.reasoning ||
-             insight.message ||
-             insight.body ||
-             insight.insight ||
-             insight.description ||
-             (insight.expectedOutcome && `Expected: ${insight.expectedOutcome}`) ||
-             'New pattern detected'}
+            {getStringContent(
+              insight.summary,
+              insight.reasoning,
+              insight.message,
+              insight.body,
+              insight.description,
+              insight.expectedOutcome
+            ) || 'New pattern detected'}
           </p>
           {/* Timing for recommendations */}
-          {insight.timing && (
+          {getStringContent(insight.timing) && (
             <p className="text-xs text-warm-500 mt-1">
               ⏰ Best time: {insight.timing}
             </p>
           )}
           {/* Recommendation action if available */}
-          {(insight.recommendation?.action || insight.suggestion || insight.expectedOutcome) && (
+          {getStringContent(insight.recommendation?.action, insight.suggestion, insight.expectedOutcome) && (
             <p className="text-xs text-warm-500 mt-2 italic">
-              💡 {insight.recommendation?.action || insight.suggestion || insight.expectedOutcome}
+              💡 {getStringContent(insight.recommendation?.action, insight.suggestion, insight.expectedOutcome)}
             </p>
           )}
           {(insight.confidence || insight.score || insight.evidence?.statistical?.confidence || insight.recommendation?.confidence) && (
