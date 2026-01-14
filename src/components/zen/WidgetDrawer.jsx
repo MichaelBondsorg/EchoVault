@@ -83,13 +83,15 @@ const WidgetDrawer = ({
     <AnimatePresence>
       {isOpen && (
         <>
-          {/* Backdrop */}
+          {/* Backdrop - touch-action: none prevents scroll passthrough */}
           <motion.div
             className="fixed inset-0 bg-black/30 backdrop-blur-sm z-40"
+            style={{ touchAction: 'none' }}
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             onClick={onClose}
+            onTouchMove={(e) => e.preventDefault()}
           />
 
           {/* Drawer */}
@@ -102,10 +104,17 @@ const WidgetDrawer = ({
               max-h-[70vh]
               overflow-hidden
             "
+            style={{ touchAction: 'none' }}
             initial={{ y: '100%' }}
             animate={{ y: 0 }}
             exit={{ y: '100%' }}
             transition={{ type: 'spring', damping: 25 }}
+            onTouchMove={(e) => {
+              // Only allow touch move within the scroll container
+              if (!scrollRef.current?.contains(e.target)) {
+                e.preventDefault();
+              }
+            }}
           >
             {/* Handle */}
             <div className="flex justify-center pt-3 pb-2">
@@ -133,6 +142,7 @@ const WidgetDrawer = ({
                 maxHeight: 'calc(70vh - 100px)',
                 WebkitOverflowScrolling: 'touch',
                 overscrollBehavior: 'contain',
+                touchAction: 'pan-y',
               }}
               onTouchStart={handleTouchStart}
               onTouchMove={handleTouchMove}
