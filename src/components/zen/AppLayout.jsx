@@ -51,6 +51,7 @@ const AppLayout = ({
   onShowSafetyPlan,
   onShowExport,
   onShowHealthSettings,
+  onShowNexusSettings,
   onRequestNotifications,
   onLogout,
 
@@ -270,6 +271,7 @@ const AppLayout = ({
                 entries={entries}
                 category={category}
                 userId={user?.uid}
+                user={user}
                 onShowFullInsights={onShowInsights}
               />
             }
@@ -280,6 +282,7 @@ const AppLayout = ({
               <SettingsPage
                 user={user}
                 onOpenHealthSettings={onShowHealthSettings}
+                onOpenNexusSettings={onShowNexusSettings}
                 onOpenSafetyPlan={onShowSafetyPlan}
                 onOpenExport={onShowExport}
                 onRequestNotifications={onRequestNotifications}

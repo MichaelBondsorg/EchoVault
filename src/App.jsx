@@ -46,6 +46,7 @@ import { updateSignalStatus, batchUpdateSignalStatus } from './services/signals'
 import { runEntryPostProcessing } from './services/background';
 import { getEntryHealthContext, handleWhoopOAuthSuccess } from './services/health';
 import { getEntryEnvironmentContext } from './services/environment';
+import { updateInsightsForNewEntry } from './services/nexus/orchestrator';
 
 // Hooks
 import { useIOSMeta } from './hooks/useIOSMeta';
@@ -63,6 +64,7 @@ import {
   DayDashboard, EntryBar
 } from './components';
 import UnifiedConversation from './components/chat/UnifiedConversation';
+import NexusSettings from './components/settings/NexusSettings';
 
 // Dashboard Enhancement Components
 import { QuickStatsBar, GoalsProgress, WeeklyDigest, SituationTimeline, ReflectionPrompts } from './components/dashboard/shared';
@@ -151,6 +153,9 @@ export default function App() {
 
   // Health Settings Screen
   const [showHealthSettings, setShowHealthSettings] = useState(false);
+
+  // Nexus Settings Screen
+  const [showNexusSettings, setShowNexusSettings] = useState(false);
 
   // Quick Log Modal (lifted to App level to prevent unmount issues)
   const [showQuickLog, setShowQuickLog] = useState(false);
@@ -887,6 +892,24 @@ export default function App() {
         }
       })();
 
+      // Nexus 2.0 insight update (non-blocking, parallel)
+      // Updates thread associations and marks insights as stale for regeneration
+      (async () => {
+        try {
+          console.log('[Nexus] Updating insights for new entry:', ref.id);
+          await updateInsightsForNewEntry(
+            user.uid,
+            ref.id,
+            finalTex,
+            0.5  // Sentiment placeholder, will be updated after analysis
+          );
+          console.log('[Nexus] Incremental insights updated');
+        } catch (nexusError) {
+          // Nexus failure shouldn't break the app
+          console.error('[Nexus] Insight update failed:', nexusError);
+        }
+      })();
+
       // Analysis pipeline (existing logic)
       (async () => {
         try {
@@ -1574,6 +1597,7 @@ export default function App() {
       onShowSafetyPlan={() => setShowSafetyPlan(true)}
       onShowExport={() => setShowExport(true)}
       onShowHealthSettings={() => setShowHealthSettings(true)}
+      onShowNexusSettings={() => setShowNexusSettings(true)}
       onRequestNotifications={requestPermission}
       onLogout={() => signOut(auth)}
 
@@ -1760,6 +1784,26 @@ export default function App() {
         <HealthSettingsScreen
           onClose={() => setShowHealthSettings(false)}
         />
+      )}
+
+      {/* Nexus Settings Screen */}
+      {showNexusSettings && (
+        <div className="fixed inset-0 z-50 bg-warm-900/95 overflow-y-auto">
+          <div className="min-h-screen">
+            <div className="flex items-center justify-between p-4 border-b border-warm-700">
+              <h1 className="text-lg font-semibold text-warm-100">Nexus Settings</h1>
+              <button
+                onClick={() => setShowNexusSettings(false)}
+                className="p-2 rounded-full hover:bg-warm-800 text-warm-400"
+              >
+                <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            <NexusSettings user={user} />
+          </div>
+        </div>
       )}
     </AppLayout>
   );

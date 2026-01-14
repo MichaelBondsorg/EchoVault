@@ -1,7 +1,7 @@
 import { motion } from 'framer-motion';
 import {
   User, Bell, Heart, Shield, Download, LogOut,
-  ChevronRight, Smartphone
+  ChevronRight, Smartphone, Brain
 } from 'lucide-react';
 
 /**
@@ -17,6 +17,7 @@ import {
 const SettingsPage = ({
   user,
   onOpenHealthSettings,
+  onOpenNexusSettings,
   onOpenSafetyPlan,
   onOpenExport,
   onRequestNotifications,
@@ -44,6 +45,12 @@ const SettingsPage = ({
           description: notificationPermission === 'granted' ? 'Enabled' : 'Tap to enable',
           onClick: notificationPermission !== 'granted' ? onRequestNotifications : null,
           badge: notificationPermission !== 'granted' ? 'Off' : null,
+        },
+        {
+          icon: Brain,
+          label: 'Nexus Insights',
+          description: 'Control AI pattern detection',
+          onClick: onOpenNexusSettings,
         },
         {
           icon: Smartphone,

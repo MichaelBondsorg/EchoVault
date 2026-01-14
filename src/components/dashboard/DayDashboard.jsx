@@ -4,6 +4,7 @@ import { Loader2 } from 'lucide-react';
 
 // Hooks
 import { useDashboardMode } from '../../hooks/useDashboardMode';
+import { useNexusInsights } from '../../hooks/useNexusInsights';
 
 // Views
 import { MorningCompass, MidDayCheckIn, EveningMirror, ShelterView } from './views';
@@ -50,6 +51,14 @@ const DayDashboard = ({
   const [shelterOverride, setShelterOverride] = useState(false);
   const midnightTimeoutRef = useRef(null);
   const lastEntryCountRef = useRef(0);
+
+  // Nexus 2.0 insights (4-layer deep insights)
+  const {
+    insights: nexusInsights,
+    primaryInsight: nexusPrimaryInsight,
+    isCalibrating,
+    calibrationProgress
+  } = useNexusInsights(user, { autoRefresh: false });
 
   // Filter today's entries
   const todayEntries = useMemo(() => {
@@ -122,11 +131,22 @@ const DayDashboard = ({
     loadYesterdayCarryForward(userId, category).then(setCarryForwardItems);
   }, [userId, category]);
 
-  // Load pattern insights with rotation
+  // Load insights - prioritize Nexus 2.0 insights, fallback to pattern insights
   useEffect(() => {
     if (!userId) return;
+
+    // If we have a Nexus primary insight, use it
+    if (nexusPrimaryInsight) {
+      setCurrentInsight({
+        ...nexusPrimaryInsight,
+        source: 'nexus',
+        priority: nexusPrimaryInsight.priority === 1 ? 'high' : 'normal'
+      });
+      return;
+    }
+
+    // Fallback to pattern-based insights
     const loadInsights = async () => {
-      // Gather all available insights
       const allInsights = [];
 
       // Contradictions are high-priority
@@ -149,17 +169,15 @@ const DayDashboard = ({
       }
 
       if (allInsights.length > 0) {
-        // Use rotation to pick which insight to show
         const selected = getNextInsight(userId, category, allInsights);
         if (selected) {
           setCurrentInsight(selected);
-          // Mark as shown so it rotates next time
           markInsightShown(userId, category, selected);
         }
       }
     };
     loadInsights();
-  }, [userId, category]);
+  }, [userId, category, nexusPrimaryInsight]);
 
   // Generate content with caching
   const generateAndCacheContent = useCallback(async (useCache = true) => {
