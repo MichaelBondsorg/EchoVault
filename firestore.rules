@@ -53,6 +53,16 @@ service cloud.firestore {
         allow read, write: if isOwner(userId);
       }
 
+      // NEW: Nexus 2.0 subcollection (insights, beliefs, interventions, threads, baselines, states)
+      match /nexus/{docId} {
+        allow read, write: if isOwner(userId);
+      }
+
+      // NEW: Settings subcollection (user preferences)
+      match /settings/{settingId} {
+        allow read, write: if isOwner(userId);
+      }
+
       // RAG embeddings subcollection
       match /rag_embeddings/{embeddingId} {
         allow read, write: if isOwner(userId);
