@@ -43,6 +43,17 @@ const WidgetDrawer = ({
       document.body.style.right = '0';
       document.body.style.overflow = 'hidden';
 
+      // Also block wheel events on document for desktop browsers
+      const blockWheel = (e) => {
+        // Allow scrolling only within the scroll container
+        if (scrollRef.current?.contains(e.target)) {
+          return; // Allow scroll inside widget list
+        }
+        e.preventDefault();
+      };
+
+      document.addEventListener('wheel', blockWheel, { passive: false });
+
       return () => {
         // Restore scroll position when closing
         document.body.style.position = '';
@@ -51,6 +62,7 @@ const WidgetDrawer = ({
         document.body.style.right = '';
         document.body.style.overflow = '';
         window.scrollTo(0, scrollY);
+        document.removeEventListener('wheel', blockWheel);
       };
     }
   }, [isOpen]);
