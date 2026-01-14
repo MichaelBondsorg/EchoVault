@@ -64,6 +64,18 @@ const GoalsWidget = ({
     return 'text-warm-400';
   };
 
+  // Format goal tag to nice display name
+  // e.g. "@goal:find_new_job" -> "Find new job"
+  const formatGoalName = (tag) => {
+    if (!tag) return '';
+    // Remove @goal: prefix if present
+    let name = tag.replace(/^@goal:/i, '');
+    // Replace underscores with spaces
+    name = name.replace(/_/g, ' ');
+    // Capitalize first letter
+    return name.charAt(0).toUpperCase() + name.slice(1);
+  };
+
   return (
     <GlassCard
       size={size}
@@ -96,7 +108,7 @@ const GoalsWidget = ({
                   >
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium text-warm-700 truncate">
-                        #{goal.tag}
+                        {formatGoalName(goal.tag)}
                       </p>
                       <p className="text-xs text-warm-400">
                         {goal.mentions} {goal.mentions === 1 ? 'mention' : 'mentions'}

@@ -636,14 +636,31 @@ const saveInsights = async (userId, insights) => {
 
   // Get existing history
   let existingHistory = [];
+  let existingActive = [];
   try {
     const existingDoc = await getDoc(insightRef);
     if (existingDoc.exists()) {
       existingHistory = existingDoc.data().history || [];
+      existingActive = existingDoc.data().active || [];
     }
   } catch (e) {
     console.warn('[Orchestrator] Could not read existing history:', e);
   }
+
+  // Combine existing insights for deduplication check
+  const allExisting = [...existingActive, ...existingHistory];
+
+  // Filter new insights to remove duplicates (by semantic similarity)
+  const uniqueNewInsights = [];
+  for (const insight of insights) {
+    // Check against both existing insights AND already-added new insights
+    const allToCheck = [...allExisting, ...uniqueNewInsights];
+    if (!isDuplicateInsight(insight, allToCheck)) {
+      uniqueNewInsights.push(insight);
+    }
+  }
+
+  console.log(`[Orchestrator] Insights: ${insights.length} generated, ${uniqueNewInsights.length} unique after dedup`);
 
   // Merge new insights into history (dedupe by id, keep latest)
   const historyMap = new Map();
@@ -655,8 +672,8 @@ const saveInsights = async (userId, insights) => {
     }
   }
 
-  // Add/update with new insights
-  for (const insight of insights) {
+  // Add/update with new unique insights
+  for (const insight of uniqueNewInsights) {
     if (insight.id) {
       historyMap.set(insight.id, {
         ...insight,
@@ -677,7 +694,7 @@ const saveInsights = async (userId, insights) => {
     .slice(0, 50);
 
   await setDoc(insightRef, {
-    active: insights,
+    active: uniqueNewInsights,
     history: updatedHistory,
     generatedAt: Timestamp.now(),
     expiresAt: Timestamp.fromMillis(Date.now() + 24 * 60 * 60 * 1000), // 24h
@@ -708,4 +725,56 @@ const getTimeOfDay = () => {
   if (hour < 12) return 'morning';
   if (hour < 17) return 'afternoon';
   return 'evening';
+};
+
+/**
+ * Calculate Jaccard similarity between two strings
+ * Used for deduplicating similar insights
+ */
+const textSimilarity = (str1, str2) => {
+  if (!str1 || !str2) return 0;
+  const s1 = str1.toLowerCase();
+  const s2 = str2.toLowerCase();
+  if (s1 === s2) return 1;
+
+  const words1 = new Set(s1.split(/\s+/).filter(w => w.length > 2));
+  const words2 = new Set(s2.split(/\s+/).filter(w => w.length > 2));
+  const intersection = [...words1].filter(w => words2.has(w));
+  const union = new Set([...words1, ...words2]);
+
+  return union.size > 0 ? intersection.length / union.size : 0;
+};
+
+/**
+ * Check if an insight is too similar to any existing insights
+ * Compares title and summary for semantic overlap
+ */
+const isDuplicateInsight = (newInsight, existingInsights, threshold = 0.6) => {
+  if (!newInsight || !existingInsights?.length) return false;
+
+  const newTitle = newInsight.title || '';
+  const newSummary = newInsight.summary || '';
+  const newCombined = `${newTitle} ${newSummary}`;
+
+  for (const existing of existingInsights) {
+    const existingTitle = existing.title || '';
+    const existingSummary = existing.summary || '';
+    const existingCombined = `${existingTitle} ${existingSummary}`;
+
+    // Check title similarity (higher weight - titles are the main identifier)
+    const titleSim = textSimilarity(newTitle, existingTitle);
+    if (titleSim > 0.7) {
+      console.log(`[Orchestrator] Duplicate insight detected (title): "${newTitle}" ~ "${existingTitle}" (${(titleSim * 100).toFixed(0)}%)`);
+      return true;
+    }
+
+    // Check combined content similarity
+    const combinedSim = textSimilarity(newCombined, existingCombined);
+    if (combinedSim > threshold) {
+      console.log(`[Orchestrator] Duplicate insight detected (content): "${newTitle}" ~ "${existingTitle}" (${(combinedSim * 100).toFixed(0)}%)`);
+      return true;
+    }
+  }
+
+  return false;
 };
