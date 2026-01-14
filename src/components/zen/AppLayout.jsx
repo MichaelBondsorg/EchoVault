@@ -272,7 +272,6 @@ const AppLayout = ({
                 category={category}
                 userId={user?.uid}
                 user={user}
-                onShowFullInsights={onShowInsights}
               />
             }
           />
