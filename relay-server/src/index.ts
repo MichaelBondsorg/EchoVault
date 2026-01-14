@@ -1,4 +1,5 @@
 import express from 'express';
+import cors from 'cors';
 import { createServer } from 'http';
 import { WebSocketServer, WebSocket } from 'ws';
 import { URL } from 'url';
@@ -58,6 +59,21 @@ validateConfig();
 
 // Create Express app
 const app = express();
+
+// CORS configuration - allow requests from the web app
+app.use(cors({
+  origin: [
+    'https://echo-vault-app.web.app',
+    'http://localhost:5173',      // Vite dev server
+    'http://localhost:3000',
+    'capacitor://localhost',      // iOS app
+    'http://localhost',           // Android app
+  ],
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+}));
+
 app.use(express.json());
 
 // Health check endpoint (required for Cloud Run)
