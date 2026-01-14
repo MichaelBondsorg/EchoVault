@@ -33,6 +33,88 @@
 - You MUST explain thoroughly what you're changing and why
 - Always preserve the core safety functionality
 
+---
+
+## Project Status Tracking
+
+### Living Project State
+
+**File:** `PROJECT_STATUS.md` (root directory)
+
+This file tracks current project state, decisions, and priorities. It's the "living" complement to this technical reference.
+
+- **CLAUDE.md** = How the codebase works (mostly static)
+- **PROJECT_STATUS.md** = Where we are and what we've decided (updated frequently)
+
+**At the start of every session**, read both files to understand:
+1. Technical context (CLAUDE.md)
+2. Current priorities and recent decisions (PROJECT_STATUS.md)
+
+### When to Update PROJECT_STATUS.md
+
+**Before creating a PR**, check if any of these sections need updates:
+
+| Section | Update When... |
+|---------|----------------|
+| **Active Work** | Work items completed, new items started, status changed |
+| **Recent Decisions** | Any significant decision made during session |
+| **Parked Ideas** | We discussed and explicitly rejected an approach |
+| **Known Issues** | Discovered new tech debt, bugs, or problems |
+| **Session Notes** | Major design sessions or architectural discussions |
+| **User Feedback Log** | Any feedback received from users |
+
+### What Counts as a "Decision"
+
+**Log it if:**
+- We chose between multiple viable approaches
+- We decided NOT to build something (and why)
+- We changed or reversed a previous decision
+- We made an architectural choice that constrains future work
+- We set a threshold, default, or policy (e.g., "mood gate at 50%")
+
+**Don't log:**
+- Routine implementation choices
+- Bug fixes
+- Minor refactors
+- Obvious decisions with no real alternatives
+
+### Decision Log Format
+
+Keep entries minimal. One row per decision.
+
+```markdown
+| Date | Decision | Why | Revisit If |
+|------|----------|-----|------------|
+| 2026-01-14 | Use Firestore transactions for thread updates | Prevent race conditions on rapid entries | Performance issues at scale |
+```
+
+The **"Revisit If"** column is important — it tells future sessions when this decision should be reconsidered.
+
+### PR Checklist
+
+Before marking a PR ready for review:
+
+- [ ] Code changes tested locally
+- [ ] No temporary/debug code left in
+- [ ] Console.logs removed (or intentional and documented)
+- [ ] **PROJECT_STATUS.md updated** (if applicable)
+  - [ ] Active Work reflects current state
+  - [ ] Any decisions logged with rationale
+  - [ ] New tech debt documented
+- [ ] Commit messages are descriptive
+
+### Session Handoff
+
+When ending a significant work session (especially if work is incomplete):
+
+1. **Update Active Work** with current status
+2. **Add Session Notes** if context would help the next session
+3. **Stage changes** but let Michael review before committing
+
+This ensures the next session (whether tomorrow or next week) can pick up without re-discovering context.
+
+---
+
 ## Project Overview
 
 EchoVault is a mental health journaling application (v2.0.0) that helps users process emotions, track patterns, set goals, and receive AI-powered therapeutic insights. It's a cross-platform app supporting web, iOS, and Android.

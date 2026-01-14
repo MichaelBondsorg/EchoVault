@@ -1,0 +1,137 @@
+# EchoVault Project Status
+
+> **Last Updated:** 2026-01-13
+> **Updated By:** Claude (via conversation with Michael)
+
+---
+
+## Current Phase
+
+**Pre-launch.** 2 users (Michael + 1). Validating core value proposition before broader release.
+
+**North Star:** Make insights so good users think "holy shit, I didn't realize that about myself."
+
+---
+
+## Active Work
+
+| Item | Status | Notes |
+|------|--------|-------|
+| Nexus 2.0 Insights Engine | 📋 Spec Complete | Full implementation spec created. Replaces entire existing insights system. |
+
+### Nexus 2.0 Implementation Phases
+
+- [ ] **Phase 1:** Layer 1 + Layer 2 foundation (Days 1-3)
+- [ ] **Phase 2:** Layer 3 LLM synthesis (Days 4-6)
+- [ ] **Phase 3:** Layer 4 + orchestration (Days 7-8)
+- [ ] **Phase 4:** UI + settings (Days 9-10)
+- [ ] **Phase 5:** Migration + launch (Days 11-12)
+
+---
+
+## Current Priorities (Ordered)
+
+1. **Ship Nexus 2.0** — Nothing else matters until insights are genuinely valuable
+2. **Get 10 external users** — Need real feedback beyond Michael
+3. **Collect feedback** — Instrument what insights get engagement
+4. **Iterate** — Based on what users actually respond to
+
+---
+
+## Recent Decisions
+
+| Date | Decision | Why | Revisit If |
+|------|----------|-----|------------|
+| 2026-01-13 | Replace entire insights system with Nexus 2.0 | Current system produces correlation-level insights ("X boosts mood 30%") not causal insights with mechanisms. Fundamental architecture limitation, not fixable incrementally. | Implementation takes >3 weeks |
+| 2026-01-13 | Belief dissonance feature ON by default | Core differentiator. Surfaces gaps between stated beliefs and behavioral data. Opt-out sufficient protection. | Multiple users complain it feels judgmental |
+| 2026-01-13 | Mood gate at 50% for challenging insights | Don't surface belief dissonance when user is already struggling | Users want it lower/higher |
+| 2026-01-13 | Personal baselines, not population averages | "HRV is low" means nothing without knowing what's normal for THIS user | N/A - this is fundamental |
+| 2026-01-13 | Narrative-first AND biometric-first patterns | Some insights only emerge from narrative (beliefs), others only from biometrics (recovery). Need both. | N/A |
+| 2026-01-13 | Skip formal PM tooling / agents | Overhead not worth it at 2 users. Living docs > process theater. | Hit 50+ users or multiple contributors |
+| 2026-01-13 | ~$1.20/user/month LLM budget acceptable | At $9.99 subscription, 88% margin is healthy. Build expensive first, optimize later. | Costs exceed $2/user or scale issues emerge |
+
+---
+
+## Parked Ideas
+
+Good ideas we're explicitly NOT doing now. Don't re-suggest these.
+
+| Idea | Why Parked | Revisit When |
+|------|------------|--------------|
+| Social features / friend comparisons | Need to nail individual value prop first | Core insights validated |
+| Apple Health integration | Whoop integration is sufficient for now | Users request it |
+| Therapist export feature | No user has asked for this | A user asks |
+| Automated UAT / Playwright tests | App changing too fast, maintenance > value | Core flows stabilize |
+| CI/CD complexity | Current deploy process works fine | Shipping multiple times/week |
+| Multiple LLM provider failover | Gemini reliability acceptable | Outages affect users |
+
+---
+
+## Known Issues / Tech Debt
+
+| Issue | Severity | Notes |
+|-------|----------|-------|
+| `APP_COLLECTION_ID` hardcoded in `leadershipThreads.js` | Low | Fix during Nexus 2.0 implementation |
+| `App.jsx` is 71KB | Medium | Needs decomposition, but works |
+| `functions/index.js` is monolithic | Medium | Consider splitting post-launch |
+| Limited test coverage | Medium | Signal lifecycle has tests, little else |
+| Existing insights files to delete | High | Part of Nexus 2.0 Phase 1 |
+
+---
+
+## User Feedback Log
+
+| Date | User | Feedback | Action Taken |
+|------|------|----------|--------------|
+| — | — | No external user feedback yet | — |
+
+---
+
+## Key Metrics (When Available)
+
+- **Users:** 2
+- **Daily Active:** ?
+- **Entries/user/week:** ?
+- **Insight engagement rate:** ? (not yet instrumented)
+- **Whoop connection rate:** ?
+
+---
+
+## Files Created This Session
+
+| File | Purpose |
+|------|---------|
+| `EchoVault-Nexus-2.0-Implementation-Spec.md` | Complete implementation spec for new insights engine (5,300+ lines) |
+
+---
+
+## Session Notes
+
+### 2026-01-13: Nexus 2.0 Design Session
+
+**Context:** Michael dissatisfied with current insight quality. Receiving generic correlations like "drag show boosts mood 30%" that miss deeper patterns.
+
+**Key Insight from Michael's Data:**
+- 99 journal entries analyzed (Dec 2025 - Jan 2026)
+- Major emotional arc: Databricks offer → verbal acceptance → rejection after reference checks
+- Spencer functions as emotional stabilizer (mood floor of 50% when mentioned)
+- Sterling walks correlate with HRV recovery
+- Immigration anxiety underlies all career stress
+
+**Example of Target Insight Quality:**
+> "While you describe yourself as 'patient' regarding Anthropic, your RHR has trended 4bpm higher during waiting periods. However, on days you mention Sterling, your HRV recovers by 12ms within 24 hours. Caring for Sterling is your most effective physical 'off-switch' for career tension."
+
+**Architecture Decided:**
+- 4-layer pipeline: Pattern Detection → Temporal Reasoner → Causal Synthesizer → Intervention Optimizer
+- Thread metamorphosis for tracking evolving life narratives
+- Belief extraction + dissonance detection
+- Intervention effectiveness tracking with counterfactual reasoning
+
+---
+
+## How to Use This Document
+
+1. **Start of session:** Read this to understand current state
+2. **During work:** Reference Recent Decisions before re-litigating choices
+3. **Before PR:** Update relevant sections (see CLAUDE.md for checklist)
+4. **After user feedback:** Log it here immediately
