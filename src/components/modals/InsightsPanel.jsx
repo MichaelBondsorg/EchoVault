@@ -6,9 +6,8 @@ import {
   AlertOctagon, Zap, Clock, Users, MessageSquare, AlertCircle
 } from 'lucide-react';
 import { analyzeLongitudinalPatterns } from '../../services/safety';
-import { getAllPatterns } from '../../services/patterns/cached';
+import { getAllPatterns, getRotatedInsights, markInsightShown } from '../../services/nexus/compat';
 import { addToExclusionList, getActiveExclusions } from '../../services/signals/signalLifecycle';
-import { getRotatedInsights, markInsightShown } from '../../services/patterns/insightRotation';
 
 const InsightsPanel = ({ entries, userId, category, onClose }) => {
   const [loading, setLoading] = useState(true);

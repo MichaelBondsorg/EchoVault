@@ -11,7 +11,7 @@
  */
 
 import { refreshCorePeopleCache } from '../social/socialTracker';
-import { invalidatePatternCache } from '../patterns/cached';
+import { invalidatePatternCache } from '../nexus/compat';
 
 // Track last cache refresh to avoid redundant updates
 let lastCacheRefresh = null;

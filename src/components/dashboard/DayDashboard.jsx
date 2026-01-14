@@ -18,8 +18,7 @@ import {
   getMillisecondsUntilMidnight,
   completeTaskAsWin
 } from '../../services/dashboard';
-import { getPatternSummary, getContradictions } from '../../services/patterns/cached';
-import { getNextInsight, markInsightShown } from '../../services/patterns/insightRotation';
+import { getPatternSummary, getContradictions, getNextInsight, markInsightShown } from '../../services/nexus/compat';
 
 /**
  * DayDashboard - Controller Component

@@ -1,6 +1,6 @@
 import { callGemini } from '../ai';
 import { computeMoodTrajectory, detectCyclicalPatterns } from '../analysis';
-import { generateProactiveContext, computeActivitySentiment } from '../patterns';
+import { generateProactiveContext, computeActivitySentiment } from '../nexus/compat';
 
 /**
  * Prompt Priority Hierarchy:

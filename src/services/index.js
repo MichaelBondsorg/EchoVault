@@ -22,8 +22,8 @@ export * from './temporal';
 // RAG Services
 export * from './rag';
 
-// Pattern Services
-export * from './patterns';
+// Nexus Insight Engine (replaces patterns)
+export * from './nexus';
 
 // Vector Search Services (Phase 3)
 export * from './vectorSearch';
