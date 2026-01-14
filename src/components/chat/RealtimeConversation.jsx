@@ -447,10 +447,22 @@ const RealtimeConversation = ({ entries, onClose, category, onSaveEntry }) => {
               <button
                 onMouseDown={toggleRecording}
                 onMouseUp={() => isRecording && toggleRecording()}
-                onTouchStart={toggleRecording}
-                onTouchEnd={() => isRecording && toggleRecording()}
+                onTouchStart={(e) => {
+                  e.preventDefault();
+                  toggleRecording();
+                }}
+                onTouchEnd={(e) => {
+                  e.preventDefault();
+                  if (isRecording) toggleRecording();
+                }}
+                onTouchCancel={(e) => {
+                  e.preventDefault();
+                  if (isRecording) toggleRecording();
+                }}
+                onContextMenu={(e) => e.preventDefault()}
                 disabled={status === 'speaking'}
-                className={`w-24 h-24 rounded-full shadow-lg flex items-center justify-center transition-all ${
+                style={{ touchAction: 'none', userSelect: 'none', WebkitUserSelect: 'none' }}
+                className={`w-24 h-24 rounded-full shadow-lg flex items-center justify-center transition-all select-none ${
                   isRecording
                     ? 'bg-green-500 shadow-green-500/30 scale-110'
                     : status === 'speaking'

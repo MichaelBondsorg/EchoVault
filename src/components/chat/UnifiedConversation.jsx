@@ -574,7 +574,7 @@ const UnifiedConversation = ({
                   : 'bg-white/10 text-white'
               }`}
             >
-              <MarkdownLite>{msg.content}</MarkdownLite>
+              <MarkdownLite text={msg.content} variant="light" />
             </div>
           </motion.div>
         ))}
@@ -725,10 +725,22 @@ const UnifiedConversation = ({
               <button
                 onMouseDown={toggleVoiceRecording}
                 onMouseUp={() => voiceIsRecording && toggleVoiceRecording()}
-                onTouchStart={toggleVoiceRecording}
-                onTouchEnd={() => voiceIsRecording && toggleVoiceRecording()}
+                onTouchStart={(e) => {
+                  e.preventDefault();
+                  toggleVoiceRecording();
+                }}
+                onTouchEnd={(e) => {
+                  e.preventDefault();
+                  if (voiceIsRecording) toggleVoiceRecording();
+                }}
+                onTouchCancel={(e) => {
+                  e.preventDefault();
+                  if (voiceIsRecording) toggleVoiceRecording();
+                }}
+                onContextMenu={(e) => e.preventDefault()}
                 disabled={voiceStatus === 'speaking'}
-                className={`w-24 h-24 rounded-full shadow-lg flex items-center justify-center transition-all ${
+                style={{ touchAction: 'none', userSelect: 'none', WebkitUserSelect: 'none' }}
+                className={`w-24 h-24 rounded-full shadow-lg flex items-center justify-center transition-all select-none ${
                   voiceIsRecording
                     ? 'bg-green-500 shadow-green-500/30 scale-110'
                     : voiceStatus === 'speaking'
