@@ -3,7 +3,8 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   ArrowLeft, Search, Plus, User, PawPrint, MapPin, Package, Activity,
   ChevronDown, ChevronRight, Pencil, MoreVertical, Trash2, Archive, Merge,
-  RefreshCw, CheckCircle, AlertCircle
+  RefreshCw, CheckCircle, AlertCircle, List, GitBranch, HelpCircle, X,
+  Sparkles, Link2, Edit3
 } from 'lucide-react';
 import {
   getAllEntities,
@@ -19,6 +20,7 @@ import {
 } from '../services/memory/memoryGraph';
 import { migrateEntitiesFromEntriesFn } from '../config/firebase';
 import EntityEditModal from '../components/settings/EntityEditModal';
+import RelationshipGraph from '../components/settings/RelationshipGraph';
 
 /**
  * EntityManagementPage - Manage people, pets, places, and things
@@ -44,8 +46,19 @@ const EntityManagementPage = ({ userId, onBack }) => {
   const [editingEntity, setEditingEntity] = useState(null);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showArchived, setShowArchived] = useState(false);
+  const [viewMode, setViewMode] = useState('list'); // 'list' | 'graph'
   const [migrationStatus, setMigrationStatus] = useState(null); // null | 'loading' | 'success' | 'error'
   const [migrationResult, setMigrationResult] = useState(null);
+  const [showTips, setShowTips] = useState(() => {
+    // Show tips by default unless user has dismissed them
+    return localStorage.getItem('entityManagement.tipsDismissed') !== 'true';
+  });
+
+  // Dismiss tips and persist
+  const dismissTips = () => {
+    setShowTips(false);
+    localStorage.setItem('entityManagement.tipsDismissed', 'true');
+  };
 
   // Entity type configuration
   const entityConfig = {
@@ -253,6 +266,40 @@ const EntityManagementPage = ({ userId, onBack }) => {
               {totalCount} {totalCount === 1 ? 'entity' : 'entities'}
             </p>
           </div>
+          {/* View mode toggle */}
+          <div className="flex rounded-xl bg-warm-100 p-1">
+            <button
+              onClick={() => setViewMode('list')}
+              className={`p-1.5 rounded-lg transition-colors ${
+                viewMode === 'list'
+                  ? 'bg-white text-primary-600 shadow-sm'
+                  : 'text-warm-500 hover:text-warm-700'
+              }`}
+              title="List view"
+            >
+              <List size={18} />
+            </button>
+            <button
+              onClick={() => setViewMode('graph')}
+              className={`p-1.5 rounded-lg transition-colors ${
+                viewMode === 'graph'
+                  ? 'bg-white text-primary-600 shadow-sm'
+                  : 'text-warm-500 hover:text-warm-700'
+              }`}
+              title="Graph view"
+            >
+              <GitBranch size={18} />
+            </button>
+          </div>
+          {!showTips && (
+            <button
+              onClick={() => setShowTips(true)}
+              className="p-2 rounded-xl hover:bg-warm-100 transition-colors"
+              title="Show tips"
+            >
+              <HelpCircle size={20} className="text-warm-400" />
+            </button>
+          )}
           <button
             onClick={() => setShowCreateModal(true)}
             className="p-2 rounded-xl bg-primary-100 hover:bg-primary-200 transition-colors"
@@ -261,34 +308,83 @@ const EntityManagementPage = ({ userId, onBack }) => {
           </button>
         </div>
 
-        {/* Search bar */}
-        <div className="px-4 pb-3">
-          <div className="relative">
-            <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-warm-400" />
-            <input
-              type="text"
-              placeholder="Search by name..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-10 pr-4 py-2.5 bg-white/50 border border-white/30 rounded-xl
-                text-warm-700 placeholder-warm-400 focus:outline-none focus:ring-2 focus:ring-primary-300"
-            />
+        {/* Search bar - only show in list view */}
+        {viewMode === 'list' && (
+          <div className="px-4 pb-3">
+            <div className="relative">
+              <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-warm-400" />
+              <input
+                type="text"
+                placeholder="Search by name..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full pl-10 pr-4 py-2.5 bg-white/50 border border-white/30 rounded-xl
+                  text-warm-700 placeholder-warm-400 focus:outline-none focus:ring-2 focus:ring-primary-300"
+              />
+            </div>
           </div>
-        </div>
+        )}
 
-        {/* Show archived toggle */}
-        <div className="px-4 pb-3">
-          <label className="flex items-center gap-2 text-sm text-warm-600">
-            <input
-              type="checkbox"
-              checked={showArchived}
-              onChange={(e) => setShowArchived(e.target.checked)}
-              className="rounded border-warm-300 text-primary-600 focus:ring-primary-500"
-            />
-            Show archived
-          </label>
-        </div>
+        {/* Show archived toggle - only in list view */}
+        {viewMode === 'list' && (
+          <div className="px-4 pb-3">
+            <label className="flex items-center gap-2 text-sm text-warm-600">
+              <input
+                type="checkbox"
+                checked={showArchived}
+                onChange={(e) => setShowArchived(e.target.checked)}
+                className="rounded border-warm-300 text-primary-600 focus:ring-primary-500"
+              />
+              Show archived
+            </label>
+          </div>
+        )}
       </div>
+
+      {/* Tips Banner */}
+      <AnimatePresence>
+        {showTips && (
+          <motion.div
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: 'auto' }}
+            exit={{ opacity: 0, height: 0 }}
+            className="mx-4 mb-4"
+          >
+            <div className="bg-gradient-to-r from-primary-50 to-accent-50 rounded-2xl border border-primary-200 p-4">
+              <div className="flex items-start gap-3">
+                <div className="w-8 h-8 rounded-full bg-primary-100 flex items-center justify-center flex-shrink-0">
+                  <Sparkles size={16} className="text-primary-600" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center justify-between gap-2 mb-2">
+                    <h3 className="font-medium text-warm-800">Welcome to People & Things</h3>
+                    <button
+                      onClick={dismissTips}
+                      className="p-1 rounded-lg hover:bg-white/50 text-warm-400 hover:text-warm-600"
+                    >
+                      <X size={16} />
+                    </button>
+                  </div>
+                  <div className="space-y-2 text-sm text-warm-600">
+                    <div className="flex items-start gap-2">
+                      <Edit3 size={14} className="text-primary-500 mt-0.5 flex-shrink-0" />
+                      <span><strong>Edit entities</strong> to fix names, change types (person/pet/place), and add notes</span>
+                    </div>
+                    <div className="flex items-start gap-2">
+                      <Link2 size={14} className="text-primary-500 mt-0.5 flex-shrink-0" />
+                      <span><strong>Connect entities</strong> to show relationships (e.g., Luna is Spencer's pet)</span>
+                    </div>
+                    <div className="flex items-start gap-2">
+                      <GitBranch size={14} className="text-primary-500 mt-0.5 flex-shrink-0" />
+                      <span><strong>Graph view</strong> visualizes how your people, pets, and places are connected</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Content */}
       <div className="px-4 py-4 space-y-4">
@@ -296,8 +392,16 @@ const EntityManagementPage = ({ userId, onBack }) => {
           <div className="flex items-center justify-center py-12">
             <div className="w-8 h-8 border-4 border-primary-200 border-t-primary-600 rounded-full animate-spin" />
           </div>
+        ) : viewMode === 'graph' ? (
+          /* Graph View */
+          <RelationshipGraph
+            entities={entities}
+            onEditEntity={setEditingEntity}
+          />
         ) : (
-          ENTITY_TYPES.map(type => {
+          /* List View */
+          <>
+          {ENTITY_TYPES.map(type => {
             const config = entityConfig[type];
             const typeEntities = filteredEntities[type] || [];
             const isExpanded = expandedSections[type];
@@ -395,11 +499,10 @@ const EntityManagementPage = ({ userId, onBack }) => {
                 </AnimatePresence>
               </div>
             );
-          })
-        )}
+          })}
 
-        {/* Empty state */}
-        {!loading && totalCount === 0 && (
+          {/* Empty state */}
+          {!loading && totalCount === 0 && (
           <div className="py-12 text-center">
             <div className="w-16 h-16 mx-auto mb-4 bg-warm-100 rounded-full flex items-center justify-center">
               <User size={28} className="text-warm-400" />
@@ -463,6 +566,8 @@ const EntityManagementPage = ({ userId, onBack }) => {
               </button>
             </div>
           </div>
+        )}
+          </>
         )}
       </div>
 
