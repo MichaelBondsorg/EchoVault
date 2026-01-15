@@ -66,6 +66,7 @@ import {
 import UnifiedConversation from './components/chat/UnifiedConversation';
 import NexusSettings from './components/settings/NexusSettings';
 import EntityManagementPage from './pages/EntityManagementPage';
+import WhatsNewModal from './components/shared/WhatsNewModal';
 
 // Dashboard Enhancement Components
 import { QuickStatsBar, GoalsProgress, WeeklyDigest, SituationTimeline, ReflectionPrompts } from './components/dashboard/shared';
@@ -1845,6 +1846,9 @@ export default function App() {
           />
         </div>
       )}
+
+      {/* What's New Modal - shows once after feature updates */}
+      <WhatsNewModal />
     </AppLayout>
   );
 }
