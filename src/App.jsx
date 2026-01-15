@@ -860,6 +860,11 @@ export default function App() {
         entryData.has_warning_indicators = true;
       }
 
+      console.log('📝 Entry data being saved:', {
+        hasHealthContext: !!entryData.healthContext,
+        healthContext: entryData.healthContext,
+        hasEnvironmentContext: !!entryData.environmentContext
+      });
       console.time('⏱️ Firestore save');
       const ref = await addDoc(collection(db, 'artifacts', APP_COLLECTION_ID, 'users', user.uid, 'entries'), entryData);
       console.timeEnd('⏱️ Firestore save');

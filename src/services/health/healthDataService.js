@@ -19,49 +19,162 @@ import { isWhoopLinked, getWhoopSummary, getWhoopHistory } from './whoop';
 /**
  * Get current health summary using best available method
  *
- * Priority: Whoop (cloud) > Native HealthKit/GoogleFit > Cache > Manual
+ * Smart merge strategy when multiple sources available:
+ * - Sleep/HRV/Recovery: Prefer Whoop (more accurate 24/7 tracking)
+ * - Steps: Prefer HealthKit (Whoop doesn't track steps natively)
+ * - Workouts: Prefer Whoop (better strain/calorie tracking)
+ * - Heart Rate: Use Whoop resting, HealthKit for current
  *
  * @param {Date} date - Date to query (default: today)
  * @returns {Object} Health summary with source info
  */
 export const getHealthSummary = async (date = new Date()) => {
-  // Check for Whoop first (works on all platforms)
+  console.log('[HealthDataService] getHealthSummary called');
+
+  // Check what sources are available
+  let whoopData = null;
+  let nativeData = null;
+  let whoopLinked = false;
+
+  // Try Whoop
   try {
-    const whoopLinked = await isWhoopLinked();
+    whoopLinked = await isWhoopLinked();
+    console.log('[HealthDataService] Whoop linked:', whoopLinked);
     if (whoopLinked) {
-      return await getWhoopSummary(date);
+      whoopData = await getWhoopSummary(date);
     }
   } catch (error) {
-    console.warn('Whoop check failed, falling back to native:', error);
+    console.warn('Whoop fetch failed:', error);
   }
 
-  // Fall back to native/cache strategy
+  // Try native (HealthKit/GoogleFit)
   const strategy = await getHealthDataStrategy();
+  console.log('[HealthDataService] Strategy:', strategy.strategy, 'isAvailable:', strategy.isAvailable);
 
-  switch (strategy.strategy) {
-    case 'healthkit':
-      return await getHealthKitSummary(date);
-
-    case 'googlefit':
-      return await getGoogleFitSummary(date);
-
-    case 'cache':
-      // Return cached data with freshness info
-      return {
-        ...strategy.cachedData,
-        source: 'cache',
-        cacheAge: strategy.cacheAge,
-        note: 'Data from your last mobile session'
-      };
-
-    case 'manual':
-    default:
-      return {
-        available: false,
-        source: 'none',
-        note: 'Health data available when using the mobile app'
-      };
+  if (strategy.strategy === 'healthkit' && strategy.isAvailable) {
+    try {
+      nativeData = await getHealthKitSummary(date);
+    } catch (error) {
+      console.warn('HealthKit fetch failed:', error);
+    }
+  } else if (strategy.strategy === 'googlefit' && strategy.isAvailable) {
+    try {
+      nativeData = await getGoogleFitSummary(date);
+    } catch (error) {
+      console.warn('GoogleFit fetch failed:', error);
+    }
   }
+
+  // Smart merge if both sources available
+  if (whoopData?.available && nativeData?.available) {
+    console.log('[HealthDataService] Smart merging Whoop + HealthKit data');
+    return smartMergeHealthData(whoopData, nativeData);
+  }
+
+  // Single source fallbacks
+  if (whoopData?.available) {
+    return whoopData;
+  }
+
+  if (nativeData?.available) {
+    return nativeData;
+  }
+
+  // Cache fallback
+  if (strategy.strategy === 'cache') {
+    return {
+      ...strategy.cachedData,
+      source: 'cache',
+      cacheAge: strategy.cacheAge,
+      note: 'Data from your last mobile session'
+    };
+  }
+
+  // No data available
+  return {
+    available: false,
+    source: 'none',
+    note: 'Health data available when using the mobile app'
+  };
+};
+
+/**
+ * Smart merge health data from multiple sources
+ * Uses each source for what it does best
+ */
+const smartMergeHealthData = (whoopData, nativeData) => {
+  return {
+    available: true,
+    source: 'merged',
+    sources: ['whoop', nativeData.source || 'healthkit'],
+    date: whoopData.date || nativeData.date,
+
+    // Sleep: Prefer Whoop (24/7 tracking, better accuracy)
+    sleep: whoopData.sleep || nativeData.sleep,
+
+    // Heart: Merge - Whoop for resting/HRV, HealthKit for current
+    heart: {
+      restingRate: whoopData.heart?.restingRate || nativeData.heart?.restingRate,
+      currentRate: nativeData.heart?.currentRate || whoopData.heart?.currentRate,
+      hrv: whoopData.heart?.hrv || nativeData.heart?.hrv,
+      hrvTrend: whoopData.heart?.hrvTrend || nativeData.heart?.hrvTrend,
+      stressIndicator: whoopData.heart?.stressIndicator || nativeData.heart?.stressIndicator,
+    },
+
+    // Activity: Steps from HealthKit, workouts from Whoop
+    activity: {
+      // Steps: HealthKit (Whoop doesn't track steps natively)
+      stepsToday: nativeData.activity?.stepsToday || whoopData.activity?.stepsToday,
+      // Calories: Whoop (better strain tracking)
+      totalCaloriesBurned: whoopData.activity?.totalCaloriesBurned || nativeData.activity?.totalCaloriesBurned,
+      activeCaloriesBurned: whoopData.activity?.activeCaloriesBurned || nativeData.activity?.activeCaloriesBurned,
+      // Exercise: Whoop (better workout detection)
+      totalExerciseMinutes: whoopData.activity?.totalExerciseMinutes || nativeData.activity?.totalExerciseMinutes,
+      hasWorkout: whoopData.activity?.hasWorkout || nativeData.activity?.hasWorkout,
+      // Workouts: Merge both, prefer Whoop details
+      workouts: mergeWorkouts(whoopData.activity?.workouts, nativeData.activity?.workouts),
+    },
+
+    // Whoop-specific fields (preserved)
+    recovery: whoopData.recovery,
+    strain: whoopData.strain,
+
+    // Legacy flat fields for compatibility
+    hrv: whoopData.hrv || nativeData.hrv,
+    heartRate: whoopData.heartRate || nativeData.heartRate,
+    workouts: mergeWorkouts(whoopData.workouts, nativeData.workouts),
+    hasWorkout: whoopData.hasWorkout || nativeData.hasWorkout,
+    steps: nativeData.activity?.stepsToday || whoopData.steps,
+
+    queriedAt: new Date().toISOString(),
+  };
+};
+
+/**
+ * Merge workouts from multiple sources, avoiding duplicates
+ */
+const mergeWorkouts = (whoopWorkouts = [], nativeWorkouts = []) => {
+  // Use Whoop workouts as base (more detailed strain data)
+  const merged = [...whoopWorkouts];
+
+  // Add native workouts that don't overlap with Whoop
+  for (const nativeW of nativeWorkouts) {
+    const hasOverlap = whoopWorkouts.some(whoopW => {
+      // Check if workouts overlap in time (within 30 min)
+      if (nativeW.startTime && whoopW.startTime) {
+        const timeDiff = Math.abs(new Date(nativeW.startTime) - new Date(whoopW.startTime));
+        return timeDiff < 30 * 60 * 1000;
+      }
+      // Check if same type on same day
+      return nativeW.type?.toLowerCase() === whoopW.type?.toLowerCase();
+    });
+
+    if (!hasOverlap) {
+      merged.push({ ...nativeW, source: 'healthkit' });
+    }
+  }
+
+  return merged;
 };
 
 /**
@@ -159,18 +272,22 @@ export const checkHealthPermissions = async () => {
  * @returns {Object|null} Health context or null if unavailable
  */
 export const getEntryHealthContext = async () => {
+  console.log('[HealthDataService] getEntryHealthContext called');
   const summary = await getHealthSummary();
+  console.log('[HealthDataService] getHealthSummary returned:', JSON.stringify(summary, null, 2));
 
   if (!summary.available) {
+    console.log('[HealthDataService] summary.available is false, returning null');
     return null;
   }
 
   // Handle both old flat format (Whoop/cache) and new nested format (HealthKit)
   const isNewFormat = summary.activity !== undefined;
+  console.log('[HealthDataService] isNewFormat:', isNewFormat);
 
   if (isNewFormat) {
     // New expanded format from HealthKit
-    return {
+    const context = {
       sleep: {
         totalHours: summary.sleep?.totalHours || null,
         quality: summary.sleep?.quality || null,
@@ -195,6 +312,8 @@ export const getEntryHealthContext = async () => {
       source: summary.source || 'healthkit',
       capturedAt: new Date().toISOString()
     };
+    console.log('[HealthDataService] Returning NEW format context:', JSON.stringify(context, null, 2));
+    return context;
   }
 
   // Legacy format (Whoop, cache, or older data)
