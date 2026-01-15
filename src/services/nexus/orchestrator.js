@@ -136,6 +136,41 @@ const PATTERN_DISPLAY_MAP = {
       summary: 'You have a pattern of experiencing genuine positivity',
       body: `When you're feeling good, your mood shows it (averaging ${Math.round(mood * 100)}%). Take note of what contributes to these moments.`
     })
+  },
+  // Stabilizer patterns
+  pet_interaction: {
+    title: 'Pet Time Pattern',
+    getContent: (mood) => ({
+      summary: `Time with your pets ${mood > 0.5 ? 'brightens' : 'steadies'} your day`,
+      body: mood > 0.5
+        ? `When you spend time with your pets, your mood averages ${Math.round(mood * 100)}%. Pet interactions are proven mood stabilizers—keep it up!`
+        : `Your mood averages ${Math.round(mood * 100)}% on days you mention your pets. Pets often provide comfort during harder days.`
+    })
+  },
+  creative_activity: {
+    title: 'Creative Flow Pattern',
+    getContent: (mood) => ({
+      summary: 'Creative work affects your emotional state',
+      body: mood > 0.5
+        ? `When you're creating—whether building, painting, or coding—your mood averages ${Math.round(mood * 100)}%. Creative flow appears to energize you.`
+        : `Your mood averages ${Math.round(mood * 100)}% during creative work. This could mean you create to process emotions, which is actually healthy.`
+    })
+  },
+  social_connection: {
+    title: 'Social Connection Pattern',
+    getContent: (mood) => ({
+      summary: `Social time ${mood > 0.5 ? 'lifts' : 'accompanies'} your mood`,
+      body: mood > 0.5
+        ? `When you connect with friends and loved ones, your mood averages ${Math.round(mood * 100)}%. Social connection appears to be valuable for your wellbeing.`
+        : `Your mood averages ${Math.round(mood * 100)}% around social events. This could reflect pre-event anxiety or that you reach out when struggling.`
+    })
+  },
+  caregiving_stress: {
+    title: 'Caregiving Pattern',
+    getContent: (mood) => ({
+      summary: 'Caring for others impacts your emotional state',
+      body: `When caregiving responsibilities come up, your mood averages ${Math.round(mood * 100)}%. Remember to care for yourself too—caregiver burnout is real.`
+    })
   }
 };
 
@@ -527,34 +562,78 @@ export const generateInsights = async (userId, options = {}) => {
       });
     }
 
-    // If no Whoop but entries exist, show entry-only insights
-    if (!dataStatus.whoopConnected && entries.length >= 5) {
-      // Add patterns-based insight using mood data
-      const topPattern = Object.values(patterns.aggregated || {})
+    // ========== SIMPLE PATTERN INSIGHTS ==========
+    // Always generate these regardless of Whoop status - they're the "X improves mood by Y%" style insights
+
+    if (entries.length >= 5) {
+      // Get top patterns sorted by how much they deviate from neutral (50%)
+      const sortedPatterns = Object.values(patterns.aggregated || {})
         .filter(p => p.mood.mean !== null && p.occurrences >= 3)
-        .sort((a, b) => Math.abs(b.mood.mean - 0.5) - Math.abs(a.mood.mean - 0.5))[0];
+        .sort((a, b) => Math.abs(b.mood.mean - 0.5) - Math.abs(a.mood.mean - 0.5));
 
-      if (topPattern) {
-        // Get a meaningful display name and description
-        const patternInfo = getPatternDisplayInfo(topPattern.patternId, topPattern.mood.mean);
+      // Add up to 2 simple pattern insights
+      let patternCount = 0;
+      for (const pattern of sortedPatterns) {
+        if (patternCount >= 2) break;
 
-        // Only add if we have a meaningful pattern (not just category)
+        const patternInfo = getPatternDisplayInfo(pattern.patternId, pattern.mood.mean);
         if (patternInfo.hasContent) {
           insights.push({
-            id: `pattern_${topPattern.patternId}`,
-            type: 'pattern_alert',
+            id: `pattern_${pattern.patternId}`,
+            type: 'pattern_correlation',
             title: patternInfo.title,
             summary: patternInfo.summary,
             body: patternInfo.body,
             evidence: {
-              narrative: [`Detected in ${topPattern.occurrences} entries`],
+              narrative: [`Detected in ${pattern.occurrences} entries`],
               statistical: {
-                sampleSize: topPattern.occurrences,
-                averageMood: Math.round(topPattern.mood.mean * 100)
+                sampleSize: pattern.occurrences,
+                averageMood: Math.round(pattern.mood.mean * 100)
               }
             },
-            priority: 2
+            priority: 3  // Lower priority than deep insights but always show some
           });
+          patternCount++;
+        }
+      }
+    }
+
+    // ========== ENTITY-SPECIFIC CORRELATION INSIGHTS ==========
+    // "Time with [person/pet] correlates with X% mood", "Yoga improves mood by X%"
+
+    if (entries.length >= 10) {
+      const entityCorrelations = computeEntityMoodCorrelations(entries);
+
+      // Add up to 2 entity correlation insights
+      let entityCount = 0;
+      for (const correlation of entityCorrelations) {
+        if (entityCount >= 2) break;
+
+        // Only show strong correlations (>10% deviation from average)
+        if (Math.abs(correlation.moodDelta) >= 10) {
+          const direction = correlation.moodDelta > 0 ? 'boosts' : 'lowers';
+          const absChange = Math.abs(correlation.moodDelta);
+
+          insights.push({
+            id: `entity_${correlation.entityName.toLowerCase().replace(/\s+/g, '_')}_${Date.now()}`,
+            type: 'entity_correlation',
+            title: `${correlation.entityName} Effect`,
+            summary: `${correlation.entityName} ${direction} your mood by ~${absChange}%`,
+            body: correlation.moodDelta > 0
+              ? `On days when you mention ${correlation.entityName}, your mood averages ${correlation.averageMood}% (compared to ${correlation.baselineMood}% overall). ${correlation.entityType === 'pet' ? 'Pet interactions are known mood stabilizers!' : correlation.entityType === 'activity' ? 'This activity seems to be working for you.' : 'This connection appears valuable for your wellbeing.'}`
+              : `When ${correlation.entityName} comes up in your entries, your mood tends to be lower (${correlation.averageMood}% vs ${correlation.baselineMood}% overall). This could indicate stress, or simply that you journal about ${correlation.entityName} when processing difficult emotions.`,
+            evidence: {
+              narrative: [`Mentioned in ${correlation.mentionCount} entries`],
+              statistical: {
+                sampleSize: correlation.mentionCount,
+                averageMood: correlation.averageMood,
+                baselineMood: correlation.baselineMood,
+                moodDelta: correlation.moodDelta
+              }
+            },
+            priority: 3
+          });
+          entityCount++;
         }
       }
     }
@@ -628,6 +707,138 @@ export const updateInsightsForNewEntry = async (userId, entryId, entryText, entr
 // ============================================================
 // HELPER FUNCTIONS
 // ============================================================
+
+/**
+ * Compute mood correlations for entities (people, pets, activities) mentioned in entries
+ * Returns sorted list of entities with their mood impact
+ */
+const computeEntityMoodCorrelations = (entries) => {
+  if (!entries || entries.length < 5) return [];
+
+  // Common entities to look for (can be expanded with memory graph data)
+  // These are extracted from entry text via simple keyword matching
+  const entityPatterns = [
+    // People names - common ones, will also look at extracted entities
+    { pattern: /\b(spencer|mom|dad|sarah|partner|wife|husband)\b/gi, type: 'person' },
+    // Pets
+    { pattern: /\b(luna|sterling|dog|cat|pet)\b/gi, type: 'pet' },
+    // Activities
+    { pattern: /\b(yoga|meditation|workout|exercise|gym|running|walking|hiking|swimming)\b/gi, type: 'activity' },
+    { pattern: /\b(therapy|therapist|counseling)\b/gi, type: 'activity' },
+    { pattern: /\b(work|meeting|project)\b/gi, type: 'activity' }
+  ];
+
+  // Also extract entities from entry analysis if available
+  const extractedEntities = new Map();
+
+  for (const entry of entries) {
+    // From analysis.entities if available
+    const analysisEntities = entry.analysis?.entities || [];
+    for (const entity of analysisEntities) {
+      if (entity.name && entity.name.length > 2) {
+        const key = entity.name.toLowerCase();
+        if (!extractedEntities.has(key)) {
+          extractedEntities.set(key, {
+            name: entity.name,
+            type: entity.type || 'person',
+            pattern: new RegExp(`\\b${entity.name}\\b`, 'gi')
+          });
+        }
+      }
+    }
+
+    // From memory mentions if available
+    const memoryMentions = entry.memoryMentions || [];
+    for (const mention of memoryMentions) {
+      if (mention.name && mention.name.length > 2) {
+        const key = mention.name.toLowerCase();
+        if (!extractedEntities.has(key)) {
+          extractedEntities.set(key, {
+            name: mention.name,
+            type: mention.entityType || 'person',
+            pattern: new RegExp(`\\b${mention.name}\\b`, 'gi')
+          });
+        }
+      }
+    }
+  }
+
+  // Combine static patterns with extracted entities
+  const allPatterns = [
+    ...entityPatterns,
+    ...Array.from(extractedEntities.values()).map(e => ({
+      pattern: e.pattern,
+      type: e.type,
+      name: e.name
+    }))
+  ];
+
+  // Calculate baseline mood (average across all entries)
+  const allMoods = entries
+    .map(e => e.mood || e.analysis?.mood_score)
+    .filter(m => m !== null && m !== undefined);
+
+  if (allMoods.length === 0) return [];
+
+  const baselineMood = Math.round(allMoods.reduce((a, b) => a + b, 0) / allMoods.length);
+
+  // Track entity mentions and associated moods
+  const entityStats = new Map();
+
+  for (const entry of entries) {
+    const mood = entry.mood || entry.analysis?.mood_score;
+    if (mood === null || mood === undefined) continue;
+
+    const text = (entry.content || entry.text || '').toLowerCase();
+
+    for (const { pattern, type, name } of allPatterns) {
+      const matches = text.match(pattern);
+      if (matches && matches.length > 0) {
+        // Use the matched text as the entity name if not provided
+        const entityName = name || matches[0].charAt(0).toUpperCase() + matches[0].slice(1).toLowerCase();
+        const key = entityName.toLowerCase();
+
+        if (!entityStats.has(key)) {
+          entityStats.set(key, {
+            entityName,
+            entityType: type,
+            moods: [],
+            mentionCount: 0
+          });
+        }
+
+        const stats = entityStats.get(key);
+        stats.moods.push(mood);
+        stats.mentionCount++;
+      }
+    }
+  }
+
+  // Calculate correlations
+  const correlations = [];
+
+  for (const [key, stats] of entityStats) {
+    // Need at least 3 mentions for statistical relevance
+    if (stats.mentionCount < 3) continue;
+
+    const averageMood = Math.round(stats.moods.reduce((a, b) => a + b, 0) / stats.moods.length);
+    const moodDelta = averageMood - baselineMood;
+
+    correlations.push({
+      entityName: stats.entityName,
+      entityType: stats.entityType,
+      mentionCount: stats.mentionCount,
+      averageMood,
+      baselineMood,
+      moodDelta
+    });
+  }
+
+  // Sort by absolute mood delta (strongest correlations first)
+  correlations.sort((a, b) => Math.abs(b.moodDelta) - Math.abs(a.moodDelta));
+
+  return correlations;
+};
 
 const saveInsights = async (userId, insights) => {
   const insightRef = doc(
@@ -746,8 +957,70 @@ const textSimilarity = (str1, str2) => {
 };
 
 /**
+ * Theme definitions for semantic deduplication
+ * Insights sharing a theme are considered duplicates even with different wording
+ */
+const INSIGHT_THEMES = {
+  trade_off_regulation: {
+    label: 'Trade-off & Regulation',
+    triggers: ['trade', 'trading', 'convenience', 'friction', 'regulation', 'dysregulation',
+               'paradox', 'loop', 'proximity', 'routine', 'spontaneity', 'co-regulation',
+               'depletion', 'agency', 'anchoring', 'reset']
+  },
+  social_energy: {
+    label: 'Social Energy',
+    triggers: ['social', 'connection', 'isolation', 'alone', 'people', 'relationship',
+               'interaction', 'engagement', 'withdrawal', 'introvert', 'extrovert']
+  },
+  physical_mood: {
+    label: 'Physical-Mood Connection',
+    triggers: ['exercise', 'workout', 'yoga', 'walk', 'movement', 'physical', 'body',
+               'somatic', 'tension', 'pain', 'energy', 'fatigue', 'sleep', 'rest']
+  },
+  career_stress: {
+    label: 'Career & Stress',
+    triggers: ['career', 'job', 'work', 'interview', 'waiting', 'rejection', 'uncertainty',
+               'professional', 'application', 'opportunity']
+  },
+  routine_disruption: {
+    label: 'Routine & Disruption',
+    triggers: ['routine', 'schedule', 'disruption', 'change', 'stability', 'predictability',
+               'structure', 'chaos', 'order', 'planning', 'spontaneous']
+  },
+  emotional_avoidance: {
+    label: 'Emotional Patterns',
+    triggers: ['avoid', 'avoidance', 'escape', 'cope', 'coping', 'suppress', 'process',
+               'emotional', 'feelings', 'anxiety', 'stress', 'overwhelm']
+  }
+};
+
+/**
+ * Extract the primary theme from an insight based on content analysis
+ */
+const extractInsightTheme = (insight) => {
+  if (!insight) return null;
+
+  const text = `${insight.title || ''} ${insight.summary || ''} ${insight.body || ''}`.toLowerCase();
+
+  let bestTheme = null;
+  let bestScore = 0;
+
+  for (const [themeId, theme] of Object.entries(INSIGHT_THEMES)) {
+    const matchCount = theme.triggers.filter(trigger => text.includes(trigger)).length;
+    const score = matchCount / theme.triggers.length;
+
+    if (score > bestScore && matchCount >= 2) {  // Require at least 2 trigger matches
+      bestScore = score;
+      bestTheme = themeId;
+    }
+  }
+
+  return bestTheme;
+};
+
+/**
  * Check if an insight is too similar to any existing insights
- * Compares title and summary for semantic overlap
+ * Uses three methods: title similarity, content similarity, and theme matching
  */
 const isDuplicateInsight = (newInsight, existingInsights, threshold = 0.6) => {
   if (!newInsight || !existingInsights?.length) return false;
@@ -755,6 +1028,7 @@ const isDuplicateInsight = (newInsight, existingInsights, threshold = 0.6) => {
   const newTitle = newInsight.title || '';
   const newSummary = newInsight.summary || '';
   const newCombined = `${newTitle} ${newSummary}`;
+  const newTheme = extractInsightTheme(newInsight);
 
   for (const existing of existingInsights) {
     const existingTitle = existing.title || '';
@@ -773,6 +1047,16 @@ const isDuplicateInsight = (newInsight, existingInsights, threshold = 0.6) => {
     if (combinedSim > threshold) {
       console.log(`[Orchestrator] Duplicate insight detected (content): "${newTitle}" ~ "${existingTitle}" (${(combinedSim * 100).toFixed(0)}%)`);
       return true;
+    }
+
+    // Check theme matching - if both insights share the same theme, they're duplicates
+    // This catches semantically similar insights with different wording
+    if (newTheme) {
+      const existingTheme = extractInsightTheme(existing);
+      if (existingTheme === newTheme) {
+        console.log(`[Orchestrator] Duplicate insight detected (theme: ${newTheme}): "${newTitle}" ~ "${existingTitle}"`);
+        return true;
+      }
     }
   }
 
