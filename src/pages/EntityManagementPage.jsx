@@ -12,6 +12,8 @@ import {
   archivePerson,
   createEntity,
   mergeEntities,
+  addEntityRelationship,
+  removeEntityRelationship,
   ENTITY_TYPES,
   RELATIONSHIP_TYPES
 } from '../services/memory/memoryGraph';
@@ -158,6 +160,46 @@ const EntityManagementPage = ({ userId, onBack }) => {
     } catch (error) {
       console.error('[EntityManagement] Failed to create entity:', error);
       alert('Failed to create. Please try again.');
+    }
+  };
+
+  // Handle adding entity relationship
+  const handleAddRelationship = async (sourceEntityId, targetEntityId, relationshipType) => {
+    try {
+      await addEntityRelationship(userId, sourceEntityId, targetEntityId, relationshipType);
+      // Refresh entities and update editingEntity
+      const grouped = await getAllEntities(userId, { excludeArchived: !showArchived });
+      setEntities(grouped);
+
+      // Update the editing entity with fresh data
+      const flatEntities = Object.values(grouped).flat();
+      const updatedEntity = flatEntities.find(e => e.id === sourceEntityId);
+      if (updatedEntity) {
+        setEditingEntity(updatedEntity);
+      }
+    } catch (error) {
+      console.error('[EntityManagement] Failed to add relationship:', error);
+      alert('Failed to add connection. Please try again.');
+    }
+  };
+
+  // Handle removing entity relationship
+  const handleRemoveRelationship = async (sourceEntityId, targetEntityId, relationshipType) => {
+    try {
+      await removeEntityRelationship(userId, sourceEntityId, targetEntityId, relationshipType);
+      // Refresh entities and update editingEntity
+      const grouped = await getAllEntities(userId, { excludeArchived: !showArchived });
+      setEntities(grouped);
+
+      // Update the editing entity with fresh data
+      const flatEntities = Object.values(grouped).flat();
+      const updatedEntity = flatEntities.find(e => e.id === sourceEntityId);
+      if (updatedEntity) {
+        setEditingEntity(updatedEntity);
+      }
+    } catch (error) {
+      console.error('[EntityManagement] Failed to remove relationship:', error);
+      alert('Failed to remove connection. Please try again.');
     }
   };
 
@@ -429,10 +471,12 @@ const EntityManagementPage = ({ userId, onBack }) => {
         {editingEntity && (
           <EntityEditModal
             entity={editingEntity}
-            allEntities={Object.values(entities).flat()}
+            allEntities={entities}
             onSave={handleUpdateEntity}
             onDelete={handleDeleteEntity}
             onArchive={handleArchiveEntity}
+            onAddRelationship={handleAddRelationship}
+            onRemoveRelationship={handleRemoveRelationship}
             onClose={() => setEditingEntity(null)}
           />
         )}
@@ -443,7 +487,7 @@ const EntityManagementPage = ({ userId, onBack }) => {
         {showCreateModal && (
           <EntityEditModal
             entity={null}
-            allEntities={Object.values(entities).flat()}
+            allEntities={entities}
             onSave={(_, data) => handleCreateEntity(data)}
             onClose={() => setShowCreateModal(false)}
             isCreating

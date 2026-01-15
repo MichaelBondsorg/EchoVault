@@ -577,12 +577,26 @@ const generateMemorySummary = ({ core, people, events, values }) => {
     parts.push(`Goes by "${core.preferences.preferredName}".`);
   }
 
-  // Key people
+  // Key people with relationships
   const activePeople = people.filter(p => p.status !== 'archived').slice(0, 5);
   if (activePeople.length > 0) {
-    const peopleStr = activePeople.map(p =>
-      `${p.name} (${p.relationship}, sentiment: ${p.sentiment?.overall?.toFixed(1) || 'unknown'})`
-    ).join(', ');
+    const peopleStr = activePeople.map(p => {
+      let desc = `${p.name} (${p.relationship}`;
+      if (p.sentiment?.overall !== undefined) {
+        desc += `, sentiment: ${p.sentiment.overall.toFixed(1)}`;
+      }
+
+      // Add key relationships
+      const outgoingRels = p.relationships?.filter(r => r.direction === 'outgoing')?.slice(0, 1);
+      if (outgoingRels?.length > 0) {
+        const rel = outgoingRels[0];
+        const linkConfig = ENTITY_LINK_TYPES[rel.relationshipType];
+        desc += `, ${linkConfig?.label?.toLowerCase() || rel.relationshipType} ${rel.targetEntityName}`;
+      }
+
+      desc += ')';
+      return desc;
+    }).join(', ');
     parts.push(`Key people: ${peopleStr}`);
   }
 
@@ -635,7 +649,24 @@ export const formatMemoryForContext = (memory, maxTokens = 500) => {
     const peopleLines = memory.people.slice(0, 5).map(p => {
       const sentiment = p.sentiment?.overall;
       const sentimentLabel = sentiment > 0.3 ? 'positive' : sentiment < -0.3 ? 'strained' : 'neutral';
-      return `- ${p.name} (${p.relationship}): ${sentimentLabel}`;
+
+      // Include entity relationships if present
+      let relationshipInfo = '';
+      if (p.relationships?.length > 0) {
+        const connections = p.relationships
+          .filter(r => r.direction === 'outgoing')
+          .slice(0, 2)
+          .map(r => {
+            const linkConfig = ENTITY_LINK_TYPES[r.relationshipType];
+            return `${linkConfig?.label || r.relationshipType} ${r.targetEntityName}`;
+          });
+        if (connections.length > 0) {
+          relationshipInfo = ` [${connections.join(', ')}]`;
+        }
+      }
+
+      const entityType = p.entityType && p.entityType !== 'person' ? ` [${p.entityType}]` : '';
+      return `- ${p.name}${entityType} (${p.relationship}): ${sentimentLabel}${relationshipInfo}`;
     });
     sections.push(`PEOPLE:\n${peopleLines.join('\n')}`);
   }
@@ -749,7 +780,7 @@ export const runRelevanceDecay = async (userId) => {
 export const ENTITY_TYPES = ['person', 'pet', 'place', 'thing', 'activity'];
 
 /**
- * Valid relationship types by entity type
+ * Valid relationship types by entity type (relationship TO USER)
  */
 export const RELATIONSHIP_TYPES = {
   person: ['friend', 'family', 'partner', 'coworker', 'therapist', 'acquaintance', 'unknown'],
@@ -757,6 +788,44 @@ export const RELATIONSHIP_TYPES = {
   place: ['home', 'work', 'frequent', 'occasional'],
   thing: ['owned', 'used', 'important'],
   activity: ['hobby', 'exercise', 'work', 'social', 'self_care']
+};
+
+/**
+ * Valid relationship types BETWEEN entities (entity-to-entity links)
+ * Format: { type: label, inverse: inverse_type }
+ * Inverse is used for bidirectional display (Luna is pet_of Spencer → Spencer has_pet Luna)
+ */
+export const ENTITY_LINK_TYPES = {
+  // Person-to-person relationships
+  partner_of: { label: 'Partner of', inverse: 'partner_of', forTypes: ['person'] },
+  parent_of: { label: 'Parent of', inverse: 'child_of', forTypes: ['person'] },
+  child_of: { label: 'Child of', inverse: 'parent_of', forTypes: ['person'] },
+  sibling_of: { label: 'Sibling of', inverse: 'sibling_of', forTypes: ['person'] },
+  friend_of: { label: 'Friend of', inverse: 'friend_of', forTypes: ['person'] },
+  coworker_of: { label: 'Coworker of', inverse: 'coworker_of', forTypes: ['person'] },
+
+  // Pet relationships
+  pet_of: { label: 'Pet of', inverse: 'has_pet', forTypes: ['pet'] },
+  has_pet: { label: 'Has pet', inverse: 'pet_of', forTypes: ['person'] },
+
+  // Place relationships
+  lives_at: { label: 'Lives at', inverse: 'home_of', forTypes: ['person', 'pet'] },
+  home_of: { label: 'Home of', inverse: 'lives_at', forTypes: ['place'] },
+  works_at: { label: 'Works at', inverse: 'workplace_of', forTypes: ['person'] },
+  workplace_of: { label: 'Workplace of', inverse: 'works_at', forTypes: ['place'] },
+
+  // Thing relationships
+  owns: { label: 'Owns', inverse: 'owned_by', forTypes: ['person'] },
+  owned_by: { label: 'Owned by', inverse: 'owns', forTypes: ['thing'] },
+
+  // Activity relationships
+  does_activity: { label: 'Does', inverse: 'done_by', forTypes: ['person'] },
+  done_by: { label: 'Done by', inverse: 'does_activity', forTypes: ['activity'] },
+  done_with: { label: 'Done with', inverse: 'activity_partner', forTypes: ['activity'] },
+  activity_partner: { label: 'Activity partner for', inverse: 'done_with', forTypes: ['person'] },
+
+  // Generic
+  related_to: { label: 'Related to', inverse: 'related_to', forTypes: ['person', 'pet', 'place', 'thing', 'activity'] }
 };
 
 /**
@@ -923,6 +992,188 @@ export const createEntity = async (userId, entityData) => {
   return { id: entityRef.id, ...newEntity };
 };
 
+// ============================================
+// ENTITY RELATIONSHIPS (Entity-to-Entity Links)
+// ============================================
+
+/**
+ * Add a relationship between two entities
+ * Creates bidirectional links (e.g., Luna pet_of Spencer ↔ Spencer has_pet Luna)
+ *
+ * @param {string} userId - User ID
+ * @param {string} sourceEntityId - Source entity ID
+ * @param {string} targetEntityId - Target entity ID
+ * @param {string} relationshipType - Type of relationship (from ENTITY_LINK_TYPES)
+ * @returns {Object} Result with both entity updates
+ */
+export const addEntityRelationship = async (userId, sourceEntityId, targetEntityId, relationshipType) => {
+  if (!ENTITY_LINK_TYPES[relationshipType]) {
+    throw new Error(`Invalid relationship type: ${relationshipType}`);
+  }
+
+  const [source, target] = await Promise.all([
+    getPerson(userId, sourceEntityId),
+    getPerson(userId, targetEntityId)
+  ]);
+
+  if (!source) throw new Error(`Source entity ${sourceEntityId} not found`);
+  if (!target) throw new Error(`Target entity ${targetEntityId} not found`);
+
+  const linkType = ENTITY_LINK_TYPES[relationshipType];
+  const inverseType = linkType.inverse;
+
+  // Create forward relationship (source → target)
+  const sourceRelationships = source.relationships || [];
+  const existingForward = sourceRelationships.find(
+    r => r.targetEntityId === targetEntityId && r.relationshipType === relationshipType
+  );
+
+  if (!existingForward) {
+    sourceRelationships.push({
+      targetEntityId,
+      targetEntityName: target.name,
+      relationshipType,
+      direction: 'outgoing',
+      createdAt: new Date().toISOString()
+    });
+  }
+
+  // Create inverse relationship (target → source)
+  const targetRelationships = target.relationships || [];
+  const existingInverse = targetRelationships.find(
+    r => r.targetEntityId === sourceEntityId && r.relationshipType === inverseType
+  );
+
+  if (!existingInverse) {
+    targetRelationships.push({
+      targetEntityId: sourceEntityId,
+      targetEntityName: source.name,
+      relationshipType: inverseType,
+      direction: 'incoming',
+      createdAt: new Date().toISOString()
+    });
+  }
+
+  // Update both entities
+  const sourceRef = doc(db, getMemorySubcollectionPath(userId, 'people'), sourceEntityId);
+  const targetRef = doc(db, getMemorySubcollectionPath(userId, 'people'), targetEntityId);
+
+  const batch = writeBatch(db);
+  batch.update(sourceRef, {
+    relationships: sourceRelationships,
+    updatedAt: serverTimestamp()
+  });
+  batch.update(targetRef, {
+    relationships: targetRelationships,
+    updatedAt: serverTimestamp()
+  });
+
+  await batch.commit();
+
+  return {
+    success: true,
+    sourceEntity: { id: sourceEntityId, name: source.name },
+    targetEntity: { id: targetEntityId, name: target.name },
+    relationshipType,
+    inverseType
+  };
+};
+
+/**
+ * Remove a relationship between two entities
+ * Removes both directions of the link
+ *
+ * @param {string} userId - User ID
+ * @param {string} sourceEntityId - Source entity ID
+ * @param {string} targetEntityId - Target entity ID
+ * @param {string} relationshipType - Type of relationship to remove
+ */
+export const removeEntityRelationship = async (userId, sourceEntityId, targetEntityId, relationshipType) => {
+  if (!ENTITY_LINK_TYPES[relationshipType]) {
+    throw new Error(`Invalid relationship type: ${relationshipType}`);
+  }
+
+  const [source, target] = await Promise.all([
+    getPerson(userId, sourceEntityId),
+    getPerson(userId, targetEntityId)
+  ]);
+
+  if (!source || !target) {
+    // One or both entities deleted - nothing to do
+    return { success: true, alreadyRemoved: true };
+  }
+
+  const linkType = ENTITY_LINK_TYPES[relationshipType];
+  const inverseType = linkType.inverse;
+
+  // Remove forward relationship
+  const sourceRelationships = (source.relationships || []).filter(
+    r => !(r.targetEntityId === targetEntityId && r.relationshipType === relationshipType)
+  );
+
+  // Remove inverse relationship
+  const targetRelationships = (target.relationships || []).filter(
+    r => !(r.targetEntityId === sourceEntityId && r.relationshipType === inverseType)
+  );
+
+  // Update both entities
+  const sourceRef = doc(db, getMemorySubcollectionPath(userId, 'people'), sourceEntityId);
+  const targetRef = doc(db, getMemorySubcollectionPath(userId, 'people'), targetEntityId);
+
+  const batch = writeBatch(db);
+  batch.update(sourceRef, {
+    relationships: sourceRelationships,
+    updatedAt: serverTimestamp()
+  });
+  batch.update(targetRef, {
+    relationships: targetRelationships,
+    updatedAt: serverTimestamp()
+  });
+
+  await batch.commit();
+
+  return { success: true };
+};
+
+/**
+ * Get all relationships for an entity
+ * Returns both outgoing and incoming relationships
+ *
+ * @param {string} userId - User ID
+ * @param {string} entityId - Entity ID
+ * @returns {Object} { outgoing: [], incoming: [] }
+ */
+export const getEntityRelationships = async (userId, entityId) => {
+  const entity = await getPerson(userId, entityId);
+
+  if (!entity) {
+    return { outgoing: [], incoming: [] };
+  }
+
+  const relationships = entity.relationships || [];
+
+  return {
+    outgoing: relationships.filter(r => r.direction === 'outgoing'),
+    incoming: relationships.filter(r => r.direction === 'incoming'),
+    all: relationships
+  };
+};
+
+/**
+ * Get valid relationship types for a given entity type
+ * @param {string} entityType - The entity type (person, pet, place, etc.)
+ * @returns {Array} Array of { type, label } for valid relationship types
+ */
+export const getValidLinkTypesForEntity = (entityType) => {
+  return Object.entries(ENTITY_LINK_TYPES)
+    .filter(([_, config]) => config.forTypes.includes(entityType))
+    .map(([type, config]) => ({
+      type,
+      label: config.label,
+      inverse: config.inverse
+    }));
+};
+
 export default {
   // Core
   getCoreMemory,
@@ -969,5 +1220,12 @@ export default {
   updateEntity,
   deleteEntity,
   mergeEntities,
-  createEntity
+  createEntity,
+
+  // Entity Relationships (Entity-to-Entity Links)
+  ENTITY_LINK_TYPES,
+  addEntityRelationship,
+  removeEntityRelationship,
+  getEntityRelationships,
+  getValidLinkTypesForEntity
 };

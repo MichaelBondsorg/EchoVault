@@ -1,10 +1,15 @@
-import { useState, useEffect } from 'react';
-import { motion } from 'framer-motion';
+import { useState, useEffect, useMemo } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
 import {
-  X, Trash2, Archive, Save, Plus, AlertTriangle,
+  X, Trash2, Archive, Save, Plus, AlertTriangle, Link2, ChevronDown,
   User, PawPrint, MapPin, Package, Activity
 } from 'lucide-react';
-import { ENTITY_TYPES, RELATIONSHIP_TYPES } from '../../services/memory/memoryGraph';
+import {
+  ENTITY_TYPES,
+  RELATIONSHIP_TYPES,
+  ENTITY_LINK_TYPES,
+  getValidLinkTypesForEntity
+} from '../../services/memory/memoryGraph';
 
 /**
  * EntityEditModal - Edit or create an entity
@@ -22,6 +27,8 @@ const EntityEditModal = ({
   onSave,
   onDelete,
   onArchive,
+  onAddRelationship,
+  onRemoveRelationship,
   onClose,
   isCreating = false
 }) => {
@@ -33,6 +40,12 @@ const EntityEditModal = ({
   const [notes, setNotes] = useState('');
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [saving, setSaving] = useState(false);
+
+  // Relationship linking state
+  const [showRelationshipPicker, setShowRelationshipPicker] = useState(false);
+  const [selectedTargetEntity, setSelectedTargetEntity] = useState('');
+  const [selectedLinkType, setSelectedLinkType] = useState('');
+  const [addingRelationship, setAddingRelationship] = useState(false);
 
   // Entity type icons
   const typeIcons = {
@@ -70,6 +83,63 @@ const EntityEditModal = ({
       setRelationship(availableRelationships[0] || 'unknown');
     }
   }, [entityType, availableRelationships, relationship]);
+
+  // Get current entity relationships
+  const currentRelationships = entity?.relationships || [];
+
+  // Get valid link types for the current entity type
+  const validLinkTypes = useMemo(() => {
+    return getValidLinkTypesForEntity(entityType);
+  }, [entityType]);
+
+  // Get available target entities (exclude self and already-linked entities for this relationship type)
+  const availableTargetEntities = useMemo(() => {
+    if (!entity?.id) return [];
+
+    // Flatten all entities
+    const flatEntities = Object.values(allEntities).flat();
+
+    // Exclude self
+    return flatEntities.filter(e => {
+      if (e.id === entity.id) return false;
+      // Could also filter out already-linked for this specific type if desired
+      return true;
+    });
+  }, [allEntities, entity?.id]);
+
+  // Reset picker when hidden
+  useEffect(() => {
+    if (!showRelationshipPicker) {
+      setSelectedTargetEntity('');
+      setSelectedLinkType('');
+    }
+  }, [showRelationshipPicker]);
+
+  // Handle adding a relationship
+  const handleAddRelationship = async () => {
+    if (!selectedTargetEntity || !selectedLinkType || !onAddRelationship) return;
+
+    setAddingRelationship(true);
+    try {
+      await onAddRelationship(entity.id, selectedTargetEntity, selectedLinkType);
+      setShowRelationshipPicker(false);
+    } catch (error) {
+      console.error('[EntityEditModal] Failed to add relationship:', error);
+    } finally {
+      setAddingRelationship(false);
+    }
+  };
+
+  // Handle removing a relationship
+  const handleRemoveRelationship = async (targetEntityId, relationshipType) => {
+    if (!onRemoveRelationship) return;
+
+    try {
+      await onRemoveRelationship(entity.id, targetEntityId, relationshipType);
+    } catch (error) {
+      console.error('[EntityEditModal] Failed to remove relationship:', error);
+    }
+  };
 
   // Add alias
   const handleAddAlias = () => {
@@ -288,6 +358,142 @@ const EntityEditModal = ({
                 text-warm-800 placeholder-warm-400 focus:outline-none focus:ring-2 focus:ring-primary-300 resize-none"
             />
           </div>
+
+          {/* Entity Relationships (Links to other entities) - Edit mode only */}
+          {!isCreating && onAddRelationship && (
+            <div>
+              <label className="block text-sm font-medium text-warm-700 mb-1.5">
+                <div className="flex items-center gap-2">
+                  <Link2 size={16} />
+                  Connected to
+                </div>
+              </label>
+
+              {/* Current relationships */}
+              {currentRelationships.length > 0 ? (
+                <div className="space-y-2 mb-3">
+                  {currentRelationships.map((rel, idx) => {
+                    const linkConfig = ENTITY_LINK_TYPES[rel.relationshipType];
+                    return (
+                      <div
+                        key={`${rel.targetEntityId}-${rel.relationshipType}-${idx}`}
+                        className="flex items-center justify-between p-3 bg-warm-50 rounded-xl border border-warm-100"
+                      >
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs text-warm-500 uppercase tracking-wide">
+                            {linkConfig?.label || formatLabel(rel.relationshipType)}
+                          </span>
+                          <span className="font-medium text-warm-800">
+                            {rel.targetEntityName}
+                          </span>
+                        </div>
+                        <button
+                          onClick={() => handleRemoveRelationship(rel.targetEntityId, rel.relationshipType)}
+                          className="p-1.5 text-warm-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
+                          title="Remove relationship"
+                        >
+                          <X size={16} />
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <p className="text-sm text-warm-500 mb-3">
+                  No connections yet
+                </p>
+              )}
+
+              {/* Add relationship button/picker */}
+              {!showRelationshipPicker ? (
+                <button
+                  onClick={() => setShowRelationshipPicker(true)}
+                  className="w-full py-2.5 px-4 border-2 border-dashed border-warm-200 text-warm-500
+                    rounded-xl hover:border-primary-300 hover:text-primary-600 transition-colors
+                    flex items-center justify-center gap-2"
+                >
+                  <Plus size={18} />
+                  Add connection
+                </button>
+              ) : (
+                <motion.div
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: 'auto' }}
+                  className="p-4 bg-primary-50 rounded-xl border border-primary-200 space-y-3"
+                >
+                  {/* Target entity picker */}
+                  <div>
+                    <label className="block text-xs text-primary-700 mb-1">
+                      Connect to
+                    </label>
+                    <select
+                      value={selectedTargetEntity}
+                      onChange={(e) => setSelectedTargetEntity(e.target.value)}
+                      className="w-full px-3 py-2 bg-white border border-primary-200 rounded-lg
+                        text-warm-800 focus:outline-none focus:ring-2 focus:ring-primary-300 text-sm"
+                    >
+                      <option value="">Select an entity...</option>
+                      {availableTargetEntities.map((e) => {
+                        const Icon = typeIcons[e.entityType || 'person'];
+                        return (
+                          <option key={e.id} value={e.id}>
+                            {e.name} ({formatLabel(e.entityType || 'person')})
+                          </option>
+                        );
+                      })}
+                    </select>
+                  </div>
+
+                  {/* Relationship type picker */}
+                  <div>
+                    <label className="block text-xs text-primary-700 mb-1">
+                      Relationship type
+                    </label>
+                    <select
+                      value={selectedLinkType}
+                      onChange={(e) => setSelectedLinkType(e.target.value)}
+                      className="w-full px-3 py-2 bg-white border border-primary-200 rounded-lg
+                        text-warm-800 focus:outline-none focus:ring-2 focus:ring-primary-300 text-sm"
+                    >
+                      <option value="">Select relationship...</option>
+                      {validLinkTypes.map((lt) => (
+                        <option key={lt.type} value={lt.type}>
+                          {lt.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Add/Cancel buttons */}
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => setShowRelationshipPicker(false)}
+                      className="flex-1 py-2 px-3 text-warm-600 hover:bg-white rounded-lg
+                        transition-colors text-sm"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={handleAddRelationship}
+                      disabled={!selectedTargetEntity || !selectedLinkType || addingRelationship}
+                      className="flex-1 py-2 px-3 bg-primary-600 text-white rounded-lg
+                        hover:bg-primary-700 transition-colors text-sm disabled:opacity-50
+                        flex items-center justify-center gap-1"
+                    >
+                      {addingRelationship ? (
+                        <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                      ) : (
+                        <>
+                          <Link2 size={14} />
+                          Connect
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </motion.div>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Actions */}
