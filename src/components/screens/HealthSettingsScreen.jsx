@@ -319,21 +319,21 @@ const HealthSettingsScreen = ({ onClose }) => {
                   <div className="text-center">
                     <Footprints className="w-4 h-4 mx-auto text-green-500 mb-1" />
                     <p className="text-sm font-semibold text-warm-800">
-                      {todayData.steps ? `${(todayData.steps / 1000).toFixed(1)}k` : '—'}
+                      {todayData.activity?.stepsToday ? `${(todayData.activity.stepsToday / 1000).toFixed(1)}k` : '—'}
                     </p>
                     <p className="text-[10px] text-warm-500">Steps</p>
                   </div>
                   <div className="text-center">
                     <Activity className="w-4 h-4 mx-auto text-orange-500 mb-1" />
                     <p className="text-sm font-semibold text-warm-800">
-                      {todayData.hasWorkout ? '✓' : '—'}
+                      {todayData.activity?.hasWorkout ? '✓' : '—'}
                     </p>
                     <p className="text-[10px] text-warm-500">Workout</p>
                   </div>
                   <div className="text-center">
                     <Heart className="w-4 h-4 mx-auto text-red-400 mb-1" />
                     <p className="text-sm font-semibold text-warm-800">
-                      {todayData.heartRate?.resting ?? '—'}
+                      {todayData.heart?.restingRate ?? '—'}
                     </p>
                     <p className="text-[10px] text-warm-500">BPM</p>
                   </div>

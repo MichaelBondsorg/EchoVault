@@ -2,12 +2,12 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-    <key>CAPACITOR_DEBUG</key>
+	<key>CAPACITOR_DEBUG</key>
 	<string>$(CAPACITOR_DEBUG)</string>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>en</string>
 	<key>CFBundleDisplayName</key>
-        <string>EchoVault</string>
+	<string>EchoVault</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -20,10 +20,48 @@
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
 	<string>$(MARKETING_VERSION)</string>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>com.echovault.app</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>echovault</string>
+			</array>
+		</dict>
+	</array>
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsArbitraryLoads</key>
+		<true/>
+		<key>NSAllowsArbitraryLoadsInWebContent</key>
+		<true/>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+	</dict>
+	<key>NSFaceIDUsageDescription</key>
+	<string>Use Face ID to securely access your private journal entries.</string>
+	<key>NSHealthShareUsageDescription</key>
+	<string>EchoVault reads your health data (sleep, steps, heart rate) to show you how your physical health affects your mood. We never share this data.</string>
+	<key>NSHealthUpdateUsageDescription</key>
+	<string>EchoVault does not write any data to Apple Health.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>EchoVault needs microphone access to record voice journal entries. Your recordings are transcribed and stored securely.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>EchoVault uses speech recognition to transcribe your voice journal entries into text.</string>
+	<key>NSUserTrackingUsageDescription</key>
+	<string>EchoVault does not track you. We only collect data necessary to provide journaling features.</string>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>audio</string>
+	</array>
 	<key>UILaunchStoryboardName</key>
 	<string>LaunchScreen</string>
 	<key>UIMainStoryboardFile</key>
@@ -47,62 +85,5 @@
 	</array>
 	<key>UIViewControllerBasedStatusBarAppearance</key>
 	<true/>
-
-	<!-- Microphone Permission - Required for voice journaling -->
-	<key>NSMicrophoneUsageDescription</key>
-	<string>EchoVault needs microphone access to record voice journal entries. Your recordings are transcribed and stored securely.</string>
-
-	<!-- Speech Recognition (if using on-device) -->
-	<key>NSSpeechRecognitionUsageDescription</key>
-	<string>EchoVault uses speech recognition to transcribe your voice journal entries into text.</string>
-
-	<!-- Face ID (for future biometric auth) -->
-	<key>NSFaceIDUsageDescription</key>
-	<string>Use Face ID to securely access your private journal entries.</string>
-
-	<!-- HealthKit - Read health data for mood correlation insights -->
-	<key>NSHealthShareUsageDescription</key>
-	<string>EchoVault reads your health data (sleep, steps, heart rate) to show you how your physical health affects your mood. We never share this data.</string>
-
-	<key>NSHealthUpdateUsageDescription</key>
-	<string>EchoVault does not write any data to Apple Health.</string>
-
-	<!-- App Transport Security - Allow all connections (temporary for debugging) -->
-	<key>NSAppTransportSecurity</key>
-	<dict>
-		<key>NSAllowsArbitraryLoads</key>
-		<true/>
-		<key>NSAllowsArbitraryLoadsInWebContent</key>
-		<true/>
-		<key>NSAllowsLocalNetworking</key>
-		<true/>
-	</dict>
-
-	<!-- Background Modes (if needed for audio) -->
-	<key>UIBackgroundModes</key>
-	<array>
-		<string>audio</string>
-	</array>
-
-	<!-- Privacy - User data descriptions for App Store -->
-	<key>NSUserTrackingUsageDescription</key>
-	<string>EchoVault does not track you. We only collect data necessary to provide journaling features.</string>
-
-	<!-- ITSAppUsesNonExemptEncryption - Required for App Store -->
-	<key>ITSAppUsesNonExemptEncryption</key>
-	<false/>
-
-	<!-- URL Schemes - Deep linking for OAuth callbacks -->
-	<key>CFBundleURLTypes</key>
-	<array>
-		<dict>
-			<key>CFBundleURLName</key>
-			<string>com.echovault.app</string>
-			<key>CFBundleURLSchemes</key>
-			<array>
-				<string>echovault</string>
-			</array>
-		</dict>
-	</array>
 </dict>
 </plist>
