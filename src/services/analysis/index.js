@@ -2,6 +2,23 @@ import { analyzeJournalEntryCloud } from '../ai/gemini';
 import { cosineSimilarity } from '../ai/embeddings';
 import { askJournalAIFn } from '../../config/firebase';
 
+// Local analysis exports (for offline/iOS optimization)
+export { classify as classifyLocal, ENTRY_TYPES } from './localClassifier';
+export { analyze as analyzeSentimentLocal, getLabel as getSentimentLabel, quickCheck as quickSentimentCheck } from './localSentiment';
+export {
+  routeClassification,
+  routeSentiment,
+  performLocalAnalysis,
+  getAnalysisStrategy,
+  compareAnalysis
+} from './analysisRouter';
+export {
+  detectRecurrence,
+  hasRecurrenceIndicators,
+  getNextOccurrence,
+  getRecurrenceDescription
+} from './recurrenceDetector';
+
 /**
  * Classify entry into type: task, mixed, reflection, or vent
  * Now uses Cloud Function (which handles recurrence detection)

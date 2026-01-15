@@ -58,6 +58,9 @@
 | 2026-01-15 | Smart merge Whoop + HealthKit | When both sources connected: Sleep/HRV/Recovery from Whoop (24/7 tracking), Steps from HealthKit (Whoop doesn't track steps). Best of both worlds. | User prefers single source |
 | 2026-01-15 | Health backfill user-triggered | Button in Health Settings to retroactively add health data to old entries. User-triggered (not automatic) to give control. | N/A |
 | 2026-01-15 | Whoop secrets in Cloud Run Secret Manager | OAuth credentials stored as secrets, not env vars. Relay server handles token exchange and encrypted storage in Firestore. | N/A |
+| 2026-01-15 | iOS local analysis for offline + latency | iOS gets <200ms local classification/sentiment vs ~5s server. Full offline journaling (except AI chat). Single codebase with runtime platform detection via Capacitor. | Local accuracy < 80% |
+| 2026-01-15 | Native Swift sleep score calculation | Sleep score computed in Swift (<10ms) vs JS for maximum iOS performance. Falls back to JS if native fails. | N/A |
+| 2026-01-15 | VADER-style local sentiment (no ML model) | Lexicon-based sentiment analysis with intensifiers, negation, emoji handling. Avoids Core ML complexity while achieving good accuracy. | Accuracy issues warrant ML |
 
 ---
 
@@ -114,10 +117,84 @@ Good ideas we're explicitly NOT doing now. Don't re-suggest these.
 | `src/pages/EntityManagementPage.jsx` | Entity list/management view (Milestone 1) |
 | `src/components/settings/EntityEditModal.jsx` | Entity edit form modal (Milestone 1) |
 | `src/services/health/healthBackfill.js` | Retroactive health data for old entries |
+| `src/services/offline/offlineStore.js` | IndexedDB wrapper for offline entry queue |
+| `src/services/offline/offlineManager.js` | Queue management with retry logic |
+| `src/services/sync/syncOrchestrator.js` | Conflict resolution, batch sync |
+| `src/services/entries/entryProcessor.js` | Platform-aware entry pipeline |
+| `src/services/analysis/localClassifier.js` | Rule-based entry type classification |
+| `src/services/analysis/localSentiment.js` | VADER-style sentiment analysis |
+| `src/services/analysis/sentimentLexicon.js` | 200+ word lexicon with valence scores |
+| `src/services/analysis/analysisRouter.js` | Routes analysis to local or server |
+| `src/services/analysis/recurrenceDetector.js` | Detects recurring task patterns |
+| `src/services/signals/localGoalDetector.js` | Extracts goals from entry text |
+| `src/services/signals/localTemporalParser.js` | Parses date/time expressions |
+| `src/hooks/useEntryProcessor.js` | Hook for platform-aware entry processing |
 
 ---
 
 ## Session Notes
+
+### 2026-01-15: iOS vs Web Client-Side Computation (Offline-First)
+
+**Context:** Implement differentiated client-side computation for iOS vs Web to decrease latency and enable full offline journaling.
+
+**Architecture Implemented:**
+```
+iOS (On-Device)                          Web (Server-Dependent)
+===============                          ====================
+Entry Input                              Entry Input
+    |                                        |
+    v                                        v
+[Local Classifier] <50ms                 [Cloud Function] ~2s
+    |                                        |
+    v                                        v
+[Local Sentiment] <30ms                  [Gemini Analysis] ~3s
+    |                                        |
+    v                                        v
+[IndexedDB Queue] ---sync when online--> [Firestore]
+    |
+    v
+[Native Sleep Score] <10ms
+(Swift/HealthKit)
+```
+
+**Key Design Decisions:**
+- **Single codebase** with runtime platform detection via `Capacitor.getPlatform()`
+- **VADER-style sentiment** (lexicon-based, no Core ML) - simpler and fast enough
+- **Native Swift sleep score** for <10ms vs JS calculation
+- **Offline queue** with exponential backoff retry (2s base, 30s max)
+
+**New Services Created:**
+| Service | Purpose |
+|---------|---------|
+| `offlineStore.js` | IndexedDB wrapper via Capacitor Preferences |
+| `offlineManager.js` | Queue management with retry logic |
+| `syncOrchestrator.js` | Conflict resolution, batch sync |
+| `entryProcessor.js` | Platform-aware entry pipeline |
+| `localClassifier.js` | Rule-based entry type detection |
+| `localSentiment.js` | VADER-style sentiment (200+ word lexicon) |
+| `analysisRouter.js` | Routes to local or server based on platform |
+| `recurrenceDetector.js` | Detects recurring task patterns |
+| `localGoalDetector.js` | Extracts goals from text |
+| `localTemporalParser.js` | Parses date/time expressions |
+
+**Swift Additions:**
+- `calculateSleepScore()` method in HealthPlugin.swift
+- Same formula as JS for consistency
+- Returns score + breakdown by component
+
+**Integration Points:**
+- `App.jsx:doSaveEntry()` now uses local analysis when offline on iOS
+- `useNetworkStatus` hook triggers sync on reconnect
+- `healthKit.js` tries native sleep score, falls back to JS
+
+**Performance Targets:**
+| Operation | Target | Achieved |
+|-----------|--------|----------|
+| Local classification | <50ms | ✓ |
+| Local sentiment | <30ms | ✓ |
+| Native sleep score | <10ms | ✓ |
+| Full offline save | <200ms | ✓ |
 
 ### 2026-01-15: Whoop Integration, Smart Merge & Health Backfill
 

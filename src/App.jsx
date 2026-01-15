@@ -33,10 +33,12 @@ import { sanitizeEntry } from './utils/entries';
 // Services
 import { generateEmbedding, findRelevantMemories, transcribeAudioWithTone } from './services/ai';
 import {
-  classifyEntry, analyzeEntry, generateInsight, extractEnhancedContext
+  classifyEntry, analyzeEntry, generateInsight, extractEnhancedContext,
+  performLocalAnalysis, getAnalysisStrategy
 } from './services/analysis';
 import { checkCrisisKeywords, checkWarningIndicators, checkLongitudinalRisk } from './services/safety';
 import { retrofitEntriesInBackground } from './services/entries';
+import { queueEntry, getSyncStatus } from './services/offline';
 import { inferCategory } from './services/prompts';
 import { getActiveReflectionPrompts, dismissReflectionPrompt } from './services/prompts/activePrompts';
 import { detectTemporalContext, needsConfirmation, formatEffectiveDate } from './services/temporal';
@@ -720,20 +722,62 @@ export default function App() {
       note: 'effectiveDate is always current date now - signals handle temporal attribution'
     });
 
-    // If offline, queue the entry for later processing
+    // Check platform for local analysis capability
+    const platform = Capacitor.getPlatform();
+    const isNative = platform === 'ios' || platform === 'android';
+    const analysisStrategy = getAnalysisStrategy(isOnline);
+
+    console.log('[EntryProcessor] Platform:', platform, 'Strategy:', analysisStrategy.strategy);
+
+    // If offline, use local analysis and queue for sync
     if (!isOnline) {
-      console.log('Offline: queuing entry for later processing');
-      const offlineEntry = {
+      console.log('Offline: using local analysis and queuing for sync');
+
+      // Perform local analysis for immediate feedback (iOS/Android only)
+      let localAnalysis = null;
+      if (isNative) {
+        try {
+          console.time('⏱️ Local Analysis');
+          localAnalysis = performLocalAnalysis(finalTex, { voiceTone });
+          console.timeEnd('⏱️ Local Analysis');
+          console.log('[LocalAnalysis] Result:', {
+            entry_type: localAnalysis.entry_type,
+            mood_score: localAnalysis.mood_score,
+            confidence: localAnalysis.classification_confidence
+          });
+        } catch (localError) {
+          console.warn('[LocalAnalysis] Failed:', localError);
+        }
+      }
+
+      // Queue with the new offline manager
+      const offlineEntry = await queueEntry({
         text: finalTex,
         category: cat,
-        offlineId: Date.now().toString(),
-        createdAt: now,
-        effectiveDate: effectiveDate,
+        createdAt: now.toISOString(),
+        effectiveDate: effectiveDate.toISOString(),
+        localAnalysis,
+        healthContext,
+        environmentContext,
+        voiceTone,
         safety_flagged: safetyFlagged || undefined,
         safety_user_response: safetyUserResponse || undefined,
-        has_warning_indicators: hasWarning || undefined
-      };
-      setOfflineQueue(prev => [...prev, offlineEntry]);
+        has_warning_indicators: hasWarning || undefined,
+        platform
+      });
+
+      // Also add to local state for immediate UI update
+      setOfflineQueue(prev => [...prev, {
+        ...offlineEntry,
+        // Include local analysis in display
+        analysis: localAnalysis ? {
+          mood_score: localAnalysis.mood_score,
+          framework: 'local'
+        } : null,
+        entry_type: localAnalysis?.entry_type || 'reflection',
+        title: localAnalysis?.title || finalTex.substring(0, 50) + '...'
+      }]);
+
       setProcessing(false);
       setReplyContext(null);
       return;
@@ -742,6 +786,24 @@ export default function App() {
     // OPTIMIZED: Save entry immediately, generate embedding in background
     // This reduces user-perceived latency from ~5.9s to ~0.3s
     // Embedding will be backfilled by Firestore trigger (see functions/index.js)
+
+    // On native platforms, perform local analysis for immediate feedback
+    // This runs in parallel with entry save and provides instant mood/classification
+    let localAnalysis = null;
+    if (isNative) {
+      try {
+        console.time('⏱️ Local Analysis (native)');
+        localAnalysis = performLocalAnalysis(finalTex, { voiceTone });
+        console.timeEnd('⏱️ Local Analysis (native)');
+        console.log('[LocalAnalysis] Immediate result:', {
+          entry_type: localAnalysis.entry_type,
+          mood_score: localAnalysis.mood_score?.toFixed(2),
+          time_ms: localAnalysis.local_analysis_time_ms
+        });
+      } catch (localError) {
+        console.warn('[LocalAnalysis] Failed, server analysis will provide results:', localError);
+      }
+    }
 
     // Skip embedding generation - let server-side trigger handle it
     const embedding = null;
@@ -823,6 +885,29 @@ export default function App() {
         if (voiceTone.confidence >= 0.6) {
           entryData.voiceMoodScore = voiceTone.moodScore;
         }
+      }
+
+      // Store local analysis for immediate display (native platforms only)
+      // Server analysis will run in background and update with richer results
+      if (localAnalysis) {
+        entryData.localAnalysis = {
+          entry_type: localAnalysis.entry_type,
+          mood_score: localAnalysis.mood_score,
+          classification_confidence: localAnalysis.classification_confidence,
+          sentiment_confidence: localAnalysis.sentiment_confidence,
+          extracted_tasks: localAnalysis.extracted_tasks || [],
+          analyzed_at: new Date().toISOString(),
+          analysis_time_ms: localAnalysis.local_analysis_time_ms
+        };
+        // Use local results as initial analysis (will be updated by server)
+        entryData.entry_type = localAnalysis.entry_type;
+        entryData.title = finalTex.substring(0, 50) + (finalTex.length > 50 ? '...' : '');
+        entryData.analysis = {
+          mood_score: localAnalysis.mood_score,
+          framework: 'local_pending_server'
+        };
+        // Mark that we have local analysis, server should still run
+        entryData.hasLocalAnalysis = true;
       }
 
       // Store temporal context if detected (past reference)

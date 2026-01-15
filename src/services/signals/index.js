@@ -284,6 +284,19 @@ export const getFutureSignals = async (userId, fromDate = new Date()) => {
     .filter(s => s.type === 'plan');
 };
 
+// Local pattern detection (for offline iOS processing)
+export {
+  extractGoals,
+  hasGoalIndicators,
+  categorizeGoal
+} from './localGoalDetector';
+
+export {
+  parseTemporalExpressions,
+  hasTemporalIndicators,
+  getPrimaryTemporal
+} from './localTemporalParser';
+
 export default {
   saveSignalsWithVersionCheck,
   deleteSignalsForEntry,
