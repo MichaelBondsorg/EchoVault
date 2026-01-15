@@ -321,8 +321,8 @@ const querySleep = async (plugin, start, end) => {
     const totalHours = result.total / 60;
     const quality = totalHours >= 7 ? 'good' : totalHours >= 5 ? 'fair' : 'poor';
 
-    // Calculate sleep score with actual data using full formula
-    const score = calculateSleepScore({
+    // Calculate sleep score - try native first (iOS), fallback to JS
+    const sleepData = {
       totalMinutes: result.total,
       deepMinutes: result.deep,
       coreMinutes: result.core,
@@ -331,7 +331,8 @@ const querySleep = async (plugin, start, end) => {
       awakePeriods: result.awakePeriods || 0,
       inBedStart: result.inBedStart,
       inBedEnd: result.inBedEnd
-    });
+    };
+    const score = await getNativeSleepScore(plugin, sleepData);
 
     return {
       totalHours: Math.round(totalHours * 10) / 10,
@@ -402,13 +403,58 @@ const querySleepBasic = async (plugin, start, end) => {
 };
 
 /**
- * Calculate sleep score from full HealthKit sleep stage data
+ * Try to calculate sleep score natively (iOS) for <10ms performance
+ * Falls back to JavaScript calculation if native fails
+ *
+ * @param {Object} plugin - Health plugin instance
+ * @param {Object} data - Sleep data from sleep-stages endpoint
+ * @returns {Promise<number>} Sleep score 0-100
+ */
+const getNativeSleepScore = async (plugin, data) => {
+  const {
+    totalMinutes,
+    deepMinutes,
+    coreMinutes,
+    remMinutes,
+    awakeMinutes,
+    awakePeriods,
+    inBedStart,
+    inBedEnd
+  } = data;
+
+  // Calculate time in bed from timestamps (ms to minutes)
+  const inBedMinutes = inBedEnd > inBedStart
+    ? (inBedEnd - inBedStart) / 1000 / 60
+    : totalMinutes / 0.92;
+
+  try {
+    const startTime = performance.now();
+    const result = await plugin.calculateSleepScore({
+      totalMinutes,
+      deepMinutes: deepMinutes || 0,
+      coreMinutes: coreMinutes || 0,
+      remMinutes: remMinutes || 0,
+      awakeMinutes: awakeMinutes || 0,
+      awakePeriods: awakePeriods || 0,
+      inBedMinutes
+    });
+    const elapsed = performance.now() - startTime;
+    console.log(`[HealthKit] Native sleep score calculated in ${elapsed.toFixed(1)}ms:`, result.score);
+    return result.score;
+  } catch (error) {
+    console.warn('[HealthKit] Native sleep score failed, using JS fallback:', error.message);
+    return calculateSleepScoreJS(data);
+  }
+};
+
+/**
+ * Calculate sleep score from full HealthKit sleep stage data (JavaScript version)
  * Uses Michael's complete formula with all available data
  *
  * @param {Object} data - Sleep data from sleep-stages endpoint
  * @returns {number} Sleep score 0-100
  */
-const calculateSleepScore = ({
+const calculateSleepScoreJS = ({
   totalMinutes,
   deepMinutes,
   coreMinutes,

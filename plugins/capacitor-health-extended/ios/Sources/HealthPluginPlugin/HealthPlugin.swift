@@ -19,7 +19,8 @@ public class HealthPlugin: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "queryAggregated", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "queryWorkouts", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "queryLatestSample", returnType: CAPPluginReturnPromise),
-        CAPPluginMethod(name: "getCharacteristics", returnType: CAPPluginReturnPromise)
+        CAPPluginMethod(name: "getCharacteristics", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "calculateSleepScore", returnType: CAPPluginReturnPromise)
     ]
     
     let healthStore = HKHealthStore()
@@ -1714,6 +1715,105 @@ public class HealthPlugin: CAPPlugin, CAPBridgedPlugin {
     }
     
     
+    // MARK: - Native Sleep Score Calculation
+
+    /**
+     * Calculate sleep score natively for <10ms performance
+     * Uses the same formula as JavaScript for consistency
+     *
+     * Expected parameters:
+     * - totalMinutes: Double - Total sleep time in minutes
+     * - deepMinutes: Double - Deep sleep time in minutes
+     * - coreMinutes: Double - Core/light sleep time in minutes
+     * - remMinutes: Double - REM sleep time in minutes
+     * - awakeMinutes: Double - Awake time in minutes
+     * - awakePeriods: Int - Number of times woken up
+     * - inBedMinutes: Double - Total time in bed in minutes (optional)
+     */
+    @objc func calculateSleepScore(_ call: CAPPluginCall) {
+        guard let totalMinutes = call.getDouble("totalMinutes"),
+              totalMinutes > 0 else {
+            call.reject("Missing or invalid totalMinutes")
+            return
+        }
+
+        let deepMinutes = call.getDouble("deepMinutes") ?? 0
+        let coreMinutes = call.getDouble("coreMinutes") ?? 0
+        let remMinutes = call.getDouble("remMinutes") ?? 0
+        let awakeMinutes = call.getDouble("awakeMinutes") ?? 0
+        let awakePeriods = call.getInt("awakePeriods") ?? 0
+
+        // Calculate time in bed - use provided value or estimate from total sleep
+        let inBedMinutes = call.getDouble("inBedMinutes") ?? (totalMinutes / 0.92)
+
+        // Duration score (30%) - 7-9 hours optimal (420-540 minutes)
+        let durationScore = scoreDuration(value: totalMinutes, minOptimal: 420, maxOptimal: 540)
+
+        // Efficiency score (20%) - time asleep / time in bed
+        let efficiency = inBedMinutes > 0 ? (totalMinutes / inBedMinutes) * 100 : 92
+        let efficiencyScore = min(100, efficiency)
+
+        // Deep sleep (20%) - 13-23% of total sleep optimal
+        let deepRatio = totalMinutes > 0 ? deepMinutes / totalMinutes : 0
+        let deepScore = scoreInRange(value: deepRatio, minOptimal: 0.13, maxOptimal: 0.23)
+
+        // REM (15%) - 18-28% of total sleep optimal
+        let remRatio = totalMinutes > 0 ? remMinutes / totalMinutes : 0
+        let remScore = scoreInRange(value: remRatio, minOptimal: 0.18, maxOptimal: 0.28)
+
+        // Continuity (15%) - penalize wake-ups
+        let continuityScore = max(0, 100 - Double(awakePeriods * 8) - (awakeMinutes * 1.5))
+
+        let score = Int(round(
+            durationScore * 0.30 +
+            efficiencyScore * 0.20 +
+            deepScore * 0.20 +
+            remScore * 0.15 +
+            continuityScore * 0.15
+        ))
+
+        let clampedScore = max(0, min(100, score))
+
+        call.resolve([
+            "score": clampedScore,
+            "breakdown": [
+                "duration": Int(round(durationScore)),
+                "efficiency": Int(round(efficiencyScore)),
+                "deep": Int(round(deepScore)),
+                "rem": Int(round(remScore)),
+                "continuity": Int(round(continuityScore))
+            ]
+        ])
+    }
+
+    /// Score based on optimal duration range
+    private func scoreDuration(value: Double, minOptimal: Double, maxOptimal: Double) -> Double {
+        if value >= minOptimal && value <= maxOptimal {
+            return 100
+        }
+        if value < minOptimal {
+            return max(0, (value / minOptimal) * 100)
+        }
+        // value > maxOptimal - gradual penalty for oversleeping
+        let overage = value - maxOptimal
+        return max(0, 100 - (overage / minOptimal) * 50)
+    }
+
+    /// Score based on whether value falls within optimal percentage range
+    private func scoreInRange(value: Double, minOptimal: Double, maxOptimal: Double) -> Double {
+        if value >= minOptimal && value <= maxOptimal {
+            return 100
+        }
+        if value < minOptimal {
+            return Swift.max(0, (value / minOptimal) * 100)
+        }
+        // value > maxOptimal - penalty for too much
+        let midpoint = (minOptimal + maxOptimal) / 2
+        let distance = abs(value - midpoint)
+        let range = maxOptimal - minOptimal
+        return Swift.max(0, 100 - (distance / range) * 100)
+    }
+
     let workoutTypeMapping: [UInt : String] =  [
         1 : "americanFootball" ,
         2 : "archery" ,
