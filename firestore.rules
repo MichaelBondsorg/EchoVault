@@ -82,6 +82,11 @@ service cloud.firestore {
       match /rag_embeddings/{embeddingId} {
         allow read, write: if isOwner(userId);
       }
+
+      // Memory subcollection (entity graph - people, events, values, conversations)
+      match /memory/{memoryDoc=**} {
+        allow read, write: if isOwner(userId);
+      }
     }
 
     // Allow Cloud Functions to read/write with admin claims
