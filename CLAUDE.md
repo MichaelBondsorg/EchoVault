@@ -328,6 +328,68 @@ cd relay-server && npm run dev   # Local development
 2. Consider migration for existing data
 3. Update relevant service modules
 
+### Adding Feature Announcements (What's New)
+
+After developing significant new features, add user-facing announcements:
+
+**1. What's New Modal (one-time popup)**
+
+File: `src/components/shared/WhatsNewModal.jsx`
+
+```javascript
+// Increment FEATURE_VERSION to show modal again after new features
+const FEATURE_VERSION = '2.1.0';  // Change this!
+const STORAGE_KEY = 'echovault.lastSeenVersion';
+```
+
+To trigger the modal for all users after a feature release:
+1. Open `WhatsNewModal.jsx`
+2. Increment `FEATURE_VERSION` (e.g., '2.1.0' → '2.2.0')
+3. Update the feature list in the modal content
+4. Deploy
+
+Users who haven't seen this version will get the popup on next visit.
+
+**2. Page-Level Tips Banner**
+
+For feature-specific onboarding, add dismissible tips to the relevant page.
+
+Example pattern (see `EntityManagementPage.jsx`):
+```javascript
+// State with localStorage persistence
+const [showTips, setShowTips] = useState(() => {
+  return localStorage.getItem('featureName.tipsDismissed') !== 'true';
+});
+
+const dismissTips = () => {
+  setShowTips(false);
+  localStorage.setItem('featureName.tipsDismissed', 'true');
+};
+```
+
+Add a help button to show tips again:
+```jsx
+{!showTips && (
+  <button onClick={() => setShowTips(true)} title="Show tips">
+    <HelpCircle size={20} />
+  </button>
+)}
+```
+
+**3. Testing Announcements Locally**
+
+Reset localStorage to test as a new user:
+```javascript
+// In browser console:
+localStorage.removeItem('echovault.lastSeenVersion')  // What's New modal
+localStorage.removeItem('featureName.tipsDismissed')  // Page tips
+```
+
+**Checklist after developing features:**
+- [ ] Update `WhatsNewModal.jsx` with new features (increment version)
+- [ ] Add page-level tips if feature has its own screen
+- [ ] Test by clearing localStorage and refreshing
+
 ## Safety Requirements
 
 **CRITICAL**: This is a mental health app. Always:
