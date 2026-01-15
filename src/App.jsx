@@ -918,8 +918,22 @@ export default function App() {
       (async () => {
         try {
           console.time('⏱️ Classification');
-          const classification = await classifyEntry(finalTex);
+          const classifyResult = await classifyEntry(finalTex);
           console.timeEnd('⏱️ Classification');
+
+          // Extract classification and entity resolution from result
+          const classification = classifyResult.classification || classifyResult;
+          const entityResolution = classifyResult.entityResolution;
+
+          // Use corrected text for subsequent analysis if entity resolution made corrections
+          const textForAnalysis = entityResolution?.correctedText || finalTex;
+
+          if (entityResolution?.corrections?.length > 0) {
+            console.log('[EntityResolution] Name corrections applied:', entityResolution.corrections);
+            console.log('[EntityResolution] Original:', finalTex.substring(0, 100) + '...');
+            console.log('[EntityResolution] Corrected:', textForAnalysis.substring(0, 100) + '...');
+          }
+
           console.log('Entry classification:', classification);
 
           // Get active reflection prompts for AI detection of answered prompts
@@ -928,9 +942,9 @@ export default function App() {
 
           console.time('⏱️ AI Analysis (parallel)');
           const [analysis, insight, enhancedContext] = await Promise.all([
-            analyzeEntry(finalTex, classification.entry_type),
-            classification.entry_type !== 'task' ? generateInsight(finalTex, related, recent, entries, pendingPrompts) : Promise.resolve(null),
-            classification.entry_type !== 'task' ? extractEnhancedContext(finalTex, recent) : Promise.resolve(null)
+            analyzeEntry(textForAnalysis, classification.entry_type),
+            classification.entry_type !== 'task' ? generateInsight(textForAnalysis, related, recent, entries, pendingPrompts) : Promise.resolve(null),
+            classification.entry_type !== 'task' ? extractEnhancedContext(textForAnalysis, recent) : Promise.resolve(null)
           ]);
           console.timeEnd('⏱️ AI Analysis (parallel)');
 
@@ -966,6 +980,17 @@ export default function App() {
             classification_confidence: classification.confidence,
             context_version: CURRENT_CONTEXT_VERSION
           };
+
+          // Update entry text with corrected version if entity resolution made corrections
+          // This ensures the user sees correct names (e.g., "Luna" instead of "Lunar")
+          if (entityResolution?.correctedText && entityResolution?.corrections?.length > 0) {
+            updateData.text = entityResolution.correctedText;
+            updateData.originalText = finalTex;  // Preserve original for reference
+            updateData.entityResolution = {
+              corrections: entityResolution.corrections,
+              appliedAt: new Date().toISOString()
+            };
+          }
 
           if (enhancedContext?.continues_situation) {
             updateData.continues_situation = enhancedContext.continues_situation;

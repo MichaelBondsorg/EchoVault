@@ -2,7 +2,8 @@ import { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   ArrowLeft, Search, Plus, User, PawPrint, MapPin, Package, Activity,
-  ChevronDown, ChevronRight, Pencil, MoreVertical, Trash2, Archive, Merge
+  ChevronDown, ChevronRight, Pencil, MoreVertical, Trash2, Archive, Merge,
+  RefreshCw, CheckCircle, AlertCircle
 } from 'lucide-react';
 import {
   getAllEntities,
@@ -14,6 +15,7 @@ import {
   ENTITY_TYPES,
   RELATIONSHIP_TYPES
 } from '../services/memory/memoryGraph';
+import { migrateEntitiesFromEntriesFn } from '../config/firebase';
 import EntityEditModal from '../components/settings/EntityEditModal';
 
 /**
@@ -40,6 +42,8 @@ const EntityManagementPage = ({ userId, onBack }) => {
   const [editingEntity, setEditingEntity] = useState(null);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showArchived, setShowArchived] = useState(false);
+  const [migrationStatus, setMigrationStatus] = useState(null); // null | 'loading' | 'success' | 'error'
+  const [migrationResult, setMigrationResult] = useState(null);
 
   // Entity type configuration
   const entityConfig = {
@@ -154,6 +158,26 @@ const EntityManagementPage = ({ userId, onBack }) => {
     } catch (error) {
       console.error('[EntityManagement] Failed to create entity:', error);
       alert('Failed to create. Please try again.');
+    }
+  };
+
+  // Handle migration from existing entries
+  const handleMigrateEntities = async () => {
+    setMigrationStatus('loading');
+    setMigrationResult(null);
+
+    try {
+      const result = await migrateEntitiesFromEntriesFn({ dryRun: false, limit: 300 });
+      setMigrationResult(result.data);
+      setMigrationStatus('success');
+
+      // Refresh entity list
+      const grouped = await getAllEntities(userId, { excludeArchived: !showArchived });
+      setEntities(grouped);
+    } catch (error) {
+      console.error('[EntityManagement] Migration failed:', error);
+      setMigrationStatus('error');
+      setMigrationResult({ error: error.message });
     }
   };
 
@@ -339,15 +363,63 @@ const EntityManagementPage = ({ userId, onBack }) => {
               <User size={28} className="text-warm-400" />
             </div>
             <h3 className="font-medium text-warm-700 mb-2">No entities yet</h3>
-            <p className="text-sm text-warm-500 mb-4">
+            <p className="text-sm text-warm-500 mb-4 max-w-xs mx-auto">
               People, pets, and places from your journal entries will appear here.
+              Import from existing entries or add manually.
             </p>
-            <button
-              onClick={() => setShowCreateModal(true)}
-              className="px-4 py-2 bg-primary-600 text-white rounded-xl hover:bg-primary-700 transition-colors"
-            >
-              Add manually
-            </button>
+
+            {/* Migration status */}
+            {migrationStatus === 'success' && migrationResult && (
+              <div className="mb-4 mx-auto max-w-xs p-3 bg-green-50 border border-green-200 rounded-xl text-sm">
+                <div className="flex items-center gap-2 text-green-700 mb-1">
+                  <CheckCircle size={16} />
+                  <span className="font-medium">Migration complete!</span>
+                </div>
+                <p className="text-green-600">
+                  Created {migrationResult.entitiesCreated} entities from {migrationResult.entriesProcessed} entries.
+                </p>
+              </div>
+            )}
+
+            {migrationStatus === 'error' && (
+              <div className="mb-4 mx-auto max-w-xs p-3 bg-red-50 border border-red-200 rounded-xl text-sm">
+                <div className="flex items-center gap-2 text-red-700 mb-1">
+                  <AlertCircle size={16} />
+                  <span className="font-medium">Migration failed</span>
+                </div>
+                <p className="text-red-600">
+                  {migrationResult?.error || 'Please try again.'}
+                </p>
+              </div>
+            )}
+
+            {/* Action buttons */}
+            <div className="flex flex-col gap-3 items-center">
+              <button
+                onClick={handleMigrateEntities}
+                disabled={migrationStatus === 'loading'}
+                className="px-4 py-2 bg-primary-600 text-white rounded-xl hover:bg-primary-700
+                  transition-colors flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {migrationStatus === 'loading' ? (
+                  <>
+                    <RefreshCw size={18} className="animate-spin" />
+                    Scanning entries...
+                  </>
+                ) : (
+                  <>
+                    <RefreshCw size={18} />
+                    Import from journal
+                  </>
+                )}
+              </button>
+              <button
+                onClick={() => setShowCreateModal(true)}
+                className="px-4 py-2 text-warm-600 hover:text-warm-800 transition-colors"
+              >
+                Or add manually
+              </button>
+            </div>
           </div>
         )}
       </div>

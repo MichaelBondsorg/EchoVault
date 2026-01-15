@@ -37,7 +37,7 @@ const CRISIS_KEYWORDS = [
  * @param {string} text - Text to check
  * @returns {boolean} True if crisis content detected
  */
-const containsCrisisContent = (text) => {
+export const containsCrisisContent = (text) => {
   const lowerText = text.toLowerCase();
   return CRISIS_KEYWORDS.some(keyword => lowerText.includes(keyword));
 };
@@ -47,7 +47,7 @@ const containsCrisisContent = (text) => {
  * @param {string} text - Text to sanitize
  * @returns {string} Sanitized text
  */
-const sanitizeForMemory = (text) => {
+export const sanitizeForMemory = (text) => {
   if (!text) return text;
 
   let sanitized = text;

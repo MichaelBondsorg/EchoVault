@@ -164,6 +164,15 @@ const formatCondition = (condition) => {
 };
 
 /**
+ * Map weather code to condition string
+ * @param {number} code - Open-Meteo weather code
+ * @returns {string} Condition string (e.g., 'clear', 'rain', 'snow')
+ */
+export const mapWeatherCode = (code) => {
+  return WEATHER_CONDITIONS[code] || 'unknown';
+};
+
+/**
  * Get weather icon name (for Lucide icons)
  */
 export const getWeatherIcon = (condition, isDay = true) => {

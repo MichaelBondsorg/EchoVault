@@ -1,6 +1,6 @@
 # EchoVault Project Status
 
-> **Last Updated:** 2026-01-13
+> **Last Updated:** 2026-01-14
 > **Updated By:** Claude (via conversation with Michael)
 
 ---
@@ -18,6 +18,7 @@
 | Item | Status | Notes |
 |------|--------|-------|
 | Nexus 2.0 Insights Engine | 📋 Spec Complete | Full implementation spec created. Replaces entire existing insights system. |
+| Entity Management (Milestone 1.5) | ✅ Complete | Entity resolution for voice transcription + migration from older entries |
 
 ### Nexus 2.0 Implementation Phases
 
@@ -49,6 +50,9 @@
 | 2026-01-13 | Narrative-first AND biometric-first patterns | Some insights only emerge from narrative (beliefs), others only from biometrics (recovery). Need both. | N/A |
 | 2026-01-13 | Skip formal PM tooling / agents | Overhead not worth it at 2 users. Living docs > process theater. | Hit 50+ users or multiple contributors |
 | 2026-01-13 | ~$1.20/user/month LLM budget acceptable | At $9.99 subscription, 88% margin is healthy. Build expensive first, optimize later. | Costs exceed $2/user or scale issues emerge |
+| 2026-01-14 | Server-side entity resolution in Cloud Functions | Whisper mishears names (Lunar→Luna). Resolve after transcription before analysis. Server-side avoids browser limitations. | Performance issues at scale |
+| 2026-01-14 | Entity migration function for older entries | Users have entries but empty entity list. Migration extracts @person/@pet/@place tags into memory/core/people collection. | N/A - one-time backfill |
+| 2026-01-14 | 65% fuzzy match threshold for entity resolution | Lower catches more typos but risks false positives. 65% balances "Lunar"→"Luna" (80%+ match) while avoiding "Mike"→"Luna" (20% match). | Too many false corrections |
 
 ---
 
@@ -102,10 +106,40 @@ Good ideas we're explicitly NOT doing now. Don't re-suggest these.
 | File | Purpose |
 |------|---------|
 | `EchoVault-Nexus-2.0-Implementation-Spec.md` | Complete implementation spec for new insights engine (5,300+ lines) |
+| `src/pages/EntityManagementPage.jsx` | Entity list/management view (Milestone 1) |
+| `src/components/settings/EntityEditModal.jsx` | Entity edit form modal (Milestone 1) |
 
 ---
 
 ## Session Notes
+
+### 2026-01-14: Entity Management Feature (Milestone 1.5)
+
+**Context:** Michael identified entity data issues - Whisper mishears names (e.g., "Lunar" instead of "Luna") and relationships need manual correction (e.g., "my dog" should be "partner's dog").
+
+**Completed:**
+- **Milestone 1:** Basic Entity Editor
+  - EntityManagementPage with list view grouped by type
+  - EntityEditModal with name, aliases, type, relationship editing
+  - Integration with Settings page and PeopleSection widget
+  - CRUD operations in memoryGraph.js
+  - `userCorrected` flag to preserve manual edits from AI overwriting
+
+- **Milestone 1.5a:** Entity Resolution in Cloud Functions
+  - Levenshtein distance fuzzy matching (65% threshold)
+  - `resolveEntities()` function corrects names before analysis
+  - `analyzeJournalEntry` applies entity resolution, returns corrections
+  - Client updates entry text with corrected version
+
+- **Milestone 1.5b:** Entity Migration
+  - `migrateEntitiesFromEntries` Cloud Function
+  - Extracts @person/@pet/@place tags from existing entries
+  - Creates entities for items mentioned 2+ times
+  - UI button in EntityManagementPage for users with empty entity list
+
+**Next Milestones (Parked):**
+- Milestone 2: Entity-to-entity relationship links (Luna belongs to Spencer)
+- Milestone 3: Visual relationship graph
 
 ### 2026-01-13: Nexus 2.0 Design Session
 

@@ -5,6 +5,10 @@ import { askJournalAIFn } from '../../config/firebase';
 /**
  * Classify entry into type: task, mixed, reflection, or vent
  * Now uses Cloud Function (which handles recurrence detection)
+ *
+ * Also performs entity resolution to correct misheard names from voice transcription.
+ * Returns { classification, entityResolution? } where entityResolution contains
+ * corrected text if any corrections were made.
  */
 export const classifyEntry = async (text) => {
   try {
@@ -13,13 +17,23 @@ export const classifyEntry = async (text) => {
     });
 
     if (!result?.classification) {
-      return { entry_type: 'reflection', confidence: 0.5, extracted_tasks: [] };
+      return {
+        classification: { entry_type: 'reflection', confidence: 0.5, extracted_tasks: [] },
+        entityResolution: null
+      };
     }
 
-    return result.classification;
+    // Return both classification and entity resolution (if any corrections were made)
+    return {
+      classification: result.classification,
+      entityResolution: result.entityResolution || null
+    };
   } catch (e) {
     console.error('classifyEntry error:', e);
-    return { entry_type: 'reflection', confidence: 0.5, extracted_tasks: [] };
+    return {
+      classification: { entry_type: 'reflection', confidence: 0.5, extracted_tasks: [] },
+      entityResolution: null
+    };
   }
 };
 

@@ -110,6 +110,197 @@ async function callOpenAI(apiKey, systemPrompt, userPrompt) {
   }
 }
 
+// ============================================
+// ENTITY RESOLUTION HELPERS
+// ============================================
+
+/**
+ * Calculate Levenshtein distance between two strings
+ * Used for fuzzy name matching to correct Whisper transcription errors
+ */
+function levenshteinDistance(a, b) {
+  if (!a || !b) return Math.max(a?.length || 0, b?.length || 0);
+
+  const matrix = [];
+
+  // Initialize matrix
+  for (let i = 0; i <= b.length; i++) {
+    matrix[i] = [i];
+  }
+  for (let j = 0; j <= a.length; j++) {
+    matrix[0][j] = j;
+  }
+
+  // Fill matrix
+  for (let i = 1; i <= b.length; i++) {
+    for (let j = 1; j <= a.length; j++) {
+      if (b.charAt(i - 1) === a.charAt(j - 1)) {
+        matrix[i][j] = matrix[i - 1][j - 1];
+      } else {
+        matrix[i][j] = Math.min(
+          matrix[i - 1][j - 1] + 1, // substitution
+          matrix[i][j - 1] + 1,     // insertion
+          matrix[i - 1][j] + 1      // deletion
+        );
+      }
+    }
+  }
+
+  return matrix[b.length][a.length];
+}
+
+/**
+ * Calculate similarity ratio between two strings (0-1)
+ * Higher = more similar
+ */
+function stringSimilarity(a, b) {
+  if (!a || !b) return 0;
+  const maxLen = Math.max(a.length, b.length);
+  if (maxLen === 0) return 1;
+  const distance = levenshteinDistance(a.toLowerCase(), b.toLowerCase());
+  return 1 - (distance / maxLen);
+}
+
+/**
+ * Fetch user's entities from Firestore (server-side)
+ * Returns array of {name, aliases, entityType, relationship}
+ */
+async function fetchUserEntities(userId) {
+  try {
+    const peopleRef = db.collection(`artifacts/${APP_COLLECTION_ID}/users/${userId}/memory/core/people`);
+    const snapshot = await peopleRef.where('status', '!=', 'archived').get();
+
+    if (snapshot.empty) {
+      return [];
+    }
+
+    return snapshot.docs.map(doc => {
+      const data = doc.data();
+      return {
+        id: doc.id,
+        name: data.name || '',
+        aliases: data.aliases || [],
+        entityType: data.entityType || 'person',
+        relationship: data.relationship || 'unknown',
+        userCorrected: data.userCorrected || false
+      };
+    });
+  } catch (e) {
+    console.error('fetchUserEntities error:', e);
+    return [];
+  }
+}
+
+/**
+ * Find the best matching entity for a word
+ * Returns {match: entity, similarity: number} or null if no good match
+ */
+function findBestEntityMatch(word, entities, threshold = 0.7) {
+  if (!word || word.length < 2) return null;
+
+  let bestMatch = null;
+  let bestSimilarity = 0;
+
+  for (const entity of entities) {
+    // Check against main name
+    const nameSim = stringSimilarity(word, entity.name);
+    if (nameSim > bestSimilarity && nameSim >= threshold) {
+      bestSimilarity = nameSim;
+      bestMatch = entity;
+    }
+
+    // Check against aliases
+    for (const alias of entity.aliases) {
+      const aliasSim = stringSimilarity(word, alias);
+      if (aliasSim > bestSimilarity && aliasSim >= threshold) {
+        bestSimilarity = aliasSim;
+        bestMatch = entity;
+      }
+    }
+  }
+
+  return bestMatch ? { match: bestMatch, similarity: bestSimilarity } : null;
+}
+
+/**
+ * Resolve entities in text by finding and correcting potential name mishearings
+ * Returns {correctedText, corrections: [{original, corrected, entityType}]}
+ *
+ * Strategy:
+ * 1. Extract capitalized words (likely names)
+ * 2. For each, check if it fuzzy-matches a known entity
+ * 3. If similarity is high enough (but not exact), replace with correct name
+ */
+function resolveEntities(text, entities) {
+  if (!text || !entities || entities.length === 0) {
+    return { correctedText: text, corrections: [] };
+  }
+
+  const corrections = [];
+  let correctedText = text;
+
+  // Extract potential names (capitalized words or sequences)
+  // Match: "Word" or "Word Word" (for multi-word names like "Uncle Bob")
+  const namePattern = /\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\b/g;
+  const potentialNames = [];
+  let match;
+
+  while ((match = namePattern.exec(text)) !== null) {
+    potentialNames.push({
+      word: match[1],
+      index: match.index
+    });
+  }
+
+  // Build a set of known entity names for exact match checking
+  const exactNames = new Set();
+  for (const entity of entities) {
+    exactNames.add(entity.name.toLowerCase());
+    for (const alias of entity.aliases) {
+      exactNames.add(alias.toLowerCase());
+    }
+  }
+
+  // Process potential names (in reverse order to maintain string indices)
+  for (let i = potentialNames.length - 1; i >= 0; i--) {
+    const { word } = potentialNames[i];
+
+    // Skip if it's already an exact match
+    if (exactNames.has(word.toLowerCase())) {
+      continue;
+    }
+
+    // Find best matching entity
+    const result = findBestEntityMatch(word, entities, 0.65);
+
+    if (result && result.similarity < 0.99) { // Only correct if not exact match
+      // Replace in text using word boundary-aware replacement
+      const regex = new RegExp(`\\b${escapeRegex(word)}\\b`, 'g');
+      const newText = correctedText.replace(regex, result.match.name);
+
+      if (newText !== correctedText) {
+        corrections.push({
+          original: word,
+          corrected: result.match.name,
+          entityType: result.match.entityType,
+          similarity: result.similarity
+        });
+        correctedText = newText;
+        console.log(`Entity resolution: "${word}" → "${result.match.name}" (${(result.similarity * 100).toFixed(0)}% match)`);
+      }
+    }
+  }
+
+  return { correctedText, corrections };
+}
+
+/**
+ * Escape special regex characters in a string
+ */
+function escapeRegex(string) {
+  return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 /**
  * Classify entry into type: task, mixed, reflection, or vent
  */
@@ -651,7 +842,8 @@ export const analyzeJournalEntry = onCall(
       throw new HttpsError('unauthenticated', 'User must be authenticated');
     }
 
-    const { text, recentEntriesContext, historyContext, moodTrajectory, cyclicalPatterns, pendingPrompts, operations, userLocalHour } = request.data;
+    const userId = request.auth.uid;
+    const { text, recentEntriesContext, historyContext, moodTrajectory, cyclicalPatterns, pendingPrompts, operations, userLocalHour, skipEntityResolution } = request.data;
 
     if (!text || typeof text !== 'string') {
       throw new HttpsError('invalid-argument', 'Text is required');
@@ -664,21 +856,47 @@ export const analyzeJournalEntry = onCall(
       // Run requested operations
       const ops = operations || ['classify', 'analyze', 'extractContext', 'generateInsight'];
 
+      // Entity Resolution: Correct misheard names from voice transcription
+      // This runs first to ensure all subsequent operations use corrected text
+      let processedText = text;
+
+      if (!skipEntityResolution) {
+        try {
+          const entities = await fetchUserEntities(userId);
+          if (entities.length > 0) {
+            const { correctedText, corrections } = resolveEntities(text, entities);
+            processedText = correctedText;
+
+            if (corrections.length > 0) {
+              results.entityResolution = {
+                originalText: text,
+                correctedText,
+                corrections
+              };
+              console.log(`Entity resolution applied ${corrections.length} correction(s) for user ${userId}`);
+            }
+          }
+        } catch (e) {
+          // Non-critical: continue with original text if entity resolution fails
+          console.warn('Entity resolution failed, continuing with original text:', e.message);
+        }
+      }
+
       if (ops.includes('classify')) {
-        results.classification = await classifyEntry(apiKey, text);
+        results.classification = await classifyEntry(apiKey, processedText);
       }
 
       if (ops.includes('analyze')) {
         const entryType = results.classification?.entry_type || 'reflection';
-        results.analysis = await analyzeEntry(apiKey, text, entryType, userLocalHour);
+        results.analysis = await analyzeEntry(apiKey, processedText, entryType, userLocalHour);
       }
 
       if (ops.includes('extractContext')) {
-        results.enhancedContext = await extractEnhancedContext(apiKey, text, recentEntriesContext);
+        results.enhancedContext = await extractEnhancedContext(apiKey, processedText, recentEntriesContext);
       }
 
       if (ops.includes('generateInsight') && historyContext) {
-        results.insight = await generateInsight(apiKey, text, historyContext, moodTrajectory, cyclicalPatterns, pendingPrompts);
+        results.insight = await generateInsight(apiKey, processedText, historyContext, moodTrajectory, cyclicalPatterns, pendingPrompts);
       }
 
       return results;
@@ -3761,6 +3979,238 @@ export const reprocessEntriesForGoals = onCall(
     };
 
     console.log('Reprocessing complete:', result);
+    return result;
+  }
+);
+
+// ============================================
+// ENTITY MIGRATION FUNCTION
+// ============================================
+
+/**
+ * Migration function to extract entities from existing entries
+ * This populates the memory/core/people collection for users who have entries
+ * but no entities (because the entity extraction was added later)
+ *
+ * Call this once per user to backfill entity data.
+ */
+export const migrateEntitiesFromEntries = onCall(
+  {
+    cors: true,
+    secrets: [geminiApiKey],
+    timeoutSeconds: 540, // 9 minutes max
+    maxInstances: 1
+  },
+  async (request) => {
+    const uid = request.auth?.uid;
+    if (!uid) {
+      throw new HttpsError('unauthenticated', 'Must be logged in');
+    }
+
+    const apiKey = geminiApiKey.value();
+    if (!apiKey) {
+      throw new HttpsError('failed-precondition', 'API key not configured');
+    }
+
+    const { dryRun = false, limit: maxEntries = 100 } = request.data || {};
+
+    console.log(`Starting entity migration for user: ${uid} (dryRun: ${dryRun}, limit: ${maxEntries})`);
+
+    // Get existing entities to avoid duplicates
+    const existingEntities = await fetchUserEntities(uid);
+    const existingNames = new Set(existingEntities.map(e => e.name.toLowerCase()));
+    existingEntities.forEach(e => {
+      e.aliases.forEach(a => existingNames.add(a.toLowerCase()));
+    });
+
+    console.log(`Found ${existingEntities.length} existing entities`);
+
+    // Fetch entries
+    const entriesRef = db
+      .collection('artifacts')
+      .doc(APP_COLLECTION_ID)
+      .collection('users')
+      .doc(uid)
+      .collection('entries');
+
+    const snapshot = await entriesRef
+      .orderBy('createdAt', 'desc')
+      .limit(maxEntries)
+      .get();
+
+    console.log(`Processing ${snapshot.docs.length} entries`);
+
+    // Collect all @person:, @pet:, @place:, @thing: tags from entries
+    const entityMap = new Map(); // name -> {type, mentions, sentiments, lastMentioned}
+
+    for (const doc of snapshot.docs) {
+      const entry = doc.data();
+      const tags = entry.tags || [];
+      const entryDate = entry.effectiveDate || entry.createdAt;
+      const date = entryDate?.toDate?.() || new Date();
+      const sentimentByEntity = entry.analysis?.sentiment_by_entity || {};
+
+      // Process @person: tags
+      const personTags = tags.filter(t => t.startsWith('@person:'));
+      for (const tag of personTags) {
+        const name = tag.replace('@person:', '').replace(/_/g, ' ');
+        const normalizedName = name.toLowerCase();
+
+        // Skip if already exists in user's entities
+        if (existingNames.has(normalizedName)) continue;
+
+        if (!entityMap.has(normalizedName)) {
+          entityMap.set(normalizedName, {
+            name: name.charAt(0).toUpperCase() + name.slice(1), // Capitalize
+            entityType: 'person',
+            mentions: 1,
+            sentiments: [],
+            relationship: 'unknown',
+            lastMentioned: date
+          });
+        } else {
+          const existing = entityMap.get(normalizedName);
+          existing.mentions++;
+          if (date > existing.lastMentioned) {
+            existing.lastMentioned = date;
+          }
+        }
+
+        // Track sentiment if available
+        const sentiment = sentimentByEntity[tag];
+        if (sentiment) {
+          entityMap.get(normalizedName).sentiments.push(sentiment);
+        }
+      }
+
+      // Process @pet: tags (if any)
+      const petTags = tags.filter(t => t.startsWith('@pet:'));
+      for (const tag of petTags) {
+        const name = tag.replace('@pet:', '').replace(/_/g, ' ');
+        const normalizedName = name.toLowerCase();
+
+        if (existingNames.has(normalizedName)) continue;
+
+        if (!entityMap.has(normalizedName)) {
+          entityMap.set(normalizedName, {
+            name: name.charAt(0).toUpperCase() + name.slice(1),
+            entityType: 'pet',
+            mentions: 1,
+            sentiments: [],
+            relationship: 'pet',
+            lastMentioned: date
+          });
+        } else {
+          const existing = entityMap.get(normalizedName);
+          existing.mentions++;
+          if (date > existing.lastMentioned) {
+            existing.lastMentioned = date;
+          }
+        }
+      }
+
+      // Process @place: tags
+      const placeTags = tags.filter(t => t.startsWith('@place:'));
+      for (const tag of placeTags) {
+        const name = tag.replace('@place:', '').replace(/_/g, ' ');
+        const normalizedName = name.toLowerCase();
+
+        if (existingNames.has(normalizedName)) continue;
+
+        if (!entityMap.has(normalizedName)) {
+          entityMap.set(normalizedName, {
+            name: name.charAt(0).toUpperCase() + name.slice(1),
+            entityType: 'place',
+            mentions: 1,
+            sentiments: [],
+            relationship: 'frequent',
+            lastMentioned: date
+          });
+        } else {
+          const existing = entityMap.get(normalizedName);
+          existing.mentions++;
+          if (date > existing.lastMentioned) {
+            existing.lastMentioned = date;
+          }
+        }
+      }
+    }
+
+    // Now create entities for items mentioned 2+ times
+    const entitiesToCreate = Array.from(entityMap.values())
+      .filter(e => e.mentions >= 2)
+      .sort((a, b) => b.mentions - a.mentions);
+
+    console.log(`Found ${entitiesToCreate.length} entities to create (mentioned 2+ times)`);
+
+    if (dryRun) {
+      return {
+        dryRun: true,
+        entriesProcessed: snapshot.docs.length,
+        existingEntities: existingEntities.length,
+        entitiesToCreate: entitiesToCreate.map(e => ({
+          name: e.name,
+          type: e.entityType,
+          mentions: e.mentions
+        }))
+      };
+    }
+
+    // Create entities in Firestore
+    let created = 0;
+    const errors = [];
+    const peopleRef = db.collection(`artifacts/${APP_COLLECTION_ID}/users/${uid}/memory/core/people`);
+
+    for (const entity of entitiesToCreate) {
+      try {
+        // Calculate sentiment average
+        let sentimentOverall = 0;
+        if (entity.sentiments.length > 0) {
+          const sentimentMap = { positive: 0.7, negative: -0.5, neutral: 0, mixed: 0.2 };
+          const sum = entity.sentiments.reduce((acc, s) => acc + (sentimentMap[s] || 0), 0);
+          sentimentOverall = sum / entity.sentiments.length;
+        }
+
+        const newEntity = {
+          name: entity.name,
+          aliases: [],
+          entityType: entity.entityType,
+          relationship: entity.relationship,
+          sentiment: {
+            overall: sentimentOverall,
+            recent: sentimentOverall,
+            trend: 'stable'
+          },
+          topics: [],
+          firstMentioned: FieldValue.serverTimestamp(),
+          lastMentioned: entity.lastMentioned,
+          mentionCount: entity.mentions,
+          significantMoments: [],
+          status: 'active',
+          archivedAt: null,
+          userCorrected: false,
+          migratedAt: FieldValue.serverTimestamp()
+        };
+
+        await peopleRef.add(newEntity);
+        created++;
+        console.log(`Created entity: ${entity.name} (${entity.entityType}, ${entity.mentions} mentions)`);
+      } catch (e) {
+        errors.push({ name: entity.name, error: e.message });
+        console.error(`Failed to create entity ${entity.name}:`, e);
+      }
+    }
+
+    const result = {
+      entriesProcessed: snapshot.docs.length,
+      existingEntities: existingEntities.length,
+      entitiesFound: entityMap.size,
+      entitiesCreated: created,
+      errors: errors.length,
+      errorDetails: errors.slice(0, 5)
+    };
+
+    console.log('Entity migration complete:', result);
     return result;
   }
 );

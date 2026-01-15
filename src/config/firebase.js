@@ -51,11 +51,19 @@ export const askJournalAIFn = httpsCallable(functions, 'askJournalAI', { timeout
 export const executePromptFn = httpsCallable(functions, 'executePrompt', { timeout: 120000 }); // 2 min
 export const exchangeGoogleTokenFn = httpsCallable(functions, 'exchangeGoogleToken', { timeout: 30000 }); // 30s - auth should be fast
 export const reprocessEntriesForGoalsFn = httpsCallable(functions, 'reprocessEntriesForGoals', { timeout: 540000 }); // 9 min
+export const migrateEntitiesFromEntriesFn = httpsCallable(functions, 'migrateEntitiesFromEntries', { timeout: 540000 }); // 9 min
 
 // Expose for console debugging
 if (typeof window !== 'undefined') {
   window.__reprocessGoals = () => reprocessEntriesForGoalsFn().then(r => {
     console.log('Reprocess complete:', r.data);
+    return r.data;
+  });
+
+  // Entity migration - run with dryRun first to see what would be created
+  // Usage: __migrateEntities() for dry run, __migrateEntities(false) to actually create
+  window.__migrateEntities = (dryRun = true, limit = 200) => migrateEntitiesFromEntriesFn({ dryRun, limit }).then(r => {
+    console.log('Migration result:', r.data);
     return r.data;
   });
 }
