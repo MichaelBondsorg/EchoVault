@@ -1,6 +1,6 @@
 # EchoVault Project Status
 
-> **Last Updated:** 2026-01-14
+> **Last Updated:** 2026-01-15
 > **Updated By:** Claude (via conversation with Michael)
 
 ---
@@ -19,7 +19,8 @@
 |------|--------|-------|
 | Nexus 2.0 Insights Engine | 📋 Spec Complete | Full implementation spec created. Replaces entire existing insights system. |
 | Entity Management (Milestone 1.5) | ✅ Complete | Entity resolution for voice transcription + migration from older entries |
-| HealthKit Integration (Expanded) | 🔧 In Progress | Sleep stages fork deployed, needs debugging. Health data not saving to entries. |
+| HealthKit Integration (Expanded) | ✅ Complete | Sleep stages, smart merge with Whoop, health backfill feature |
+| Whoop Integration | ✅ Complete | OAuth working, cloud sync, recovery/strain/sleep data |
 
 ### Nexus 2.0 Implementation Phases
 
@@ -54,6 +55,9 @@
 | 2026-01-14 | Server-side entity resolution in Cloud Functions | Whisper mishears names (Lunar→Luna). Resolve after transcription before analysis. Server-side avoids browser limitations. | Performance issues at scale |
 | 2026-01-14 | Entity migration function for older entries | Users have entries but empty entity list. Migration extracts @person/@pet/@place tags into memory/core/people collection. | N/A - one-time backfill |
 | 2026-01-14 | 65% fuzzy match threshold for entity resolution | Lower catches more typos but risks false positives. 65% balances "Lunar"→"Luna" (80%+ match) while avoiding "Mike"→"Luna" (20% match). | Too many false corrections |
+| 2026-01-15 | Smart merge Whoop + HealthKit | When both sources connected: Sleep/HRV/Recovery from Whoop (24/7 tracking), Steps from HealthKit (Whoop doesn't track steps). Best of both worlds. | User prefers single source |
+| 2026-01-15 | Health backfill user-triggered | Button in Health Settings to retroactively add health data to old entries. User-triggered (not automatic) to give control. | N/A |
+| 2026-01-15 | Whoop secrets in Cloud Run Secret Manager | OAuth credentials stored as secrets, not env vars. Relay server handles token exchange and encrypted storage in Firestore. | N/A |
 
 ---
 
@@ -64,7 +68,7 @@ Good ideas we're explicitly NOT doing now. Don't re-suggest these.
 | Idea | Why Parked | Revisit When |
 |------|------------|--------------|
 | Social features / friend comparisons | Need to nail individual value prop first | Core insights validated |
-| Apple Health integration | ✅ Now implemented - see HealthKit session notes | N/A |
+| Oura / Fitbit integration | Whoop + HealthKit covers current user base | User requests it |
 | Therapist export feature | No user has asked for this | A user asks |
 | Automated UAT / Playwright tests | App changing too fast, maintenance > value | Core flows stabilize |
 | CI/CD complexity | Current deploy process works fine | Shipping multiple times/week |
@@ -109,10 +113,56 @@ Good ideas we're explicitly NOT doing now. Don't re-suggest these.
 | `EchoVault-Nexus-2.0-Implementation-Spec.md` | Complete implementation spec for new insights engine (5,300+ lines) |
 | `src/pages/EntityManagementPage.jsx` | Entity list/management view (Milestone 1) |
 | `src/components/settings/EntityEditModal.jsx` | Entity edit form modal (Milestone 1) |
+| `src/services/health/healthBackfill.js` | Retroactive health data for old entries |
 
 ---
 
 ## Session Notes
+
+### 2026-01-15: Whoop Integration, Smart Merge & Health Backfill
+
+**Context:** Completing health data integration with Whoop OAuth and handling users with multiple health sources.
+
+**What Was Done:**
+
+1. **Whoop OAuth Setup (WORKING)**
+   - Fixed OAuth "invalid_client" error by updating secrets in Cloud Run Secret Manager
+   - Fixed redirect URI in Whoop Developer Portal to point to relay server callback
+   - Added 'offline' scope to get refresh tokens for persistent access
+   - Token exchange and encrypted storage in Firestore now working
+
+2. **Smart Merge for Multiple Health Sources**
+   - Users with both Whoop and HealthKit now get best of both:
+     - Sleep/HRV/Recovery: From Whoop (24/7 tracking, more accurate)
+     - Steps: From HealthKit (Whoop doesn't track steps natively)
+     - Workouts: Merged from both sources, deduped by time overlap
+   - Updated `healthDataService.js` with `smartMergeHealthData()` function
+   - Updated `whoop.js` to return nested format matching HealthKit structure
+
+3. **Health Settings UI Redesign**
+   - Unified "Health Sources" section with chips for each connected source
+   - Single "Today's Health" card with source badges showing where each metric came from
+   - Added placeholder for future sources (Oura, Fitbit)
+   - Cleaner, less confusing layout
+
+4. **Health Backfill Feature**
+   - Created `healthBackfill.js` service for retroactive health data
+   - `getEntriesWithoutHealth()` finds entries missing healthContext
+   - `backfillHealthData()` queries historical health data and updates entries
+   - UI with progress bar, cancel button, and results summary
+   - Rate-limited to avoid overwhelming health APIs
+
+5. **Sleep Query Window Fix**
+   - Changed from 36-hour lookback to 6 PM yesterday → now
+   - Prevents double-counting multiple nights of sleep data
+
+**Key Files Created/Modified:**
+- `src/services/health/healthBackfill.js` (NEW)
+- `src/services/health/healthDataService.js` (smart merge)
+- `src/services/health/whoop.js` (nested format)
+- `src/components/screens/HealthSettingsScreen.jsx` (redesign)
+- `plugins/capacitor-health-extended/.../HealthPlugin.swift` (sleep window)
+- `relay-server/src/services/whoop/whoopClient.ts` (offline scope)
 
 ### 2026-01-14: Expanded HealthKit Integration
 
