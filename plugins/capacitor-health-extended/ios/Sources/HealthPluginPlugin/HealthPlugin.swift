@@ -463,9 +463,12 @@ public class HealthPlugin: CAPPlugin, CAPBridgedPlugin {
                 return
             }
 
+            // Query from 6 PM yesterday to now (captures only last night's sleep, not multiple nights)
             let endDate = Date()
-            let startDate = Calendar.current.date(byAdding: .hour, value: -36, to: endDate) ?? endDate.addingTimeInterval(-36 * 3600)
-            let predicate = HKQuery.predicateForSamples(withStart: startDate, end: endDate, options: .strictEndDate)
+            let calendar = Calendar.current
+            var yesterdayEvening = calendar.date(byAdding: .day, value: -1, to: endDate) ?? endDate.addingTimeInterval(-24 * 3600)
+            yesterdayEvening = calendar.date(bySettingHour: 18, minute: 0, second: 0, of: yesterdayEvening) ?? yesterdayEvening
+            let predicate = HKQuery.predicateForSamples(withStart: yesterdayEvening, end: endDate, options: .strictEndDate)
 
             let query = HKSampleQuery(sampleType: sleepType, predicate: predicate, limit: HKObjectQueryNoLimit, sortDescriptors: nil) { _, samples, error in
                 if let error = error {

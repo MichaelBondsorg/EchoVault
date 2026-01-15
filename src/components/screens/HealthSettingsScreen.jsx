@@ -5,10 +5,11 @@
  * - Whoop (cloud-to-cloud, works everywhere)
  * - Apple Health (iOS native)
  * - Google Fit (Android native)
+ * - Future: Oura, Fitbit, etc.
  */
 
 import React, { useState, useEffect } from 'react';
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 import {
   X,
   Heart,
@@ -20,12 +21,16 @@ import {
   AlertCircle,
   Smartphone,
   RefreshCw,
-  ChevronRight,
   Shield,
   Link2,
   Unlink,
   ExternalLink,
-  TrendingUp
+  TrendingUp,
+  Plus,
+  Apple,
+  Watch,
+  History,
+  XCircle
 } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
 
@@ -37,8 +42,30 @@ import {
   isWhoopLinked,
   initiateWhoopOAuth,
   disconnectWhoop,
-  getWhoopRecoveryInsight
+  getWhoopRecoveryInsight,
+  getBackfillCount,
+  backfillHealthData
 } from '../../services/health';
+
+// Source badge component - shows which source data came from
+const SourceBadge = ({ source }) => {
+  if (!source) return null;
+
+  const config = {
+    whoop: { label: 'Whoop', bg: 'bg-teal-100', text: 'text-teal-700' },
+    healthkit: { label: 'Apple', bg: 'bg-gray-100', text: 'text-gray-700' },
+    googlefit: { label: 'Fit', bg: 'bg-blue-100', text: 'text-blue-700' },
+    merged: { label: 'Both', bg: 'bg-purple-100', text: 'text-purple-700' },
+  };
+
+  const { label, bg, text } = config[source] || config.healthkit;
+
+  return (
+    <span className={`text-[9px] px-1.5 py-0.5 rounded-full ${bg} ${text} font-medium`}>
+      {label}
+    </span>
+  );
+};
 
 const HealthSettingsScreen = ({ onClose }) => {
   const [status, setStatus] = useState(null);
@@ -50,6 +77,14 @@ const HealthSettingsScreen = ({ onClose }) => {
   const [whoopLinked, setWhoopLinked] = useState(false);
   const [whoopConnecting, setWhoopConnecting] = useState(false);
   const [whoopDisconnecting, setWhoopDisconnecting] = useState(false);
+
+  // Backfill state
+  const [backfillCount, setBackfillCount] = useState(0);
+  const [backfillRunning, setBackfillRunning] = useState(false);
+  const [backfillProgress, setBackfillProgress] = useState(null);
+  const [backfillComplete, setBackfillComplete] = useState(false);
+  const [backfillResults, setBackfillResults] = useState(null);
+  const [backfillAbort, setBackfillAbort] = useState(null);
 
   // Load current status on mount
   useEffect(() => {
@@ -66,12 +101,16 @@ const HealthSettingsScreen = ({ onClose }) => {
       const healthStatus = await getHealthDataStatus();
       setStatus(healthStatus);
 
-      // If connected, also load today's data to show it's working
-      if (healthStatus.isAvailable) {
+      // If any source connected, load today's data and check backfill
+      if (healthStatus.isAvailable || whoopStatus) {
         const summary = await getHealthSummary();
         if (summary.available) {
           setTodayData(summary);
         }
+
+        // Check how many entries need backfill
+        const count = await getBackfillCount();
+        setBackfillCount(count);
       }
     } catch (error) {
       console.error('Failed to load health status:', error);
@@ -84,7 +123,6 @@ const HealthSettingsScreen = ({ onClose }) => {
     try {
       const result = await requestHealthPermissions();
       if (result.authorized) {
-        // Refresh status after connecting
         await loadStatus();
       } else if (result.error) {
         alert(`Could not connect: ${result.error}`);
@@ -113,13 +151,10 @@ const HealthSettingsScreen = ({ onClose }) => {
     try {
       const authUrl = await initiateWhoopOAuth();
 
-      // Open Whoop authorization - use Capacitor Browser on native, window.open on web
       if (Capacitor.isNativePlatform()) {
         const { Browser } = await import('@capacitor/browser');
         await Browser.open({ url: authUrl });
-        // Browser will redirect back via deep link when complete
       } else {
-        // On web, open in same window - OAuth callback will redirect back
         window.location.href = authUrl;
       }
     } catch (error) {
@@ -145,50 +180,79 @@ const HealthSettingsScreen = ({ onClose }) => {
     setWhoopDisconnecting(false);
   };
 
-  // What platform-specific name to show
+  // Backfill handlers
+  const handleStartBackfill = async () => {
+    setBackfillRunning(true);
+    setBackfillComplete(false);
+    setBackfillResults(null);
+    setBackfillProgress({ total: backfillCount, processed: 0, updated: 0, skipped: 0 });
+
+    // Create abort controller
+    const abortController = new AbortController();
+    setBackfillAbort(abortController);
+
+    try {
+      const results = await backfillHealthData(
+        (progress) => setBackfillProgress(progress),
+        abortController.signal
+      );
+      setBackfillResults(results);
+      setBackfillComplete(true);
+      setBackfillCount(0); // Reset count after successful backfill
+    } catch (error) {
+      console.error('Backfill failed:', error);
+      alert('Backfill failed. Please try again.');
+    }
+
+    setBackfillRunning(false);
+    setBackfillAbort(null);
+  };
+
+  const handleCancelBackfill = () => {
+    if (backfillAbort) {
+      backfillAbort.abort();
+      setBackfillRunning(false);
+      setBackfillAbort(null);
+    }
+  };
+
+  const handleDismissBackfillResults = () => {
+    setBackfillComplete(false);
+    setBackfillResults(null);
+    setBackfillProgress(null);
+  };
+
+  // Platform name for native health
   const platformName = status?.platform === 'ios'
     ? 'Apple Health'
     : status?.platform === 'android'
       ? 'Google Fit'
       : 'Health App';
 
-  // Data types we collect with simple explanations
-  const dataTypes = [
-    {
-      icon: Moon,
-      name: 'Sleep',
-      description: 'Hours slept and sleep quality',
-      color: 'text-indigo-500',
-      bgColor: 'bg-indigo-50'
-    },
-    {
-      icon: Footprints,
-      name: 'Steps',
-      description: 'Daily step count',
-      color: 'text-green-500',
-      bgColor: 'bg-green-50'
-    },
-    {
-      icon: Activity,
-      name: 'Workouts',
-      description: 'Exercise sessions you log',
-      color: 'text-orange-500',
-      bgColor: 'bg-orange-50'
-    },
-    {
-      icon: Heart,
-      name: 'Heart Rate',
-      description: 'Resting and average heart rate',
-      color: 'text-red-400',
-      bgColor: 'bg-red-50'
-    },
-    {
-      icon: Zap,
-      name: 'HRV (Stress)',
-      description: 'Heart rate variability for stress detection',
-      color: 'text-purple-500',
-      bgColor: 'bg-purple-50'
+  // Check if native health is connected
+  const nativeConnected = status?.isAvailable && !status?.isWhoop;
+  const isWeb = status?.platform === 'web';
+  const anySourceConnected = whoopLinked || nativeConnected;
+
+  // Determine source for each metric in merged data
+  const getMetricSource = (metric) => {
+    if (!todayData) return null;
+    if (todayData.source === 'merged') {
+      // In merged mode, use knowledge of what each source provides
+      if (metric === 'steps') return 'healthkit';
+      if (['sleep', 'hrv', 'recovery', 'strain'].includes(metric)) return 'whoop';
+      return 'merged';
     }
+    return todayData.source;
+  };
+
+  // Data types we collect
+  const dataTypes = [
+    { icon: Moon, name: 'Sleep', description: 'Hours slept and sleep quality', color: 'text-indigo-500', bgColor: 'bg-indigo-50' },
+    { icon: Footprints, name: 'Steps', description: 'Daily step count', color: 'text-green-500', bgColor: 'bg-green-50' },
+    { icon: Activity, name: 'Workouts', description: 'Exercise sessions you log', color: 'text-orange-500', bgColor: 'bg-orange-50' },
+    { icon: Heart, name: 'Heart Rate', description: 'Resting and average heart rate', color: 'text-red-400', bgColor: 'bg-red-50' },
+    { icon: Zap, name: 'HRV (Stress)', description: 'Heart rate variability for stress detection', color: 'text-purple-500', bgColor: 'bg-purple-50' }
   ];
 
   return (
@@ -217,7 +281,7 @@ const HealthSettingsScreen = ({ onClose }) => {
         </button>
       </div>
 
-      <div className="p-4 max-w-md mx-auto space-y-6 pb-20 overflow-y-auto" style={{ maxHeight: 'calc(100vh - 80px)' }}>
+      <div className="p-4 max-w-md mx-auto space-y-4 pb-20 overflow-y-auto" style={{ maxHeight: 'calc(100vh - 80px)' }}>
         {/* Loading State */}
         {loading && (
           <div className="flex items-center justify-center py-12">
@@ -225,7 +289,7 @@ const HealthSettingsScreen = ({ onClose }) => {
           </div>
         )}
 
-        {/* Connection Status Card */}
+        {/* Health Sources Card */}
         {!loading && (
           <motion.div
             className="bg-white rounded-2xl border border-warm-200 overflow-hidden"
@@ -234,8 +298,8 @@ const HealthSettingsScreen = ({ onClose }) => {
           >
             <div className="p-4">
               <div className="flex items-center justify-between mb-4">
-                <h2 className="font-semibold text-warm-800">Connection Status</h2>
-                {status?.isAvailable && (
+                <h2 className="font-semibold text-warm-800">Health Sources</h2>
+                {anySourceConnected && (
                   <button
                     onClick={handleRefresh}
                     className="text-sm text-primary-500 flex items-center gap-1"
@@ -245,127 +309,103 @@ const HealthSettingsScreen = ({ onClose }) => {
                 )}
               </div>
 
-              {/* Status Badge */}
-              <div className={`flex items-center gap-3 p-3 rounded-xl ${
-                status?.isAvailable
-                  ? 'bg-green-50 border border-green-200'
-                  : status?.platform === 'web'
-                    ? 'bg-amber-50 border border-amber-200'
-                    : 'bg-warm-50 border border-warm-200'
-              }`}>
-                {status?.isAvailable ? (
-                  <>
-                    <CheckCircle className="w-6 h-6 text-green-500" />
-                    <div>
-                      <p className="font-medium text-green-800">Connected to {platformName}</p>
-                      <p className="text-sm text-green-600">{status.message}</p>
+              {/* Source Chips */}
+              <div className="flex flex-wrap gap-2">
+                {/* Apple Health / Google Fit Chip */}
+                {!isWeb && (
+                  <button
+                    onClick={nativeConnected ? undefined : handleConnect}
+                    disabled={connecting}
+                    className={`flex items-center gap-2 px-3 py-2 rounded-xl border transition-all ${
+                      nativeConnected
+                        ? 'bg-green-50 border-green-200'
+                        : 'bg-warm-50 border-warm-200 hover:border-warm-300'
+                    }`}
+                  >
+                    <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${
+                      nativeConnected ? 'bg-green-100' : 'bg-warm-100'
+                    }`}>
+                      {status?.platform === 'ios' ? (
+                        <Heart className={`w-4 h-4 ${nativeConnected ? 'text-green-600' : 'text-warm-500'}`} />
+                      ) : (
+                        <Activity className={`w-4 h-4 ${nativeConnected ? 'text-green-600' : 'text-warm-500'}`} />
+                      )}
                     </div>
-                  </>
-                ) : status?.platform === 'web' ? (
-                  <>
-                    <Smartphone className="w-6 h-6 text-amber-500" />
-                    <div>
-                      <p className="font-medium text-amber-800">Use the Mobile App</p>
-                      <p className="text-sm text-amber-600">
-                        Health data requires the iPhone or Android app
+                    <div className="text-left">
+                      <p className={`text-sm font-medium ${nativeConnected ? 'text-green-800' : 'text-warm-700'}`}>
+                        {platformName}
+                      </p>
+                      <p className={`text-xs ${nativeConnected ? 'text-green-600' : 'text-warm-500'}`}>
+                        {nativeConnected ? 'Connected' : connecting ? 'Connecting...' : 'Tap to connect'}
                       </p>
                     </div>
-                  </>
-                ) : (
-                  <>
-                    <AlertCircle className="w-6 h-6 text-warm-400" />
-                    <div>
-                      <p className="font-medium text-warm-700">Not Connected</p>
-                      <p className="text-sm text-warm-500">{status?.message || 'Tap below to connect'}</p>
-                    </div>
-                  </>
+                    {nativeConnected && <CheckCircle className="w-4 h-4 text-green-500 ml-1" />}
+                  </button>
                 )}
+
+                {/* Whoop Chip */}
+                <button
+                  onClick={whoopLinked ? undefined : handleConnectWhoop}
+                  disabled={whoopConnecting}
+                  className={`flex items-center gap-2 px-3 py-2 rounded-xl border transition-all ${
+                    whoopLinked
+                      ? 'bg-teal-50 border-teal-200'
+                      : 'bg-warm-50 border-warm-200 hover:border-warm-300'
+                  }`}
+                >
+                  <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${
+                    whoopLinked ? 'bg-teal-100' : 'bg-warm-100'
+                  }`}>
+                    <Watch className={`w-4 h-4 ${whoopLinked ? 'text-teal-600' : 'text-warm-500'}`} />
+                  </div>
+                  <div className="text-left">
+                    <p className={`text-sm font-medium ${whoopLinked ? 'text-teal-800' : 'text-warm-700'}`}>
+                      Whoop
+                    </p>
+                    <p className={`text-xs ${whoopLinked ? 'text-teal-600' : 'text-warm-500'}`}>
+                      {whoopLinked ? 'Connected' : whoopConnecting ? 'Connecting...' : 'Tap to connect'}
+                    </p>
+                  </div>
+                  {whoopLinked && <CheckCircle className="w-4 h-4 text-teal-500 ml-1" />}
+                </button>
+
+                {/* Add More (Future sources placeholder) */}
+                <div className="flex items-center gap-2 px-3 py-2 rounded-xl border border-dashed border-warm-200 text-warm-400">
+                  <Plus className="w-4 h-4" />
+                  <span className="text-xs">More coming soon</span>
+                </div>
               </div>
 
-              {/* Connect Button (only on native platforms) */}
-              {status?.canRequestPermission && (
+              {/* Web platform notice */}
+              {isWeb && !whoopLinked && (
+                <div className="mt-3 p-3 rounded-xl bg-amber-50 border border-amber-200 flex items-start gap-2">
+                  <Smartphone className="w-5 h-5 text-amber-500 flex-shrink-0 mt-0.5" />
+                  <div>
+                    <p className="text-sm font-medium text-amber-800">Use the Mobile App</p>
+                    <p className="text-xs text-amber-600">
+                      Apple Health requires the iOS app. Or connect Whoop to sync from anywhere.
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {/* Disconnect option for Whoop */}
+              {whoopLinked && (
                 <button
-                  onClick={handleConnect}
-                  disabled={connecting}
-                  className="w-full mt-4 py-3 px-4 bg-gradient-to-r from-red-400 to-pink-500 text-white font-semibold rounded-xl flex items-center justify-center gap-2 disabled:opacity-50"
+                  onClick={handleDisconnectWhoop}
+                  disabled={whoopDisconnecting}
+                  className="mt-3 text-xs text-warm-500 hover:text-warm-700 flex items-center gap-1"
                 >
-                  {connecting ? (
-                    <>
-                      <RefreshCw className="w-5 h-5 animate-spin" />
-                      Connecting...
-                    </>
-                  ) : (
-                    <>
-                      <Heart className="w-5 h-5" />
-                      Connect {platformName}
-                    </>
-                  )}
+                  <Unlink className="w-3 h-3" />
+                  {whoopDisconnecting ? 'Disconnecting...' : 'Disconnect Whoop'}
                 </button>
               )}
             </div>
-
-            {/* Today's Data Preview (if connected) */}
-            {todayData?.available && (
-              <div className="border-t border-warm-100 p-4 bg-warm-50">
-                <p className="text-xs text-warm-500 mb-3">Today's Data</p>
-                <div className="grid grid-cols-4 gap-2">
-                  <div className="text-center">
-                    <Moon className="w-4 h-4 mx-auto text-indigo-500 mb-1" />
-                    <p className="text-sm font-semibold text-warm-800">
-                      {todayData.sleep?.totalHours?.toFixed(1) ?? '—'}h
-                    </p>
-                    <p className="text-[10px] text-warm-500">Sleep</p>
-                  </div>
-                  <div className="text-center">
-                    <Footprints className="w-4 h-4 mx-auto text-green-500 mb-1" />
-                    <p className="text-sm font-semibold text-warm-800">
-                      {todayData.activity?.stepsToday ? `${(todayData.activity.stepsToday / 1000).toFixed(1)}k` : '—'}
-                    </p>
-                    <p className="text-[10px] text-warm-500">Steps</p>
-                  </div>
-                  <div className="text-center">
-                    <Activity className="w-4 h-4 mx-auto text-orange-500 mb-1" />
-                    <p className="text-sm font-semibold text-warm-800">
-                      {todayData.activity?.hasWorkout ? '✓' : '—'}
-                    </p>
-                    <p className="text-[10px] text-warm-500">Workout</p>
-                  </div>
-                  <div className="text-center">
-                    <Heart className="w-4 h-4 mx-auto text-red-400 mb-1" />
-                    <p className="text-sm font-semibold text-warm-800">
-                      {todayData.heart?.restingRate ?? '—'}
-                    </p>
-                    <p className="text-[10px] text-warm-500">BPM</p>
-                  </div>
-                </div>
-
-                {/* Whoop Recovery Score (if available) */}
-                {todayData.recovery && (
-                  <div className={`mt-3 p-3 rounded-xl flex items-center gap-3 ${
-                    todayData.recovery.status === 'green' ? 'bg-green-50' :
-                    todayData.recovery.status === 'yellow' ? 'bg-yellow-50' : 'bg-red-50'
-                  }`}>
-                    <TrendingUp className={`w-5 h-5 ${
-                      todayData.recovery.status === 'green' ? 'text-green-600' :
-                      todayData.recovery.status === 'yellow' ? 'text-yellow-600' : 'text-red-500'
-                    }`} />
-                    <div>
-                      <p className="text-sm font-semibold text-warm-800">
-                        Recovery: {todayData.recovery.score}%
-                      </p>
-                      <p className="text-xs text-warm-600">
-                        {getWhoopRecoveryInsight(todayData.recovery)?.message}
-                      </p>
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
           </motion.div>
         )}
 
-        {/* Whoop Cloud Connection - Available on ALL platforms */}
-        {!loading && (
+        {/* Today's Health Card */}
+        {!loading && todayData?.available && (
           <motion.div
             className="bg-white rounded-2xl border border-warm-200 overflow-hidden"
             initial={{ y: 20, opacity: 0 }}
@@ -373,76 +413,248 @@ const HealthSettingsScreen = ({ onClose }) => {
             transition={{ delay: 0.05 }}
           >
             <div className="p-4">
-              <div className="flex items-center gap-3 mb-4">
-                <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-teal-500 to-cyan-600 flex items-center justify-center">
-                  <Activity className="w-5 h-5 text-white" />
-                </div>
-                <div className="flex-1">
-                  <h2 className="font-semibold text-warm-800">Whoop</h2>
-                  <p className="text-sm text-warm-500">
-                    Cloud sync • Works everywhere
-                  </p>
-                </div>
-                {whoopLinked && (
-                  <CheckCircle className="w-5 h-5 text-green-500" />
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="font-semibold text-warm-800">Today's Health</h2>
+                {todayData.source === 'merged' && (
+                  <span className="text-xs text-purple-600 bg-purple-50 px-2 py-1 rounded-full">
+                    Smart merged
+                  </span>
                 )}
               </div>
 
-              {whoopLinked ? (
-                <>
-                  <div className="flex items-center gap-3 p-3 rounded-xl bg-green-50 border border-green-200">
-                    <CheckCircle className="w-6 h-6 text-green-500" />
+              {/* Health Metrics */}
+              <div className="space-y-3">
+                {/* Sleep */}
+                <div className="flex items-center justify-between py-2">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-xl bg-indigo-50 flex items-center justify-center">
+                      <Moon className="w-5 h-5 text-indigo-500" />
+                    </div>
                     <div>
-                      <p className="font-medium text-green-800">Connected</p>
-                      <p className="text-sm text-green-600">
-                        Syncing recovery, sleep, strain & workouts
+                      <p className="text-sm text-warm-600">Sleep</p>
+                      <p className="text-lg font-semibold text-warm-800">
+                        {todayData.sleep?.totalHours?.toFixed(1) ?? '—'} hrs
                       </p>
+                    </div>
+                  </div>
+                  <SourceBadge source={getMetricSource('sleep')} />
+                </div>
+
+                {/* Steps */}
+                <div className="flex items-center justify-between py-2 border-t border-warm-100">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-xl bg-green-50 flex items-center justify-center">
+                      <Footprints className="w-5 h-5 text-green-500" />
+                    </div>
+                    <div>
+                      <p className="text-sm text-warm-600">Steps</p>
+                      <p className="text-lg font-semibold text-warm-800">
+                        {todayData.activity?.stepsToday
+                          ? todayData.activity.stepsToday.toLocaleString()
+                          : '—'}
+                      </p>
+                    </div>
+                  </div>
+                  <SourceBadge source={getMetricSource('steps')} />
+                </div>
+
+                {/* Workout */}
+                <div className="flex items-center justify-between py-2 border-t border-warm-100">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-xl bg-orange-50 flex items-center justify-center">
+                      <Activity className="w-5 h-5 text-orange-500" />
+                    </div>
+                    <div>
+                      <p className="text-sm text-warm-600">Workout</p>
+                      <p className="text-lg font-semibold text-warm-800">
+                        {todayData.activity?.hasWorkout
+                          ? `${todayData.activity.totalExerciseMinutes || ''} min`.trim() || '✓'
+                          : '—'}
+                      </p>
+                    </div>
+                  </div>
+                  <SourceBadge source={getMetricSource('workout')} />
+                </div>
+
+                {/* Resting Heart Rate */}
+                <div className="flex items-center justify-between py-2 border-t border-warm-100">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-xl bg-red-50 flex items-center justify-center">
+                      <Heart className="w-5 h-5 text-red-400" />
+                    </div>
+                    <div>
+                      <p className="text-sm text-warm-600">Resting HR</p>
+                      <p className="text-lg font-semibold text-warm-800">
+                        {todayData.heart?.restingRate ?? '—'} bpm
+                      </p>
+                    </div>
+                  </div>
+                  <SourceBadge source={getMetricSource('hr')} />
+                </div>
+
+                {/* HRV */}
+                {todayData.heart?.hrv && (
+                  <div className="flex items-center justify-between py-2 border-t border-warm-100">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-xl bg-purple-50 flex items-center justify-center">
+                        <Zap className="w-5 h-5 text-purple-500" />
+                      </div>
+                      <div>
+                        <p className="text-sm text-warm-600">HRV</p>
+                        <p className="text-lg font-semibold text-warm-800">
+                          {todayData.heart.hrv} ms
+                        </p>
+                      </div>
+                    </div>
+                    <SourceBadge source={getMetricSource('hrv')} />
+                  </div>
+                )}
+              </div>
+
+              {/* Whoop Recovery Score */}
+              {todayData.recovery && (
+                <div className={`mt-4 p-4 rounded-xl flex items-center gap-3 ${
+                  todayData.recovery.status === 'green' ? 'bg-green-50 border border-green-200' :
+                  todayData.recovery.status === 'yellow' ? 'bg-yellow-50 border border-yellow-200' :
+                  'bg-red-50 border border-red-200'
+                }`}>
+                  <TrendingUp className={`w-6 h-6 ${
+                    todayData.recovery.status === 'green' ? 'text-green-600' :
+                    todayData.recovery.status === 'yellow' ? 'text-yellow-600' : 'text-red-500'
+                  }`} />
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2">
+                      <p className="font-semibold text-warm-800">
+                        Recovery: {todayData.recovery.score}%
+                      </p>
+                      <SourceBadge source="whoop" />
+                    </div>
+                    <p className="text-sm text-warm-600">
+                      {getWhoopRecoveryInsight(todayData.recovery)?.message}
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {/* Strain Score */}
+              {todayData.strain && (
+                <div className="mt-3 p-3 rounded-xl bg-warm-50 border border-warm-200 flex items-center gap-3">
+                  <Activity className="w-5 h-5 text-warm-600" />
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2">
+                      <p className="text-sm font-medium text-warm-700">
+                        Strain: {todayData.strain.score?.toFixed(1)}
+                      </p>
+                      <SourceBadge source="whoop" />
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          </motion.div>
+        )}
+
+        {/* Sync Past Entries (Backfill) */}
+        {!loading && anySourceConnected && (backfillCount > 0 || backfillRunning || backfillComplete) && (
+          <motion.div
+            className="bg-white rounded-2xl border border-warm-200 overflow-hidden"
+            initial={{ y: 20, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            transition={{ delay: 0.08 }}
+          >
+            <div className="p-4">
+              <div className="flex items-center gap-3 mb-3">
+                <div className="w-10 h-10 rounded-xl bg-amber-50 flex items-center justify-center">
+                  <History className="w-5 h-5 text-amber-600" />
+                </div>
+                <div>
+                  <h2 className="font-semibold text-warm-800">Sync Past Entries</h2>
+                  <p className="text-sm text-warm-500">
+                    Add health data to older journal entries
+                  </p>
+                </div>
+              </div>
+
+              {/* Not running, not complete - show start button */}
+              {!backfillRunning && !backfillComplete && backfillCount > 0 && (
+                <>
+                  <p className="text-sm text-warm-600 mb-3">
+                    Found <span className="font-semibold">{backfillCount}</span> entries without health data.
+                    We can add sleep, steps, and heart rate from your health history.
+                  </p>
+                  <button
+                    onClick={handleStartBackfill}
+                    className="w-full py-2.5 px-4 bg-gradient-to-r from-amber-500 to-orange-500 text-white font-semibold rounded-xl flex items-center justify-center gap-2"
+                  >
+                    <History className="w-4 h-4" />
+                    Sync {backfillCount} Entries
+                  </button>
+                </>
+              )}
+
+              {/* Running - show progress */}
+              {backfillRunning && backfillProgress && (
+                <div className="space-y-3">
+                  {/* Progress bar */}
+                  <div className="w-full bg-warm-100 rounded-full h-2">
+                    <div
+                      className="bg-gradient-to-r from-amber-500 to-orange-500 h-2 rounded-full transition-all duration-300"
+                      style={{ width: `${(backfillProgress.processed / backfillProgress.total) * 100}%` }}
+                    />
+                  </div>
+
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-warm-600">
+                      Processing {backfillProgress.processed} of {backfillProgress.total}...
+                    </span>
+                    <span className="text-green-600 font-medium">
+                      {backfillProgress.updated} updated
+                    </span>
+                  </div>
+
+                  {/* Current entry being processed */}
+                  {backfillProgress.currentEntry && (
+                    <p className="text-xs text-warm-500 truncate">
+                      {backfillProgress.currentEntry.createdAt?.toLocaleDateString()} - {backfillProgress.currentEntry.content}
+                    </p>
+                  )}
+
+                  <button
+                    onClick={handleCancelBackfill}
+                    className="w-full py-2 px-4 border border-warm-200 text-warm-600 font-medium rounded-xl flex items-center justify-center gap-2 hover:bg-warm-50"
+                  >
+                    <XCircle className="w-4 h-4" />
+                    Cancel
+                  </button>
+                </div>
+              )}
+
+              {/* Complete - show results */}
+              {backfillComplete && backfillResults && (
+                <div className="space-y-3">
+                  <div className="p-3 rounded-xl bg-green-50 border border-green-200">
+                    <div className="flex items-center gap-2 mb-2">
+                      <CheckCircle className="w-5 h-5 text-green-600" />
+                      <p className="font-semibold text-green-800">Sync Complete!</p>
+                    </div>
+                    <div className="text-sm text-green-700 space-y-1">
+                      <p>✓ Added health data to <span className="font-semibold">{backfillResults.updated}</span> entries</p>
+                      {backfillResults.skipped > 0 && (
+                        <p className="text-warm-600">• {backfillResults.skipped} entries had no matching health data</p>
+                      )}
+                      {backfillResults.failed > 0 && (
+                        <p className="text-red-600">• {backfillResults.failed} entries failed to update</p>
+                      )}
                     </div>
                   </div>
 
                   <button
-                    onClick={handleDisconnectWhoop}
-                    disabled={whoopDisconnecting}
-                    className="w-full mt-3 py-2.5 px-4 border border-warm-200 text-warm-600 font-medium rounded-xl flex items-center justify-center gap-2 hover:bg-warm-50 disabled:opacity-50"
+                    onClick={handleDismissBackfillResults}
+                    className="w-full py-2 px-4 border border-warm-200 text-warm-600 font-medium rounded-xl hover:bg-warm-50"
                   >
-                    {whoopDisconnecting ? (
-                      <>
-                        <RefreshCw className="w-4 h-4 animate-spin" />
-                        Disconnecting...
-                      </>
-                    ) : (
-                      <>
-                        <Unlink className="w-4 h-4" />
-                        Disconnect Whoop
-                      </>
-                    )}
+                    Done
                   </button>
-                </>
-              ) : (
-                <>
-                  <p className="text-sm text-warm-600 mb-3">
-                    Connect your Whoop to automatically sync recovery, HRV, sleep, and workout data — even on web.
-                  </p>
-
-                  <button
-                    onClick={handleConnectWhoop}
-                    disabled={whoopConnecting}
-                    className="w-full py-3 px-4 bg-gradient-to-r from-teal-500 to-cyan-600 text-white font-semibold rounded-xl flex items-center justify-center gap-2 disabled:opacity-50"
-                  >
-                    {whoopConnecting ? (
-                      <>
-                        <RefreshCw className="w-5 h-5 animate-spin" />
-                        Connecting...
-                      </>
-                    ) : (
-                      <>
-                        <Link2 className="w-5 h-5" />
-                        Connect Whoop
-                        <ExternalLink className="w-4 h-4 ml-1 opacity-70" />
-                      </>
-                    )}
-                  </button>
-                </>
+                </div>
               )}
             </div>
           </motion.div>

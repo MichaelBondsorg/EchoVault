@@ -47,6 +47,13 @@ export {
   getWhoopStrainInsight
 } from './whoop';
 
+// Health data backfill (retroactive health context for old entries)
+export {
+  getEntriesWithoutHealth,
+  backfillHealthData,
+  getBackfillCount
+} from './healthBackfill';
+
 // Platform-specific (typically don't need direct access)
 export * as healthKit from './healthKit';
 export * as googleFit from './googleFit';

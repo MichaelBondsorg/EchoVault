@@ -19,6 +19,7 @@ const WHOOP_AUTH_BASE = 'https://api.prod.whoop.com/oauth/oauth2';
 
 // Required scopes for EchoVault integration
 const REQUIRED_SCOPES = [
+  'offline',          // Required for refresh tokens
   'read:recovery',
   'read:sleep',
   'read:workout',
@@ -172,10 +173,20 @@ export const exchangeCodeForTokens = async (
 
   if (!response.ok) {
     const error = await response.text();
+    console.error('Whoop token exchange failed:', error);
     throw new Error(`Token exchange failed: ${error}`);
   }
 
   const data = await response.json();
+  console.log('Whoop token response keys:', Object.keys(data));
+  console.log('Whoop token response scope:', data.scope);
+  console.log('Whoop has refresh_token:', !!data.refresh_token);
+
+  if (!data.refresh_token) {
+    console.error('No refresh_token in Whoop response. Full response:', JSON.stringify(data, null, 2));
+    throw new Error('Whoop did not return a refresh token. Ensure "offline" scope is requested.');
+  }
+
   return {
     accessToken: data.access_token,
     refreshToken: data.refresh_token,

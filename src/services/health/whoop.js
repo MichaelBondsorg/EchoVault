@@ -151,25 +151,48 @@ export const getWhoopSummary = async (date = new Date()) => {
       `/health/whoop/summary?date=${date.toISOString()}`
     );
 
-    // Transform response to match EchoVault health schema
+    // Transform response to match EchoVault nested health schema (same as HealthKit)
+    const workouts = response.workouts?.map(w => ({
+      type: w.type,
+      duration: w.duration,
+      calories: w.calories,
+      strain: w.strain,
+    })) || [];
+
     const summary = {
       available: response.available,
       source: 'whoop',
       date: response.date,
+
+      // Nested format matching HealthKit structure for UI compatibility
       sleep: response.sleep ? {
         totalHours: response.sleep.totalHours,
         quality: response.sleep.quality,
+        score: response.sleep.score || null,
+        stages: null, // Whoop doesn't provide sleep stages breakdown
         inBed: response.sleep.inBed,
         asleep: response.sleep.asleep,
       } : null,
-      hrv: response.hrv ? {
-        average: response.hrv.average,
-        stressIndicator: response.hrv.stressIndicator,
-      } : null,
-      heartRate: response.heartRate ? {
-        resting: response.heartRate.resting,
-      } : null,
-      // Whoop-specific fields
+
+      heart: {
+        restingRate: response.heartRate?.resting || null,
+        currentRate: null, // Whoop doesn't provide current HR
+        hrv: response.hrv?.average || null,
+        hrvTrend: null,
+        stressIndicator: response.hrv?.stressIndicator || null,
+      },
+
+      activity: {
+        // Whoop doesn't track steps - estimate from strain calories
+        stepsToday: response.strain?.calories ? Math.round(response.strain.calories * 15) : null,
+        totalCaloriesBurned: response.strain?.calories || null,
+        activeCaloriesBurned: response.strain?.calories || null,
+        totalExerciseMinutes: workouts.reduce((sum, w) => sum + (w.duration || 0), 0),
+        hasWorkout: workouts.length > 0,
+        workouts: workouts,
+      },
+
+      // Whoop-specific fields (preserved for Whoop UI elements)
       recovery: response.recovery ? {
         score: response.recovery.score,
         status: response.recovery.status,
@@ -178,17 +201,19 @@ export const getWhoopSummary = async (date = new Date()) => {
         score: response.strain.score,
         calories: response.strain.calories,
       } : null,
-      // Map workouts to standard format
-      workouts: response.workouts?.map(w => ({
-        type: w.type,
-        duration: w.duration,
-        calories: w.calories,
-        strain: w.strain,
-      })) || [],
-      hasWorkout: response.workouts?.length > 0,
-      // Map strain to steps equivalent (rough approximation for UI compatibility)
+
+      // Legacy flat fields for backward compatibility
+      hrv: response.hrv ? {
+        average: response.hrv.average,
+        stressIndicator: response.hrv.stressIndicator,
+      } : null,
+      heartRate: response.heartRate ? {
+        resting: response.heartRate.resting,
+      } : null,
+      workouts: workouts,
+      hasWorkout: workouts.length > 0,
       steps: response.strain?.calories ? Math.round(response.strain.calories * 15) : null,
-      stepsGoalMet: response.strain?.score >= 10,
+
       queriedAt: response.queriedAt || new Date().toISOString(),
     };
 

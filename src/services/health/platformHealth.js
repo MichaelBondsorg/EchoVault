@@ -74,10 +74,15 @@ export const getHealthDataStrategy = async () => {
   // Native platform - can access health APIs
   if (isNative) {
     const permissionStatus = await getPermissionStatus();
+    console.log('[PlatformHealth] Permission status:', permissionStatus);
+
+    // Consider available if granted, partial (some permissions), or unknown (might have been set in iOS Settings)
+    // We'll attempt to query HealthKit and it will fail gracefully if no permissions
+    const isAvailable = permissionStatus === 'granted' || permissionStatus === 'partial' || permissionStatus === 'unknown';
 
     return {
       strategy: capabilities.provider,
-      isAvailable: permissionStatus === 'granted',
+      isAvailable,
       permissionStatus,
       capabilities,
       platform,
