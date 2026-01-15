@@ -148,8 +148,13 @@ export const checkHealthPermissions = async () => {
 /**
  * Get health context for entry enrichment
  *
- * Returns simplified health context to store with journal entries.
+ * Returns expanded health context to store with journal entries.
  * Used to correlate mood with health metrics.
+ *
+ * Structure matches the expanded HealthKit/Whoop summary format:
+ * - sleep: totalHours, quality, score, stages
+ * - heart: restingRate, currentRate, hrv, stressIndicator
+ * - activity: stepsToday, calories, exerciseMinutes, workouts
  *
  * @returns {Object|null} Health context or null if unavailable
  */
@@ -160,13 +165,67 @@ export const getEntryHealthContext = async () => {
     return null;
   }
 
+  // Handle both old flat format (Whoop/cache) and new nested format (HealthKit)
+  const isNewFormat = summary.activity !== undefined;
+
+  if (isNewFormat) {
+    // New expanded format from HealthKit
+    return {
+      sleep: {
+        totalHours: summary.sleep?.totalHours || null,
+        quality: summary.sleep?.quality || null,
+        score: summary.sleep?.score || null,
+        stages: summary.sleep?.stages || null
+      },
+      heart: {
+        restingRate: summary.heart?.restingRate || null,
+        currentRate: summary.heart?.currentRate || null,
+        hrv: summary.heart?.hrv || null,
+        hrvTrend: summary.heart?.hrvTrend || null,
+        stressIndicator: summary.heart?.stressIndicator || null
+      },
+      activity: {
+        stepsToday: summary.activity?.stepsToday || null,
+        totalCaloriesBurned: summary.activity?.totalCaloriesBurned || null,
+        activeCaloriesBurned: summary.activity?.activeCaloriesBurned || null,
+        totalExerciseMinutes: summary.activity?.totalExerciseMinutes || null,
+        hasWorkout: summary.activity?.hasWorkout || false,
+        workouts: summary.activity?.workouts || []
+      },
+      source: summary.source || 'healthkit',
+      capturedAt: new Date().toISOString()
+    };
+  }
+
+  // Legacy format (Whoop, cache, or older data)
   return {
-    sleepLastNight: summary.sleep?.totalHours || null,
-    sleepQuality: summary.sleep?.quality || null,
-    stepsToday: summary.steps || null,
-    hasWorkout: summary.hasWorkout || false,
-    stressIndicator: summary.hrv?.stressIndicator || null,
-    restingHeartRate: summary.heartRate?.resting || null,
+    sleep: {
+      totalHours: summary.sleep?.totalHours || null,
+      quality: summary.sleep?.quality || null,
+      score: summary.sleepScore || null,
+      stages: null
+    },
+    heart: {
+      restingRate: summary.heartRate?.resting || null,
+      currentRate: summary.heartRate?.average || null,
+      hrv: summary.hrv?.average || null,
+      hrvTrend: summary.hrv?.trend || null,
+      stressIndicator: summary.hrv?.stressIndicator || null
+    },
+    activity: {
+      stepsToday: summary.steps || null,
+      totalCaloriesBurned: summary.calories?.total || null,
+      activeCaloriesBurned: summary.calories?.active || null,
+      totalExerciseMinutes: summary.exerciseMinutes || null,
+      hasWorkout: summary.hasWorkout || false,
+      workouts: (summary.workouts || []).map(w => ({
+        type: w.type,
+        duration: w.duration,
+        calories: w.calories || 0,
+        startTime: w.startTime || null,
+        endTime: w.endTime || null
+      }))
+    },
     source: summary.source || 'native',
     capturedAt: new Date().toISOString()
   };

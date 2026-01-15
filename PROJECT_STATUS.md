@@ -19,6 +19,7 @@
 |------|--------|-------|
 | Nexus 2.0 Insights Engine | 📋 Spec Complete | Full implementation spec created. Replaces entire existing insights system. |
 | Entity Management (Milestone 1.5) | ✅ Complete | Entity resolution for voice transcription + migration from older entries |
+| HealthKit Integration (Expanded) | 🔧 In Progress | Sleep stages fork deployed, needs debugging. Health data not saving to entries. |
 
 ### Nexus 2.0 Implementation Phases
 
@@ -63,7 +64,7 @@ Good ideas we're explicitly NOT doing now. Don't re-suggest these.
 | Idea | Why Parked | Revisit When |
 |------|------------|--------------|
 | Social features / friend comparisons | Need to nail individual value prop first | Core insights validated |
-| Apple Health integration | Whoop integration is sufficient for now | Users request it |
+| Apple Health integration | ✅ Now implemented - see HealthKit session notes | N/A |
 | Therapist export feature | No user has asked for this | A user asks |
 | Automated UAT / Playwright tests | App changing too fast, maintenance > value | Core flows stabilize |
 | CI/CD complexity | Current deploy process works fine | Shipping multiple times/week |
@@ -112,6 +113,77 @@ Good ideas we're explicitly NOT doing now. Don't re-suggest these.
 ---
 
 ## Session Notes
+
+### 2026-01-14: Expanded HealthKit Integration
+
+**Context:** Expanding health data captured with journal entries to enable better mood correlation insights.
+
+**What Was Done:**
+
+1. **Fixed HealthKit Plugin Loading (WORKING)**
+   - Original issue: Plugin hanging on iOS during load
+   - Solution: Changed from static import to lazy `registerPlugin()` inside getter function
+   - HealthKit now connects, permissions dialog shows, and user can grant access
+   - Health Settings screen now displays: Sleep, Steps, Workout status, BPM
+
+2. **Created Local Plugin Fork (`/plugins/capacitor-health-extended/`)**
+   - Forked `@flomentumsolutions/capacitor-health-extended@0.6.4`
+   - Added `sleep-stages` data type handler in Swift (`HealthPlugin.swift:459-560`)
+   - Returns: deep, core, REM, awake (minutes), total, inBedStart, inBedEnd, awakePeriods
+   - Package renamed to `@echovault/capacitor-health-extended@0.6.4-fork.1`
+   - Package.swift name changed to `EchovaultCapacitorHealthExtended`
+
+3. **Updated healthKit.js for Expanded Data**
+   - Added timeout wrappers (10s) around all queries to prevent hanging
+   - Added detailed console logging for each query
+   - Updated `querySleep()` to use new `sleep-stages` endpoint with fallback
+   - Implemented full sleep score calculation using Michael's formula:
+     - Duration (30%) - 7-9 hours optimal
+     - Efficiency (20%) - time asleep / time in bed
+     - Deep sleep (20%) - 13-23% optimal
+     - REM (15%) - 18-28% optimal
+     - Continuity (15%) - penalize wake-ups
+
+4. **Updated HealthSettingsScreen.jsx**
+   - Fixed data mapping for new nested structure:
+     - `todayData.activity?.stepsToday` (was `todayData.steps`)
+     - `todayData.activity?.hasWorkout` (was `todayData.hasWorkout`)
+     - `todayData.heart?.restingRate` (was `todayData.heartRate?.resting`)
+
+5. **Fixed Geolocation Timeout Issue**
+   - Added 5-second timeout wrappers around `checkPermissions()` and `requestPermissions()`
+   - Falls back to cached location if permissions hang (was blocking entry creation)
+
+**Expanded Health Context Per Entry:**
+```javascript
+{
+  sleep: { totalHours, quality, score, stages: { deep, core, rem, awake } },
+  heart: { restingRate, currentRate, hrv, hrvTrend, stressIndicator },
+  activity: { stepsToday, totalCaloriesBurned, activeCaloriesBurned, totalExerciseMinutes, hasWorkout, workouts: [...] },
+  source: "healthkit",
+  capturedAt: "..."
+}
+```
+
+**Current Issue (Needs Debugging):**
+- HealthKit queries work and data shows in Health Settings screen
+- BUT health data is NOT being saved to journal entries
+- Need to trace where `getEntryHealthContext()` is called during entry creation
+- Check if it's being called, and if so, why the data isn't persisting
+
+**Key Files Modified:**
+- `src/services/health/healthKit.js` - Main HealthKit integration
+- `src/services/health/healthDataService.js` - Entry health context mapping
+- `src/components/screens/HealthSettingsScreen.jsx` - UI data binding
+- `src/services/environment/environmentService.js` - Geolocation timeout fix
+- `plugins/capacitor-health-extended/` - Local plugin fork with sleep stages
+- `package.json` - Points to local plugin
+
+**Debugging Next Steps:**
+1. Add logging to `getEntryHealthContext()` to see if it's being called
+2. Check where entry creation calls health context capture
+3. Verify Firestore entry documents have/don't have `healthContext` field
+4. May be a timing issue (health queries async vs entry save sync)
 
 ### 2026-01-14: Entity Management Feature (Milestone 1.5)
 

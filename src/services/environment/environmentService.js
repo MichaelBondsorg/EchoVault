@@ -15,6 +15,17 @@ import { getSunTimes, isAfterSunset, isBeforeSunrise, getDaylightRemaining } fro
 
 const LOCATION_CACHE_KEY = 'env_location_cache';
 const CACHE_DURATION_MS = 30 * 60 * 1000; // 30 minutes
+const GEOLOCATION_TIMEOUT_MS = 5000; // 5 second timeout for permission checks
+
+/**
+ * Wrap a promise with a timeout
+ */
+const withTimeout = (promise, ms, fallback = null) => {
+  return Promise.race([
+    promise,
+    new Promise((resolve) => setTimeout(() => resolve(fallback), ms))
+  ]);
+};
 
 /**
  * Get current location with caching
@@ -24,8 +35,12 @@ const CACHE_DURATION_MS = 30 * 60 * 1000; // 30 minutes
  */
 export const getCurrentLocation = async () => {
   try {
-    // Check permissions first
-    const permission = await Geolocation.checkPermissions();
+    // Check permissions first (with timeout to prevent hanging)
+    const permission = await withTimeout(
+      Geolocation.checkPermissions(),
+      GEOLOCATION_TIMEOUT_MS,
+      { location: 'denied' }
+    );
 
     if (permission.location === 'denied') {
       // Try to get cached location
@@ -33,17 +48,21 @@ export const getCurrentLocation = async () => {
     }
 
     if (permission.location === 'prompt') {
-      // Request permission
-      const requested = await Geolocation.requestPermissions();
+      // Request permission (with timeout)
+      const requested = await withTimeout(
+        Geolocation.requestPermissions(),
+        GEOLOCATION_TIMEOUT_MS,
+        { location: 'denied' }
+      );
       if (requested.location !== 'granted') {
         return await getCachedLocation();
       }
     }
 
-    // Get current position
+    // Get current position (already has its own timeout)
     const position = await Geolocation.getCurrentPosition({
       enableHighAccuracy: false, // Coarse location is fine for weather
-      timeout: 10000
+      timeout: 8000
     });
 
     const location = {
