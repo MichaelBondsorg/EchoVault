@@ -515,6 +515,206 @@ const generateHealthRecommendations = (correlations, pairs) => {
   return recommendations.slice(0, 3); // Top 3 recommendations
 };
 
+/**
+ * Analyze correlations with time lags
+ *
+ * Real insights often come from lagged relationships:
+ * - "Poor sleep on Day N → low mood on Day N+1"
+ * - "High strain on Day N → elevated RHR for 2 days"
+ *
+ * @param {Array} entries - Journal entries with mood_score
+ * @param {Array} healthHistory - Daily health summaries
+ * @returns {Object} Lagged correlation analysis
+ */
+export const analyzeLaggedCorrelations = (entries, healthHistory) => {
+  if (!entries?.length || !healthHistory?.length) {
+    return { available: false, reason: 'insufficient_data' };
+  }
+
+  // Build date-indexed maps
+  const moodByDate = buildMoodByDate(entries);
+  const healthByDate = buildHealthByDate(healthHistory);
+
+  const results = {
+    lag0: {}, // Same-day correlations
+    lag1: {}, // Next-day correlations
+    lag2: {}, // Two-day correlations
+    insights: [],
+    analyzedAt: new Date().toISOString()
+  };
+
+  // Metrics to correlate with mood
+  const metrics = ['sleepHours', 'sleepScore', 'hrv', 'recovery', 'strain', 'steps'];
+
+  for (const metric of metrics) {
+    for (const lag of [0, 1, 2]) {
+      const pairs = buildLaggedPairs(healthByDate, moodByDate, metric, lag);
+
+      if (pairs.length >= 5) {
+        const correlation = pearsonCorrelation(
+          pairs.map(p => p.x),
+          pairs.map(p => p.y)
+        );
+
+        if (correlation !== null) {
+          results[`lag${lag}`][metric] = {
+            correlation: Math.round(correlation * 100) / 100,
+            sampleSize: pairs.length,
+            significant: Math.abs(correlation) > 0.3 && pairs.length >= 10
+          };
+
+          // Generate insight for significant lagged correlations
+          if (lag > 0 && Math.abs(correlation) > 0.3 && pairs.length >= 10) {
+            results.insights.push({
+              type: 'lagged_correlation',
+              metric,
+              lag,
+              correlation: Math.round(correlation * 100) / 100,
+              message: generateLaggedInsightMessage(metric, lag, correlation),
+              confidence: calculateConfidence(correlation, pairs.length)
+            });
+          }
+        }
+      }
+    }
+  }
+
+  // Sort insights by confidence
+  results.insights.sort((a, b) => b.confidence - a.confidence);
+
+  return results;
+};
+
+/**
+ * Build mood by date map
+ */
+const buildMoodByDate = (entries) => {
+  const map = {};
+  for (const entry of entries) {
+    if (entry.analysis?.mood_score !== undefined) {
+      const dateStr = (entry.createdAt?.toDate?.() || new Date(entry.createdAt))
+        .toISOString().split('T')[0];
+      // Average if multiple entries per day
+      if (map[dateStr]) {
+        map[dateStr] = (map[dateStr] + entry.analysis.mood_score) / 2;
+      } else {
+        map[dateStr] = entry.analysis.mood_score;
+      }
+    }
+  }
+  return map;
+};
+
+/**
+ * Build health by date map
+ */
+const buildHealthByDate = (healthHistory) => {
+  const map = {};
+  for (const h of healthHistory) {
+    if (h.date) {
+      map[h.date] = h;
+    }
+  }
+  return map;
+};
+
+/**
+ * Extract metric value from health data
+ */
+const extractMetricValue = (healthData, metric) => {
+  if (!healthData) return null;
+
+  switch (metric) {
+    case 'sleepHours':
+      return healthData.sleep?.totalHours || null;
+    case 'sleepScore':
+      return healthData.sleep?.score || null;
+    case 'hrv':
+      return healthData.hrv?.average || healthData.heart?.hrv || null;
+    case 'recovery':
+      return healthData.recovery?.score || null;
+    case 'strain':
+      return healthData.strain?.score || null;
+    case 'steps':
+      return healthData.steps || healthData.activity?.stepsToday || null;
+    default:
+      return null;
+  }
+};
+
+/**
+ * Build pairs for lagged correlation
+ * @param {number} lag - Days of lag (0 = same day, 1 = next day, etc.)
+ */
+const buildLaggedPairs = (healthByDate, moodByDate, metric, lag) => {
+  const pairs = [];
+
+  for (const [dateStr, healthData] of Object.entries(healthByDate)) {
+    const metricValue = extractMetricValue(healthData, metric);
+    if (metricValue === null) continue;
+
+    // Get mood from date + lag
+    const baseDate = new Date(dateStr);
+    const targetDate = new Date(baseDate);
+    targetDate.setDate(targetDate.getDate() + lag);
+    const targetDateStr = targetDate.toISOString().split('T')[0];
+
+    const moodValue = moodByDate[targetDateStr];
+
+    if (moodValue !== undefined) {
+      pairs.push({ x: metricValue, y: moodValue });
+    }
+  }
+
+  return pairs;
+};
+
+/**
+ * Generate human-readable insight for lagged correlation
+ */
+const generateLaggedInsightMessage = (metric, lag, correlation) => {
+  const direction = correlation > 0 ? 'positively' : 'negatively';
+  const strength = Math.abs(correlation) > 0.5 ? 'strongly' : 'moderately';
+
+  const metricLabels = {
+    sleepHours: 'sleep duration',
+    sleepScore: 'sleep quality',
+    hrv: 'HRV',
+    recovery: 'recovery score',
+    strain: 'workout strain',
+    steps: 'step count'
+  };
+
+  const lagLabels = {
+    1: 'the next day',
+    2: 'two days later'
+  };
+
+  const metricLabel = metricLabels[metric] || metric;
+
+  if (correlation > 0) {
+    return `Your ${metricLabel} ${strength} predicts better mood ${lagLabels[lag]}. Consider tracking this pattern.`;
+  } else {
+    return `Higher ${metricLabel} may ${strength} predict lower mood ${lagLabels[lag]}. You might be pushing too hard.`;
+  }
+};
+
+/**
+ * Calculate confidence based on correlation strength and sample size
+ */
+const calculateConfidence = (correlation, sampleSize) => {
+  const absCorr = Math.abs(correlation);
+  // Base confidence from correlation strength
+  let confidence = absCorr * 0.5;
+  // Boost for larger sample sizes
+  if (sampleSize >= 30) confidence += 0.3;
+  else if (sampleSize >= 15) confidence += 0.2;
+  else if (sampleSize >= 10) confidence += 0.1;
+  // Cap at 0.95
+  return Math.min(0.95, confidence);
+};
+
 export default {
-  analyzeHealthMoodCorrelations
+  analyzeHealthMoodCorrelations,
+  analyzeLaggedCorrelations
 };

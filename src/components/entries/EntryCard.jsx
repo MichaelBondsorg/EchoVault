@@ -4,7 +4,7 @@ import {
   Trash2, Calendar, Edit2, Check, RefreshCw, Lightbulb, Wind, Sparkles,
   Brain, Info, Footprints, Clipboard, X, Compass,
   Sun, Moon, Cloud, CloudRain, CloudSnow, CloudLightning, CloudFog, CloudDrizzle, CloudSun, CloudMoon,
-  Thermometer, Activity, BedDouble
+  Thermometer, Activity, BedDouble, Battery, Zap
 } from 'lucide-react';
 import { safeString, formatMentions } from '../../utils/string';
 import { formatDateForInput, getTodayForInput, parseDateInput, getDateString } from '../../utils/date';
@@ -27,6 +27,70 @@ const getWeatherIcon = (condition, isDay = true) => {
     thunderstorm: CloudLightning
   };
   return icons[condition] || Cloud;
+};
+
+/**
+ * Primary Readiness Metric Component
+ * Displays the most relevant health metric based on data source:
+ * - Whoop users: Recovery Score (green/yellow/red zones)
+ * - HealthKit-only users: Sleep Score (calculated from sleep data)
+ * - Merged: Recovery Score (Whoop priority)
+ */
+const PrimaryReadinessMetric = ({ healthContext }) => {
+  if (!healthContext) return null;
+
+  const source = healthContext.source;
+  const recovery = healthContext.recovery?.score;
+  const sleepScore = healthContext.sleep?.score;
+  const sleepHours = healthContext.sleep?.totalHours;
+
+  // Determine which metric to show as primary
+  const hasWhoop = source === 'whoop' || source === 'merged';
+  const hasRecovery = recovery && recovery > 0;
+  const hasSleepScore = sleepScore && sleepScore > 0;
+
+  // Whoop users (or merged): Recovery is primary
+  if (hasWhoop && hasRecovery) {
+    const recoveryColor = recovery >= 67 ? 'bg-green-100 text-green-700 border-green-200' :
+                          recovery >= 34 ? 'bg-yellow-100 text-yellow-700 border-yellow-200' :
+                          'bg-red-100 text-red-700 border-red-200';
+    return (
+      <span className={`flex items-center gap-1 px-2 py-0.5 rounded-full border font-medium ${recoveryColor}`}>
+        <Battery size={12} />
+        <span className="font-semibold">{recovery}%</span>
+        <span className="hidden sm:inline text-[9px] opacity-75">recovery</span>
+      </span>
+    );
+  }
+
+  // HealthKit-only users: Sleep Score is primary
+  if (hasSleepScore) {
+    const sleepColor = sleepScore >= 80 ? 'bg-green-100 text-green-700 border-green-200' :
+                       sleepScore >= 60 ? 'bg-purple-100 text-purple-700 border-purple-200' :
+                       'bg-orange-100 text-orange-700 border-orange-200';
+    return (
+      <span className={`flex items-center gap-1 px-2 py-0.5 rounded-full border font-medium ${sleepColor}`}>
+        <BedDouble size={12} />
+        <span className="font-semibold">{sleepScore}</span>
+        <span className="hidden sm:inline text-[9px] opacity-75">sleep</span>
+      </span>
+    );
+  }
+
+  // Fallback: Show sleep hours if available
+  if (sleepHours && sleepHours > 0) {
+    const hoursColor = sleepHours >= 7 ? 'bg-green-50 text-green-700' :
+                       sleepHours >= 5 ? 'bg-yellow-50 text-yellow-700' :
+                       'bg-red-50 text-red-700';
+    return (
+      <span className={`flex items-center gap-1 px-1.5 py-0.5 rounded-full ${hoursColor}`}>
+        <BedDouble size={10} />
+        {sleepHours.toFixed(1)}h sleep
+      </span>
+    );
+  }
+
+  return null;
 };
 
 // Mood color utility
@@ -476,29 +540,29 @@ const EntryCard = ({ entry, onDelete, onUpdate }) => {
             );
           })()}
 
-          {/* Health Context */}
+          {/* Health Context - Prioritized display */}
           {entry.healthContext && (() => {
             const health = entry.healthContext;
+            const source = health.source;
+            const hasWhoop = source === 'whoop' || source === 'merged';
+
             return (
               <>
-                {/* Sleep */}
-                {health.sleep?.totalHours > 0 && (
-                  <span className={`flex items-center gap-1 px-1.5 py-0.5 rounded-full ${
-                    health.sleep.score >= 80 ? 'bg-green-50 text-green-700' :
-                    health.sleep.score >= 60 ? 'bg-purple-50 text-purple-700' :
-                    'bg-orange-50 text-orange-700'
-                  }`}>
+                {/* Primary Readiness Metric (Recovery for Whoop, Sleep Score for HealthKit) */}
+                <PrimaryReadinessMetric healthContext={health} />
+
+                {/* Secondary metrics shown on larger screens */}
+                {/* Sleep hours (if primary is recovery, show hours as secondary) */}
+                {hasWhoop && health.recovery?.score > 0 && health.sleep?.totalHours > 0 && (
+                  <span className="hidden md:flex items-center gap-1 bg-purple-50 text-purple-700 px-1.5 py-0.5 rounded-full text-[10px]">
                     <BedDouble size={10} />
                     {health.sleep.totalHours.toFixed(1)}h
-                    {health.sleep.score && (
-                      <span className="hidden sm:inline">({health.sleep.score})</span>
-                    )}
                   </span>
                 )}
 
                 {/* HRV */}
                 {health.heart?.hrv > 0 && (
-                  <span className={`flex items-center gap-1 px-1.5 py-0.5 rounded-full ${
+                  <span className={`hidden sm:flex items-center gap-1 px-1.5 py-0.5 rounded-full ${
                     health.heart.hrvTrend === 'improving' ? 'bg-green-50 text-green-700' :
                     health.heart.hrvTrend === 'declining' ? 'bg-orange-50 text-orange-700' :
                     'bg-warm-50 text-warm-600'
@@ -508,21 +572,23 @@ const EntryCard = ({ entry, onDelete, onUpdate }) => {
                   </span>
                 )}
 
-                {/* Recovery (Whoop) */}
-                {health.recovery?.score > 0 && (
-                  <span className={`flex items-center gap-1 px-1.5 py-0.5 rounded-full ${
-                    health.recovery.score >= 67 ? 'bg-green-50 text-green-700' :
-                    health.recovery.score >= 34 ? 'bg-yellow-50 text-yellow-700' :
-                    'bg-red-50 text-red-700'
+                {/* Strain (Whoop only) */}
+                {hasWhoop && health.strain?.score > 0 && (
+                  <span className={`hidden md:flex items-center gap-1 px-1.5 py-0.5 rounded-full ${
+                    health.strain.score >= 15 ? 'bg-red-50 text-red-700' :
+                    health.strain.score >= 10 ? 'bg-orange-50 text-orange-700' :
+                    'bg-blue-50 text-blue-700'
                   }`}>
-                    Recovery {health.recovery.score}%
+                    <Zap size={10} />
+                    {health.strain.score.toFixed(1)} strain
                   </span>
                 )}
 
-                {/* Steps */}
+                {/* Steps - always show on larger screens */}
                 {health.activity?.stepsToday > 0 && (
-                  <span className="flex items-center gap-1 bg-green-50 text-green-700 px-1.5 py-0.5 rounded-full hidden sm:flex">
-                    {health.activity.stepsToday.toLocaleString()} steps
+                  <span className="hidden sm:flex items-center gap-1 bg-green-50 text-green-700 px-1.5 py-0.5 rounded-full">
+                    <Footprints size={10} />
+                    {health.activity.stepsToday.toLocaleString()}
                   </span>
                 )}
               </>

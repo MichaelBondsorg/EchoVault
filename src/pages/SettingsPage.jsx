@@ -3,6 +3,7 @@ import {
   User, Bell, Heart, Shield, Download, LogOut,
   ChevronRight, Smartphone, Brain, Users
 } from 'lucide-react';
+import BackfillPanel from '../components/settings/BackfillPanel';
 
 /**
  * SettingsPage - App settings and account management
@@ -144,6 +145,14 @@ const SettingsPage = ({
           </div>
         </div>
       ))}
+
+      {/* Data Enrichment Section */}
+      <div className="space-y-2">
+        <h3 className="text-xs font-bold text-warm-400 uppercase tracking-wider px-1">
+          Data
+        </h3>
+        <BackfillPanel />
+      </div>
 
       {/* Sign Out Button */}
       <motion.button

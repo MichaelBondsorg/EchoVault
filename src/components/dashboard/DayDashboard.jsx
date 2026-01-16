@@ -20,6 +20,7 @@ import {
   completeTaskAsWin
 } from '../../services/dashboard';
 import { getPatternSummary, getContradictions, getNextInsight, markInsightShown } from '../../services/nexus/compat';
+import { addToExclusionList, getActiveExclusions } from '../../services/signals/signalLifecycle';
 
 /**
  * DayDashboard - Controller Component
@@ -49,6 +50,7 @@ const DayDashboard = ({
   const [carryForwardItems, setCarryForwardItems] = useState([]);
   const [currentInsight, setCurrentInsight] = useState(null);
   const [shelterOverride, setShelterOverride] = useState(false);
+  const [exclusions, setExclusions] = useState([]);
   const midnightTimeoutRef = useRef(null);
   const lastEntryCountRef = useRef(0);
 
@@ -125,23 +127,51 @@ const DayDashboard = ({
     return () => clearTimeout(midnightTimeoutRef.current);
   }, []);
 
-  // Load carry-forward items
+  // Load carry-forward items and exclusions
   useEffect(() => {
     if (!userId) return;
     loadYesterdayCarryForward(userId, category).then(setCarryForwardItems);
+    // Load insight exclusions so we can filter them out
+    getActiveExclusions(userId).then(setExclusions).catch(console.error);
   }, [userId, category]);
+
+  // Helper to check if an insight is excluded
+  const isInsightExcluded = useCallback((insight) => {
+    if (exclusions.length === 0) return false;
+
+    const insightType = insight.type || insight.patternType || 'insight';
+    const insightMessage = (insight.message || insight.observation || '').slice(0, 100);
+    const insightEntity = insight.entity || insight.entityName || null;
+
+    return exclusions.some(exc => {
+      // Match by pattern type
+      if (exc.patternType !== insightType) return false;
+
+      // If exclusion has context, check for partial match
+      if (exc.context && Object.keys(exc.context).length > 0) {
+        const msgMatch = !exc.context.message || insightMessage.includes(exc.context.message.slice(0, 50));
+        const entityMatch = !exc.context.entity || exc.context.entity === insightEntity;
+        return msgMatch && entityMatch;
+      }
+
+      // Blanket exclusion for this type
+      return true;
+    });
+  }, [exclusions]);
 
   // Load insights - prioritize Nexus 2.0 insights, fallback to pattern insights
   useEffect(() => {
     if (!userId) return;
 
-    // If we have a Nexus primary insight, use it
+    // If we have a Nexus primary insight, check if excluded
     if (nexusPrimaryInsight) {
-      setCurrentInsight({
-        ...nexusPrimaryInsight,
-        source: 'nexus',
-        priority: nexusPrimaryInsight.priority === 1 ? 'high' : 'normal'
-      });
+      if (!isInsightExcluded(nexusPrimaryInsight)) {
+        setCurrentInsight({
+          ...nexusPrimaryInsight,
+          source: 'nexus',
+          priority: nexusPrimaryInsight.priority === 1 ? 'high' : 'normal'
+        });
+      }
       return;
     }
 
@@ -168,8 +198,11 @@ const DayDashboard = ({
         }));
       }
 
-      if (allInsights.length > 0) {
-        const selected = getNextInsight(userId, category, allInsights);
+      // Filter out excluded insights
+      const filteredInsights = allInsights.filter(insight => !isInsightExcluded(insight));
+
+      if (filteredInsights.length > 0) {
+        const selected = getNextInsight(userId, category, filteredInsights);
         if (selected) {
           setCurrentInsight(selected);
           markInsightShown(userId, category, selected);
@@ -177,7 +210,7 @@ const DayDashboard = ({
       }
     };
     loadInsights();
-  }, [userId, category, nexusPrimaryInsight]);
+  }, [userId, category, nexusPrimaryInsight, isInsightExcluded]);
 
   // Generate content with caching
   const generateAndCacheContent = useCallback(async (useCache = true) => {
@@ -221,6 +254,43 @@ const DayDashboard = ({
   }, [todayEntries.length, latestEntryTimestamp, generateAndCacheContent, summary]);
 
   // Handlers
+
+  // Dismiss insight permanently
+  const handleDismissInsight = useCallback(async () => {
+    if (!currentInsight || !userId) {
+      setCurrentInsight(null);
+      return;
+    }
+
+    // Generate a pattern key for exclusion
+    const patternType = currentInsight.type || currentInsight.patternType || 'insight';
+    const context = {
+      message: (currentInsight.message || currentInsight.observation || '').slice(0, 100),
+      entity: currentInsight.entity || currentInsight.entityName || null,
+      source: currentInsight.source || 'dashboard'
+    };
+
+    try {
+      // Add to exclusion list permanently
+      await addToExclusionList(userId, {
+        patternType,
+        context,
+        reason: 'user_dismissed',
+        permanent: true // Always permanent from dashboard dismiss
+      });
+
+      // Update local exclusions
+      setExclusions(prev => [...prev, { patternType, context, permanent: true }]);
+
+      console.log('[DayDashboard] Insight permanently dismissed:', patternType);
+    } catch (error) {
+      console.error('[DayDashboard] Failed to persist insight dismissal:', error);
+    }
+
+    // Always clear from UI
+    setCurrentInsight(null);
+  }, [currentInsight, userId]);
+
   const handleTaskComplete = useCallback(async (task, source, index) => {
     const taskText = typeof task === 'string' ? task : task.text;
 
@@ -297,7 +367,7 @@ const DayDashboard = ({
           onWrapUp={() => generateAndCacheContent(false)}
           onPromptClick={onPromptClick}
           onShowInsights={onShowInsights}
-          onDismissInsight={() => setCurrentInsight(null)}
+          onDismissInsight={handleDismissInsight}
         />
       ) : (
         <MidDayCheckIn
@@ -309,7 +379,7 @@ const DayDashboard = ({
           onEnergyCheck={onStartTextEntry}
           onPromptClick={onPromptClick}
           onShowInsights={onShowInsights}
-          onDismissInsight={() => setCurrentInsight(null)}
+          onDismissInsight={handleDismissInsight}
         />
       )}
     </AnimatePresence>

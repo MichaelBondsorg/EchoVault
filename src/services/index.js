@@ -33,3 +33,6 @@ export * from './memory';
 
 // Guided Services (Sessions & Mindfulness)
 export * from './guided';
+
+// Backfill Services (Retroactive Data Enrichment)
+export * from './backfill';

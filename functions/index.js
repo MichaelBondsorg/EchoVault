@@ -2027,6 +2027,18 @@ export const onEntryUpdate = onDocumentUpdated(
     const before = event.data.before.data();
     const after = event.data.after.data();
 
+    // CRITICAL: Skip staleness marking for backfilled entries
+    // The unified backfill service handles reassessment at the end
+    const isBackfillUpdate = (
+      (!before.healthContext && after.healthContext?.backfilled) ||
+      (!before.environmentContext && after.environmentContext?.backfilled)
+    );
+
+    if (isBackfillUpdate) {
+      console.log(`[onEntryUpdate] Backfill update detected for ${entryId} - skipping pattern recompute`);
+      return null;
+    }
+
     // Check if analysis was just added (contains goal_update info)
     const hadGoalUpdate = before.analysis?.goal_update ||
                           before.analysis?.extractEnhancedContext?.goal_update;

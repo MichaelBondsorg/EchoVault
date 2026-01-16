@@ -3,6 +3,15 @@
  *
  * Retroactively applies environment data to existing journal entries.
  *
+ * IMPORTANT: Only backfills entries that have their own location metadata.
+ * Does NOT use current device location - that would create dirty data
+ * (user may have been in a different location when the entry was created).
+ *
+ * Features:
+ * - Location requirement: Only backfills if entry has location metadata
+ * - Weather caching: Avoids redundant API calls for same day/location
+ * - Batched writes: Uses Firestore batched writes for performance
+ *
  * LIMITATION: Historical weather requires past data from Open-Meteo.
  * We can backfill entries from the past 7 days reliably.
  * Older entries will be marked as "unavailable" but won't error.
@@ -11,13 +20,28 @@
 import { auth, db } from '../../config/firebase';
 import { APP_COLLECTION_ID } from '../../config/constants';
 import { getDailyWeatherHistory } from './apis/weather';
-import { Preferences } from '@capacitor/preferences';
-import { collection, query, orderBy, limit, getDocs, doc, updateDoc } from 'firebase/firestore';
+import { collection, query, orderBy, limit, getDocs, doc, writeBatch } from 'firebase/firestore';
 
-const LOCATION_CACHE_KEY = 'env_location_cache';
+// Weather cache by date + location (approximate city)
+// Key format: "2026-01-15|37.8|-122.4" (date|lat|lng rounded to ~10km)
+const weatherCache = new Map();
+const BATCH_SIZE = 500;
+
+/**
+ * Get cache key for weather data
+ * Rounds lat/lng to ~10km precision to group nearby locations
+ */
+const getCacheKey = (date, lat, lng) => {
+  const dateStr = date.toISOString().split('T')[0];
+  const latRounded = Math.round(lat * 10) / 10;
+  const lngRounded = Math.round(lng * 10) / 10;
+  return `${dateStr}|${latRounded}|${lngRounded}`;
+};
 
 /**
  * Get entries that don't have environment context
+ * Now includes location metadata for proper backfill
+ *
  * @param {number} maxEntries - Maximum entries to fetch
  * @param {number} daysBack - How many days back to look (API limitation)
  * @returns {Array} Entries without environment context
@@ -53,10 +77,15 @@ export const getEntriesWithoutEnvironment = async (maxEntries = 200, daysBack = 
 
     // Only backfill recent entries (API limitation) and those without environment
     if (!data.environmentContext && createdAt >= cutoffDate) {
+      // Include location metadata if available
+      // Location can be on the entry itself or in existing partial environmentContext
+      const location = data.location || data.environmentContext?.location || null;
+
       entriesWithoutEnv.push({
         id: docSnap.id,
         createdAt,
-        content: data.text?.substring(0, 50) + '...'
+        content: data.text?.substring(0, 50) + '...',
+        location // May be null - will be checked during backfill
       });
     }
   });
@@ -65,37 +94,49 @@ export const getEntriesWithoutEnvironment = async (maxEntries = 200, daysBack = 
 };
 
 /**
- * Get cached location for backfill
- */
-const getCachedLocation = async () => {
-  try {
-    const { value } = await Preferences.get({ key: LOCATION_CACHE_KEY });
-    if (!value) return null;
-
-    const cached = JSON.parse(value);
-    return {
-      latitude: cached.latitude,
-      longitude: cached.longitude
-    };
-  } catch {
-    return null;
-  }
-};
-
-/**
- * Fetch environment data for a specific date
- * @param {Date} date - The date to fetch environment for
- * @param {Object} location - { latitude, longitude }
+ * Fetch environment data for a specific entry
+ * CRITICAL: Only backfills if entry has its own location metadata
+ * Does NOT use current device location - that creates dirty data
+ *
+ * @param {Object} entry - Entry with createdAt and optional location
  * @returns {Object|null} Environment context or null if unavailable
  */
-const fetchEnvironmentForDate = async (date, location) => {
+const fetchEnvironmentForEntry = async (entry) => {
+  // CRITICAL: Only backfill if entry has its own location metadata
+  // Do NOT use current device location - that creates dirty data
+  const entryLocation = entry.location;
+
+  if (!entryLocation?.latitude || !entryLocation?.longitude) {
+    console.log(`[EnvironmentBackfill] Skipping entry ${entry.id} - no location metadata`);
+    return { skipped: true, reason: 'no_location' };
+  }
+
+  const { latitude, longitude } = entryLocation;
+  const entryDate = entry.createdAt;
+
+  // Check cache first (avoid redundant API calls for same day/location)
+  const cacheKey = getCacheKey(entryDate, latitude, longitude);
+  if (weatherCache.has(cacheKey)) {
+    console.log(`[EnvironmentBackfill] Cache hit for ${cacheKey}`);
+    const cachedData = weatherCache.get(cacheKey);
+    return {
+      ...cachedData,
+      location: entryLocation, // Use entry's original location
+      backfilled: true,
+      backfilledAt: new Date().toISOString(),
+      originalDate: entryDate.toISOString()
+    };
+  }
+
+  // Check 7-day API limit
+  const daysAgo = Math.ceil((Date.now() - entryDate.getTime()) / (1000 * 60 * 60 * 24));
+  if (daysAgo > 7) {
+    console.log(`[EnvironmentBackfill] Entry ${entry.id} is ${daysAgo} days old - outside API limit`);
+    return { skipped: true, reason: 'too_old' };
+  }
+
   try {
-    if (!location) return null;
-
-    const { latitude, longitude } = location;
-
     // Get weather history for the specific date
-    const daysAgo = Math.ceil((Date.now() - date.getTime()) / (1000 * 60 * 60 * 24));
     const history = await getDailyWeatherHistory(latitude, longitude, daysAgo + 1);
 
     if (!history || history.length === 0) {
@@ -103,7 +144,7 @@ const fetchEnvironmentForDate = async (date, location) => {
     }
 
     // Find the day that matches our target date
-    const dateStr = date.toISOString().split('T')[0];
+    const dateStr = entryDate.toISOString().split('T')[0];
     const dayData = history.find(d => d.date === dateStr);
 
     if (!dayData) {
@@ -111,12 +152,12 @@ const fetchEnvironmentForDate = async (date, location) => {
     }
 
     // Build environment context
-    return {
+    const environmentContext = {
       weather: dayData.condition,
       weatherLabel: dayData.conditionLabel,
-      temperature: dayData.tempMax, // Use high temp as representative
+      temperature: dayData.tempMax,
       temperatureUnit: '°F',
-      cloudCover: null, // Not available in daily history
+      cloudCover: null,
 
       daySummary: {
         condition: dayData.condition,
@@ -128,51 +169,90 @@ const fetchEnvironmentForDate = async (date, location) => {
         isLowSunshine: dayData.isLowLight
       },
 
-      // Sun times not available in backfill
       sunsetTime: null,
       sunriseTime: null,
       daylightHours: dayData.daylightHours || null,
 
-      isAfterDark: false, // Can't determine for historical entries
+      isAfterDark: false,
       lightContext: dayData.isLowLight ? 'low_light' : 'daylight',
       daylightRemaining: null,
+
+      // Preserve original location
+      location: entryLocation,
 
       // Metadata
       backfilled: true,
       backfilledAt: new Date().toISOString(),
-      originalDate: date.toISOString()
+      originalDate: entryDate.toISOString()
     };
+
+    // Cache for other entries on same day/location
+    weatherCache.set(cacheKey, {
+      weather: environmentContext.weather,
+      weatherLabel: environmentContext.weatherLabel,
+      temperature: environmentContext.temperature,
+      temperatureUnit: environmentContext.temperatureUnit,
+      daySummary: environmentContext.daySummary,
+      daylightHours: environmentContext.daylightHours,
+      lightContext: environmentContext.lightContext
+    });
+
+    return environmentContext;
   } catch (error) {
-    console.warn(`Failed to fetch environment for ${date.toDateString()}:`, error);
+    console.warn(`Failed to fetch environment for ${entryDate.toDateString()}:`, error);
     return null;
   }
 };
 
 /**
- * Update an entry with backfilled environment context
+ * Batch update entries with environment context using Firestore batched writes
+ * @param {Array} updates - Array of { entryId, environmentContext }
+ * @returns {Object} Result with count of updates
  */
-const updateEntryEnvironment = async (entryId, environmentContext) => {
+const batchUpdateEnvironmentContext = async (updates) => {
   const user = auth.currentUser;
   if (!user) throw new Error('Not authenticated');
 
-  const entryRef = doc(
-    db,
-    'artifacts',
-    APP_COLLECTION_ID,
-    'users',
-    user.uid,
-    'entries',
-    entryId
-  );
+  const batches = [];
+  for (let i = 0; i < updates.length; i += BATCH_SIZE) {
+    const batchUpdates = updates.slice(i, i + BATCH_SIZE);
+    const batch = writeBatch(db);
 
-  await updateDoc(entryRef, {
-    environmentContext,
-    updatedAt: new Date()
-  });
+    for (const { entryId, environmentContext } of batchUpdates) {
+      const entryRef = doc(
+        db,
+        'artifacts',
+        APP_COLLECTION_ID,
+        'users',
+        user.uid,
+        'entries',
+        entryId
+      );
+      batch.update(entryRef, {
+        environmentContext,
+        updatedAt: new Date()
+      });
+    }
+
+    batches.push(batch);
+  }
+
+  console.log(`[EnvironmentBackfill] Executing ${batches.length} batches (${updates.length} total updates)`);
+
+  for (let i = 0; i < batches.length; i++) {
+    await batches[i].commit();
+    console.log(`[EnvironmentBackfill] Batch ${i + 1}/${batches.length} committed`);
+  }
+
+  return { success: true, updated: updates.length };
 };
 
 /**
  * Main backfill function - processes entries and adds environment data
+ *
+ * IMPORTANT: Only backfills entries that have their own location metadata.
+ * Does NOT use current device location - that would create dirty data.
+ *
  * @param {Function} onProgress - Callback for progress updates
  * @param {AbortSignal} signal - Optional abort signal to cancel
  * @returns {Object} Results summary
@@ -180,19 +260,8 @@ const updateEntryEnvironment = async (entryId, environmentContext) => {
 export const backfillEnvironmentData = async (onProgress, signal) => {
   console.log('[EnvironmentBackfill] Starting backfill...');
 
-  // Get cached location (we need this for weather API)
-  const location = await getCachedLocation();
-  if (!location) {
-    console.log('[EnvironmentBackfill] No cached location available');
-    return {
-      total: 0,
-      processed: 0,
-      updated: 0,
-      skipped: 0,
-      failed: 0,
-      error: 'No location available. Open the app with location enabled first.'
-    };
-  }
+  // Clear weather cache for fresh run
+  weatherCache.clear();
 
   // Get entries that need environment data
   const entries = await getEntriesWithoutEnvironment();
@@ -204,17 +273,21 @@ export const backfillEnvironmentData = async (onProgress, signal) => {
       processed: 0,
       updated: 0,
       skipped: 0,
+      skippedNoLocation: 0,
+      skippedTooOld: 0,
       failed: 0
     };
   }
 
   let processed = 0;
-  let updated = 0;
   let skipped = 0;
+  let skippedNoLocation = 0;
+  let skippedTooOld = 0;
   let failed = 0;
+  const pendingUpdates = [];
 
+  // Phase 1: Collect environment data for entries that have location
   for (const entry of entries) {
-    // Check for cancellation
     if (signal?.aborted) {
       console.log('[EnvironmentBackfill] Cancelled by user');
       break;
@@ -224,17 +297,26 @@ export const backfillEnvironmentData = async (onProgress, signal) => {
       onProgress?.({
         total: entries.length,
         processed,
-        updated,
+        updated: pendingUpdates.length,
         skipped,
-        currentEntry: entry
+        skippedNoLocation,
+        skippedTooOld,
+        currentEntry: entry,
+        phase: 'collecting'
       });
 
-      const environmentContext = await fetchEnvironmentForDate(entry.createdAt, location);
+      const result = await fetchEnvironmentForEntry(entry);
 
-      if (environmentContext) {
-        await updateEntryEnvironment(entry.id, environmentContext);
-        updated++;
-        console.log(`[EnvironmentBackfill] Updated entry ${entry.id} (${entry.createdAt.toDateString()})`);
+      if (result?.skipped) {
+        if (result.reason === 'no_location') {
+          skippedNoLocation++;
+        } else if (result.reason === 'too_old') {
+          skippedTooOld++;
+        }
+        skipped++;
+      } else if (result) {
+        pendingUpdates.push({ entryId: entry.id, environmentContext: result });
+        console.log(`[EnvironmentBackfill] Collected data for ${entry.id} (${entry.createdAt.toDateString()})`);
       } else {
         skipped++;
         console.log(`[EnvironmentBackfill] No environment data for ${entry.createdAt.toDateString()}`);
@@ -246,8 +328,31 @@ export const backfillEnvironmentData = async (onProgress, signal) => {
 
     processed++;
 
-    // Rate limiting for API
-    await new Promise(resolve => setTimeout(resolve, 300));
+    // Rate limiting for API (only if not cached)
+    if (!weatherCache.has(getCacheKey(entry.createdAt, entry.location?.latitude || 0, entry.location?.longitude || 0))) {
+      await new Promise(resolve => setTimeout(resolve, 200));
+    }
+  }
+
+  // Phase 2: Batch write all collected updates
+  let updated = 0;
+  if (pendingUpdates.length > 0 && !signal?.aborted) {
+    onProgress?.({
+      total: entries.length,
+      processed,
+      updated: 0,
+      skipped,
+      phase: 'writing',
+      pendingWrites: pendingUpdates.length
+    });
+
+    try {
+      await batchUpdateEnvironmentContext(pendingUpdates);
+      updated = pendingUpdates.length;
+    } catch (batchError) {
+      console.error('[EnvironmentBackfill] Batch write failed:', batchError);
+      failed += pendingUpdates.length;
+    }
   }
 
   onProgress?.({
@@ -255,16 +360,20 @@ export const backfillEnvironmentData = async (onProgress, signal) => {
     processed,
     updated,
     skipped,
+    skippedNoLocation,
+    skippedTooOld,
     complete: true
   });
 
-  console.log(`[EnvironmentBackfill] Complete: ${updated} updated, ${skipped} skipped, ${failed} failed`);
+  console.log(`[EnvironmentBackfill] Complete: ${updated} updated, ${skipped} skipped (${skippedNoLocation} no location, ${skippedTooOld} too old), ${failed} failed`);
 
   return {
     total: entries.length,
     processed,
     updated,
     skipped,
+    skippedNoLocation,
+    skippedTooOld,
     failed
   };
 };
