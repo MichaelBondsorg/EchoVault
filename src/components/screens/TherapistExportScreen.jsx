@@ -92,6 +92,49 @@ const TherapistExportScreen = ({ entries, onClose }) => {
           yPos += 5;
         }
 
+        // Health context summary
+        if (entry.healthContext) {
+          doc.setFontSize(8);
+          doc.setFont(undefined, 'normal');
+          const healthParts = [];
+          if (entry.healthContext.sleep?.totalHours) {
+            healthParts.push(`Sleep: ${entry.healthContext.sleep.totalHours.toFixed(1)}h${entry.healthContext.sleep.score ? ` (${entry.healthContext.sleep.score})` : ''}`);
+          }
+          if (entry.healthContext.heart?.hrv) {
+            healthParts.push(`HRV: ${entry.healthContext.heart.hrv}ms`);
+          }
+          if (entry.healthContext.recovery?.score) {
+            healthParts.push(`Recovery: ${entry.healthContext.recovery.score}%`);
+          }
+          if (entry.healthContext.activity?.stepsToday) {
+            healthParts.push(`Steps: ${entry.healthContext.activity.stepsToday.toLocaleString()}`);
+          }
+          if (healthParts.length > 0) {
+            doc.text(`Health: ${healthParts.join(' | ')}`, margin, yPos);
+            yPos += 4;
+          }
+        }
+
+        // Environment context summary
+        if (entry.environmentContext) {
+          doc.setFontSize(8);
+          doc.setFont(undefined, 'normal');
+          const envParts = [];
+          if (entry.environmentContext.weatherLabel) {
+            envParts.push(entry.environmentContext.weatherLabel);
+          }
+          if (entry.environmentContext.temperature != null) {
+            envParts.push(`${Math.round(entry.environmentContext.temperature)}°`);
+          }
+          if (entry.environmentContext.daySummary?.sunshinePercent != null) {
+            envParts.push(`${entry.environmentContext.daySummary.sunshinePercent}% sunshine`);
+          }
+          if (envParts.length > 0) {
+            doc.text(`Environment: ${envParts.join(', ')}`, margin, yPos);
+            yPos += 4;
+          }
+        }
+
         doc.setFontSize(10);
         doc.setFont(undefined, 'normal');
         const textLines = doc.splitTextToSize(entry.text, 170);
@@ -151,7 +194,41 @@ const TherapistExportScreen = ({ entries, onClose }) => {
         mood_score: e.analysis?.mood_score,
         entry_type: e.entry_type,
         tags: e.tags,
-        cbt_breakdown: e.analysis?.cbt_breakdown
+        cbt_breakdown: e.analysis?.cbt_breakdown,
+        // Include health context
+        healthContext: e.healthContext ? {
+          sleep: e.healthContext.sleep ? {
+            totalHours: e.healthContext.sleep.totalHours,
+            quality: e.healthContext.sleep.quality,
+            score: e.healthContext.sleep.score
+          } : null,
+          heart: e.healthContext.heart ? {
+            hrv: e.healthContext.heart.hrv,
+            hrvTrend: e.healthContext.heart.hrvTrend,
+            restingRate: e.healthContext.heart.restingRate
+          } : null,
+          recovery: e.healthContext.recovery,
+          strain: e.healthContext.strain,
+          activity: e.healthContext.activity ? {
+            stepsToday: e.healthContext.activity.stepsToday,
+            exerciseMinutes: e.healthContext.activity.totalExerciseMinutes,
+            hasWorkout: e.healthContext.activity.hasWorkout
+          } : null
+        } : null,
+        // Include environment context
+        environmentContext: e.environmentContext ? {
+          weather: e.environmentContext.weather,
+          weatherLabel: e.environmentContext.weatherLabel,
+          temperature: e.environmentContext.temperature,
+          daySummary: e.environmentContext.daySummary ? {
+            condition: e.environmentContext.daySummary.condition,
+            sunshinePercent: e.environmentContext.daySummary.sunshinePercent,
+            tempHigh: e.environmentContext.daySummary.tempHigh,
+            tempLow: e.environmentContext.daySummary.tempLow
+          } : null,
+          lightContext: e.environmentContext.lightContext,
+          daylightHours: e.environmentContext.daylightHours
+        } : null
       }))
     };
 

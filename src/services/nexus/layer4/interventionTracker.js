@@ -3,11 +3,15 @@
  *
  * Tracks what activities/behaviors the user does and measures their
  * effectiveness on mood and biometrics.
+ * Includes environment-aware tracking for sunshine exposure,
+ * outdoor activities, and light therapy.
  */
 
 import { doc, getDoc, setDoc, Timestamp } from 'firebase/firestore';
 import { db } from '../../../config/firebase';
 import { APP_COLLECTION_ID } from '../../../config/constants';
+import { extractHealthSignals } from '../../health/healthFormatter';
+import { extractEnvironmentSignals } from '../../environment/environmentFormatter';
 
 // ============================================================
 // INTERVENTION DEFINITIONS
@@ -80,6 +84,105 @@ export const INTERVENTION_PATTERNS = {
     category: 'recovery',
     patterns: [/slept in/i, /extra sleep/i, /early to bed/i],
     measureWindow: { next_day: true }
+  },
+
+  // Outdoor/Light exposure
+  outdoor_time: {
+    category: 'light_exposure',
+    patterns: [/outside/i, /outdoors/i, /in the sun/i, /sunshine/i],
+    measureWindow: { same_day: true }
+  },
+  morning_light: {
+    category: 'light_exposure',
+    patterns: [/morning walk/i, /walked this morning/i, /morning sun/i, /morning outside/i],
+    measureWindow: { same_day: true, next_day: true }
+  },
+  nature_time: {
+    category: 'light_exposure',
+    patterns: [/park/i, /beach/i, /trail/i, /garden/i, /nature/i],
+    measureWindow: { same_day: true }
+  }
+};
+
+/**
+ * Environment-based interventions (detected from environmentContext)
+ */
+export const ENVIRONMENT_INTERVENTIONS = {
+  high_sunshine_day: {
+    category: 'environment',
+    condition: (env) => env?.sunshinePercent >= 60,
+    measureWindow: { same_day: true }
+  },
+  low_sunshine_day: {
+    category: 'environment',
+    condition: (env) => env?.sunshinePercent != null && env.sunshinePercent < 30,
+    measureWindow: { same_day: true }
+  },
+  sunny_weather: {
+    category: 'environment',
+    condition: (env) => /sunny|clear/i.test(env?.weatherLabel || ''),
+    measureWindow: { same_day: true }
+  },
+  rainy_weather: {
+    category: 'environment',
+    condition: (env) => /rain|storm|drizzle/i.test(env?.weatherLabel || ''),
+    measureWindow: { same_day: true }
+  },
+  warm_weather: {
+    category: 'environment',
+    condition: (env) => env?.temperature != null && env.temperature >= 70,
+    measureWindow: { same_day: true }
+  },
+  cold_weather: {
+    category: 'environment',
+    condition: (env) => env?.temperature != null && env.temperature < 45,
+    measureWindow: { same_day: true }
+  }
+};
+
+/**
+ * Health-based interventions (detected from healthContext)
+ */
+export const HEALTH_INTERVENTIONS = {
+  good_sleep_night: {
+    category: 'health',
+    condition: (health) => health?.sleepScore >= 80 || health?.sleepHours >= 8,
+    measureWindow: { same_day: true }
+  },
+  poor_sleep_night: {
+    category: 'health',
+    condition: (health) => health?.sleepScore < 50 || (health?.sleepHours != null && health.sleepHours < 6),
+    measureWindow: { same_day: true }
+  },
+  workout_day: {
+    category: 'health',
+    condition: (health) => health?.hadWorkout === true,
+    measureWindow: { same_day: true, next_day: true }
+  },
+  high_recovery_day: {
+    category: 'health',
+    condition: (health) => health?.recoveryScore >= 67,
+    measureWindow: { same_day: true }
+  },
+  low_recovery_day: {
+    category: 'health',
+    condition: (health) => health?.recoveryScore != null && health.recoveryScore < 34,
+    measureWindow: { same_day: true }
+  },
+  high_strain_day: {
+    category: 'health',
+    condition: (health) => health?.strainScore >= 15,
+    measureWindow: { same_day: true, next_day: true }
+  },
+  active_day: {
+    category: 'health',
+    condition: (health) => health?.steps >= 8000,
+    measureWindow: { same_day: true }
+  },
+  sedentary_day: {
+    category: 'health',
+    condition: (health) => health?.steps != null && health.steps < 3000,
+    measureWindow: { same_day: true }
   }
 };
 
@@ -89,22 +192,82 @@ export const INTERVENTION_PATTERNS = {
 
 /**
  * Detect interventions in an entry
+ * Includes narrative (text-based), environment, and health interventions
  */
 export const detectInterventionsInEntry = (entry) => {
   const text = entry.content || entry.text || '';
   const detected = [];
+  const entryDate = entry.date || entry.createdAt?.toDate?.()?.toISOString?.().split('T')[0];
+  const entryMood = entry.mood || entry.analysis?.mood_score;
 
+  // Detect narrative interventions (text-based)
   for (const [name, config] of Object.entries(INTERVENTION_PATTERNS)) {
     const matched = config.patterns.some(pattern => pattern.test(text));
 
     if (matched) {
       detected.push({
         intervention: name,
+        interventionType: 'narrative',
         category: config.category,
         entryId: entry.id,
-        entryDate: entry.date || entry.createdAt?.toDate?.()?.toISOString?.().split('T')[0],
-        entryMood: entry.mood || entry.analysis?.mood_score
+        entryDate,
+        entryMood
       });
+    }
+  }
+
+  // Detect environment interventions (from environmentContext)
+  if (entry.environmentContext) {
+    const env = extractEnvironmentSignals(entry.environmentContext);
+    for (const [name, config] of Object.entries(ENVIRONMENT_INTERVENTIONS)) {
+      try {
+        if (config.condition(env)) {
+          detected.push({
+            intervention: name,
+            interventionType: 'environment',
+            category: config.category,
+            entryId: entry.id,
+            entryDate,
+            entryMood,
+            environmentData: {
+              sunshinePercent: env.sunshinePercent,
+              weatherLabel: env.weatherLabel,
+              temperature: env.temperature
+            }
+          });
+        }
+      } catch (e) {
+        // Condition check failed, skip
+      }
+    }
+  }
+
+  // Detect health interventions (from healthContext)
+  if (entry.healthContext) {
+    const health = extractHealthSignals(entry.healthContext);
+    for (const [name, config] of Object.entries(HEALTH_INTERVENTIONS)) {
+      try {
+        if (config.condition(health)) {
+          detected.push({
+            intervention: name,
+            interventionType: 'health',
+            category: config.category,
+            entryId: entry.id,
+            entryDate,
+            entryMood,
+            healthData: {
+              sleepHours: health.sleepHours,
+              sleepScore: health.sleepScore,
+              recoveryScore: health.recoveryScore,
+              strainScore: health.strainScore,
+              steps: health.steps,
+              hadWorkout: health.hadWorkout
+            }
+          });
+        }
+      } catch (e) {
+        // Condition check failed, skip
+      }
     }
   }
 

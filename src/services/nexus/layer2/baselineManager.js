@@ -3,12 +3,15 @@
  *
  * Calculates and maintains personal baselines for all metrics.
  * Enables comparison of current state to personal norms.
+ * Includes health (HealthKit) and environment baselines.
  */
 
 import { doc, getDoc, setDoc, Timestamp } from 'firebase/firestore';
 import { db } from '../../../config/firebase';
 import { APP_COLLECTION_ID } from '../../../config/constants';
 import { getWhoopHistory } from '../../health/whoop';
+import { extractHealthSignals } from '../../health/healthFormatter';
+import { extractEnvironmentSignals } from '../../environment/environmentFormatter';
 
 // ============================================================
 // CONSTANTS
@@ -241,6 +244,200 @@ export const calculateContextualBaselines = async (whoopHistory, entries, thread
         recovery: calculateStats(dayOfWeekMetrics[i].recovery)
       };
     }
+  }
+
+  // === ENVIRONMENT-BASED BASELINES ===
+
+  // Sunshine level baselines
+  const highSunshineDays = new Set();
+  const lowSunshineDays = new Set();
+  for (const entry of entries) {
+    if (!entry.environmentContext) continue;
+    const env = extractEnvironmentSignals(entry.environmentContext);
+    const date = getEntryDate(entry);
+    if (!date || env.sunshinePercent == null) continue;
+
+    if (env.sunshinePercent >= 60) highSunshineDays.add(date);
+    else if (env.sunshinePercent < 30) lowSunshineDays.add(date);
+  }
+
+  if (highSunshineDays.size >= 3) {
+    const metrics = extractMetricsForDays(whoopByDate, entries, highSunshineDays);
+    contextual['environment:high_sunshine'] = {
+      mood: calculateStats(metrics.mood),
+      energy: calculateStats(metrics.strain), // Using strain as proxy for energy
+      sampleDays: highSunshineDays.size
+    };
+  }
+
+  if (lowSunshineDays.size >= 3) {
+    const metrics = extractMetricsForDays(whoopByDate, entries, lowSunshineDays);
+    contextual['environment:low_sunshine'] = {
+      mood: calculateStats(metrics.mood),
+      energy: calculateStats(metrics.strain),
+      sampleDays: lowSunshineDays.size
+    };
+  }
+
+  // Weather condition baselines
+  const sunnyDays = new Set();
+  const rainyDays = new Set();
+  const cloudyDays = new Set();
+  for (const entry of entries) {
+    if (!entry.environmentContext) continue;
+    const env = extractEnvironmentSignals(entry.environmentContext);
+    const date = getEntryDate(entry);
+    if (!date || !env.weatherLabel) continue;
+
+    if (/sunny|clear/i.test(env.weatherLabel)) sunnyDays.add(date);
+    else if (/rain|storm|drizzle/i.test(env.weatherLabel)) rainyDays.add(date);
+    else if (/cloud|overcast/i.test(env.weatherLabel)) cloudyDays.add(date);
+  }
+
+  if (sunnyDays.size >= 3) {
+    const metrics = extractMetricsForDays(whoopByDate, entries, sunnyDays);
+    contextual['environment:sunny_weather'] = {
+      mood: calculateStats(metrics.mood),
+      hrv: calculateStats(metrics.hrv),
+      sampleDays: sunnyDays.size
+    };
+  }
+
+  if (rainyDays.size >= 3) {
+    const metrics = extractMetricsForDays(whoopByDate, entries, rainyDays);
+    contextual['environment:rainy_weather'] = {
+      mood: calculateStats(metrics.mood),
+      hrv: calculateStats(metrics.hrv),
+      sampleDays: rainyDays.size
+    };
+  }
+
+  // Light context baselines (daylight vs after dark journaling)
+  const daylightEntries = new Set();
+  const afterDarkEntries = new Set();
+  for (const entry of entries) {
+    if (!entry.environmentContext) continue;
+    const env = extractEnvironmentSignals(entry.environmentContext);
+    const date = getEntryDate(entry);
+    if (!date) continue;
+
+    if (env.lightContext === 'daylight') daylightEntries.add(date);
+    else if (env.isAfterDark) afterDarkEntries.add(date);
+  }
+
+  if (daylightEntries.size >= 3) {
+    const metrics = extractMetricsForDays(whoopByDate, entries, daylightEntries);
+    contextual['environment:daylight_journaling'] = {
+      mood: calculateStats(metrics.mood),
+      sampleDays: daylightEntries.size
+    };
+  }
+
+  if (afterDarkEntries.size >= 3) {
+    const metrics = extractMetricsForDays(whoopByDate, entries, afterDarkEntries);
+    contextual['environment:after_dark_journaling'] = {
+      mood: calculateStats(metrics.mood),
+      sampleDays: afterDarkEntries.size
+    };
+  }
+
+  // === HEALTHKIT-BASED BASELINES ===
+
+  // Sleep quality baselines (from healthContext)
+  const goodSleepDays = new Set();
+  const poorSleepDays = new Set();
+  for (const entry of entries) {
+    if (!entry.healthContext) continue;
+    const health = extractHealthSignals(entry.healthContext);
+    const date = getEntryDate(entry);
+    if (!date) continue;
+
+    if (health.sleepScore >= 80 || health.sleepHours >= 8) goodSleepDays.add(date);
+    else if (health.sleepScore < 50 || health.sleepHours < 6) poorSleepDays.add(date);
+  }
+
+  if (goodSleepDays.size >= 3) {
+    const metrics = extractMetricsForDays(whoopByDate, entries, goodSleepDays);
+    contextual['health:good_sleep'] = {
+      mood: calculateStats(metrics.mood),
+      hrv: calculateStats(metrics.hrv),
+      recovery: calculateStats(metrics.recovery),
+      sampleDays: goodSleepDays.size
+    };
+  }
+
+  if (poorSleepDays.size >= 3) {
+    const metrics = extractMetricsForDays(whoopByDate, entries, poorSleepDays);
+    contextual['health:poor_sleep'] = {
+      mood: calculateStats(metrics.mood),
+      hrv: calculateStats(metrics.hrv),
+      recovery: calculateStats(metrics.recovery),
+      sampleDays: poorSleepDays.size
+    };
+  }
+
+  // Workout days baseline
+  const workoutDays = new Set();
+  const restDays = new Set();
+  for (const entry of entries) {
+    if (!entry.healthContext) continue;
+    const health = extractHealthSignals(entry.healthContext);
+    const date = getEntryDate(entry);
+    if (!date) continue;
+
+    if (health.hadWorkout) workoutDays.add(date);
+    else restDays.add(date);
+  }
+
+  if (workoutDays.size >= 3) {
+    const metrics = extractMetricsForDays(whoopByDate, entries, workoutDays);
+    contextual['health:workout_days'] = {
+      mood: calculateStats(metrics.mood),
+      strain: calculateStats(metrics.strain),
+      sampleDays: workoutDays.size
+    };
+  }
+
+  if (restDays.size >= 3) {
+    const metrics = extractMetricsForDays(whoopByDate, entries, restDays);
+    contextual['health:rest_days'] = {
+      mood: calculateStats(metrics.mood),
+      recovery: calculateStats(metrics.recovery),
+      sampleDays: restDays.size
+    };
+  }
+
+  // Recovery zone baselines
+  const greenRecoveryDays = new Set();
+  const redRecoveryDays = new Set();
+  for (const entry of entries) {
+    if (!entry.healthContext) continue;
+    const health = extractHealthSignals(entry.healthContext);
+    const date = getEntryDate(entry);
+    if (!date || health.recoveryScore == null) continue;
+
+    if (health.recoveryScore >= 67) greenRecoveryDays.add(date);
+    else if (health.recoveryScore < 34) redRecoveryDays.add(date);
+  }
+
+  if (greenRecoveryDays.size >= 3) {
+    const metrics = extractMetricsForDays(whoopByDate, entries, greenRecoveryDays);
+    contextual['health:green_recovery'] = {
+      mood: calculateStats(metrics.mood),
+      hrv: calculateStats(metrics.hrv),
+      strain: calculateStats(metrics.strain),
+      sampleDays: greenRecoveryDays.size
+    };
+  }
+
+  if (redRecoveryDays.size >= 3) {
+    const metrics = extractMetricsForDays(whoopByDate, entries, redRecoveryDays);
+    contextual['health:red_recovery'] = {
+      mood: calculateStats(metrics.mood),
+      hrv: calculateStats(metrics.hrv),
+      strain: calculateStats(metrics.strain),
+      sampleDays: redRecoveryDays.size
+    };
   }
 
   return contextual;

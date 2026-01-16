@@ -47,6 +47,11 @@ import {
   backfillHealthData
 } from '../../services/health';
 
+import {
+  getEnvironmentBackfillCount,
+  backfillEnvironmentData
+} from '../../services/environment/environmentBackfill';
+
 // Source badge component - shows which source data came from
 const SourceBadge = ({ source }) => {
   if (!source) return null;
@@ -78,13 +83,21 @@ const HealthSettingsScreen = ({ onClose }) => {
   const [whoopConnecting, setWhoopConnecting] = useState(false);
   const [whoopDisconnecting, setWhoopDisconnecting] = useState(false);
 
-  // Backfill state
+  // Health Backfill state
   const [backfillCount, setBackfillCount] = useState(0);
   const [backfillRunning, setBackfillRunning] = useState(false);
   const [backfillProgress, setBackfillProgress] = useState(null);
   const [backfillComplete, setBackfillComplete] = useState(false);
   const [backfillResults, setBackfillResults] = useState(null);
   const [backfillAbort, setBackfillAbort] = useState(null);
+
+  // Environment Backfill state
+  const [envBackfillCount, setEnvBackfillCount] = useState(0);
+  const [envBackfillRunning, setEnvBackfillRunning] = useState(false);
+  const [envBackfillProgress, setEnvBackfillProgress] = useState(null);
+  const [envBackfillComplete, setEnvBackfillComplete] = useState(false);
+  const [envBackfillResults, setEnvBackfillResults] = useState(null);
+  const [envBackfillAbort, setEnvBackfillAbort] = useState(null);
 
   // Load current status on mount
   useEffect(() => {
@@ -108,9 +121,17 @@ const HealthSettingsScreen = ({ onClose }) => {
           setTodayData(summary);
         }
 
-        // Check how many entries need backfill
+        // Check how many entries need health backfill
         const count = await getBackfillCount();
         setBackfillCount(count);
+
+        // Check how many entries need environment backfill
+        try {
+          const envCount = await getEnvironmentBackfillCount();
+          setEnvBackfillCount(envCount);
+        } catch (e) {
+          console.warn('Environment backfill count unavailable:', e);
+        }
       }
     } catch (error) {
       console.error('Failed to load health status:', error);
@@ -220,6 +241,50 @@ const HealthSettingsScreen = ({ onClose }) => {
     setBackfillComplete(false);
     setBackfillResults(null);
     setBackfillProgress(null);
+  };
+
+  // Environment backfill handlers
+  const handleStartEnvBackfill = async () => {
+    setEnvBackfillRunning(true);
+    setEnvBackfillComplete(false);
+    setEnvBackfillResults(null);
+    setEnvBackfillProgress({ total: envBackfillCount, processed: 0, updated: 0, skipped: 0 });
+
+    // Create abort controller
+    const abortController = new AbortController();
+    setEnvBackfillAbort(abortController);
+
+    try {
+      const results = await backfillEnvironmentData(
+        (progress) => setEnvBackfillProgress(progress),
+        abortController.signal
+      );
+      setEnvBackfillResults(results);
+      setEnvBackfillComplete(true);
+      setEnvBackfillCount(0);
+    } catch (error) {
+      console.error('Environment backfill failed:', error);
+      if (!abortController.signal.aborted) {
+        alert('Environment backfill failed. Please try again.');
+      }
+    }
+
+    setEnvBackfillRunning(false);
+    setEnvBackfillAbort(null);
+  };
+
+  const handleCancelEnvBackfill = () => {
+    if (envBackfillAbort) {
+      envBackfillAbort.abort();
+      setEnvBackfillRunning(false);
+      setEnvBackfillAbort(null);
+    }
+  };
+
+  const handleDismissEnvBackfillResults = () => {
+    setEnvBackfillComplete(false);
+    setEnvBackfillResults(null);
+    setEnvBackfillProgress(null);
   };
 
   // Platform name for native health
@@ -650,6 +715,126 @@ const HealthSettingsScreen = ({ onClose }) => {
 
                   <button
                     onClick={handleDismissBackfillResults}
+                    className="w-full py-2 px-4 border border-warm-200 text-warm-600 font-medium rounded-xl hover:bg-warm-50"
+                  >
+                    Done
+                  </button>
+                </div>
+              )}
+            </div>
+          </motion.div>
+        )}
+
+        {/* Environment Backfill Section */}
+        {!loading && (envBackfillCount > 0 || envBackfillRunning || envBackfillComplete) && (
+          <motion.div
+            className="bg-white rounded-2xl border border-warm-200 overflow-hidden"
+            initial={{ y: 20, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            transition={{ delay: 0.15 }}
+          >
+            <div className="p-4 border-b border-warm-100">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-sky-400 to-blue-500 flex items-center justify-center">
+                  <svg className="w-5 h-5 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <circle cx="12" cy="12" r="5" />
+                    <line x1="12" y1="1" x2="12" y2="3" />
+                    <line x1="12" y1="21" x2="12" y2="23" />
+                    <line x1="4.22" y1="4.22" x2="5.64" y2="5.64" />
+                    <line x1="18.36" y1="18.36" x2="19.78" y2="19.78" />
+                    <line x1="1" y1="12" x2="3" y2="12" />
+                    <line x1="21" y1="12" x2="23" y2="12" />
+                    <line x1="4.22" y1="19.78" x2="5.64" y2="18.36" />
+                    <line x1="18.36" y1="5.64" x2="19.78" y2="4.22" />
+                  </svg>
+                </div>
+                <div className="flex-1">
+                  <h2 className="font-semibold text-warm-800">Sync Weather Data</h2>
+                  <p className="text-sm text-warm-500">
+                    Add weather &amp; light data to past entries
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="p-4 space-y-4">
+              {/* Ready to start */}
+              {!envBackfillRunning && !envBackfillComplete && envBackfillCount > 0 && (
+                <div className="space-y-3">
+                  <p className="text-sm text-warm-600">
+                    <span className="font-semibold">{envBackfillCount}</span> recent {envBackfillCount === 1 ? 'entry' : 'entries'} from
+                    the last 7 days can be enriched with weather data (temperature, sunshine, conditions).
+                  </p>
+                  <button
+                    onClick={handleStartEnvBackfill}
+                    className="w-full py-3 px-4 bg-gradient-to-r from-sky-500 to-blue-500 text-white font-medium rounded-xl flex items-center justify-center gap-2 active:scale-98 transition-transform"
+                  >
+                    <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <circle cx="12" cy="12" r="5" />
+                      <line x1="12" y1="1" x2="12" y2="3" />
+                      <line x1="12" y1="21" x2="12" y2="23" />
+                    </svg>
+                    Sync Weather Data
+                  </button>
+                  <p className="text-xs text-warm-400 text-center">
+                    Uses Open-Meteo weather history (free, no account needed)
+                  </p>
+                </div>
+              )}
+
+              {/* Running */}
+              {envBackfillRunning && envBackfillProgress && (
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-warm-600">
+                      Processing entry {envBackfillProgress.processed} of {envBackfillProgress.total}...
+                    </span>
+                    <button
+                      onClick={handleCancelEnvBackfill}
+                      className="text-red-500 text-xs hover:underline"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+
+                  {/* Progress bar */}
+                  <div className="h-2 bg-warm-100 rounded-full overflow-hidden">
+                    <motion.div
+                      className="h-full bg-gradient-to-r from-sky-500 to-blue-500"
+                      initial={{ width: 0 }}
+                      animate={{ width: `${(envBackfillProgress.processed / envBackfillProgress.total) * 100}%` }}
+                      transition={{ duration: 0.3 }}
+                    />
+                  </div>
+
+                  <div className="flex justify-between text-xs text-warm-500">
+                    <span>Updated: {envBackfillProgress.updated}</span>
+                    <span>Skipped: {envBackfillProgress.skipped}</span>
+                  </div>
+                </div>
+              )}
+
+              {/* Complete - show results */}
+              {envBackfillComplete && envBackfillResults && (
+                <div className="space-y-3">
+                  <div className="p-3 rounded-xl bg-sky-50 border border-sky-200">
+                    <div className="flex items-center gap-2 mb-2">
+                      <CheckCircle className="w-5 h-5 text-sky-600" />
+                      <p className="font-semibold text-sky-800">Weather Sync Complete!</p>
+                    </div>
+                    <div className="text-sm text-sky-700 space-y-1">
+                      <p>✓ Added weather data to <span className="font-semibold">{envBackfillResults.updated}</span> entries</p>
+                      {envBackfillResults.skipped > 0 && (
+                        <p className="text-warm-600">• {envBackfillResults.skipped} entries skipped (already had data or too old)</p>
+                      )}
+                      {envBackfillResults.failed > 0 && (
+                        <p className="text-red-600">• {envBackfillResults.failed} entries failed to update</p>
+                      )}
+                    </div>
+                  </div>
+
+                  <button
+                    onClick={handleDismissEnvBackfillResults}
                     className="w-full py-2 px-4 border border-warm-200 text-warm-600 font-medium rounded-xl hover:bg-warm-50"
                   >
                     Done

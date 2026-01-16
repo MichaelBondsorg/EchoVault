@@ -1,13 +1,16 @@
 import { useState, useMemo, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { MessageCircle, Mic, PenLine, ChevronLeft, ChevronRight, X, Sparkles } from 'lucide-react';
+import { MessageCircle, Mic, PenLine, ChevronLeft, ChevronRight, X, Sparkles, AlertCircle, Sun, Moon, Zap } from 'lucide-react';
 import GlassCard from '../GlassCard';
+import { getQuickContextInsights } from '../../../services/nexus/insightIntegration';
 
 /**
  * PromptWidget - Reflection prompts for Bento dashboard
  *
  * RESTORED: Uses follow-up questions from entries' contextualInsight
  * These are the insightful, personalized questions based on journal history.
+ *
+ * ENHANCED: Also shows context-aware prompts based on health/environment data.
  */
 const PromptWidget = ({
   entries = [],
@@ -17,6 +20,8 @@ const PromptWidget = ({
   isEditing = false,
   onDelete,
   size = '2x1',
+  todayHealth = null,
+  todayEnvironment = null,
 }) => {
   const [currentIndex, setCurrentIndex] = useState(0);
   const [dismissedQuestions, setDismissedQuestions] = useState(new Set());
@@ -33,6 +38,17 @@ const PromptWidget = ({
     }
   }, [category]);
 
+  // Get context-aware prompts based on health/environment
+  const contextInsights = useMemo(() => {
+    if (!todayHealth && !todayEnvironment) return null;
+    try {
+      return getQuickContextInsights(todayHealth, todayEnvironment, entries.slice(-7));
+    } catch (e) {
+      console.warn('Failed to get context insights:', e);
+      return null;
+    }
+  }, [todayHealth, todayEnvironment, entries]);
+
   // Extract follow-up questions from recent entries (last 14 days)
   const questions = useMemo(() => {
     const now = new Date();
@@ -42,6 +58,21 @@ const PromptWidget = ({
     const categoryEntries = entries.filter(e => e.category === category);
     const allQuestions = [];
 
+    // Add context-aware prompt first if high priority
+    if (contextInsights?.topPrompt && contextInsights.hasHighPriority) {
+      const prompt = contextInsights.topPrompt;
+      allQuestions.push({
+        question: prompt.prompt,
+        entryId: null,
+        entryDate: null,
+        isContext: true,
+        contextType: prompt.type,
+        priority: prompt.priority,
+        trigger: prompt.trigger
+      });
+    }
+
+    // Add follow-up questions from entries
     categoryEntries.forEach(entry => {
       const entryDate = entry.effectiveDate || entry.createdAt;
       const date = entryDate instanceof Date ? entryDate : entryDate?.toDate?.() || new Date();
@@ -56,12 +87,27 @@ const PromptWidget = ({
             allQuestions.push({
               question: q.trim(),
               entryId: entry.id,
-              entryDate: date
+              entryDate: date,
+              isContext: false
             });
           }
         });
       }
     });
+
+    // Add non-high-priority context prompt if we have space
+    if (contextInsights?.topPrompt && !contextInsights.hasHighPriority && allQuestions.length < 5) {
+      const prompt = contextInsights.topPrompt;
+      allQuestions.push({
+        question: prompt.prompt,
+        entryId: null,
+        entryDate: null,
+        isContext: true,
+        contextType: prompt.type,
+        priority: prompt.priority,
+        trigger: prompt.trigger
+      });
+    }
 
     // Filter out dismissed and dedupe
     const seen = new Set();
@@ -81,11 +127,11 @@ const PromptWidget = ({
         hour < 12 ? "What are you hoping to accomplish today?" : "What was the highlight of your day?",
         "What's one thing you're grateful for?",
       ];
-      return fallbacks.map((q, i) => ({ question: q, entryId: null, entryDate: null }));
+      return fallbacks.map((q, i) => ({ question: q, entryId: null, entryDate: null, isContext: false }));
     }
 
     return filtered;
-  }, [entries, category, dismissedQuestions]);
+  }, [entries, category, dismissedQuestions, contextInsights]);
 
   // Reset index if out of bounds
   useEffect(() => {
@@ -122,22 +168,73 @@ const PromptWidget = ({
 
   const currentQuestion = questions[currentIndex];
   const isPersonalized = currentQuestion?.entryId !== null;
+  const isContextPrompt = currentQuestion?.isContext === true;
+  const isHighPriority = currentQuestion?.priority === 'high';
+
+  // Get icon and label based on prompt type
+  const getPromptDisplay = () => {
+    if (isContextPrompt) {
+      const type = currentQuestion?.contextType || '';
+      if (type.includes('sleep') || type.includes('recovery')) {
+        return {
+          icon: Moon,
+          label: isHighPriority ? 'Check In' : 'Context',
+          colorClass: 'text-indigo-600',
+          bgClass: isHighPriority ? 'bg-gradient-to-br from-indigo-50/70 to-purple-50/70' : undefined
+        };
+      }
+      if (type.includes('sun') || type.includes('light') || type.includes('environment')) {
+        return {
+          icon: Sun,
+          label: isHighPriority ? 'Today' : 'Context',
+          colorClass: 'text-amber-600',
+          bgClass: isHighPriority ? 'bg-gradient-to-br from-amber-50/70 to-orange-50/70' : undefined
+        };
+      }
+      if (type.includes('energy') || type.includes('strain')) {
+        return {
+          icon: Zap,
+          label: 'Energy',
+          colorClass: 'text-green-600',
+          bgClass: isHighPriority ? 'bg-gradient-to-br from-green-50/70 to-emerald-50/70' : undefined
+        };
+      }
+      return {
+        icon: AlertCircle,
+        label: isHighPriority ? 'Check In' : 'Context',
+        colorClass: 'text-blue-600',
+        bgClass: isHighPriority ? 'bg-gradient-to-br from-blue-50/70 to-cyan-50/70' : undefined
+      };
+    }
+    if (isPersonalized) {
+      return { icon: Sparkles, label: 'Reflect', colorClass: 'text-secondary-600' };
+    }
+    return { icon: MessageCircle, label: 'Prompt', colorClass: 'text-secondary-600' };
+  };
+
+  const promptDisplay = getPromptDisplay();
+  const PromptIcon = promptDisplay.icon;
 
   return (
     <GlassCard
       size={size}
       isEditing={isEditing}
       onDelete={onDelete}
-      className="bg-gradient-to-br from-secondary-50/50 to-primary-50/50"
+      className={promptDisplay.bgClass || "bg-gradient-to-br from-secondary-50/50 to-primary-50/50"}
     >
       <div className="h-full flex flex-col">
         {/* Header */}
         <div className="flex items-center justify-between mb-2">
-          <div className="flex items-center gap-2 text-secondary-600">
-            {isPersonalized ? <Sparkles size={14} /> : <MessageCircle size={14} />}
+          <div className={`flex items-center gap-2 ${promptDisplay.colorClass}`}>
+            <PromptIcon size={14} />
             <span className="text-xs font-semibold uppercase tracking-wide">
-              {isPersonalized ? 'Reflect' : 'Prompt'}
+              {promptDisplay.label}
             </span>
+            {isHighPriority && (
+              <span className="text-[10px] px-1.5 py-0.5 bg-white/60 rounded-full font-medium">
+                {currentQuestion?.trigger || 'today'}
+              </span>
+            )}
           </div>
           <div className="flex items-center gap-1">
             {questions.length > 1 && (
@@ -145,7 +242,7 @@ const PromptWidget = ({
                 {currentIndex + 1}/{questions.length}
               </span>
             )}
-            {isPersonalized && !isEditing && (
+            {(isPersonalized || isContextPrompt) && !isEditing && (
               <button
                 onClick={() => dismissQuestion(currentQuestion.question)}
                 className="p-1 rounded-full hover:bg-white/50 text-warm-400 hover:text-warm-600"
@@ -171,6 +268,15 @@ const PromptWidget = ({
             {isPersonalized && currentQuestion?.entryDate && (
               <p className="text-xs text-warm-400 mt-1">
                 From {currentQuestion.entryDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+              </p>
+            )}
+            {isContextPrompt && (
+              <p className="text-xs text-warm-400 mt-1">
+                Based on today's {currentQuestion?.contextType?.includes('sleep') || currentQuestion?.contextType?.includes('recovery')
+                  ? 'health data'
+                  : currentQuestion?.contextType?.includes('sun') || currentQuestion?.contextType?.includes('light')
+                    ? 'weather'
+                    : 'context'}
               </p>
             )}
           </motion.div>
