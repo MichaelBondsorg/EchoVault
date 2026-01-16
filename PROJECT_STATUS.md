@@ -17,10 +17,12 @@
 
 | Item | Status | Notes |
 |------|--------|-------|
-| Health & Environment Insights UI | ✅ Complete | Correlation insights, context prompts, recommendations, environment backfill |
+| Health & Environment Insights UI | ✅ Complete | Correlation insights, context prompts, recommendations, environment backfill UI |
+| **Health Backfill Fix** | 🔴 Blocked | Historical queries broken - sleep/HRV/HR return today's data, not historical. See Known Issues. |
+| **Environment Capture Fix** | 🟡 Testing | Info.plist fixed. Needs app reinstall to test new location permission. |
 | Nexus 2.0 Insights Engine | 📋 Spec Complete | Full implementation spec created. Replaces entire existing insights system. |
 | Entity Management (Milestone 1.5) | ✅ Complete | Entity resolution for voice transcription + migration from older entries |
-| HealthKit Integration (Expanded) | ✅ Complete | Sleep stages, smart merge with Whoop, health backfill feature |
+| HealthKit Integration (Expanded) | ✅ Complete | Sleep stages, smart merge with Whoop, NEW entries capture health data correctly |
 | Whoop Integration | ✅ Complete | OAuth working, cloud sync, recovery/strain/sleep data |
 
 ### Nexus 2.0 Implementation Phases
@@ -88,6 +90,9 @@ Good ideas we're explicitly NOT doing now. Don't re-suggest these.
 
 | Issue | Severity | Notes |
 |-------|----------|-------|
+| **Health backfill uses wrong queries** | **High** | Sleep/HRV/HR use `queryLatestSample` which returns TODAY's data, not historical. Steps/calories work. Need to use `queryHealthSamples` with date range for proper historical queries. |
+| **Environment backfill not working** | **High** | Location permission issue on iOS. Fixed Info.plist (added `NSLocationWhenInUseUsageDescription`), needs testing after app reinstall. |
+| **iOS location shows only "When I Share"** | **Medium** | Fixed by adding `NSLocationWhenInUseUsageDescription` to Info.plist. User must delete/reinstall app to see new "While Using the App" option. |
 | `APP_COLLECTION_ID` hardcoded in `leadershipThreads.js` | Low | Fix during Nexus 2.0 implementation |
 | `App.jsx` is 71KB | Medium | Needs decomposition, but works |
 | `functions/index.js` is monolithic | Medium | Consider splitting post-launch |
@@ -143,6 +148,47 @@ Good ideas we're explicitly NOT doing now. Don't re-suggest these.
 ---
 
 ## Session Notes
+
+### 2026-01-15 (Evening): Debugging Health/Environment Data Capture
+
+**Context:** After deploying health & environment features, Michael reported data wasn't showing in journal cards, therapy export, or insights.
+
+**Debugging Findings:**
+
+1. **Health data IS being captured for NEW entries** (confirmed via Xcode logs)
+   - `getEntryHealthContext` returns data: sleep 6.2 hrs, steps 6756, workout true, HRV 19
+   - Entry saved with `hasHealthContext: true`
+   - New entries work correctly
+
+2. **Environment data NOT being captured** (location permission issue)
+   - iOS Settings showed only "When I Share" or "Never" options
+   - Root cause: Missing `NSLocationWhenInUseUsageDescription` in Info.plist
+   - **Fixed:** Added the key with appropriate description
+   - User must delete/reinstall app to get new permission prompt
+
+3. **Health backfill NOT working properly** (wrong query methods)
+   - Backfill finds entries correctly
+   - But `getHealthKitSummary(date)` uses `queryLatestSample` for sleep/HRV/HR
+   - `queryLatestSample` returns TODAY's data, ignoring the date parameter
+   - Only steps/calories/exercise use proper date-range `queryAggregated` queries
+   - **Fix needed:** Use `queryHealthSamples` with date range for sleep/HRV/HR historical data
+
+4. **Environment backfill limited to 7 days**
+   - Open-Meteo free tier only provides 7 days of weather history
+   - Older entries cannot get environment data retroactively
+
+**Changes Made:**
+- Added `NSLocationWhenInUseUsageDescription` to `ios/App/App/Info.plist`
+- Added debug logging to `healthBackfill.js` `fetchHealthForDate()`
+- Synced to iOS
+
+**Next Steps (Tomorrow):**
+1. Fix health backfill to use proper historical queries for sleep/HRV/HR
+2. Test location permission after app reinstall
+3. Test environment backfill with proper location permission
+4. Verify correlations appear in Insights after entries have health data
+
+---
 
 ### 2026-01-15: Health & Environment Insights UI Integration
 

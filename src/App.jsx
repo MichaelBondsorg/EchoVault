@@ -817,36 +817,42 @@ export default function App() {
     // Capture health context (sleep, steps, workout, stress) if available
     let healthContext = null;
     try {
+      console.log('[doSaveEntry] Calling getEntryHealthContext...');
       healthContext = await getEntryHealthContext();
+      console.log('[doSaveEntry] getEntryHealthContext returned:', healthContext ? 'data' : 'null');
       if (healthContext) {
-        console.log('Health context captured:', {
-          sleep: healthContext.sleepLastNight,
-          steps: healthContext.stepsToday,
-          workout: healthContext.hasWorkout,
-          stress: healthContext.stressIndicator
-        });
+        console.log('[doSaveEntry] Health context captured:', JSON.stringify({
+          sleep: healthContext.sleep?.totalHours,
+          steps: healthContext.activity?.stepsToday,
+          workout: healthContext.activity?.hasWorkout,
+          hrv: healthContext.heart?.hrv
+        }));
+      } else {
+        console.log('[doSaveEntry] Health context is null - no health data available');
       }
     } catch (healthError) {
       // Health context is optional - don't block entry saving
-      console.warn('Could not capture health context:', healthError.message);
+      console.warn('[doSaveEntry] Could not capture health context:', healthError.message, healthError.stack);
     }
 
     // Capture environment context (weather, light, sun times) if available
     let environmentContext = null;
     try {
+      console.log('[doSaveEntry] Calling getEntryEnvironmentContext...');
       environmentContext = await getEntryEnvironmentContext();
+      console.log('[doSaveEntry] getEntryEnvironmentContext returned:', environmentContext ? 'data' : 'null');
       if (environmentContext) {
-        console.log('Environment context captured:', {
+        console.log('[doSaveEntry] Environment context captured:', JSON.stringify({
           weather: environmentContext.weather,
           temp: environmentContext.temperature,
-          dayWeather: environmentContext.daySummary?.condition,
-          dayTempHigh: environmentContext.daySummary?.tempHigh,
-          lightContext: environmentContext.lightContext
-        });
+          sunshine: environmentContext.daySummary?.sunshinePercent
+        }));
+      } else {
+        console.log('[doSaveEntry] Environment context is null - no location/weather data');
       }
     } catch (envError) {
       // Environment context is optional - don't block entry saving
-      console.warn('Could not capture environment context:', envError.message);
+      console.warn('[doSaveEntry] Could not capture environment context:', envError.message, envError.stack);
     }
 
     try {

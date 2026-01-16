@@ -61,9 +61,21 @@ export const getEntriesWithoutHealth = async (maxEntries = 200) => {
  */
 const fetchHealthForDate = async (date) => {
   try {
+    console.log(`[HealthBackfill] Fetching health for date: ${date.toDateString()}`);
     const summary = await getHealthKitSummary(date);
 
+    console.log(`[HealthBackfill] Summary available: ${summary.available}`);
+    if (summary.available) {
+      console.log(`[HealthBackfill] Data received:`, JSON.stringify({
+        sleep: summary.sleep?.totalHours,
+        steps: summary.activity?.stepsToday,
+        hr: summary.heart?.restingRate,
+        hrv: summary.heart?.hrv
+      }));
+    }
+
     if (!summary.available) {
+      console.log(`[HealthBackfill] No data available for ${date.toDateString()}`);
       return null;
     }
 
@@ -73,6 +85,7 @@ const fetchHealthForDate = async (date) => {
                     summary.heart?.restingRate;
 
     if (!hasData) {
+      console.log(`[HealthBackfill] No meaningful data for ${date.toDateString()}`);
       return null;
     }
 
