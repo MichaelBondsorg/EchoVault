@@ -438,7 +438,8 @@ export default function App() {
   // Data Feed
   useEffect(() => {
     if (!user) return;
-    const q = query(collection(db, 'artifacts', APP_COLLECTION_ID, 'users', user.uid, 'entries'), orderBy('createdAt', 'desc'), limit(100));
+    // Increased from 100 to 1000 to allow more entries for export and analytics
+    const q = query(collection(db, 'artifacts', APP_COLLECTION_ID, 'users', user.uid, 'entries'), orderBy('createdAt', 'desc'), limit(1000));
     return onSnapshot(q, snap => {
       const safeData = snap.docs.map(doc => {
         try {

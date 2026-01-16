@@ -3,12 +3,17 @@
  *
  * The brain of Nexus 2.0. Uses LLM to synthesize patterns, baselines,
  * and context into meaningful insights with psychological mechanisms.
+ * Integrates health (HealthKit) and environment data for holistic insights.
  */
 
 import { callGemini } from '../../ai/gemini';
 import { getBaselines, compareToBaseline } from '../layer2/baselineManager';
 import { detectCurrentState, findSimilarPastStates } from '../layer2/stateDetector';
 import { getActiveThreads, getThreadLineage } from '../layer1/threadManager';
+import { extractHealthSignals } from '../../health/healthFormatter';
+import { extractEnvironmentSignals } from '../../environment/environmentFormatter';
+import { computeHealthMoodCorrelations } from '../../health/healthCorrelations';
+import { computeEnvironmentMoodCorrelations } from '../../environment/environmentCorrelations';
 
 // ============================================================
 // INSIGHT TYPES
@@ -35,16 +40,34 @@ const buildSynthesisPrompt = (context) => {
     currentState,
     baselines,
     whoopToday,
-    interventionData
+    interventionData,
+    healthCorrelations,
+    environmentCorrelations,
+    todayHealth,
+    todayEnvironment
   } = context;
 
-  // Format entries
+  // Format entries with health and environment context
   const entrySummaries = (recentEntries || []).slice(-5).map(e => {
     const date = e.date || e.createdAt?.toDate?.()?.toISOString?.().split('T')[0];
     const mood = e.mood || e.analysis?.mood_score;
     const excerpt = (e.content || e.text || '').slice(0, 300);
-    return `[${date}] Mood: ${mood}% - "${excerpt}..."`;
-  }).join('\n');
+
+    // Include health and environment signals if available
+    const healthInfo = e.healthContext ? extractHealthSignals(e.healthContext) : null;
+    const envInfo = e.environmentContext ? extractEnvironmentSignals(e.environmentContext) : null;
+
+    let contextLine = `[${date}] Mood: ${mood}%`;
+    if (healthInfo) {
+      if (healthInfo.sleepHours) contextLine += ` | Sleep: ${healthInfo.sleepHours}h`;
+      if (healthInfo.recoveryScore) contextLine += ` | Recovery: ${healthInfo.recoveryScore}%`;
+    }
+    if (envInfo) {
+      if (envInfo.sunshinePercent != null) contextLine += ` | Sunshine: ${envInfo.sunshinePercent}%`;
+      if (envInfo.weatherLabel) contextLine += ` | Weather: ${envInfo.weatherLabel}`;
+    }
+    return `${contextLine}\n"${excerpt}..."`;
+  }).join('\n\n');
 
   // Format threads
   const threadSummaries = (activeThreads || []).slice(0, 5).map(t => {
@@ -104,7 +127,84 @@ Historical pattern for "${currentState.primary}" state:
     }
   }
 
-  return `You are an expert behavioral psychologist and health coach analyzing a user's journal and biometric data. Your task is to generate a single, powerful insight that reveals a non-obvious pattern and its psychological mechanism.
+  // Format health-mood correlations
+  let healthCorrelationInfo = '';
+  if (healthCorrelations) {
+    const insights = [];
+    if (healthCorrelations.sleepMood?.insight) {
+      insights.push(`- Sleep: ${healthCorrelations.sleepMood.insight} (${healthCorrelations.sleepMood.strength} correlation)`);
+    }
+    if (healthCorrelations.exerciseMood?.insight) {
+      insights.push(`- Exercise: ${healthCorrelations.exerciseMood.insight} (${healthCorrelations.exerciseMood.strength} correlation)`);
+    }
+    if (healthCorrelations.hrvMood?.insight) {
+      insights.push(`- HRV: ${healthCorrelations.hrvMood.insight} (${healthCorrelations.hrvMood.strength} correlation)`);
+    }
+    if (healthCorrelations.recoveryMood?.insight) {
+      insights.push(`- Recovery: ${healthCorrelations.recoveryMood.insight} (${healthCorrelations.recoveryMood.strength} correlation)`);
+    }
+    if (insights.length > 0) {
+      healthCorrelationInfo = `\n### Health-Mood Correlations (Statistical)\n${insights.join('\n')}`;
+    }
+  }
+
+  // Format environment-mood correlations
+  let envCorrelationInfo = '';
+  if (environmentCorrelations) {
+    const insights = [];
+    if (environmentCorrelations.sunshineMood?.insight) {
+      insights.push(`- Sunshine: ${environmentCorrelations.sunshineMood.insight} (${environmentCorrelations.sunshineMood.strength} correlation)`);
+      if (environmentCorrelations.sunshineMood.recommendation) {
+        insights.push(`  → Recommendation: ${environmentCorrelations.sunshineMood.recommendation}`);
+      }
+    }
+    if (environmentCorrelations.weatherMood?.insight) {
+      insights.push(`- Weather: ${environmentCorrelations.weatherMood.insight} (${environmentCorrelations.weatherMood.strength} correlation)`);
+    }
+    if (environmentCorrelations.daylightMood?.insight) {
+      insights.push(`- Daylight Hours: ${environmentCorrelations.daylightMood.insight} (${environmentCorrelations.daylightMood.strength} correlation)`);
+    }
+    if (environmentCorrelations.lowSunshineWarning?.insight) {
+      insights.push(`- SAD Warning: ${environmentCorrelations.lowSunshineWarning.insight}`);
+    }
+    if (insights.length > 0) {
+      envCorrelationInfo = `\n### Environment-Mood Correlations (Statistical)\n${insights.join('\n')}`;
+    }
+  }
+
+  // Format today's health context
+  let todayHealthInfo = '';
+  if (todayHealth) {
+    const health = extractHealthSignals(todayHealth);
+    const details = [];
+    if (health.sleepHours) details.push(`Sleep: ${health.sleepHours}h (score: ${health.sleepScore || 'N/A'})`);
+    if (health.hrv) details.push(`HRV: ${health.hrv}ms ${health.hrvTrend ? `(${health.hrvTrend})` : ''}`);
+    if (health.recoveryScore != null) details.push(`Recovery: ${health.recoveryScore}%`);
+    if (health.strainScore != null) details.push(`Strain: ${health.strainScore}`);
+    if (health.steps) details.push(`Steps: ${health.steps}`);
+    if (health.hadWorkout) details.push(`Workout: ${health.workoutType || 'Yes'}`);
+    if (details.length > 0) {
+      todayHealthInfo = `\n### Today's Health (HealthKit)\n${details.join(' | ')}`;
+    }
+  }
+
+  // Format today's environment context
+  let todayEnvInfo = '';
+  if (todayEnvironment) {
+    const env = extractEnvironmentSignals(todayEnvironment);
+    const details = [];
+    if (env.weatherLabel) details.push(`Weather: ${env.weatherLabel}`);
+    if (env.temperature != null) details.push(`Temperature: ${env.temperature}°F`);
+    if (env.sunshinePercent != null) details.push(`Sunshine: ${env.sunshinePercent}%`);
+    if (env.daylightHours) details.push(`Daylight: ${env.daylightHours}h`);
+    if (env.lightContext) details.push(`Light: ${env.lightContext}`);
+    if (env.isLowSunshine) details.push(`⚠️ Low sunshine day`);
+    if (details.length > 0) {
+      todayEnvInfo = `\n### Today's Environment\n${details.join(' | ')}`;
+    }
+  }
+
+  return `You are an expert behavioral psychologist and health coach analyzing a user's journal, biometric, and environmental data. Your task is to generate a single, powerful insight that reveals a non-obvious pattern and its psychological mechanism.
 
 ## USER CONTEXT
 
@@ -120,6 +220,10 @@ ${threadSummaries || 'No active threads'}
 ${baselineComparisons || 'Biometric data unavailable'}
 ${contextualInfo}
 ${interventionInfo}
+${healthCorrelationInfo}
+${envCorrelationInfo}
+${todayHealthInfo}
+${todayEnvInfo}
 
 ## YOUR TASK
 
@@ -135,8 +239,10 @@ Generate ONE profound insight that:
 - The insight should make the user think "holy shit, I didn't realize that"
 - Avoid generic advice like "get more sleep" - be specific to THIS user
 - Reference specific entities (people, pets, places) when relevant
-- Quantify when possible ("your HRV recovers 12ms faster when...")
-- The mechanism should be psychologically sound (attachment theory, nervous system regulation, etc.)
+- Quantify when possible ("your HRV recovers 12ms faster when...", "mood is 18% higher on sunny days")
+- Consider environmental factors (weather, sunshine, light) and their interaction with health and mood
+- Look for compound effects (e.g., poor sleep + low sunshine = amplified impact on mood)
+- The mechanism should be psychologically sound (attachment theory, nervous system regulation, circadian rhythm, SAD, etc.)
 
 ## RESPONSE FORMAT (JSON only)
 

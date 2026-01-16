@@ -17,6 +17,7 @@
 
 | Item | Status | Notes |
 |------|--------|-------|
+| Health & Environment Insights UI | ✅ Complete | Correlation insights, context prompts, recommendations, environment backfill |
 | Nexus 2.0 Insights Engine | 📋 Spec Complete | Full implementation spec created. Replaces entire existing insights system. |
 | Entity Management (Milestone 1.5) | ✅ Complete | Entity resolution for voice transcription + migration from older entries |
 | HealthKit Integration (Expanded) | ✅ Complete | Sleep stages, smart merge with Whoop, health backfill feature |
@@ -61,6 +62,10 @@
 | 2026-01-15 | iOS local analysis for offline + latency | iOS gets <200ms local classification/sentiment vs ~5s server. Full offline journaling (except AI chat). Single codebase with runtime platform detection via Capacitor. | Local accuracy < 80% |
 | 2026-01-15 | Native Swift sleep score calculation | Sleep score computed in Swift (<10ms) vs JS for maximum iOS performance. Falls back to JS if native fails. | N/A |
 | 2026-01-15 | VADER-style local sentiment (no ML model) | Lexicon-based sentiment analysis with intensifiers, negation, emoji handling. Avoids Core ML complexity while achieving good accuracy. | Accuracy issues warrant ML |
+| 2026-01-15 | Environment backfill via Open-Meteo | Weather history API (free, no account) to retroactively add weather data to entries from last 7 days. User-triggered in Health Settings. | API reliability issues |
+| 2026-01-15 | Client-side correlation computation | Health-mood and environment-mood correlations computed in browser vs server. Instant feedback, no LLM cost. Statistical only. | Performance issues on large entry sets |
+| 2026-01-15 | Context-aware prompts from health/environment | PromptWidget shows personalized prompts based on today's health data (low sleep, low recovery) and environment (low sunshine). High priority contexts get featured. | Users find prompts intrusive |
+| 2026-01-15 | Recommendations based on intervention effectiveness | Daily suggestions pull from tracked intervention effectiveness (what activities help this user). Only show if user has baselines computed. | N/A |
 
 ---
 
@@ -129,10 +134,69 @@ Good ideas we're explicitly NOT doing now. Don't re-suggest these.
 | `src/services/signals/localGoalDetector.js` | Extracts goals from entry text |
 | `src/services/signals/localTemporalParser.js` | Parses date/time expressions |
 | `src/hooks/useEntryProcessor.js` | Hook for platform-aware entry processing |
+| `src/services/environment/environmentBackfill.js` | Weather history backfill via Open-Meteo |
+| `src/services/health/healthCorrelations.js` | Health-mood correlation analysis |
+| `src/services/environment/environmentCorrelations.js` | Environment-mood correlation analysis |
+| `src/services/prompts/contextPrompts.js` | Context-aware reflection prompts |
+| `src/services/nexus/insightIntegration.js` | Unified insight integration service |
 
 ---
 
 ## Session Notes
+
+### 2026-01-15: Health & Environment Insights UI Integration
+
+**Context:** Building UI surfaces for the health-mood and environment-mood correlation features created in the previous session.
+
+**What Was Done:**
+
+1. **Correlation Insights on InsightsPage**
+   - Added CorrelationsSection component showing health and environment correlations
+   - Expandable/collapsible "Your Patterns" section
+   - Shows top 3 health insights (sleep, HRV, exercise, etc.)
+   - Shows top 3 environment insights (sunshine, weather, temperature)
+   - SAD warning for users sensitive to low sunshine
+   - Color-coded by correlation strength (strong, moderate, weak)
+
+2. **Context-Aware Prompts in PromptWidget**
+   - Enhanced PromptWidget to include health/environment context prompts
+   - High-priority prompts (low sleep, low recovery) shown first
+   - Context-specific icons and colors (Moon for sleep, Sun for weather)
+   - Shows trigger info (e.g., "low sleep") for high-priority prompts
+   - Graceful fallback when health data unavailable
+
+3. **Today's Recommendations Section**
+   - RecommendationsSection on InsightsPage
+   - Pulls from `getTodayRecommendations()` based on:
+     - Current health data (recovery score, sleep hours)
+     - Environment data (sunshine percentage)
+     - Intervention effectiveness history
+   - Priority-based styling (high=red, medium=amber, low=green)
+   - Shows reasoning for each recommendation
+
+4. **Environment Backfill in Health Settings**
+   - Mirrored health backfill UI pattern
+   - Shows count of entries that can be enriched (last 7 days)
+   - Progress bar with cancel option
+   - Results summary (updated, skipped, failed)
+   - Uses Open-Meteo weather history API (free, no auth needed)
+
+5. **What's New Modal v2.2.0**
+   - Updated to announce health & environment features
+   - Four feature cards: Health-Mood Correlations, Weather Tracking, Pattern Discovery, Smart Recommendations
+   - Gradient header with heart/sun theme
+
+**Key UI Decisions:**
+- Correlations computed client-side (instant, no LLM cost)
+- Recommendations require baselines (won't show until enough data)
+- High-priority context prompts override normal prompts in widget
+- Environment backfill limited to 7 days (Open-Meteo free tier limitation)
+
+**Files Modified:**
+- `src/pages/InsightsPage.jsx` - Added CorrelationsSection, RecommendationsSection
+- `src/components/zen/widgets/PromptWidget.jsx` - Context-aware prompts
+- `src/components/screens/HealthSettingsScreen.jsx` - Environment backfill UI
+- `src/components/shared/WhatsNewModal.jsx` - v2.2.0 with new features
 
 ### 2026-01-15: iOS vs Web Client-Side Computation (Offline-First)
 

@@ -2,10 +2,22 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   Brain, Sparkles, TrendingUp, AlertTriangle, Lightbulb, X,
   ChevronDown, ChevronUp, RefreshCw, Loader2, CheckCircle2,
-  Activity, FileText, Target
+  Activity, FileText, Target, Sun, Moon, Heart, Thermometer,
+  CloudRain, Footprints, Zap
 } from 'lucide-react';
 import { useNexusInsights } from '../hooks/useNexusInsights';
-import { useState } from 'react';
+import { useState, useEffect, useMemo } from 'react';
+import {
+  computeHealthMoodCorrelations,
+  getTopHealthInsights,
+  checkHealthDataSufficiency
+} from '../services/health/healthCorrelations';
+import {
+  computeEnvironmentMoodCorrelations,
+  getTopEnvironmentInsights,
+  checkEnvironmentDataSufficiency
+} from '../services/environment/environmentCorrelations';
+import { getTodayRecommendations } from '../services/nexus/insightIntegration';
 
 /**
  * InsightsPage - Nexus 2.0 AI Insights View
@@ -22,9 +34,69 @@ const InsightsPage = ({
   category,
   userId,
   user,
+  todayHealth = null,
+  todayEnvironment = null,
 }) => {
   const [dismissedInsights, setDismissedInsights] = useState(new Set());
   const [expandedInsight, setExpandedInsight] = useState(null);
+  const [showCorrelations, setShowCorrelations] = useState(true);
+  const [recommendations, setRecommendations] = useState(null);
+  const [loadingRecommendations, setLoadingRecommendations] = useState(false);
+
+  // Load recommendations when health/environment data is available
+  useEffect(() => {
+    const loadRecommendations = async () => {
+      if (!userId || !entries?.length) return;
+      if (!todayHealth && !todayEnvironment) return;
+
+      setLoadingRecommendations(true);
+      try {
+        const result = await getTodayRecommendations(userId, entries, todayHealth, todayEnvironment);
+        setRecommendations(result);
+      } catch (e) {
+        console.warn('Failed to load recommendations:', e);
+      }
+      setLoadingRecommendations(false);
+    };
+
+    loadRecommendations();
+  }, [userId, entries?.length, todayHealth, todayEnvironment]);
+
+  // Compute correlations from entries
+  const correlations = useMemo(() => {
+    if (!entries || entries.length < 5) return null;
+
+    const healthSufficiency = checkHealthDataSufficiency(entries);
+    const envSufficiency = checkEnvironmentDataSufficiency(entries);
+
+    const result = { health: null, environment: null };
+
+    if (healthSufficiency.hasEnoughData) {
+      const healthCorr = computeHealthMoodCorrelations(entries);
+      if (healthCorr) {
+        result.health = {
+          ...healthCorr,
+          topInsights: getTopHealthInsights(entries, 3)
+        };
+      }
+    } else {
+      result.healthMessage = healthSufficiency.message;
+    }
+
+    if (envSufficiency.hasEnoughData) {
+      const envCorr = computeEnvironmentMoodCorrelations(entries);
+      if (envCorr) {
+        result.environment = {
+          ...envCorr,
+          topInsights: getTopEnvironmentInsights(entries, 3)
+        };
+      }
+    } else {
+      result.envMessage = envSufficiency.message;
+    }
+
+    return result;
+  }, [entries]);
 
   // Nexus 2.0 insights (includes active + historical, filtered by confidence ≥50%)
   const {
@@ -131,6 +203,20 @@ const InsightsPage = ({
         insightCount={filteredInsights.length}
         error={error}
       />
+
+      {/* Correlations Section */}
+      {correlations && (correlations.health || correlations.environment) && (
+        <CorrelationsSection
+          correlations={correlations}
+          isExpanded={showCorrelations}
+          onToggle={() => setShowCorrelations(!showCorrelations)}
+        />
+      )}
+
+      {/* Today's Recommendations */}
+      {recommendations?.recommendations?.length > 0 && (
+        <RecommendationsSection recommendations={recommendations} />
+      )}
 
       {/* Insights List */}
       {filteredInsights.length > 0 && (
@@ -325,6 +411,312 @@ const GenerationStatus = ({
           <Loader2 size={12} className="animate-spin" />
           <span>Refreshing insights...</span>
         </div>
+      )}
+    </motion.div>
+  );
+};
+
+/**
+ * CorrelationsSection - Shows health and environment correlations with mood
+ */
+const CorrelationsSection = ({ correlations, isExpanded, onToggle }) => {
+  const hasHealth = correlations.health?.topInsights?.length > 0;
+  const hasEnv = correlations.environment?.topInsights?.length > 0;
+
+  // Get icon for correlation type
+  const getCorrelationIcon = (type) => {
+    switch (type) {
+      case 'sleep': return Moon;
+      case 'hrv': return Heart;
+      case 'recovery': return Zap;
+      case 'strain': return Activity;
+      case 'exercise': return Activity;
+      case 'steps': return Footprints;
+      case 'sunshine': return Sun;
+      case 'temperature': return Thermometer;
+      case 'weather': return CloudRain;
+      case 'daylight': return Sun;
+      default: return Activity;
+    }
+  };
+
+  // Format correlation strength as percentage
+  const formatCorrelation = (value) => {
+    if (!value && value !== 0) return null;
+    const pct = Math.round(Math.abs(value) * 100);
+    return `${pct}%`;
+  };
+
+  return (
+    <motion.div
+      className="bg-white/50 border border-white/30 rounded-2xl overflow-hidden"
+      initial={{ opacity: 0, y: -10 }}
+      animate={{ opacity: 1, y: 0 }}
+    >
+      {/* Header */}
+      <div
+        className="p-4 flex items-center justify-between cursor-pointer hover:bg-white/30 transition-colors"
+        onClick={onToggle}
+      >
+        <div className="flex items-center gap-3">
+          <div className="p-2 bg-gradient-to-br from-red-400/20 to-blue-400/20 rounded-xl">
+            <TrendingUp size={18} className="text-warm-600" />
+          </div>
+          <div>
+            <h3 className="font-semibold text-warm-800">Your Patterns</h3>
+            <p className="text-xs text-warm-500">
+              How health &amp; environment affect your mood
+            </p>
+          </div>
+        </div>
+        {isExpanded ? (
+          <ChevronUp size={18} className="text-warm-400" />
+        ) : (
+          <ChevronDown size={18} className="text-warm-400" />
+        )}
+      </div>
+
+      {/* Expanded Content */}
+      <AnimatePresence>
+        {isExpanded && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.2 }}
+            className="overflow-hidden"
+          >
+            <div className="px-4 pb-4 space-y-4">
+              {/* Health Correlations */}
+              {hasHealth && (
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2">
+                    <Heart size={14} className="text-red-500" />
+                    <span className="text-xs font-bold text-warm-500 uppercase tracking-wider">
+                      Health &amp; Mood
+                    </span>
+                  </div>
+                  <div className="space-y-2">
+                    {correlations.health.topInsights.map((insight, i) => {
+                      const Icon = getCorrelationIcon(insight.metric);
+                      const strengthColor =
+                        insight.strength === 'strong' ? 'text-green-600 bg-green-50' :
+                        insight.strength === 'moderate' ? 'text-blue-600 bg-blue-50' :
+                        'text-warm-500 bg-warm-50';
+
+                      return (
+                        <motion.div
+                          key={i}
+                          className="bg-white/60 rounded-xl p-3 flex items-start gap-3"
+                          initial={{ opacity: 0, x: -10 }}
+                          animate={{ opacity: 1, x: 0 }}
+                          transition={{ delay: i * 0.1 }}
+                        >
+                          <div className={`p-1.5 rounded-lg ${strengthColor.split(' ')[1]}`}>
+                            <Icon size={14} className={strengthColor.split(' ')[0]} />
+                          </div>
+                          <div className="flex-1">
+                            <p className="text-sm text-warm-700">{insight.insight}</p>
+                            <div className="flex items-center gap-2 mt-1">
+                              <span className={`text-xs px-2 py-0.5 rounded-full ${strengthColor}`}>
+                                {insight.strength}
+                              </span>
+                              {insight.correlation && (
+                                <span className="text-xs text-warm-400">
+                                  {formatCorrelation(insight.correlation)} correlation
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        </motion.div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* Environment Correlations */}
+              {hasEnv && (
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2">
+                    <Sun size={14} className="text-amber-500" />
+                    <span className="text-xs font-bold text-warm-500 uppercase tracking-wider">
+                      Environment &amp; Mood
+                    </span>
+                  </div>
+                  <div className="space-y-2">
+                    {correlations.environment.topInsights.map((insight, i) => {
+                      const Icon = getCorrelationIcon(insight.metric);
+                      const strengthColor =
+                        insight.strength === 'strong' ? 'text-amber-600 bg-amber-50' :
+                        insight.strength === 'moderate' ? 'text-sky-600 bg-sky-50' :
+                        'text-warm-500 bg-warm-50';
+
+                      return (
+                        <motion.div
+                          key={i}
+                          className="bg-white/60 rounded-xl p-3 flex items-start gap-3"
+                          initial={{ opacity: 0, x: -10 }}
+                          animate={{ opacity: 1, x: 0 }}
+                          transition={{ delay: i * 0.1 }}
+                        >
+                          <div className={`p-1.5 rounded-lg ${strengthColor.split(' ')[1]}`}>
+                            <Icon size={14} className={strengthColor.split(' ')[0]} />
+                          </div>
+                          <div className="flex-1">
+                            <p className="text-sm text-warm-700">{insight.insight}</p>
+                            <div className="flex items-center gap-2 mt-1">
+                              <span className={`text-xs px-2 py-0.5 rounded-full ${strengthColor}`}>
+                                {insight.strength}
+                              </span>
+                              {insight.correlation && (
+                                <span className="text-xs text-warm-400">
+                                  {formatCorrelation(insight.correlation)} correlation
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        </motion.div>
+                      );
+                    })}
+                  </div>
+
+                  {/* SAD Warning */}
+                  {correlations.environment.lowSunshineWarning && (
+                    <motion.div
+                      className="bg-amber-50 border border-amber-200/50 rounded-xl p-3"
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                    >
+                      <div className="flex items-start gap-2">
+                        <AlertTriangle size={16} className="text-amber-600 flex-shrink-0 mt-0.5" />
+                        <div>
+                          <p className="text-sm text-amber-800 font-medium">
+                            {correlations.environment.lowSunshineWarning.insight}
+                          </p>
+                          {correlations.environment.lowSunshineWarning.recommendation && (
+                            <p className="text-xs text-amber-600 mt-1">
+                              {correlations.environment.lowSunshineWarning.recommendation}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                    </motion.div>
+                  )}
+                </div>
+              )}
+
+              {/* No data messages */}
+              {!hasHealth && correlations.healthMessage && (
+                <div className="text-xs text-warm-400 italic">
+                  {correlations.healthMessage}
+                </div>
+              )}
+              {!hasEnv && correlations.envMessage && (
+                <div className="text-xs text-warm-400 italic">
+                  {correlations.envMessage}
+                </div>
+              )}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </motion.div>
+  );
+};
+
+/**
+ * RecommendationsSection - Shows today's personalized recommendations
+ */
+const RecommendationsSection = ({ recommendations }) => {
+  const getPriorityStyle = (priority) => {
+    switch (priority) {
+      case 'high':
+        return {
+          bg: 'bg-red-50',
+          border: 'border-red-200/50',
+          icon: 'text-red-500',
+          text: 'text-red-800'
+        };
+      case 'medium':
+        return {
+          bg: 'bg-amber-50',
+          border: 'border-amber-200/50',
+          icon: 'text-amber-500',
+          text: 'text-amber-800'
+        };
+      default:
+        return {
+          bg: 'bg-green-50',
+          border: 'border-green-200/50',
+          icon: 'text-green-500',
+          text: 'text-green-800'
+        };
+    }
+  };
+
+  const getTypeIcon = (type) => {
+    switch (type) {
+      case 'recovery': return Moon;
+      case 'activity': return Activity;
+      case 'environment': return Sun;
+      case 'self_care': return Heart;
+      default: return Lightbulb;
+    }
+  };
+
+  return (
+    <motion.div
+      className="bg-gradient-to-r from-blue-50/50 to-indigo-50/50 border border-blue-200/30 rounded-2xl p-4"
+      initial={{ opacity: 0, y: -10 }}
+      animate={{ opacity: 1, y: 0 }}
+    >
+      <div className="flex items-center gap-2 mb-3">
+        <Lightbulb size={16} className="text-blue-600" />
+        <h3 className="font-semibold text-warm-800">Today's Recommendations</h3>
+      </div>
+
+      <div className="space-y-2">
+        {recommendations.recommendations.map((rec, i) => {
+          const style = getPriorityStyle(rec.priority);
+          const Icon = getTypeIcon(rec.type);
+
+          return (
+            <motion.div
+              key={i}
+              className={`${style.bg} ${style.border} border rounded-xl p-3`}
+              initial={{ opacity: 0, x: -10 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ delay: i * 0.1 }}
+            >
+              <div className="flex items-start gap-3">
+                <Icon size={16} className={`${style.icon} flex-shrink-0 mt-0.5`} />
+                <div className="flex-1">
+                  <p className={`text-sm font-medium ${style.text}`}>
+                    {rec.action}
+                  </p>
+                  {rec.reasoning && (
+                    <p className="text-xs text-warm-500 mt-1">
+                      {rec.reasoning}
+                    </p>
+                  )}
+                </div>
+                <span className={`text-xs px-2 py-0.5 rounded-full ${style.bg} ${style.text} font-medium`}>
+                  {rec.priority}
+                </span>
+              </div>
+            </motion.div>
+          );
+        })}
+      </div>
+
+      {recommendations.basedOn && (
+        <p className="text-xs text-warm-400 mt-3">
+          Based on {recommendations.basedOn.entriesAnalyzed} entries
+          {recommendations.basedOn.interventionsTracked > 0 && (
+            <> &amp; {recommendations.basedOn.interventionsTracked} tracked activities</>
+          )}
+        </p>
       )}
     </motion.div>
   );

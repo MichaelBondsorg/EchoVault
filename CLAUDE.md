@@ -133,7 +133,8 @@ EchoVault is a mental health journaling application (v2.0.0) that helps users pr
 | Database | Firestore |
 | Auth | Firebase Auth + Google OAuth |
 | AI Models | Gemini (analysis), OpenAI GPT-4o (chat), Whisper (transcription) |
-| Health | Whoop API integration |
+| Health | Whoop API, HealthKit (iOS), Google Fit (Android) |
+| Environment | Open-Meteo weather API, Geolocation |
 
 ## Directory Structure
 
@@ -148,6 +149,10 @@ EchoVault is a mental health journaling application (v2.0.0) that helps users pr
 │   ├── ai/         # AI operations (embeddings, gemini, openai, transcription)
 │   ├── signals/    # Signal lifecycle management
 │   ├── analysis/   # Entry classification and analysis
+│   ├── health/     # HealthKit, Whoop, correlations, backfill
+│   ├── environment/# Weather, geolocation, correlations
+│   ├── nexus/      # Nexus insight engine (4 layers)
+│   ├── prompts/    # Context-aware reflection prompts
 │   └── safety/     # Crisis detection
 ├── hooks/          # Custom React hooks
 ├── pages/          # Page components

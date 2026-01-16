@@ -1,6 +1,8 @@
 import { analyzeJournalEntryCloud } from '../ai/gemini';
 import { cosineSimilarity } from '../ai/embeddings';
 import { askJournalAIFn } from '../../config/firebase';
+import { formatHealthForAI, formatHealthDetailed } from '../health/healthFormatter';
+import { formatEnvironmentForAI, formatEnvironmentDetailed } from '../environment/environmentFormatter';
 
 // Local analysis exports (for offline/iOS optimization)
 export { classify as classifyLocal, ENTRY_TYPES } from './localClassifier';
@@ -207,15 +209,19 @@ export const generateInsight = async (current, relevantHistory, recentHistory, a
 
   const today = new Date();
 
-  // Build history context string
+  // Build history context string with health and environment data
   const historyContext = uniqueHistory.map(e => {
     const entryDate = e.createdAt instanceof Date ? e.createdAt : e.createdAt.toDate();
     const daysAgo = Math.floor((today - entryDate) / (1000 * 60 * 60 * 24));
     const tags = e.tags?.filter(t => t.startsWith('@')).join(', ') || '';
     const moodInfo = e.analysis?.mood_score !== null && e.analysis?.mood_score !== undefined
       ? ` [mood: ${e.analysis.mood_score.toFixed(1)}]` : '';
-    return `[${entryDate.toLocaleDateString()} - ${daysAgo} days ago]${moodInfo}${tags ? ` {${tags}}` : ''} ${e.text}`;
-  }).join('\n');
+    // Include health and environment context for pattern recognition
+    const healthInfo = formatHealthForAI(e.healthContext) || '';
+    const envInfo = formatEnvironmentForAI(e.environmentContext) || '';
+    const contextLine = [healthInfo, envInfo].filter(Boolean).join(' ');
+    return `[${entryDate.toLocaleDateString()} - ${daysAgo} days ago]${moodInfo} ${contextLine}\n${tags ? `{${tags}} ` : ''}${e.text}`;
+  }).join('\n\n');
 
   const moodTrajectory = computeMoodTrajectory(recentHistory);
   const cyclicalPatterns = allEntries.length >= 14 ? detectCyclicalPatterns(allEntries) : null;
@@ -342,7 +348,7 @@ export const generateDaySummary = async (dayEntries) => {
     return null;
   }
 
-  // Build context from day's entries
+  // Build context from day's entries with health and environment data
   const entriesContext = dayEntries.map(e => {
     const time = e.effectiveDate || e.createdAt;
     const d = time?.toDate?.() || new Date(time);
@@ -351,8 +357,18 @@ export const generateDaySummary = async (dayEntries) => {
       ? ` [mood: ${(e.analysis.mood_score * 100).toFixed(0)}%]`
       : '';
     const themes = e.analysis?.themes?.join(', ') || '';
-    return `[${timeStr}]${moodStr}${themes ? ` {${themes}}` : ''}\n${e.text || e.contextualInsight?.briefSummary || 'Voice entry'}`;
+    // Include health and environment context
+    const healthInfo = formatHealthForAI(e.healthContext) || '';
+    const envInfo = formatEnvironmentForAI(e.environmentContext) || '';
+    const contextLine = [healthInfo, envInfo].filter(Boolean).join(' ');
+    return `[${timeStr}]${moodStr} ${contextLine}\n${themes ? `{${themes}} ` : ''}${e.text || e.contextualInsight?.briefSummary || 'Voice entry'}`;
   }).join('\n\n---\n\n');
+
+  // Get aggregate health and environment context for the day
+  const dayHealth = dayEntries.find(e => e.healthContext)?.healthContext;
+  const dayEnv = dayEntries.find(e => e.environmentContext)?.environmentContext;
+  const healthSummary = formatHealthDetailed(dayHealth);
+  const envSummary = formatEnvironmentDetailed(dayEnv);
 
   // Calculate average mood
   const moodScores = dayEntries
@@ -364,11 +380,11 @@ export const generateDaySummary = async (dayEntries) => {
 
   try {
     const result = await askJournalAIFn({
-      question: `Summarize this day's journal entries in plain text. What were the main themes? What contributed positively or negatively to the mood? Keep it concise (2-3 sentences).
+      question: `Summarize this day's journal entries in plain text. What were the main themes? What contributed positively or negatively to the mood? Consider how the health/biometric data and environmental conditions might relate to the emotional content. Keep it concise (2-3 sentences).
 
 IMPORTANT: Do NOT use any markdown formatting (no #, *, -, or other special characters). Write in plain conversational prose only.
 
-Average mood score: ${avgMood !== null ? (avgMood * 100).toFixed(0) + '%' : 'unknown'}
+${healthSummary ? `TODAY'S HEALTH DATA:\n${healthSummary}\n\n` : ''}${envSummary ? `TODAY'S ENVIRONMENT:\n${envSummary}\n\n` : ''}Average mood score: ${avgMood !== null ? (avgMood * 100).toFixed(0) + '%' : 'unknown'}
 
 Entries:
 ${entriesContext}`,
@@ -417,8 +433,12 @@ export const askJournalAI = async (entries, question, questionEmbedding = null) 
   const context = relevantEntries.map(e => {
     const date = e.createdAt instanceof Date ? e.createdAt : e.createdAt?.toDate?.() || new Date();
     const tags = e.tags?.filter(t => t.startsWith('@')).join(', ') || '';
-    return `[${date.toLocaleDateString()}] [${e.title}] ${tags ? `{${tags}} ` : ''}${e.text}`;
-  }).join('\n');
+    // Include health and environment context for AI awareness
+    const healthInfo = formatHealthForAI(e.healthContext) || '';
+    const envInfo = formatEnvironmentForAI(e.environmentContext) || '';
+    const contextLine = [healthInfo, envInfo].filter(Boolean).join(' ');
+    return `[${date.toLocaleDateString()}] ${contextLine}\n[${e.title}] ${tags ? `{${tags}} ` : ''}${e.text}`;
+  }).join('\n\n');
 
   try {
     const result = await askJournalAIFn({

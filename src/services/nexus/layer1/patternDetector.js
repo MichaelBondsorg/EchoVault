@@ -1,13 +1,181 @@
 /**
  * Pattern Detector
  *
- * Identifies correlations between narrative content and biometric data.
+ * Identifies correlations between narrative content, biometric data,
+ * health metrics, and environmental factors.
  * This is the foundation layer that feeds into temporal and causal analysis.
  */
+
+import { extractHealthSignals } from '../../health/healthFormatter';
+import { extractEnvironmentSignals } from '../../environment/environmentFormatter';
 
 // ============================================================
 // PATTERN DEFINITIONS
 // ============================================================
+
+/**
+ * Environment-based patterns to detect
+ * These patterns map environmental conditions to expected mood/biometric signatures
+ */
+export const ENVIRONMENT_PATTERNS = {
+  // Sunshine patterns (SAD-related)
+  LOW_SUNSHINE: {
+    id: 'low_sunshine',
+    condition: (env) => env?.sunshinePercent != null && env.sunshinePercent < 30,
+    category: 'environment',
+    expectedSignature: { mood: 'depressed', energy: 'low' },
+    label: 'Low sunshine day'
+  },
+  HIGH_SUNSHINE: {
+    id: 'high_sunshine',
+    condition: (env) => env?.sunshinePercent != null && env.sunshinePercent >= 70,
+    category: 'environment',
+    expectedSignature: { mood: 'elevated', energy: 'high' },
+    label: 'Sunny day'
+  },
+
+  // Weather patterns
+  RAINY_WEATHER: {
+    id: 'rainy_weather',
+    condition: (env) => /rain|storm|drizzle/i.test(env?.weatherLabel || ''),
+    category: 'environment',
+    expectedSignature: { mood: 'variable', activity: 'reduced' },
+    label: 'Rainy weather'
+  },
+  COLD_WEATHER: {
+    id: 'cold_weather',
+    condition: (env) => env?.temperature != null && env.temperature < 40,
+    category: 'environment',
+    expectedSignature: { activity: 'reduced', mood: 'variable' },
+    label: 'Cold weather'
+  },
+
+  // Light context patterns
+  JOURNALING_AFTER_DARK: {
+    id: 'journaling_after_dark',
+    condition: (env) => env?.isAfterDark === true,
+    category: 'environment',
+    expectedSignature: { reflection: 'elevated' },
+    label: 'After dark journaling'
+  },
+  SHORT_DAYLIGHT: {
+    id: 'short_daylight',
+    condition: (env) => env?.daylightHours != null && env.daylightHours < 10,
+    category: 'environment',
+    expectedSignature: { mood: 'risk_lower', energy: 'risk_lower' },
+    label: 'Short daylight hours'
+  }
+};
+
+/**
+ * Health-based patterns to detect
+ * These patterns map health metrics to expected signatures
+ */
+export const HEALTH_PATTERNS = {
+  // Sleep patterns
+  POOR_SLEEP: {
+    id: 'poor_sleep',
+    condition: (health) => (health?.sleepHours != null && health.sleepHours < 6) ||
+                           (health?.sleepScore != null && health.sleepScore < 50),
+    category: 'health',
+    expectedSignature: { mood: 'risk_lower', energy: 'low', hrv: 'depressed' },
+    label: 'Poor sleep'
+  },
+  GREAT_SLEEP: {
+    id: 'great_sleep',
+    condition: (health) => health?.sleepHours >= 8 && health?.sleepScore >= 80,
+    category: 'health',
+    expectedSignature: { mood: 'elevated', energy: 'high', recovery: 'good' },
+    label: 'Great sleep'
+  },
+
+  // Stress/HRV patterns
+  ELEVATED_STRESS: {
+    id: 'elevated_stress',
+    condition: (health) => health?.hrvTrend === 'declining' ||
+                           health?.stressLevel === 'elevated' ||
+                           (health?.hrv != null && health.hrv < 25),
+    category: 'health',
+    expectedSignature: { mood: 'risk_lower', anxiety: 'elevated' },
+    label: 'Elevated stress markers'
+  },
+
+  // Recovery patterns
+  LOW_RECOVERY: {
+    id: 'low_recovery',
+    condition: (health) => health?.recoveryScore != null && health.recoveryScore < 34,
+    category: 'health',
+    expectedSignature: { energy: 'low', strain_tolerance: 'reduced' },
+    label: 'Low recovery (red zone)'
+  },
+  HIGH_RECOVERY: {
+    id: 'high_recovery',
+    condition: (health) => health?.recoveryScore != null && health.recoveryScore >= 67,
+    category: 'health',
+    expectedSignature: { energy: 'high', strain_tolerance: 'elevated' },
+    label: 'High recovery (green zone)'
+  },
+
+  // Activity patterns
+  WORKOUT_COMPLETED: {
+    id: 'workout_completed',
+    condition: (health) => health?.hadWorkout === true,
+    category: 'health',
+    expectedSignature: { mood: 'improved', endorphins: 'elevated' },
+    label: 'Workout completed'
+  },
+  SEDENTARY_DAY: {
+    id: 'sedentary_day',
+    condition: (health) => health?.steps != null && health.steps < 3000 &&
+                           !health?.hadWorkout,
+    category: 'health',
+    expectedSignature: { energy: 'stagnant', mood: 'variable' },
+    label: 'Low movement day'
+  },
+
+  // High strain
+  HIGH_STRAIN: {
+    id: 'high_strain',
+    condition: (health) => health?.strainScore != null && health.strainScore > 15,
+    category: 'health',
+    expectedSignature: { recovery_needed: 'high', next_day_hrv: 'variable' },
+    label: 'High strain day'
+  }
+};
+
+/**
+ * Combined patterns (health + environment)
+ */
+export const COMBINED_PATTERNS = {
+  DOUBLE_WHAMMY: {
+    id: 'double_whammy',
+    condition: (health, env) =>
+      ((health?.sleepHours != null && health.sleepHours < 6) ||
+       (health?.sleepScore != null && health.sleepScore < 50)) &&
+      (env?.isLowSunshine || (env?.sunshinePercent != null && env.sunshinePercent < 30)),
+    category: 'combined',
+    expectedSignature: { mood: 'high_risk_lower', energy: 'low', self_care: 'needed' },
+    label: 'Poor sleep + low sunshine'
+  },
+  OPTIMAL_CONDITIONS: {
+    id: 'optimal_conditions',
+    condition: (health, env) =>
+      health?.sleepScore >= 75 &&
+      env?.sunshinePercent > 60,
+    category: 'combined',
+    expectedSignature: { mood: 'elevated', energy: 'high', potential: 'high' },
+    label: 'Well-rested + sunny day'
+  },
+  RECOVERY_OPPORTUNITY: {
+    id: 'recovery_opportunity',
+    condition: (health, env) =>
+      health?.recoveryScore >= 67 &&
+      (/sunny|clear/i.test(env?.weatherLabel || '')),
+    category: 'combined',
+    expectedSignature: { activity_potential: 'high', mood: 'elevated' },
+    label: 'High recovery + nice weather'
+  }
+};
 
 /**
  * Core narrative patterns to detect
@@ -137,6 +305,11 @@ export const detectPatternsInEntry = (entry, whoopData = null) => {
   const text = (entry.text || '').toLowerCase();
   const detectedPatterns = [];
 
+  // Extract health and environment signals from entry context
+  const healthSignals = entry.healthContext ? extractHealthSignals(entry.healthContext) : null;
+  const envSignals = entry.environmentContext ? extractEnvironmentSignals(entry.environmentContext) : null;
+
+  // Detect narrative patterns (text-based)
   for (const [key, pattern] of Object.entries(NARRATIVE_PATTERNS)) {
     const matches = pattern.triggers.filter(trigger =>
       text.includes(trigger.toLowerCase())
@@ -145,6 +318,7 @@ export const detectPatternsInEntry = (entry, whoopData = null) => {
     if (matches.length > 0) {
       detectedPatterns.push({
         patternId: pattern.id,
+        patternType: 'narrative',
         category: pattern.category,
         triggers: matches,
         confidence: Math.min(0.5 + (matches.length * 0.15), 0.95),
@@ -159,6 +333,100 @@ export const detectPatternsInEntry = (entry, whoopData = null) => {
           sleep: whoopData.sleep?.totalHours
         } : null
       });
+    }
+  }
+
+  // Detect health patterns (from healthContext)
+  if (healthSignals) {
+    for (const [key, pattern] of Object.entries(HEALTH_PATTERNS)) {
+      try {
+        if (pattern.condition(healthSignals)) {
+          detectedPatterns.push({
+            patternId: pattern.id,
+            patternType: 'health',
+            category: pattern.category,
+            label: pattern.label,
+            expectedSignature: pattern.expectedSignature,
+            confidence: 0.9, // High confidence for metric-based detection
+            entryId: entry.id,
+            entryDate: getEntryDate(entry),
+            mood: entry.analysis?.mood_score,
+            healthData: {
+              sleepHours: healthSignals.sleepHours,
+              sleepScore: healthSignals.sleepScore,
+              hrv: healthSignals.hrv,
+              recoveryScore: healthSignals.recoveryScore,
+              strainScore: healthSignals.strainScore,
+              steps: healthSignals.steps,
+              hadWorkout: healthSignals.hadWorkout
+            }
+          });
+        }
+      } catch (e) {
+        // Pattern condition failed, skip
+      }
+    }
+  }
+
+  // Detect environment patterns (from environmentContext)
+  if (envSignals) {
+    for (const [key, pattern] of Object.entries(ENVIRONMENT_PATTERNS)) {
+      try {
+        if (pattern.condition(envSignals)) {
+          detectedPatterns.push({
+            patternId: pattern.id,
+            patternType: 'environment',
+            category: pattern.category,
+            label: pattern.label,
+            expectedSignature: pattern.expectedSignature,
+            confidence: 0.9, // High confidence for metric-based detection
+            entryId: entry.id,
+            entryDate: getEntryDate(entry),
+            mood: entry.analysis?.mood_score,
+            environmentData: {
+              sunshinePercent: envSignals.sunshinePercent,
+              weatherLabel: envSignals.weatherLabel,
+              temperature: envSignals.temperature,
+              daylightHours: envSignals.daylightHours,
+              isAfterDark: envSignals.isAfterDark,
+              lightContext: envSignals.lightContext
+            }
+          });
+        }
+      } catch (e) {
+        // Pattern condition failed, skip
+      }
+    }
+  }
+
+  // Detect combined patterns (health + environment)
+  if (healthSignals && envSignals) {
+    for (const [key, pattern] of Object.entries(COMBINED_PATTERNS)) {
+      try {
+        if (pattern.condition(healthSignals, envSignals)) {
+          detectedPatterns.push({
+            patternId: pattern.id,
+            patternType: 'combined',
+            category: pattern.category,
+            label: pattern.label,
+            expectedSignature: pattern.expectedSignature,
+            confidence: 0.95, // Very high confidence for combined detection
+            entryId: entry.id,
+            entryDate: getEntryDate(entry),
+            mood: entry.analysis?.mood_score,
+            healthData: {
+              sleepScore: healthSignals.sleepScore,
+              recoveryScore: healthSignals.recoveryScore
+            },
+            environmentData: {
+              sunshinePercent: envSignals.sunshinePercent,
+              weatherLabel: envSignals.weatherLabel
+            }
+          });
+        }
+      } catch (e) {
+        // Pattern condition failed, skip
+      }
     }
   }
 
@@ -195,10 +463,13 @@ export const detectPatternsInPeriod = async (userId, entries, whoopHistory = nul
     allPatterns.push(...patterns);
   }
 
-  // Aggregate patterns
+  // Aggregate patterns by type and id
   const patternCounts = {};
   const patternMoods = {};
   const patternBiometrics = {};
+  const patternHealthData = {};
+  const patternEnvData = {};
+  const patternTypes = {};
 
   for (const pattern of allPatterns) {
     const id = pattern.patternId;
@@ -207,11 +478,16 @@ export const detectPatternsInPeriod = async (userId, entries, whoopHistory = nul
       patternCounts[id] = 0;
       patternMoods[id] = [];
       patternBiometrics[id] = [];
+      patternHealthData[id] = [];
+      patternEnvData[id] = [];
+      patternTypes[id] = pattern.patternType;
     }
 
     patternCounts[id]++;
     if (pattern.mood != null) patternMoods[id].push(pattern.mood);
     if (pattern.whoopData) patternBiometrics[id].push(pattern.whoopData);
+    if (pattern.healthData) patternHealthData[id].push(pattern.healthData);
+    if (pattern.environmentData) patternEnvData[id].push(pattern.environmentData);
   }
 
   // Calculate aggregates
@@ -220,13 +496,21 @@ export const detectPatternsInPeriod = async (userId, entries, whoopHistory = nul
   for (const [id, count] of Object.entries(patternCounts)) {
     const moods = patternMoods[id];
     const biometrics = patternBiometrics[id];
+    const healthData = patternHealthData[id];
+    const envData = patternEnvData[id];
+    const patternType = patternTypes[id];
 
-    // Find the pattern definition
-    const patternDef = Object.values(NARRATIVE_PATTERNS).find(p => p.id === id);
+    // Find the pattern definition from appropriate source
+    let patternDef = Object.values(NARRATIVE_PATTERNS).find(p => p.id === id);
+    if (!patternDef) patternDef = Object.values(HEALTH_PATTERNS).find(p => p.id === id);
+    if (!patternDef) patternDef = Object.values(ENVIRONMENT_PATTERNS).find(p => p.id === id);
+    if (!patternDef) patternDef = Object.values(COMBINED_PATTERNS).find(p => p.id === id);
 
     patternAnalysis[id] = {
       patternId: id,
+      patternType,
       category: patternDef?.category,
+      label: patternDef?.label,
       occurrences: count,
       mood: {
         mean: moods.length > 0 ? moods.reduce((a, b) => a + b, 0) / moods.length : null,
@@ -238,15 +522,50 @@ export const detectPatternsInPeriod = async (userId, entries, whoopHistory = nul
         avgHRV: average(biometrics.map(b => b.hrv).filter(Boolean)),
         avgStrain: average(biometrics.map(b => b.strain).filter(Boolean)),
         avgRecovery: average(biometrics.map(b => b.recovery).filter(Boolean))
+      } : null,
+      healthMetrics: healthData.length > 0 ? {
+        avgSleepHours: average(healthData.map(h => h.sleepHours).filter(Boolean)),
+        avgSleepScore: average(healthData.map(h => h.sleepScore).filter(Boolean)),
+        avgHRV: average(healthData.map(h => h.hrv).filter(Boolean)),
+        avgRecovery: average(healthData.map(h => h.recoveryScore).filter(Boolean)),
+        avgSteps: average(healthData.map(h => h.steps).filter(Boolean)),
+        workoutRate: healthData.filter(h => h.hadWorkout).length / healthData.length
+      } : null,
+      environmentMetrics: envData.length > 0 ? {
+        avgSunshine: average(envData.map(e => e.sunshinePercent).filter(Boolean)),
+        avgTemp: average(envData.map(e => e.temperature).filter(Boolean)),
+        avgDaylightHours: average(envData.map(e => e.daylightHours).filter(Boolean)),
+        afterDarkRate: envData.filter(e => e.isAfterDark).length / envData.length
       } : null
     };
+  }
+
+  // Group patterns by type for easier consumption
+  const byType = {
+    narrative: [],
+    health: [],
+    environment: [],
+    combined: []
+  };
+
+  for (const analysis of Object.values(patternAnalysis)) {
+    if (byType[analysis.patternType]) {
+      byType[analysis.patternType].push(analysis);
+    }
   }
 
   return {
     rawPatterns: allPatterns,
     aggregated: patternAnalysis,
+    byType,
     totalEntries: entries.length,
-    totalPatternsDetected: allPatterns.length
+    totalPatternsDetected: allPatterns.length,
+    patternTypeCounts: {
+      narrative: byType.narrative.length,
+      health: byType.health.length,
+      environment: byType.environment.length,
+      combined: byType.combined.length
+    }
   };
 };
 

@@ -481,16 +481,48 @@ const EntryCard = ({ entry, onDelete, onUpdate }) => {
             const health = entry.healthContext;
             return (
               <>
-                {health.stepsToday > 0 && (
-                  <span className="flex items-center gap-1 bg-green-50 text-green-700 px-1.5 py-0.5 rounded-full">
-                    <Activity size={10} />
-                    {health.stepsToday.toLocaleString()} steps
+                {/* Sleep */}
+                {health.sleep?.totalHours > 0 && (
+                  <span className={`flex items-center gap-1 px-1.5 py-0.5 rounded-full ${
+                    health.sleep.score >= 80 ? 'bg-green-50 text-green-700' :
+                    health.sleep.score >= 60 ? 'bg-purple-50 text-purple-700' :
+                    'bg-orange-50 text-orange-700'
+                  }`}>
+                    <BedDouble size={10} />
+                    {health.sleep.totalHours.toFixed(1)}h
+                    {health.sleep.score && (
+                      <span className="hidden sm:inline">({health.sleep.score})</span>
+                    )}
                   </span>
                 )}
-                {health.sleepLastNight > 0 && (
-                  <span className="flex items-center gap-1 bg-purple-50 text-purple-700 px-1.5 py-0.5 rounded-full">
-                    <BedDouble size={10} />
-                    {health.sleepLastNight.toFixed(1)}h sleep
+
+                {/* HRV */}
+                {health.heart?.hrv > 0 && (
+                  <span className={`flex items-center gap-1 px-1.5 py-0.5 rounded-full ${
+                    health.heart.hrvTrend === 'improving' ? 'bg-green-50 text-green-700' :
+                    health.heart.hrvTrend === 'declining' ? 'bg-orange-50 text-orange-700' :
+                    'bg-warm-50 text-warm-600'
+                  }`}>
+                    <Activity size={10} />
+                    HRV {health.heart.hrv}ms
+                  </span>
+                )}
+
+                {/* Recovery (Whoop) */}
+                {health.recovery?.score > 0 && (
+                  <span className={`flex items-center gap-1 px-1.5 py-0.5 rounded-full ${
+                    health.recovery.score >= 67 ? 'bg-green-50 text-green-700' :
+                    health.recovery.score >= 34 ? 'bg-yellow-50 text-yellow-700' :
+                    'bg-red-50 text-red-700'
+                  }`}>
+                    Recovery {health.recovery.score}%
+                  </span>
+                )}
+
+                {/* Steps */}
+                {health.activity?.stepsToday > 0 && (
+                  <span className="flex items-center gap-1 bg-green-50 text-green-700 px-1.5 py-0.5 rounded-full hidden sm:flex">
+                    {health.activity.stepsToday.toLocaleString()} steps
                   </span>
                 )}
               </>
