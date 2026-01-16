@@ -1,6 +1,6 @@
 # EchoVault Project Status
 
-> **Last Updated:** 2026-01-15
+> **Last Updated:** 2026-01-16
 > **Updated By:** Claude (via conversation with Michael)
 
 ---
@@ -17,13 +17,48 @@
 
 | Item | Status | Notes |
 |------|--------|-------|
+| **Historical Data Enrichment** | 🔴 Next Priority | Retroactively attach health + weather data to ALL entries. See detailed plan below. |
 | Health & Environment Insights UI | ✅ Complete | Correlation insights, context prompts, recommendations, environment backfill UI |
-| **Health Backfill Fix** | 🔴 Blocked | Historical queries broken - sleep/HRV/HR return today's data, not historical. See Known Issues. |
-| **Environment Capture Fix** | 🟡 Testing | Info.plist fixed. Needs app reinstall to test new location permission. |
 | Nexus 2.0 Insights Engine | 📋 Spec Complete | Full implementation spec created. Replaces entire existing insights system. |
 | Entity Management (Milestone 1.5) | ✅ Complete | Entity resolution for voice transcription + migration from older entries |
 | HealthKit Integration (Expanded) | ✅ Complete | Sleep stages, smart merge with Whoop, NEW entries capture health data correctly |
 | Whoop Integration | ✅ Complete | OAuth working, cloud sync, recovery/strain/sleep data |
+
+### Historical Data Enrichment (Next Session)
+
+**Goal:** For every historical entry, attach health and weather data so correlation analysis works on full dataset.
+
+**Per-Entry Data to Attach:**
+| Category | Fields | Source |
+|----------|--------|--------|
+| Sleep | score, totalHours, stages (deep/core/rem/awake) | HealthKit or Whoop |
+| Activity | steps, calories, exerciseMinutes, workouts | HealthKit |
+| Heart | restingHR, HRV, stressIndicator | HealthKit or Whoop |
+| Weather | temperature, conditions, sunshinePercent | Open-Meteo API |
+
+**Implementation Steps:**
+1. ✅ Fix iOS location permission (done - needs app reinstall to test)
+2. 🔲 Fix HealthKit historical queries (sleep/HRV/HR use wrong query method)
+3. 🔲 Test HealthKit data availability (how far back: 30, 60, 90 days?)
+4. 🔲 Run health backfill on all entries
+5. 🔲 Run weather backfill (limited to 7 days with free API)
+6. 🔲 Update journal card UI to show health/weather badges
+7. 🔲 Update therapy export to include health context per entry
+8. 🔲 Verify correlation insights generate from enriched data
+
+**Data Availability Limits:**
+| Source | Expected Range | Notes |
+|--------|----------------|-------|
+| HealthKit (on-device) | ~30-90 days | May have more via iCloud sync |
+| Whoop API | Full history | Already works |
+| Open-Meteo (free) | 7 days | May need paid tier or alternative API for longer |
+
+**Files to Modify:**
+- `src/services/health/healthKit.js` - Fix historical queries for sleep/HRV/HR
+- `src/services/health/healthBackfill.js` - Already has structure, needs working queries
+- `src/services/environment/environmentBackfill.js` - May need longer history API
+- `src/components/journal/JournalCard.jsx` - Add health/weather badges
+- Therapy export function - Include healthContext in output
 
 ### Nexus 2.0 Implementation Phases
 
@@ -182,11 +217,13 @@ Good ideas we're explicitly NOT doing now. Don't re-suggest these.
 - Added debug logging to `healthBackfill.js` `fetchHealthForDate()`
 - Synced to iOS
 
-**Next Steps (Tomorrow):**
-1. Fix health backfill to use proper historical queries for sleep/HRV/HR
-2. Test location permission after app reinstall
-3. Test environment backfill with proper location permission
-4. Verify correlations appear in Insights after entries have health data
+**Next Session Goal:**
+Retroactively enrich ALL historical entries with health + weather data, then surface it in UI.
+
+**Michael's Requirements (Confirmed):**
+> "For example if I have an entry on 12/13 at 1pm, I want to attach my sleep score, how many calories I had burnt at that time, and all the other information, including weather. Then once all that data is synced we can process the new insights on it."
+
+See "Historical Data Enrichment" section above for full implementation plan.
 
 ---
 
