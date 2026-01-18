@@ -785,8 +785,62 @@ const QuickInsightsSection = ({
     );
   }
 
-  // No insights generated yet
+  // No insights generated yet - show generating state if we have enough data
   if (!insights || insights.length === 0) {
+    // If generating, show loading state
+    if (generating) {
+      return (
+        <motion.div
+          className="bg-gradient-to-r from-emerald-50/50 to-teal-50/50 border border-emerald-200/30 rounded-2xl p-4"
+          initial={{ opacity: 0, y: -10 }}
+          animate={{ opacity: 1, y: 0 }}
+        >
+          <div className="flex items-center gap-3">
+            <div className="p-2 bg-gradient-to-br from-emerald-400/20 to-teal-400/20 rounded-xl">
+              <Loader2 size={18} className="text-emerald-600 animate-spin" />
+            </div>
+            <div>
+              <h3 className="font-semibold text-warm-800">Quick Insights</h3>
+              <p className="text-xs text-warm-500">
+                Analyzing your patterns...
+              </p>
+            </div>
+          </div>
+        </motion.div>
+      );
+    }
+    // If has enough data but no insights, show prompt to generate
+    if (hasEnoughData) {
+      return (
+        <motion.div
+          className="bg-gradient-to-r from-emerald-50/50 to-teal-50/50 border border-emerald-200/30 rounded-2xl p-4"
+          initial={{ opacity: 0, y: -10 }}
+          animate={{ opacity: 1, y: 0 }}
+        >
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="p-2 bg-gradient-to-br from-emerald-400/20 to-teal-400/20 rounded-xl">
+                <Zap size={18} className="text-emerald-600" />
+              </div>
+              <div>
+                <h3 className="font-semibold text-warm-800">Quick Insights</h3>
+                <p className="text-xs text-warm-500">
+                  Tap refresh to generate pattern insights
+                </p>
+              </div>
+            </div>
+            {onRefresh && (
+              <button
+                onClick={onRefresh}
+                className="px-3 py-1.5 bg-emerald-500 text-white text-sm font-medium rounded-lg hover:bg-emerald-600 transition-colors"
+              >
+                Generate
+              </button>
+            )}
+          </div>
+        </motion.div>
+      );
+    }
     return null;
   }
 
