@@ -21,3 +21,30 @@ export { MarkdownLite, GetHelpButton, HamburgerMenu } from './ui';
 
 // Dashboard
 export { DayDashboard, EntryBar } from './dashboard';
+
+// Lazy-loaded components for code splitting
+export {
+  LazyHealthSettingsScreen,
+  LazyJournalScreen,
+  LazyTherapistExportScreen,
+  LazySafetyPlanScreen,
+  LazyCrisisResourcesScreen,
+  LazyDecompressionScreen,
+  LazyEntityManagementPage,
+  LazyNexusSettings,
+  LazyWeeklyReport,
+  LazyInsightsPanel,
+  withSuspense,
+  LoadingFallback,
+  // Pre-wrapped versions with Suspense
+  HealthSettingsScreenWithSuspense,
+  JournalScreenWithSuspense,
+  TherapistExportScreenWithSuspense,
+  SafetyPlanScreenWithSuspense,
+  CrisisResourcesScreenWithSuspense,
+  DecompressionScreenWithSuspense,
+  EntityManagementPageWithSuspense,
+  NexusSettingsWithSuspense,
+  WeeklyReportWithSuspense,
+  InsightsPanelWithSuspense
+} from './lazy';

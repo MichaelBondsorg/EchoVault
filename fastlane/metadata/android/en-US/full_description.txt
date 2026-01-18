@@ -1,0 +1,37 @@
+EchoVault is your private AI-powered journal for mental wellness. Speak or type your thoughts, and receive personalized insights that help you understand your emotional patterns and grow.
+
+<b>KEY FEATURES</b>
+
+<b>Voice & Text Journaling</b>
+- Record voice entries that are automatically transcribed
+- Type when you prefer written reflection
+- Quick capture for on-the-go moments
+
+<b>AI-Powered Insights</b>
+- Discover patterns in your emotions and behaviors
+- Receive therapeutic reflections based on proven frameworks (ACT, CBT, DBT)
+- Track progress toward personal goals
+
+<b>Health Integration</b>
+- Connect with Google Fit for activity and sleep data
+- See how physical health correlates with your emotional state
+- Whoop integration for advanced recovery metrics
+
+<b>Privacy First</b>
+- Your entries are encrypted and stored securely
+- No data sold to third parties
+- Export or delete your data anytime
+
+<b>Smart Features</b>
+- Crisis detection with safety resources
+- Daily and weekly summaries
+- Environment context (weather, location) for richer insights
+
+<b>WHO IT'S FOR</b>
+
+- Anyone seeking self-understanding through reflection
+- People managing stress, anxiety, or emotional challenges
+- Those interested in the mind-body connection
+- Journal enthusiasts who want AI-enhanced insights
+
+EchoVault helps you process your experiences, recognize patterns, and take meaningful steps toward mental wellness. Start your journey today.

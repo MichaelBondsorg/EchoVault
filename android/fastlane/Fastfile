@@ -1,0 +1,216 @@
+# Fastfile for EchoVault Android
+# Documentation: https://docs.fastlane.tools
+
+default_platform(:android)
+
+platform :android do
+  # ==========================================
+  # SETUP
+  # ==========================================
+
+  before_all do
+    # Set up any environment-specific configuration
+  end
+
+  # ==========================================
+  # BUILD LANES
+  # ==========================================
+
+  desc "Build debug APK"
+  lane :build_debug do
+    gradle(
+      task: "assembleDebug",
+      project_dir: "./"
+    )
+  end
+
+  desc "Build release APK"
+  lane :build_release_apk do
+    gradle(
+      task: "assembleRelease",
+      project_dir: "./"
+    )
+  end
+
+  desc "Build release AAB (App Bundle)"
+  lane :build_release do
+    gradle(
+      task: "bundleRelease",
+      project_dir: "./"
+    )
+  end
+
+  # ==========================================
+  # DEPLOYMENT LANES
+  # ==========================================
+
+  desc "Deploy to internal testing track"
+  lane :internal do
+    # Increment version code
+    increment_version_code
+
+    # Build the release bundle
+    build_release
+
+    # Upload to Play Store internal track
+    upload_to_play_store(
+      track: "internal",
+      aab: "app/build/outputs/bundle/release/app-release.aab",
+      skip_upload_metadata: true,
+      skip_upload_screenshots: true,
+      skip_upload_images: true
+    )
+  end
+
+  desc "Deploy to closed beta track"
+  lane :beta do
+    # Increment version code
+    increment_version_code
+
+    # Build the release bundle
+    build_release
+
+    # Upload to Play Store beta track
+    upload_to_play_store(
+      track: "beta",
+      aab: "app/build/outputs/bundle/release/app-release.aab",
+      skip_upload_metadata: false,
+      skip_upload_screenshots: true,
+      skip_upload_images: true
+    )
+
+    # Tag the release
+    add_git_tag(
+      tag: "android/beta/#{android_get_version_code}"
+    )
+  end
+
+  desc "Deploy to production"
+  lane :release do
+    # Increment version code
+    increment_version_code
+
+    # Build the release bundle
+    build_release
+
+    # Upload to Play Store production track
+    upload_to_play_store(
+      track: "production",
+      aab: "app/build/outputs/bundle/release/app-release.aab",
+      skip_upload_metadata: false,
+      skip_upload_screenshots: false,
+      skip_upload_images: false,
+      release_status: "draft" # Change to 'completed' for immediate release
+    )
+
+    # Tag the release
+    version_name = android_get_version_name
+    add_git_tag(
+      tag: "android/release/#{version_name}"
+    )
+  end
+
+  desc "Promote internal to beta"
+  lane :promote_to_beta do
+    upload_to_play_store(
+      track: "internal",
+      track_promote_to: "beta",
+      skip_upload_aab: true,
+      skip_upload_metadata: true,
+      skip_upload_screenshots: true,
+      skip_upload_images: true
+    )
+  end
+
+  desc "Promote beta to production"
+  lane :promote_to_production do
+    upload_to_play_store(
+      track: "beta",
+      track_promote_to: "production",
+      skip_upload_aab: true,
+      skip_upload_metadata: true,
+      skip_upload_screenshots: true,
+      skip_upload_images: true,
+      release_status: "draft"
+    )
+  end
+
+  # ==========================================
+  # UTILITY LANES
+  # ==========================================
+
+  desc "Increment version code"
+  lane :increment_version_code do
+    path = "app/build.gradle"
+    re = /versionCode\s+(\d+)/
+
+    s = File.read(path)
+    versionCode = s[re, 1].to_i
+    s[re, 1] = (versionCode + 1).to_s
+
+    File.write(path, s)
+
+    UI.message("Version code incremented to #{versionCode + 1}")
+  end
+
+  desc "Get current version code"
+  lane :android_get_version_code do
+    path = "app/build.gradle"
+    re = /versionCode\s+(\d+)/
+    s = File.read(path)
+    s[re, 1].to_i
+  end
+
+  desc "Get current version name"
+  lane :android_get_version_name do
+    path = "app/build.gradle"
+    re = /versionName\s+"(.+)"/
+    s = File.read(path)
+    s[re, 1]
+  end
+
+  desc "Upload metadata only (no build)"
+  lane :metadata do
+    upload_to_play_store(
+      skip_upload_aab: true,
+      skip_upload_apk: true,
+      skip_upload_screenshots: true
+    )
+  end
+
+  desc "Upload screenshots only"
+  lane :screenshots do
+    upload_to_play_store(
+      skip_upload_aab: true,
+      skip_upload_apk: true,
+      skip_upload_metadata: true
+    )
+  end
+
+  desc "Validate Play Store JSON key"
+  lane :validate_key do
+    validate_play_store_json_key(
+      json_key: ENV["PLAY_STORE_JSON_KEY"] || "play-store-key.json"
+    )
+  end
+
+  # ==========================================
+  # TESTING LANES
+  # ==========================================
+
+  desc "Run unit tests"
+  lane :test do
+    gradle(
+      task: "test",
+      project_dir: "./"
+    )
+  end
+
+  desc "Run connected (instrumentation) tests"
+  lane :connected_test do
+    gradle(
+      task: "connectedAndroidTest",
+      project_dir: "./"
+    )
+  end
+end

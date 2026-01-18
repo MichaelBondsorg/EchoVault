@@ -2,7 +2,9 @@ import { initializeApp } from 'firebase/app';
 import {
   initializeAuth, getAuth, onAuthStateChanged, signOut, signInWithCustomToken,
   GoogleAuthProvider, signInWithPopup, signInWithCredential, OAuthProvider,
-  setPersistence, browserLocalPersistence, indexedDBLocalPersistence, inMemoryPersistence
+  setPersistence, browserLocalPersistence, indexedDBLocalPersistence, inMemoryPersistence,
+  createUserWithEmailAndPassword, signInWithEmailAndPassword, sendPasswordResetEmail,
+  updateProfile
 } from 'firebase/auth';
 import {
   getFirestore, collection, addDoc, query, orderBy, onSnapshot,
@@ -50,6 +52,7 @@ export const transcribeWithToneFn = httpsCallable(functions, 'transcribeWithTone
 export const askJournalAIFn = httpsCallable(functions, 'askJournalAI', { timeout: 120000 }); // 2 min
 export const executePromptFn = httpsCallable(functions, 'executePrompt', { timeout: 120000 }); // 2 min
 export const exchangeGoogleTokenFn = httpsCallable(functions, 'exchangeGoogleToken', { timeout: 30000 }); // 30s - auth should be fast
+export const exchangeAppleTokenFn = httpsCallable(functions, 'exchangeAppleToken', { timeout: 30000 }); // 30s - auth should be fast
 export const reprocessEntriesForGoalsFn = httpsCallable(functions, 'reprocessEntriesForGoals', { timeout: 540000 }); // 9 min
 export const migrateEntitiesFromEntriesFn = httpsCallable(functions, 'migrateEntitiesFromEntries', { timeout: 540000 }); // 9 min
 
@@ -81,6 +84,12 @@ export {
   indexedDBLocalPersistence,
   browserLocalPersistence,
   inMemoryPersistence,
+  // Email/password auth
+  createUserWithEmailAndPassword,
+  signInWithEmailAndPassword,
+  sendPasswordResetEmail,
+  updateProfile,
+  // Firestore
   collection,
   addDoc,
   query,

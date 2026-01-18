@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Mic, Loader2, LogIn, Activity, Brain, Share,
-  User as UserIcon, Briefcase, X
+  User as UserIcon, Briefcase, X, Mail, Apple, Eye, EyeOff
 } from 'lucide-react';
 
 // UI Components
@@ -12,8 +12,10 @@ import { celebrate, Button, Modal, ModalHeader, ModalBody, Badge, MoodBadge, Bre
 import {
   auth, db,
   onAuthStateChanged, signOut, signInWithCustomToken,
-  GoogleAuthProvider, signInWithPopup, signInWithCredential,
-  exchangeGoogleTokenFn,
+  GoogleAuthProvider, signInWithPopup, signInWithCredential, OAuthProvider,
+  exchangeGoogleTokenFn, exchangeAppleTokenFn,
+  createUserWithEmailAndPassword, signInWithEmailAndPassword,
+  sendPasswordResetEmail, updateProfile,
   collection, addDoc, query, orderBy, onSnapshot,
   Timestamp, deleteDoc, doc, updateDoc, limit, setDoc,
   runTransaction
@@ -1640,8 +1642,160 @@ export default function App() {
     }
   };
 
+  // Handle Apple Sign-In (required for iOS App Store)
+  const handleAppleSignIn = async () => {
+    console.log('[EchoVault] Sign-in button clicked, attempting Apple sign-in...');
+    const isNative = Capacitor.isNativePlatform();
+
+    try {
+      if (isNative) {
+        // Native iOS: Use Capacitor social login plugin
+        console.log('[EchoVault] Using native Apple Sign-In...');
+        const SocialLogin = registerPlugin('SocialLogin');
+
+        // Initialize Apple provider
+        await SocialLogin.initialize({
+          apple: {
+            clientId: 'com.echovault.app', // Your app's bundle ID
+            redirectUrl: 'https://echo-vault-app.firebaseapp.com/__/auth/handler'
+          }
+        });
+
+        const response = await SocialLogin.login({
+          provider: 'apple',
+          options: {
+            scopes: ['email', 'name']
+          }
+        });
+
+        console.log('[EchoVault] Apple sign-in response:', response);
+
+        if (response?.result?.identityToken) {
+          console.log('[EchoVault] Got Apple identityToken, exchanging for Firebase token...');
+
+          const functionUrl = 'https://us-central1-echo-vault-app.cloudfunctions.net/exchangeAppleToken';
+
+          const fetchResponse = await fetch(functionUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              data: {
+                identityToken: response.result.identityToken,
+                user: response.result.user // Contains name/email on first sign-in
+              }
+            })
+          });
+
+          if (!fetchResponse.ok) {
+            const errorText = await fetchResponse.text();
+            console.error('[EchoVault] Cloud Function error:', errorText);
+            throw new Error(`Cloud Function failed: ${fetchResponse.status}`);
+          }
+
+          const exchangeResult = await fetchResponse.json();
+          const resultData = exchangeResult.result || exchangeResult;
+
+          if (!resultData?.customToken) {
+            throw new Error('No custom token received');
+          }
+
+          // Sign in with custom token
+          console.log('[EchoVault] Signing in with custom token...');
+          await signInWithCustomToken(auth, resultData.customToken);
+          console.log('[EchoVault] Apple sign-in successful!');
+
+        } else {
+          throw new Error('No identity token received from Apple');
+        }
+      } else {
+        // Web: Use Firebase OAuthProvider for Apple
+        console.log('[EchoVault] Using web popup Apple sign-in...');
+        const provider = new OAuthProvider('apple.com');
+        provider.addScope('email');
+        provider.addScope('name');
+        await signInWithPopup(auth, provider);
+        console.log('[EchoVault] Apple web sign-in successful!');
+      }
+    } catch (error) {
+      console.error('[EchoVault] Apple sign-in error:', error);
+      if (error.message?.includes('cancelled') || error.message?.includes('canceled')) {
+        console.log('[EchoVault] Sign-in was cancelled by user');
+      } else {
+        alert(`Apple sign-in failed: ${error.message}`);
+      }
+    }
+  };
+
+  // Handle Email/Password Sign-In
+  const [authMode, setAuthMode] = useState('signin'); // 'signin', 'signup', 'reset'
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [displayName, setDisplayName] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [authLoading, setAuthLoading] = useState(false);
+  const [authError, setAuthError] = useState('');
+  const [showEmailForm, setShowEmailForm] = useState(false);
+
+  const handleEmailAuth = async (e) => {
+    e.preventDefault();
+    setAuthError('');
+    setAuthLoading(true);
+
+    try {
+      if (authMode === 'signup') {
+        // Create new account
+        const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+        // Update display name if provided
+        if (displayName.trim()) {
+          await updateProfile(userCredential.user, { displayName: displayName.trim() });
+        }
+        console.log('[EchoVault] Email sign-up successful:', userCredential.user.email);
+      } else if (authMode === 'signin') {
+        // Sign in to existing account
+        await signInWithEmailAndPassword(auth, email, password);
+        console.log('[EchoVault] Email sign-in successful');
+      } else if (authMode === 'reset') {
+        // Send password reset email
+        await sendPasswordResetEmail(auth, email);
+        alert('Password reset email sent! Check your inbox.');
+        setAuthMode('signin');
+      }
+    } catch (error) {
+      console.error('[EchoVault] Email auth error:', error.code, error.message);
+      // User-friendly error messages
+      switch (error.code) {
+        case 'auth/email-already-in-use':
+          setAuthError('This email is already registered. Try signing in instead.');
+          break;
+        case 'auth/invalid-email':
+          setAuthError('Please enter a valid email address.');
+          break;
+        case 'auth/weak-password':
+          setAuthError('Password should be at least 6 characters.');
+          break;
+        case 'auth/user-not-found':
+          setAuthError('No account found with this email. Try signing up.');
+          break;
+        case 'auth/wrong-password':
+        case 'auth/invalid-credential':
+          setAuthError('Incorrect password. Please try again.');
+          break;
+        case 'auth/too-many-requests':
+          setAuthError('Too many attempts. Please try again later.');
+          break;
+        default:
+          setAuthError(error.message);
+      }
+    } finally {
+      setAuthLoading(false);
+    }
+  };
+
   if (!user) {
     console.log('[EchoVault] Rendering login screen (no user)');
+    const isNative = Capacitor.isNativePlatform();
+    const isIOS = Capacitor.getPlatform() === 'ios';
+
     return (
       <div className="min-h-screen flex flex-col items-center justify-center p-4 bg-gradient-to-br from-warm-50 to-primary-50">
         <motion.div
@@ -1655,14 +1809,194 @@ export default function App() {
         <h1 className="text-2xl font-display font-bold mb-6 text-warm-800">
           EchoVault
         </h1>
-        <Button
-          variant="primary"
-          onClick={handleSignIn}
-          className="flex gap-2 items-center"
-        >
-          <LogIn size={18}/> Sign in with Google
-        </Button>
-    </div>
+
+        <div className="w-full max-w-xs space-y-3">
+          {/* Social Sign-In Buttons */}
+          <AnimatePresence mode="wait">
+            {!showEmailForm ? (
+              <motion.div
+                key="social-buttons"
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -10 }}
+                className="space-y-3"
+              >
+                {/* Sign in with Apple - show on iOS or web */}
+                {(isIOS || !isNative) && (
+                  <Button
+                    variant="secondary"
+                    onClick={handleAppleSignIn}
+                    className="w-full flex gap-2 items-center justify-center bg-black text-white hover:bg-gray-800"
+                  >
+                    <Apple size={18}/> Sign in with Apple
+                  </Button>
+                )}
+
+                {/* Sign in with Google */}
+                <Button
+                  variant="secondary"
+                  onClick={handleSignIn}
+                  className="w-full flex gap-2 items-center justify-center"
+                >
+                  <svg className="w-4 h-4" viewBox="0 0 24 24">
+                    <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+                    <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+                    <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
+                    <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
+                  </svg>
+                  Sign in with Google
+                </Button>
+
+                {/* Divider */}
+                <div className="relative my-4">
+                  <div className="absolute inset-0 flex items-center">
+                    <div className="w-full border-t border-warm-200"></div>
+                  </div>
+                  <div className="relative flex justify-center text-sm">
+                    <span className="px-2 bg-gradient-to-br from-warm-50 to-primary-50 text-warm-500">or</span>
+                  </div>
+                </div>
+
+                {/* Email Sign-In Button */}
+                <Button
+                  variant="ghost"
+                  onClick={() => {
+                    setShowEmailForm(true);
+                    setAuthMode('signin');
+                    setAuthError('');
+                  }}
+                  className="w-full flex gap-2 items-center justify-center text-warm-600"
+                >
+                  <Mail size={18}/> Continue with Email
+                </Button>
+              </motion.div>
+            ) : (
+              <motion.div
+                key="email-form"
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -10 }}
+              >
+                <form onSubmit={handleEmailAuth} className="space-y-3">
+                  <h2 className="text-lg font-semibold text-center text-warm-800">
+                    {authMode === 'signup' ? 'Create Account' : authMode === 'reset' ? 'Reset Password' : 'Sign In'}
+                  </h2>
+
+                  {authMode === 'signup' && (
+                    <input
+                      type="text"
+                      placeholder="Name (optional)"
+                      value={displayName}
+                      onChange={(e) => setDisplayName(e.target.value)}
+                      className="w-full px-4 py-2 rounded-lg border border-warm-200 focus:border-primary-500 focus:ring-2 focus:ring-primary-200 outline-none transition-all"
+                    />
+                  )}
+
+                  <input
+                    type="email"
+                    placeholder="Email"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    required
+                    className="w-full px-4 py-2 rounded-lg border border-warm-200 focus:border-primary-500 focus:ring-2 focus:ring-primary-200 outline-none transition-all"
+                  />
+
+                  {authMode !== 'reset' && (
+                    <div className="relative">
+                      <input
+                        type={showPassword ? 'text' : 'password'}
+                        placeholder="Password"
+                        value={password}
+                        onChange={(e) => setPassword(e.target.value)}
+                        required
+                        minLength={6}
+                        className="w-full px-4 py-2 pr-10 rounded-lg border border-warm-200 focus:border-primary-500 focus:ring-2 focus:ring-primary-200 outline-none transition-all"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowPassword(!showPassword)}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-warm-400 hover:text-warm-600"
+                      >
+                        {showPassword ? <EyeOff size={18}/> : <Eye size={18}/>}
+                      </button>
+                    </div>
+                  )}
+
+                  {authError && (
+                    <p className="text-red-500 text-sm text-center">{authError}</p>
+                  )}
+
+                  <Button
+                    type="submit"
+                    variant="primary"
+                    disabled={authLoading}
+                    className="w-full flex gap-2 items-center justify-center"
+                  >
+                    {authLoading ? <Loader2 size={18} className="animate-spin"/> : <Mail size={18}/>}
+                    {authMode === 'signup' ? 'Create Account' : authMode === 'reset' ? 'Send Reset Email' : 'Sign In'}
+                  </Button>
+
+                  {/* Auth mode toggles */}
+                  <div className="text-center text-sm space-y-1">
+                    {authMode === 'signin' && (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => { setAuthMode('signup'); setAuthError(''); }}
+                          className="text-primary-600 hover:underline"
+                        >
+                          Need an account? Sign up
+                        </button>
+                        <br/>
+                        <button
+                          type="button"
+                          onClick={() => { setAuthMode('reset'); setAuthError(''); }}
+                          className="text-warm-500 hover:underline"
+                        >
+                          Forgot password?
+                        </button>
+                      </>
+                    )}
+                    {authMode === 'signup' && (
+                      <button
+                        type="button"
+                        onClick={() => { setAuthMode('signin'); setAuthError(''); }}
+                        className="text-primary-600 hover:underline"
+                      >
+                        Already have an account? Sign in
+                      </button>
+                    )}
+                    {authMode === 'reset' && (
+                      <button
+                        type="button"
+                        onClick={() => { setAuthMode('signin'); setAuthError(''); }}
+                        className="text-primary-600 hover:underline"
+                      >
+                        Back to sign in
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Back to social sign-in */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowEmailForm(false);
+                      setAuthError('');
+                      setEmail('');
+                      setPassword('');
+                      setDisplayName('');
+                    }}
+                    className="w-full text-center text-sm text-warm-500 hover:text-warm-700"
+                  >
+                    ← Back to other sign-in options
+                  </button>
+                </form>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
+      </div>
     );
   }
 

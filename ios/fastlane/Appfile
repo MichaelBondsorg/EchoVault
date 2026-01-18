@@ -1,0 +1,17 @@
+# App Store Connect App Identifier
+app_identifier("com.echovault.app")
+
+# Your Apple Developer Portal username
+# Set via environment variable or replace with your email
+apple_id(ENV["APPLE_ID"] || "your-apple-id@example.com")
+
+# Your App Store Connect Team ID (if you're part of multiple teams)
+# Find at: https://appstoreconnect.apple.com > Users and Access > Team ID
+itc_team_id(ENV["ITC_TEAM_ID"] || "YOUR_ITC_TEAM_ID")
+
+# Your Apple Developer Portal Team ID
+# Find at: https://developer.apple.com/account > Membership > Team ID
+team_id(ENV["APPLE_TEAM_ID"] || "YOUR_TEAM_ID")
+
+# For more information about the Appfile, see:
+# https://docs.fastlane.tools/advanced/#appfile

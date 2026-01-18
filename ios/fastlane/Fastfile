@@ -1,0 +1,187 @@
+# Fastfile for EchoVault iOS
+# Documentation: https://docs.fastlane.tools
+
+default_platform(:ios)
+
+platform :ios do
+  # ==========================================
+  # SETUP
+  # ==========================================
+
+  before_all do
+    # Ensure we're using the correct Xcode version
+    xcversion(version: "~> 15.0")
+  end
+
+  # ==========================================
+  # BUILD LANES
+  # ==========================================
+
+  desc "Build the app for development"
+  lane :build_dev do
+    build_app(
+      workspace: "App/App.xcworkspace",
+      scheme: "App",
+      configuration: "Debug",
+      export_method: "development",
+      output_directory: "./build",
+      output_name: "EchoVault-Dev.ipa"
+    )
+  end
+
+  desc "Build the app for release"
+  lane :build_release do
+    build_app(
+      workspace: "App/App.xcworkspace",
+      scheme: "App",
+      configuration: "Release",
+      export_method: "app-store",
+      output_directory: "./build",
+      output_name: "EchoVault.ipa"
+    )
+  end
+
+  # ==========================================
+  # DEPLOYMENT LANES
+  # ==========================================
+
+  desc "Push a new beta build to TestFlight"
+  lane :beta do
+    # Ensure clean git status
+    ensure_git_status_clean
+
+    # Increment build number
+    increment_build_number(
+      xcodeproj: "App/App.xcodeproj"
+    )
+
+    # Build the app
+    build_release
+
+    # Upload to TestFlight
+    upload_to_testflight(
+      skip_waiting_for_build_processing: true,
+      changelog: "Bug fixes and improvements"
+    )
+
+    # Commit the version bump
+    commit_version_bump(
+      xcodeproj: "App/App.xcodeproj",
+      message: "Bump iOS build number for TestFlight"
+    )
+
+    # Add git tag
+    add_git_tag(
+      tag: "ios/beta/#{get_build_number(xcodeproj: 'App/App.xcodeproj')}"
+    )
+
+    # Push to remote
+    push_to_git_remote
+  end
+
+  desc "Push a new release build to App Store"
+  lane :release do
+    # Ensure clean git status
+    ensure_git_status_clean
+
+    # Increment version number (patch)
+    increment_version_number(
+      xcodeproj: "App/App.xcodeproj",
+      bump_type: "patch"
+    )
+
+    # Reset build number for new version
+    increment_build_number(
+      xcodeproj: "App/App.xcodeproj",
+      build_number: "1"
+    )
+
+    # Build the app
+    build_release
+
+    # Upload to App Store Connect
+    upload_to_app_store(
+      skip_metadata: false,
+      skip_screenshots: false,
+      submit_for_review: false,
+      automatic_release: false,
+      precheck_include_in_app_purchases: false
+    )
+
+    # Commit the version bump
+    commit_version_bump(
+      xcodeproj: "App/App.xcodeproj",
+      message: "Bump iOS version for App Store release"
+    )
+
+    # Add git tag
+    version = get_version_number(xcodeproj: "App/App.xcodeproj")
+    add_git_tag(tag: "ios/release/#{version}")
+
+    # Push to remote
+    push_to_git_remote
+  end
+
+  # ==========================================
+  # UTILITY LANES
+  # ==========================================
+
+  desc "Sync certificates and provisioning profiles"
+  lane :sync_certs do
+    match(type: "development")
+    match(type: "appstore")
+  end
+
+  desc "Register new devices"
+  lane :register_device do |options|
+    device_name = options[:name]
+    device_udid = options[:udid]
+
+    register_devices(
+      devices: {
+        device_name => device_udid
+      }
+    )
+
+    # Regenerate provisioning profiles
+    match(type: "development", force_for_new_devices: true)
+  end
+
+  desc "Take screenshots for all device sizes"
+  lane :screenshots do
+    capture_screenshots(
+      workspace: "App/App.xcworkspace",
+      scheme: "App",
+      output_directory: "../screenshots/ios",
+      clear_previous_screenshots: true
+    )
+  end
+
+  desc "Upload metadata only (no build)"
+  lane :metadata do
+    upload_to_app_store(
+      skip_binary_upload: true,
+      skip_screenshots: true
+    )
+  end
+
+  desc "Download dSYMs from App Store Connect"
+  lane :dsyms do
+    download_dsyms
+    upload_symbols_to_crashlytics
+  end
+
+  # ==========================================
+  # TESTING LANES
+  # ==========================================
+
+  desc "Run tests"
+  lane :test do
+    run_tests(
+      workspace: "App/App.xcworkspace",
+      scheme: "App",
+      device: "iPhone 15 Pro",
+      clean: true
+    )
+  end
+end

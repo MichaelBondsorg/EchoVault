@@ -1,0 +1,48 @@
+EchoVault is your private AI-powered journal for mental wellness. Speak or type your thoughts, and receive personalized insights that help you understand your emotional patterns and grow.
+
+KEY FEATURES
+
+Voice & Text Journaling
+- Record voice entries that are automatically transcribed
+- Type when you prefer written reflection
+- Quick capture for on-the-go moments
+
+AI-Powered Insights
+- Discover patterns in your emotions and behaviors
+- Receive therapeutic reflections based on proven frameworks (ACT, CBT, DBT)
+- Track progress toward personal goals
+
+Health Integration
+- Connect with Apple Health for sleep, activity, and heart rate data
+- See how physical health correlates with your emotional state
+- Whoop integration for advanced recovery metrics
+
+Privacy First
+- Your entries are encrypted and stored securely
+- No data sold to third parties
+- Export or delete your data anytime
+
+Smart Features
+- Crisis detection with safety resources
+- Daily and weekly summaries
+- Environment context (weather, location) for richer insights
+
+WHO IT'S FOR
+
+- Anyone seeking self-understanding through reflection
+- People managing stress, anxiety, or emotional challenges
+- Those interested in the mind-body connection
+- Journal enthusiasts who want AI-enhanced insights
+
+EchoVault helps you process your experiences, recognize patterns, and take meaningful steps toward mental wellness. Start your journey today.
+
+SUBSCRIPTION INFORMATION
+
+EchoVault offers a free tier with basic features. Premium features require a subscription:
+- Monthly: $9.99/month
+- Annual: $79.99/year (save 33%)
+
+Payment will be charged to your Apple ID account at confirmation of purchase. Subscription automatically renews unless canceled at least 24 hours before the end of the current period. You can manage and cancel subscriptions in your Account Settings.
+
+Privacy Policy: https://echovault.app/privacy
+Terms of Service: https://echovault.app/terms

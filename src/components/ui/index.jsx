@@ -126,6 +126,7 @@ export const Button = ({
   disabled = false,
   loading = false,
   onClick,
+  'aria-label': ariaLabel,
   ...props
 }) => {
   const variants = {
@@ -147,12 +148,16 @@ export const Button = ({
       className={`
         inline-flex items-center justify-center gap-2 font-semibold
         transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed
+        focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2
         ${variants[variant]} ${sizes[size]} ${className}
       `}
       whileHover={disabled ? {} : { scale: 1.02 }}
       whileTap={disabled ? {} : { scale: 0.98 }}
       disabled={disabled || loading}
       onClick={onClick}
+      aria-label={ariaLabel}
+      aria-busy={loading}
+      aria-disabled={disabled}
       {...props}
     >
       {loading ? (
@@ -160,6 +165,8 @@ export const Button = ({
           className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full"
           animate={{ rotate: 360 }}
           transition={{ duration: 1, repeat: Infinity, ease: 'linear' }}
+          role="status"
+          aria-label="Loading"
         />
       ) : (
         children
@@ -244,6 +251,8 @@ export const Modal = ({
   children,
   size = 'md',
   className = '',
+  'aria-labelledby': ariaLabelledBy,
+  'aria-describedby': ariaDescribedBy,
 }) => {
   const sizes = {
     sm: 'max-w-sm',
@@ -261,6 +270,7 @@ export const Modal = ({
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
+          role="presentation"
         >
           {/* Backdrop */}
           <motion.div
@@ -269,6 +279,7 @@ export const Modal = ({
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             onClick={onClose}
+            aria-hidden="true"
           />
 
           {/* Content */}
@@ -281,6 +292,10 @@ export const Modal = ({
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95, y: 20 }}
             transition={{ type: 'spring', damping: 25, stiffness: 300 }}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby={ariaLabelledBy}
+            aria-describedby={ariaDescribedBy}
           >
             {children}
           </motion.div>
@@ -290,17 +305,19 @@ export const Modal = ({
   );
 };
 
-export const ModalHeader = ({ children, onClose, className = '' }) => (
+export const ModalHeader = ({ children, onClose, className = '', id }) => (
   <div className={`flex items-center justify-between p-6 pb-0 ${className}`}>
-    <div>{children}</div>
+    <div id={id}>{children}</div>
     {onClose && (
       <motion.button
-        className="p-2 rounded-xl text-warm-400 hover:text-warm-600 hover:bg-warm-100 transition-colors"
+        className="p-2 rounded-xl text-warm-400 hover:text-warm-600 hover:bg-warm-100 transition-colors focus:outline-none focus:ring-2 focus:ring-primary-500"
         whileHover={{ scale: 1.1 }}
         whileTap={{ scale: 0.9 }}
         onClick={onClose}
+        aria-label="Close dialog"
+        type="button"
       >
-        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
         </svg>
       </motion.button>
@@ -378,7 +395,7 @@ export const MoodBadge = ({ score, className = '' }) => {
 // Loading Components
 // ============================================
 
-export const BreathingLoader = ({ size = 'md', className = '' }) => {
+export const BreathingLoader = ({ size = 'md', className = '', label = 'Taking a moment...' }) => {
   const sizes = {
     sm: 'w-8 h-8',
     md: 'w-16 h-16',
@@ -386,7 +403,12 @@ export const BreathingLoader = ({ size = 'md', className = '' }) => {
   };
 
   return (
-    <div className={`flex flex-col items-center justify-center gap-4 ${className}`}>
+    <div
+      className={`flex flex-col items-center justify-center gap-4 ${className}`}
+      role="status"
+      aria-live="polite"
+      aria-label={label}
+    >
       <motion.div
         className={`rounded-full bg-gradient-to-br from-primary-400 to-primary-600 shadow-glow ${sizes[size]}`}
         animate={{
@@ -398,13 +420,14 @@ export const BreathingLoader = ({ size = 'md', className = '' }) => {
           repeat: Infinity,
           ease: 'easeInOut',
         }}
+        aria-hidden="true"
       />
-      <p className="text-warm-500 text-sm">Taking a moment...</p>
+      <p className="text-warm-500 text-sm">{label}</p>
     </div>
   );
 };
 
-export const Spinner = ({ size = 'md', className = '' }) => {
+export const Spinner = ({ size = 'md', className = '', label = 'Loading' }) => {
   const sizes = {
     sm: 'w-4 h-4 border-2',
     md: 'w-6 h-6 border-2',
@@ -416,6 +439,8 @@ export const Spinner = ({ size = 'md', className = '' }) => {
       className={`rounded-full border-primary-200 border-t-primary-600 ${sizes[size]} ${className}`}
       animate={{ rotate: 360 }}
       transition={{ duration: 1, repeat: Infinity, ease: 'linear' }}
+      role="status"
+      aria-label={label}
     />
   );
 };
@@ -428,51 +453,75 @@ export const Input = ({
   label,
   error,
   className = '',
+  id,
+  'aria-describedby': ariaDescribedBy,
   ...props
-}) => (
-  <div className="space-y-2">
-    {label && (
-      <label className="block text-sm font-medium text-warm-700">{label}</label>
-    )}
-    <input
-      className={`
-        w-full px-4 py-3 bg-warm-50 border-2 border-warm-200 rounded-2xl
-        font-body text-warm-800 placeholder:text-warm-400
-        transition-all duration-200
-        focus:border-primary-400 focus:bg-white focus:shadow-soft focus:outline-none
-        ${error ? 'border-red-300 focus:border-red-400' : ''}
-        ${className}
-      `}
-      {...props}
-    />
-    {error && <p className="text-sm text-red-500">{error}</p>}
-  </div>
-);
+}) => {
+  const inputId = id || `input-${Math.random().toString(36).substr(2, 9)}`;
+  const errorId = error ? `${inputId}-error` : undefined;
+  const describedBy = [ariaDescribedBy, errorId].filter(Boolean).join(' ') || undefined;
+
+  return (
+    <div className="space-y-2">
+      {label && (
+        <label htmlFor={inputId} className="block text-sm font-medium text-warm-700">{label}</label>
+      )}
+      <input
+        id={inputId}
+        className={`
+          w-full px-4 py-3 bg-warm-50 border-2 border-warm-200 rounded-2xl
+          font-body text-warm-800 placeholder:text-warm-400
+          transition-all duration-200
+          focus:border-primary-400 focus:bg-white focus:shadow-soft focus:outline-none
+          focus:ring-2 focus:ring-primary-500 focus:ring-offset-2
+          ${error ? 'border-red-300 focus:border-red-400' : ''}
+          ${className}
+        `}
+        aria-invalid={error ? 'true' : undefined}
+        aria-describedby={describedBy}
+        {...props}
+      />
+      {error && <p id={errorId} className="text-sm text-red-500" role="alert">{error}</p>}
+    </div>
+  );
+};
 
 export const Textarea = ({
   label,
   error,
   className = '',
+  id,
+  'aria-describedby': ariaDescribedBy,
   ...props
-}) => (
-  <div className="space-y-2">
-    {label && (
-      <label className="block text-sm font-medium text-warm-700">{label}</label>
-    )}
-    <textarea
-      className={`
-        w-full px-4 py-3 bg-warm-50 border-2 border-warm-200 rounded-2xl
-        font-body text-warm-800 placeholder:text-warm-400
-        transition-all duration-200 min-h-[120px] resize-none
-        focus:border-primary-400 focus:bg-white focus:shadow-soft focus:outline-none
-        ${error ? 'border-red-300 focus:border-red-400' : ''}
-        ${className}
-      `}
-      {...props}
-    />
-    {error && <p className="text-sm text-red-500">{error}</p>}
-  </div>
-);
+}) => {
+  const textareaId = id || `textarea-${Math.random().toString(36).substr(2, 9)}`;
+  const errorId = error ? `${textareaId}-error` : undefined;
+  const describedBy = [ariaDescribedBy, errorId].filter(Boolean).join(' ') || undefined;
+
+  return (
+    <div className="space-y-2">
+      {label && (
+        <label htmlFor={textareaId} className="block text-sm font-medium text-warm-700">{label}</label>
+      )}
+      <textarea
+        id={textareaId}
+        className={`
+          w-full px-4 py-3 bg-warm-50 border-2 border-warm-200 rounded-2xl
+          font-body text-warm-800 placeholder:text-warm-400
+          transition-all duration-200 min-h-[120px] resize-none
+          focus:border-primary-400 focus:bg-white focus:shadow-soft focus:outline-none
+          focus:ring-2 focus:ring-primary-500 focus:ring-offset-2
+          ${error ? 'border-red-300 focus:border-red-400' : ''}
+          ${className}
+        `}
+        aria-invalid={error ? 'true' : undefined}
+        aria-describedby={describedBy}
+        {...props}
+      />
+      {error && <p id={errorId} className="text-sm text-red-500" role="alert">{error}</p>}
+    </div>
+  );
+};
 
 // ============================================
 // List Animation Wrapper
@@ -560,6 +609,10 @@ export const Toast = ({
     info: 'bg-primary-500',
   };
 
+  // Map toast type to ARIA role
+  const ariaRole = type === 'error' ? 'alert' : 'status';
+  const ariaLive = type === 'error' ? 'assertive' : 'polite';
+
   return (
     <AnimatePresence>
       {isVisible && (
@@ -572,6 +625,8 @@ export const Toast = ({
           initial={{ opacity: 0, y: 50, x: '-50%' }}
           animate={{ opacity: 1, y: 0, x: '-50%' }}
           exit={{ opacity: 0, y: 50, x: '-50%' }}
+          role={ariaRole}
+          aria-live={ariaLive}
         >
           {message}
         </motion.div>

@@ -1,0 +1,35 @@
+# Android App Identifier (Package Name)
+package_name("com.echovault.app")
+
+# Path to your Google Play Console JSON key file
+# Create this at: https://play.google.com/console > Setup > API access > Service accounts
+# Download the JSON key and place it in a secure location (NOT in version control)
+json_key_file(ENV["PLAY_STORE_JSON_KEY"] || "play-store-key.json")
+
+# For more information about the Appfile, see:
+# https://docs.fastlane.tools/advanced/#appfile
+
+# ==========================================
+# SETUP INSTRUCTIONS
+# ==========================================
+#
+# 1. Create a Google Play Developer account ($25 one-time fee)
+#    https://play.google.com/console
+#
+# 2. Create your app in Play Console
+#
+# 3. Set up API access:
+#    a. Go to Setup > API access
+#    b. Link to Google Cloud Project
+#    c. Create a Service Account with "Editor" role
+#    d. Download the JSON key file
+#
+# 4. Store the JSON key securely:
+#    - For local development: Store in ~/.android/play-store-key.json
+#    - For CI/CD: Store as a secret/environment variable
+#
+# 5. Set the environment variable:
+#    export PLAY_STORE_JSON_KEY="~/.android/play-store-key.json"
+#
+# 6. Validate your setup:
+#    fastlane validate_key

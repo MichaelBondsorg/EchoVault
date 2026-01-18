@@ -163,6 +163,30 @@ EchoVault is a mental health journaling application (v2.0.0) that helps users pr
 /relay-server/      # Voice relay server (TypeScript)
 /android/           # Android native app
 /ios/               # iOS native app
+/screenshots/       # App Store/Play Store screenshots
+/fastlane/          # Shared Fastlane metadata
+```
+
+### App Store Related Files
+
+```
+/screenshots/
+├── ios/
+│   ├── iphone-6.7/     # iPhone 15 Pro Max (1290x2796)
+│   ├── iphone-6.5/     # iPhone 14 Plus (1284x2778)
+│   ├── iphone-5.5/     # iPhone 8 Plus (1242x2208)
+│   └── ipad-12.9/      # iPad Pro 12.9" (2048x2732)
+└── android/            # Phone (1080x1920+), tablets
+
+/fastlane/metadata/
+├── ios/en-US/          # name.txt, subtitle.txt, description.txt, keywords.txt
+└── android/en-US/      # title.txt, short_description.txt, full_description.txt
+
+/ios/fastlane/          # Fastfile, Appfile for iOS deployment
+/android/fastlane/      # Fastfile, Appfile for Android deployment
+
+/ios/App/App/PrivacyInfo.xcprivacy  # iOS 17+ privacy manifest
+/public/terms-of-service.html       # Terms of Service page
 ```
 
 ## Key Files
@@ -171,6 +195,9 @@ EchoVault is a mental health journaling application (v2.0.0) that helps users pr
 - `src/config/firebase.js` - Firebase SDK setup and callable functions
 - `src/config/constants.js` - Safety keywords, prompts, AI config
 - `src/services/signals/signalLifecycle.js` - Signal state machine
+- `src/services/crashReporting.js` - Crashlytics wrapper (web-safe)
+- `src/components/lazy.jsx` - React.lazy wrappers for code splitting
+- `vitest.config.js` - Test configuration with module mocking
 - `functions/index.js` - All Cloud Functions (129KB monolith)
 - `relay-server/src/index.ts` - Voice relay WebSocket server
 - `firestore.rules` - Database security rules
@@ -264,10 +291,18 @@ Server-side AI processing via `httpsCallable`:
 # Frontend development
 npm run dev              # Start Vite dev server
 npm run build            # Production build
+npm run analyze          # Build with bundle visualization (opens stats.html)
+
+# Testing
+npm test                 # Run all tests once
+npm run test:watch       # Run tests in watch mode
+npm run test:coverage    # Run with coverage report
 
 # Mobile
 npm run cap:ios          # Build and open iOS in Xcode
 npm run cap:android      # Build and open Android in Android Studio
+npm run cap:build:ios    # Build iOS for distribution
+npm run cap:build:android # Build Android for distribution
 
 # Firebase
 cd functions && npm run deploy   # Deploy Cloud Functions
@@ -275,6 +310,13 @@ firebase deploy --only hosting   # Deploy frontend
 
 # Relay Server
 cd relay-server && npm run dev   # Local development
+
+# App Store Deployment (requires Fastlane setup)
+cd ios && fastlane beta          # Deploy to TestFlight
+cd ios && fastlane release       # Deploy to App Store
+cd android && fastlane internal  # Deploy to internal testing
+cd android && fastlane beta      # Deploy to beta track
+cd android && fastlane production # Deploy to production
 ```
 
 ## CI/CD Pipelines (.github/workflows/)
@@ -311,10 +353,34 @@ cd relay-server && npm run dev   # Local development
 
 ## Testing
 
-- Framework: Vitest
-- Test location: `src/services/**/__tests__/`
-- Run tests: `npx vitest` (when configured)
-- Current coverage: Minimal (signal lifecycle tests only)
+- **Framework:** Vitest (with jsdom for DOM testing)
+- **Test location:** `src/services/**/__tests__/`
+- **Configuration:** `vitest.config.js`
+
+**Commands:**
+```bash
+npm test              # Run all tests once
+npm run test:watch    # Run tests in watch mode
+npm run test:coverage # Run with coverage report
+```
+
+**Current Test Suites (76 tests total):**
+| Suite | Tests | Description |
+|-------|-------|-------------|
+| `safety.test.js` | 30 | Crisis detection patterns (CRITICAL for mental health app) |
+| `crashReporting.test.js` | 9 | Crash reporting service behavior |
+| `signalLifecycle.test.js` | 37 | Signal state machine transitions |
+
+**Mocking Strategy:**
+- Capacitor modules mocked via `vitest.config.js` resolve aliases
+- Firebase dependencies avoided by testing pure functions only
+- Mocks located in `src/test/mocks/`
+
+**Adding New Tests:**
+1. Create `__tests__/` folder in service directory
+2. Import from `vitest` (describe, it, expect, vi)
+3. Isolate pure functions to avoid Firebase/Capacitor dependencies
+4. If testing Firebase-dependent code, mock the module in `vitest.config.js`
 
 ## Common Tasks
 
@@ -403,6 +469,37 @@ localStorage.removeItem('featureName.tipsDismissed')  // Page tips
 - Test changes to analysis that might affect crisis flagging
 - Maintain therapeutic framework integrity (ACT, CBT, DBT, RAIN)
 
+## Crash Reporting
+
+The crash reporting service (`src/services/crashReporting.js`) provides Firebase Crashlytics integration.
+
+**Usage:**
+```javascript
+import { crashReporting } from './services/crashReporting';
+
+// Initialize at app startup (in App.jsx)
+await crashReporting.initialize();
+
+// Record errors
+try {
+  // ... risky operation
+} catch (error) {
+  await crashReporting.recordError(error, 'ComponentName');
+}
+
+// Log breadcrumbs for debugging
+await crashReporting.log('User started voice recording');
+
+// Set user context (after auth)
+await crashReporting.setUserId(user.uid);
+```
+
+**Platform Behavior:**
+- **iOS/Android:** Full Crashlytics integration
+- **Web:** Graceful no-op (logs to console instead)
+
+**Note:** Crashlytics must be configured in Firebase Console and native projects before it will report crashes.
+
 ## Debugging Guide
 
 Since debugging is a pain point, here's how to approach common issues:
@@ -449,10 +546,10 @@ const user = firebase.auth().currentUser;
 
 ## Known Technical Debt
 
-- [ ] `App.jsx` is oversized (71KB) - needs decomposition
+- [ ] `App.jsx` is oversized (71KB) - lazy loading infrastructure ready in `src/components/lazy.jsx`
 - [ ] `functions/index.js` is monolithic - consider splitting
 - [ ] Limited TypeScript usage (only relay-server)
-- [ ] Test coverage is minimal
+- [ ] Main bundle 631KB - vendor splitting done, but route-level splitting needed in App.jsx
 
 ## Environment Setup
 
