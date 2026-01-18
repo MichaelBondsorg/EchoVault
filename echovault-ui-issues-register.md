@@ -1,4 +1,4 @@
-# EchoVault UI/UX Issues Register
+a# EchoVault UI/UX Issues Register
 
 **App URL:** https://echo-vault-app.web.app/
 **Review Date:** January 17, 2026

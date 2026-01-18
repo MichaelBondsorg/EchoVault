@@ -396,10 +396,10 @@ const HealthSettingsScreen = ({ onClose }) => {
         transition={{ duration: 0.2 }}
       />
 
-      {/* Modal content - leaves clickable backdrop on sides for larger screens (MOD-001 fix) */}
+      {/* Modal content - full width on mobile, centered with max-width on larger screens */}
       {/* MOD-004: Smoother animation with opacity for cleaner transitions */}
       <motion.div
-        className="absolute inset-y-0 left-1/2 -translate-x-1/2 w-full max-w-2xl bg-warm-50 shadow-2xl"
+        className="absolute inset-y-0 inset-x-0 mx-auto w-full max-w-2xl bg-warm-50 shadow-2xl"
         initial={{ y: 20, opacity: 0 }}
         animate={{ y: 0, opacity: 1 }}
         exit={{ y: 20, opacity: 0 }}
