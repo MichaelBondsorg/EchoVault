@@ -1,6 +1,6 @@
 # EchoVault Project Status
 
-> **Last Updated:** 2026-01-17
+> **Last Updated:** 2026-01-18
 > **Updated By:** Claude (via conversation with Michael)
 
 ---
@@ -17,6 +17,7 @@
 
 | Item | Status | Notes |
 |------|--------|-------|
+| **Multi-Provider Authentication** | ✅ Complete | Google, Apple (iOS only), Email/Password with MFA support |
 | **App Store Readiness** | ✅ Complete | Crashlytics, Fastlane, testing, accessibility, performance optimization |
 | Health & Environment Insights UI | ✅ Complete | Correlation insights, context prompts, recommendations, environment backfill |
 | Nexus 2.0 Insights Engine | 📋 Spec Complete | Full implementation spec created. Replaces entire existing insights system. |
@@ -77,6 +78,10 @@
 | 2026-01-17 | Vendor code splitting in Vite config | Separate chunks for react, firebase, UI libs. Keeps main bundle manageable. Uses rollup manualChunks. | Bundle size issues |
 | 2026-01-17 | Console.log stripping in production | `esbuild.drop: ['console', 'debugger']` in vite.config.js. Reduces bundle size and prevents debug leaks. | Need production debugging |
 | 2026-01-17 | Android ProGuard minification enabled | `minifyEnabled true`, `shrinkResources true` for release builds. Significantly reduces APK size. | ProGuard rule issues |
+| 2026-01-18 | Multi-provider auth (Google, Apple, Email) | iOS App Store requires Apple Sign-In when offering other social logins. Email/password gives non-social option. | N/A |
+| 2026-01-18 | Apple Sign-In iOS-only for now | Web Apple Sign-In requires Apple Developer Service ID configuration. Will enable once app name finalized. | App name decided |
+| 2026-01-18 | MFA support via Firebase TOTP | Users can enable authenticator app MFA. Handled gracefully during email sign-in flow. | N/A |
+| 2026-01-18 | Cloud Function for Apple token exchange | Native iOS Apple Sign-In returns identity token, exchanged server-side for Firebase custom token. Same pattern as Google. | N/A |
 
 ---
 
@@ -185,6 +190,47 @@ Good ideas we're explicitly NOT doing now. Don't re-suggest these.
 ---
 
 ## Session Notes
+
+### 2026-01-18: Multi-Provider Authentication
+
+**Context:** iOS App Store requires Sign in with Apple when offering other social login options. Also added email/password as a non-social alternative.
+
+**What Was Done:**
+
+1. **Sign in with Apple**
+   - Added entitlement to `ios/App/App/App.entitlements`
+   - Created `exchangeAppleToken` Cloud Function for native iOS token exchange
+   - Implemented Apple sign-in handler using `@capgo/capacitor-social-login`
+   - Currently iOS-only (web requires Apple Developer Service ID setup)
+
+2. **Email/Password Authentication**
+   - Sign in with existing account
+   - Sign up with new account (optional display name)
+   - Password reset via email
+   - User-friendly error messages for all auth states
+
+3. **MFA (Multi-Factor Authentication)**
+   - Added Firebase MFA imports and handlers
+   - TOTP (authenticator app) support
+   - Dedicated MFA verification UI with 6-digit code input
+   - Graceful error handling for invalid/expired codes
+
+4. **Login UI Redesign**
+   - Apple button (iOS only) - black with white text
+   - Google button - white with Google colors
+   - Email option expands to form with mode switching
+   - Smooth transitions between auth modes
+
+**Key Files Modified:**
+- `src/App.jsx` - Auth handlers and login UI
+- `src/config/firebase.js` - MFA and auth exports
+- `functions/index.js` - `exchangeAppleToken` Cloud Function
+- `ios/App/App/App.entitlements` - Apple Sign-In capability
+
+**Remaining for Full Apple Sign-In:**
+- [ ] Configure Apple Developer Service ID for web
+- [ ] Add private key to Firebase Console
+- [ ] Enable Apple provider in Firebase Auth
 
 ### 2026-01-17: App Store Readiness Implementation
 

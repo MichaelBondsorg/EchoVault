@@ -1907,8 +1907,9 @@ export default function App() {
                 exit={{ opacity: 0, y: -10 }}
                 className="space-y-3"
               >
-                {/* Sign in with Apple - show on iOS or web */}
-                {(isIOS || !isNative) && (
+                {/* Sign in with Apple - only show on native iOS for now */}
+                {/* Web Apple sign-in requires additional Apple Developer setup */}
+                {isIOS && (
                   <button
                     onClick={handleAppleSignIn}
                     className="w-full flex gap-2 items-center justify-center px-4 py-3 rounded-xl font-medium transition-all bg-black text-white hover:bg-gray-800 active:scale-[0.98]"
