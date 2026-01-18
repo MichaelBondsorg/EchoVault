@@ -8,7 +8,7 @@
  * - Future: Oura, Fitbit, etc.
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   X,
@@ -103,6 +103,17 @@ const HealthSettingsScreen = ({ onClose }) => {
   useEffect(() => {
     loadStatus();
   }, []);
+
+  // Handle Escape key to close modal (MOD-002)
+  useEffect(() => {
+    const handleEscape = (e) => {
+      if (e.key === 'Escape') {
+        onClose();
+      }
+    };
+    document.addEventListener('keydown', handleEscape);
+    return () => document.removeEventListener('keydown', handleEscape);
+  }, [onClose]);
 
   const loadStatus = async () => {
     setLoading(true);
@@ -320,19 +331,40 @@ const HealthSettingsScreen = ({ onClose }) => {
     { icon: Zap, name: 'HRV (Stress)', description: 'Heart rate variability for stress detection', color: 'text-purple-500', bgColor: 'bg-purple-50' }
   ];
 
+  // Handle backdrop click to close modal (MOD-001)
+  const handleBackdropClick = useCallback((e) => {
+    if (e.target === e.currentTarget) {
+      onClose();
+    }
+  }, [onClose]);
+
   return (
     <motion.div
-      className="fixed inset-0 z-50 bg-warm-50"
+      className="fixed inset-0 z-50"
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
     >
-      {/* Header */}
-      <div className="sticky top-0 bg-white border-b border-warm-100 px-4 py-4 flex items-center justify-between z-10">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-red-400 to-pink-500 flex items-center justify-center">
-            <Heart className="w-5 h-5 text-white" />
-          </div>
+      {/* Backdrop - click to close (MOD-001) */}
+      <div
+        className="absolute inset-0 bg-warm-900/20 backdrop-blur-sm"
+        onClick={handleBackdropClick}
+      />
+
+      {/* Modal content */}
+      <motion.div
+        className="absolute inset-0 bg-warm-50"
+        initial={{ y: 20 }}
+        animate={{ y: 0 }}
+        exit={{ y: 20 }}
+      >
+        {/* Header */}
+        <div className="sticky top-0 bg-white border-b border-warm-100 px-4 py-4 flex items-center justify-between z-10">
+          <div className="flex items-center gap-3">
+            {/* Fixed header icon color (CLR-001) - changed from pink to teal to match app palette */}
+            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-primary-400 to-teal-500 flex items-center justify-center">
+              <Heart className="w-5 h-5 text-white" />
+            </div>
           <div>
             <h1 className="font-display font-bold text-warm-800">Health Settings</h1>
             <p className="text-xs text-warm-500">Connect your health data</p>
@@ -498,7 +530,9 @@ const HealthSettingsScreen = ({ onClose }) => {
                     <div>
                       <p className="text-sm text-warm-600">Sleep</p>
                       <p className="text-lg font-semibold text-warm-800">
-                        {todayData.sleep?.totalHours?.toFixed(1) ?? '—'} hrs
+                        {todayData.sleep?.totalHours?.toFixed(1)
+                          ? `${todayData.sleep.totalHours.toFixed(1)} hrs`
+                          : <span className="text-warm-400 text-sm">No data</span>}
                       </p>
                     </div>
                   </div>
@@ -516,7 +550,7 @@ const HealthSettingsScreen = ({ onClose }) => {
                       <p className="text-lg font-semibold text-warm-800">
                         {todayData.activity?.stepsToday
                           ? todayData.activity.stepsToday.toLocaleString()
-                          : '—'}
+                          : <span className="text-warm-400 text-sm">No data</span>}
                       </p>
                     </div>
                   </div>
@@ -534,7 +568,7 @@ const HealthSettingsScreen = ({ onClose }) => {
                       <p className="text-lg font-semibold text-warm-800">
                         {todayData.activity?.hasWorkout
                           ? `${todayData.activity.totalExerciseMinutes || ''} min`.trim() || '✓'
-                          : '—'}
+                          : <span className="text-warm-400 text-sm">None</span>}
                       </p>
                     </div>
                   </div>
@@ -550,7 +584,9 @@ const HealthSettingsScreen = ({ onClose }) => {
                     <div>
                       <p className="text-sm text-warm-600">Resting HR</p>
                       <p className="text-lg font-semibold text-warm-800">
-                        {todayData.heart?.restingRate ?? '—'} bpm
+                        {todayData.heart?.restingRate
+                          ? `${todayData.heart.restingRate} bpm`
+                          : <span className="text-warm-400 text-sm">No data</span>}
                       </p>
                     </div>
                   </div>
@@ -914,6 +950,7 @@ const HealthSettingsScreen = ({ onClose }) => {
           </motion.div>
         )}
       </div>
+      </motion.div>
     </motion.div>
   );
 };

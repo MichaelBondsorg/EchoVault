@@ -106,6 +106,7 @@ const getMoodColor = (score) => {
 const EntryCard = ({ entry, onDelete, onUpdate }) => {
   const [editing, setEditing] = useState(false);
   const [title, setTitle] = useState(entry.title);
+  const [showAllTags, setShowAllTags] = useState(false); // LAY-001: Control tag overflow
   // Use effectiveDate if set, otherwise fall back to createdAt
   const [editDate, setEditDate] = useState(
     formatDateForInput(entry.effectiveDate || entry.createdAt)
@@ -366,37 +367,72 @@ const EntryCard = ({ entry, onDelete, onUpdate }) => {
               {entryType}
             </span>
           )}
-          {entry.tags.map((t, i) => {
-            const tag = safeString(t);
-            // Helper to format entity names (replace underscores with spaces, title case)
-            const formatName = (prefix) => tag.replace(prefix, '').replace(/_/g, ' ');
+          {/* LAY-001: Limit visible tags to prevent overflow */}
+          {(() => {
+            const MAX_VISIBLE_TAGS = 5;
+            const visibleTags = showAllTags ? entry.tags : entry.tags.slice(0, MAX_VISIBLE_TAGS);
+            const hiddenCount = entry.tags.length - MAX_VISIBLE_TAGS;
 
-            if (tag.startsWith('@person:')) {
-              return <span key={i} className="text-[10px] font-semibold text-primary-600 bg-primary-50 px-2 py-0.5 rounded-full">👤 {formatName('@person:')}</span>;
-            } else if (tag.startsWith('@place:')) {
-              return <span key={i} className="text-[10px] font-semibold text-green-600 bg-green-50 px-2 py-0.5 rounded-full">📍 {formatName('@place:')}</span>;
-            } else if (tag.startsWith('@goal:')) {
-              return <span key={i} className="text-[10px] font-semibold text-amber-600 bg-amber-50 px-2 py-0.5 rounded-full">🎯 {formatName('@goal:')}</span>;
-            } else if (tag.startsWith('@situation:')) {
-              return <span key={i} className="text-[10px] font-semibold text-secondary-600 bg-secondary-50 px-2 py-0.5 rounded-full">📌 {formatName('@situation:')}</span>;
-            } else if (tag.startsWith('@self:')) {
-              return <span key={i} className="text-[10px] font-semibold text-rose-600 bg-rose-50 px-2 py-0.5 rounded-full">💭 {formatName('@self:')}</span>;
-            } else if (tag.startsWith('@activity:')) {
-              return <span key={i} className="text-[10px] font-semibold text-blue-600 bg-blue-50 px-2 py-0.5 rounded-full">🏃 {formatName('@activity:')}</span>;
-            } else if (tag.startsWith('@media:')) {
-              return <span key={i} className="text-[10px] font-semibold text-purple-600 bg-purple-50 px-2 py-0.5 rounded-full">🎬 {formatName('@media:')}</span>;
-            } else if (tag.startsWith('@event:')) {
-              return <span key={i} className="text-[10px] font-semibold text-orange-600 bg-orange-50 px-2 py-0.5 rounded-full">📅 {formatName('@event:')}</span>;
-            } else if (tag.startsWith('@food:')) {
-              return <span key={i} className="text-[10px] font-semibold text-red-600 bg-red-50 px-2 py-0.5 rounded-full">🍽️ {formatName('@food:')}</span>;
-            } else if (tag.startsWith('@topic:')) {
-              return <span key={i} className="text-[10px] font-semibold text-slate-600 bg-slate-50 px-2 py-0.5 rounded-full">💬 {formatName('@topic:')}</span>;
-            } else if (tag.startsWith('@')) {
-              // Unknown @ tag - show without prefix
-              return <span key={i} className="text-[10px] font-semibold text-warm-600 bg-warm-50 px-2 py-0.5 rounded-full">{tag.split(':')[1]?.replace(/_/g, ' ') || tag}</span>;
-            }
-            return <span key={i} className="text-[10px] font-semibold text-primary-600 bg-primary-50 px-2 py-0.5 rounded-full">#{tag}</span>;
-          })}
+            return (
+              <>
+                {visibleTags.map((t, i) => {
+                  const tag = safeString(t);
+                  // Helper to format entity names (replace underscores with spaces, title case)
+                  const formatName = (prefix) => tag.replace(prefix, '').replace(/_/g, ' ');
+
+                  if (tag.startsWith('@person:')) {
+                    return <span key={i} className="text-[10px] font-semibold text-primary-600 bg-primary-50 px-2 py-0.5 rounded-full">👤 {formatName('@person:')}</span>;
+                  } else if (tag.startsWith('@place:')) {
+                    return <span key={i} className="text-[10px] font-semibold text-green-600 bg-green-50 px-2 py-0.5 rounded-full">📍 {formatName('@place:')}</span>;
+                  } else if (tag.startsWith('@goal:')) {
+                    return <span key={i} className="text-[10px] font-semibold text-amber-600 bg-amber-50 px-2 py-0.5 rounded-full">🎯 {formatName('@goal:')}</span>;
+                  } else if (tag.startsWith('@situation:')) {
+                    return <span key={i} className="text-[10px] font-semibold text-secondary-600 bg-secondary-50 px-2 py-0.5 rounded-full">📌 {formatName('@situation:')}</span>;
+                  } else if (tag.startsWith('@self:')) {
+                    return <span key={i} className="text-[10px] font-semibold text-rose-600 bg-rose-50 px-2 py-0.5 rounded-full">💭 {formatName('@self:')}</span>;
+                  } else if (tag.startsWith('@activity:')) {
+                    return <span key={i} className="text-[10px] font-semibold text-blue-600 bg-blue-50 px-2 py-0.5 rounded-full">🏃 {formatName('@activity:')}</span>;
+                  } else if (tag.startsWith('@media:')) {
+                    return <span key={i} className="text-[10px] font-semibold text-purple-600 bg-purple-50 px-2 py-0.5 rounded-full">🎬 {formatName('@media:')}</span>;
+                  } else if (tag.startsWith('@event:')) {
+                    return <span key={i} className="text-[10px] font-semibold text-orange-600 bg-orange-50 px-2 py-0.5 rounded-full">📅 {formatName('@event:')}</span>;
+                  } else if (tag.startsWith('@food:')) {
+                    return <span key={i} className="text-[10px] font-semibold text-red-600 bg-red-50 px-2 py-0.5 rounded-full">🍽️ {formatName('@food:')}</span>;
+                  } else if (tag.startsWith('@topic:')) {
+                    return <span key={i} className="text-[10px] font-semibold text-slate-600 bg-slate-50 px-2 py-0.5 rounded-full">💬 {formatName('@topic:')}</span>;
+                  } else if (tag.startsWith('@')) {
+                    // Unknown @ tag - show without prefix
+                    return <span key={i} className="text-[10px] font-semibold text-warm-600 bg-warm-50 px-2 py-0.5 rounded-full">{tag.split(':')[1]?.replace(/_/g, ' ') || tag}</span>;
+                  }
+                  return <span key={i} className="text-[10px] font-semibold text-primary-600 bg-primary-50 px-2 py-0.5 rounded-full">#{tag}</span>;
+                })}
+                {/* Show "+N more" button when tags are hidden */}
+                {hiddenCount > 0 && !showAllTags && (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setShowAllTags(true);
+                    }}
+                    className="text-[10px] font-semibold text-warm-500 bg-warm-100 px-2 py-0.5 rounded-full hover:bg-warm-200 transition-colors"
+                  >
+                    +{hiddenCount} more
+                  </button>
+                )}
+                {/* Show "Show less" button when all tags are visible */}
+                {showAllTags && entry.tags.length > MAX_VISIBLE_TAGS && (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setShowAllTags(false);
+                    }}
+                    className="text-[10px] font-semibold text-warm-500 bg-warm-100 px-2 py-0.5 rounded-full hover:bg-warm-200 transition-colors"
+                  >
+                    Show less
+                  </button>
+                )}
+              </>
+            );
+          })()}
         </div>
         <div className="flex items-center gap-2">
           {typeof entry.analysis?.mood_score === 'number' && entry.analysis.mood_score !== null && (
@@ -597,7 +633,8 @@ const EntryCard = ({ entry, onDelete, onUpdate }) => {
         </div>
       )}
 
-      <p className="text-warm-600 text-sm whitespace-pre-wrap leading-relaxed font-body">{entry.text}</p>
+      {/* TXT-002: Added max-w-prose for optimal line length (50-75 characters) */}
+      <p className="text-warm-600 text-sm whitespace-pre-wrap leading-relaxed font-body max-w-prose">{entry.text}</p>
 
       {/* Extracted Tasks for mixed entries */}
       {isMixed && entry.extracted_tasks && entry.extracted_tasks.length > 0 && (

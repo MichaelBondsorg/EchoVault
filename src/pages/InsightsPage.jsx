@@ -224,11 +224,11 @@ const InsightsPage = ({
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               <Sparkles size={16} className="text-purple-500" />
-              <h3 className="text-xs font-bold text-warm-400 uppercase tracking-wider">
+              <h3 className="text-xs font-bold text-warm-500 uppercase tracking-wider">
                 AI Insights
               </h3>
             </div>
-            <span className="text-xs text-warm-400">
+            <span className="text-xs text-warm-500">
               {filteredInsights.length} insight{filteredInsights.length !== 1 ? 's' : ''}
             </span>
           </div>
@@ -263,7 +263,7 @@ const InsightsPage = ({
           <p className="text-warm-600 font-medium">
             No insights yet
           </p>
-          <p className="text-warm-400 text-sm mt-2">
+          <p className="text-warm-500 text-sm mt-2">
             {entries.length < 5
               ? `Add ${5 - entries.length} more entries to start generating insights`
               : 'Tap refresh to generate new insights'
@@ -401,7 +401,7 @@ const GenerationStatus = ({
           )}
         </div>
         {formatLastGenerated() && (
-          <span className="text-warm-400">
+          <span className="text-warm-500">
             Updated {formatLastGenerated()}
           </span>
         )}
@@ -470,9 +470,9 @@ const CorrelationsSection = ({ correlations, isExpanded, onToggle }) => {
           </div>
         </div>
         {isExpanded ? (
-          <ChevronUp size={18} className="text-warm-400" />
+          <ChevronUp size={18} className="text-warm-500" />
         ) : (
-          <ChevronDown size={18} className="text-warm-400" />
+          <ChevronDown size={18} className="text-warm-500" />
         )}
       </div>
 
@@ -522,7 +522,7 @@ const CorrelationsSection = ({ correlations, isExpanded, onToggle }) => {
                                 {insight.strength}
                               </span>
                               {insight.correlation && (
-                                <span className="text-xs text-warm-400">
+                                <span className="text-xs text-warm-500">
                                   {formatCorrelation(insight.correlation)} correlation
                                 </span>
                               )}
@@ -570,7 +570,7 @@ const CorrelationsSection = ({ correlations, isExpanded, onToggle }) => {
                                 {insight.strength}
                               </span>
                               {insight.correlation && (
-                                <span className="text-xs text-warm-400">
+                                <span className="text-xs text-warm-500">
                                   {formatCorrelation(insight.correlation)} correlation
                                 </span>
                               )}
@@ -608,12 +608,12 @@ const CorrelationsSection = ({ correlations, isExpanded, onToggle }) => {
 
               {/* No data messages */}
               {!hasHealth && correlations.healthMessage && (
-                <div className="text-xs text-warm-400 italic">
+                <div className="text-xs text-warm-500 italic">
                   {correlations.healthMessage}
                 </div>
               )}
               {!hasEnv && correlations.envMessage && (
-                <div className="text-xs text-warm-400 italic">
+                <div className="text-xs text-warm-500 italic">
                   {correlations.envMessage}
                 </div>
               )}
@@ -711,7 +711,7 @@ const RecommendationsSection = ({ recommendations }) => {
       </div>
 
       {recommendations.basedOn && (
-        <p className="text-xs text-warm-400 mt-3">
+        <p className="text-xs text-warm-500 mt-3">
           Based on {recommendations.basedOn.entriesAnalyzed} entries
           {recommendations.basedOn.interventionsTracked > 0 && (
             <> &amp; {recommendations.basedOn.interventionsTracked} tracked activities</>
@@ -844,9 +844,9 @@ const NexusInsightCard = ({ insight, isExpanded, onToggleExpand, onDismiss }) =>
                 {hasExpandableContent && (
                   <div className="p-1">
                     {isExpanded ? (
-                      <ChevronUp size={14} className="text-warm-400" />
+                      <ChevronUp size={14} className="text-warm-500" />
                     ) : (
-                      <ChevronDown size={14} className="text-warm-400" />
+                      <ChevronDown size={14} className="text-warm-500" />
                     )}
                   </div>
                 )}
@@ -854,7 +854,7 @@ const NexusInsightCard = ({ insight, isExpanded, onToggleExpand, onDismiss }) =>
                   onClick={onDismiss}
                   className="p-1 hover:bg-warm-200/50 rounded-full transition-colors"
                 >
-                  <X size={14} className="text-warm-400" />
+                  <X size={14} className="text-warm-500" />
                 </button>
               </div>
             </div>
@@ -900,7 +900,7 @@ const NexusInsightCard = ({ insight, isExpanded, onToggleExpand, onDismiss }) =>
                     style={{ width: `${Math.round(confidenceValue * 100)}%` }}
                   />
                 </div>
-                <span className="text-xs text-warm-400">
+                <span className="text-xs text-warm-500">
                   {Math.round(confidenceValue * 100)}% confidence
                 </span>
               </div>
