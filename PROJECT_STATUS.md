@@ -1,6 +1,6 @@
 # EchoVault Project Status
 
-> **Last Updated:** 2026-01-15
+> **Last Updated:** 2026-01-16
 > **Updated By:** Claude (via conversation with Michael)
 
 ---
@@ -66,6 +66,9 @@
 | 2026-01-15 | Client-side correlation computation | Health-mood and environment-mood correlations computed in browser vs server. Instant feedback, no LLM cost. Statistical only. | Performance issues on large entry sets |
 | 2026-01-15 | Context-aware prompts from health/environment | PromptWidget shows personalized prompts based on today's health data (low sleep, low recovery) and environment (low sunshine). High priority contexts get featured. | Users find prompts intrusive |
 | 2026-01-15 | Recommendations based on intervention effectiveness | Daily suggestions pull from tracked intervention effectiveness (what activities help this user). Only show if user has baselines computed. | N/A |
+| 2026-01-16 | Permanent insight dismissal persists to Firestore | Dashboard insight X button now adds to `insight_exclusions` collection with `permanent: true`. Insights filter against exclusions on load. | Users want undo capability |
+| 2026-01-16 | Unified backfill pipeline: health → weather → insights | Retroactive enrichment runs in sequence: health backfill first, then weather (needs location from entries), then insight reassessment. User-triggered in Settings. | N/A |
+| 2026-01-16 | Primary Readiness Metric on entry cards | Whoop users see Recovery Score prominently (battery icon). HealthKit-only users see Sleep Score. Shows at-a-glance health context without clutter. | Users find it distracting |
 
 ---
 
@@ -139,10 +142,61 @@ Good ideas we're explicitly NOT doing now. Don't re-suggest these.
 | `src/services/environment/environmentCorrelations.js` | Environment-mood correlation analysis |
 | `src/services/prompts/contextPrompts.js` | Context-aware reflection prompts |
 | `src/services/nexus/insightIntegration.js` | Unified insight integration service |
+| `src/services/backfill/unifiedBackfill.js` | Orchestrates health → weather → insight backfill pipeline |
+| `src/services/backfill/insightReassessment.js` | Regenerates insights after backfill with staging pattern |
+| `src/services/backfill/index.js` | Backfill service exports |
+| `src/services/nexus/insightRotation.js` | Drip-feed insight scheduling (7/day over 7 days) |
+| `src/components/settings/BackfillPanel.jsx` | Settings UI for triggering/monitoring backfill |
 
 ---
 
 ## Session Notes
+
+### 2026-01-16: Retroactive Backfill System & Insight Dismissal Fix
+
+**Context:** Implementing the plan from `PLAN-retroactive-backfill-insights.md` for retroactive data enrichment and fixing user-reported issue where dismissed insights keep returning.
+
+**What Was Done:**
+
+1. **Unified Backfill System**
+   - Created `unifiedBackfill.js` orchestrator running: health → weather → insight reassessment
+   - State persistence with checkpoints every 50 entries for resume capability
+   - AbortController support for user cancellation
+   - Progress callbacks for UI updates
+
+2. **BackfillPanel UI in Settings**
+   - Added "Data" section to SettingsPage with BackfillPanel component
+   - Shows count of entries needing health/weather backfill
+   - Start/Resume button, progress bar during processing
+   - Results summary on completion
+
+3. **Primary Readiness Metric on Entry Cards**
+   - Added `PrimaryReadinessMetric` component to EntryCard
+   - Whoop users: Recovery Score (green/yellow/red battery icon)
+   - HealthKit-only: Sleep Score (purple bed icon)
+   - Secondary metrics (HRV, Strain, Steps) shown on larger screens
+
+4. **Permanent Insight Dismissal (BUG FIX)**
+   - **Problem:** Dashboard insight X button only set local state to null; insights returned on reload
+   - **Solution:**
+     - `handleDismissInsight` now calls `addToExclusionList()` with `permanent: true`
+     - Loads exclusions on mount via `getActiveExclusions()`
+     - Filters insights against exclusions when loading via `isInsightExcluded()` helper
+   - Updated both MidDayCheckIn and EveningMirror to use new handler
+
+5. **Supporting Services**
+   - `insightReassessment.js` - Regenerates baselines, patterns, correlations after backfill
+   - `insightRotation.js` - Drip-feed for backfilled insights (7/day over 7 days)
+   - Extended `healthBackfill.js` with Whoop support and batched writes
+   - Cloud Function fix to skip staleness marking for backfilled entries
+
+**Key Files Modified:**
+- `src/components/dashboard/DayDashboard.jsx` - Permanent dismissal logic
+- `src/components/entries/EntryCard.jsx` - PrimaryReadinessMetric component
+- `src/pages/SettingsPage.jsx` - BackfillPanel integration
+- `functions/index.js` - Skip recompute for backfill updates
+
+**Deployed:** Pushed to main, triggering Firebase Hosting + Cloud Functions deployment.
 
 ### 2026-01-15: Health & Environment Insights UI Integration
 

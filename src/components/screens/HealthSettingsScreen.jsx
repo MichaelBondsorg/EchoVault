@@ -351,9 +351,9 @@ const HealthSettingsScreen = ({ onClose }) => {
         onClick={handleBackdropClick}
       />
 
-      {/* Modal content */}
+      {/* Modal content - leaves clickable backdrop on sides for larger screens (MOD-001 fix) */}
       <motion.div
-        className="absolute inset-0 bg-warm-50"
+        className="absolute inset-y-0 left-1/2 -translate-x-1/2 w-full max-w-2xl bg-warm-50 shadow-2xl"
         initial={{ y: 20 }}
         animate={{ y: 0 }}
         exit={{ y: 20 }}
