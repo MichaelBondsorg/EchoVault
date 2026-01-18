@@ -207,18 +207,19 @@ const MoodHeatmapWidget = ({
           </AnimatePresence>
         </div>
 
-        {/* Legend */}
+        {/* DAT-003: Legend with visible text labels for accessibility */}
         <div className="flex items-center justify-between mt-2 pt-2 border-t border-white/10">
           <span className="text-xs text-warm-400">
             {stats.daysLogged} days logged
           </span>
-          <div className="flex items-center gap-1">
-            <span className="text-xs text-warm-400 mr-1">Mood:</span>
+          <div className="flex items-center gap-0.5">
+            <span className="text-[10px] text-warm-400 mr-1">Low</span>
             <div className="w-2.5 h-2.5 rounded-sm bg-mood-struggling" title="Struggling" />
             <div className="w-2.5 h-2.5 rounded-sm bg-mood-low" title="Low" />
             <div className="w-2.5 h-2.5 rounded-sm bg-mood-neutral" title="Okay" />
             <div className="w-2.5 h-2.5 rounded-sm bg-mood-good" title="Good" />
             <div className="w-2.5 h-2.5 rounded-sm bg-mood-great" title="Great" />
+            <span className="text-[10px] text-warm-400 ml-1">Great</span>
           </div>
         </div>
       </div>

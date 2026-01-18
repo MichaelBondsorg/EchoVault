@@ -4,12 +4,15 @@ import { useMoodBackground } from './MoodBackgroundProvider';
 /**
  * TopBar - Translucent top navigation bar with mood indicator
  *
+ * LAY-004: Shows "EchoVault" brand instead of greeting to avoid redundancy
+ * (HeroWidget already shows time-based greeting on home page)
+ *
  * @param {Object} props
- * @param {string} props.greeting - Optional greeting text (default: "EchoVault")
+ * @param {string} props.greeting - Unused (kept for API compatibility)
  * @param {function} props.onMoodOrbClick - Callback when mood orb is clicked (opens Quick Log)
  * @param {number} props.latestMoodScore - Latest entry mood score (0-1)
  */
-const TopBar = ({ greeting = 'EchoVault', onMoodOrbClick, latestMoodScore = 0.5 }) => {
+const TopBar = ({ greeting, onMoodOrbClick, latestMoodScore = 0.5 }) => {
   const { moodCategory } = useMoodBackground();
 
   // Map mood category to orb color
@@ -38,14 +41,14 @@ const TopBar = ({ greeting = 'EchoVault', onMoodOrbClick, latestMoodScore = 0.5 
       animate={{ y: 0, opacity: 1 }}
       transition={{ duration: 0.3, ease: 'easeOut' }}
     >
-      {/* Left: Brand/Greeting */}
+      {/* Left: Brand (LAY-004: Always show brand, not greeting) */}
       <motion.h1
         className="font-display font-bold text-lg text-warm-800"
         initial={{ opacity: 0, x: -10 }}
         animate={{ opacity: 1, x: 0 }}
         transition={{ delay: 0.1 }}
       >
-        {greeting}
+        EchoVault
       </motion.h1>
 
       {/* Right: Mood Indicator Orb */}

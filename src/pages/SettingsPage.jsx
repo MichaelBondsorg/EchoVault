@@ -1,7 +1,8 @@
+import { useState } from 'react';
 import { motion } from 'framer-motion';
 import {
   User, Bell, Heart, Shield, Download, LogOut,
-  ChevronRight, Smartphone, Brain, Users
+  ChevronRight, Smartphone, Brain, Users, Loader2
 } from 'lucide-react';
 import BackfillPanel from '../components/settings/BackfillPanel';
 
@@ -26,6 +27,20 @@ const SettingsPage = ({
   onLogout,
   notificationPermission,
 }) => {
+  // INT-002: Loading state for settings items
+  const [loadingItem, setLoadingItem] = useState(null);
+
+  // Wrap handlers with loading feedback
+  const handleItemClick = async (itemKey, handler) => {
+    if (!handler) return;
+    setLoadingItem(itemKey);
+    // Small delay to show loading indicator before modal opens
+    await new Promise(r => setTimeout(r, 100));
+    handler();
+    // Clear loading after a short delay (modal will be open by then)
+    setTimeout(() => setLoadingItem(null), 300);
+  };
+
   const settingsSections = [
     {
       title: 'Account',
@@ -108,40 +123,52 @@ const SettingsPage = ({
             {section.title}
           </h3>
           <div className="bg-white/30 backdrop-blur-sm border border-white/20 rounded-2xl overflow-hidden">
-            {section.items.map((item, index) => (
-              <motion.button
-                key={item.label}
-                onClick={item.onClick}
-                disabled={!item.onClick}
-                className={`
-                  w-full px-4 py-3
-                  flex items-center gap-3
-                  ${index !== section.items.length - 1 ? 'border-b border-white/10' : ''}
-                  ${item.onClick ? 'hover:bg-white/20 active:bg-white/30' : 'opacity-70'}
-                  transition-colors
-                  text-left
-                `}
-                whileTap={item.onClick ? { scale: 0.99 } : {}}
-              >
-                <div className="w-10 h-10 rounded-xl bg-primary-100 flex items-center justify-center">
-                  <item.icon size={20} className="text-primary-600" />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
-                    <span className="font-medium text-warm-800">{item.label}</span>
-                    {item.badge && (
-                      <span className="px-2 py-0.5 bg-amber-100 text-amber-700 text-xs font-bold rounded-full">
-                        {item.badge}
-                      </span>
+            {section.items.map((item, index) => {
+              const isLoading = loadingItem === item.label;
+              return (
+                <motion.button
+                  key={item.label}
+                  onClick={() => handleItemClick(item.label, item.onClick)}
+                  disabled={!item.onClick || isLoading}
+                  className={`
+                    w-full px-4 py-3
+                    flex items-center gap-3
+                    ${index !== section.items.length - 1 ? 'border-b border-white/10' : ''}
+                    ${item.onClick ? 'hover:bg-white/20 active:bg-white/30' : 'opacity-70'}
+                    ${isLoading ? 'opacity-80' : ''}
+                    transition-colors
+                    text-left
+                  `}
+                  whileTap={item.onClick && !isLoading ? { scale: 0.99 } : {}}
+                >
+                  {/* INT-002: Show loading spinner when item is being opened */}
+                  <div className="w-10 h-10 rounded-xl bg-primary-100 flex items-center justify-center">
+                    {isLoading ? (
+                      <Loader2 size={20} className="text-primary-600 animate-spin" />
+                    ) : (
+                      <item.icon size={20} className="text-primary-600" />
                     )}
                   </div>
-                  <p className="text-sm text-warm-500 truncate">{item.description}</p>
-                </div>
-                {item.onClick && (
-                  <ChevronRight size={20} className="text-warm-400" />
-                )}
-              </motion.button>
-            ))}
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="font-medium text-warm-800">{item.label}</span>
+                      {item.badge && (
+                        <span className="px-2 py-0.5 bg-amber-100 text-amber-700 text-xs font-bold rounded-full">
+                          {item.badge}
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-sm text-warm-500 truncate">{item.description}</p>
+                  </div>
+                  {item.onClick && !isLoading && (
+                    <ChevronRight size={20} className="text-warm-400" />
+                  )}
+                  {isLoading && (
+                    <span className="text-xs text-primary-500 font-medium">Loading...</span>
+                  )}
+                </motion.button>
+              );
+            })}
           </div>
         </div>
       ))}

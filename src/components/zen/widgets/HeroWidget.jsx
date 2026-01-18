@@ -86,9 +86,10 @@ const HeroWidget = ({
           >
             {moodMessage}
           </motion.h2>
+          {/* TXT-004: Improved text visibility with better contrast */}
           {todayCount > 0 && (
             <motion.p
-              className="text-warm-400 text-xs mt-2"
+              className="text-warm-500 text-xs mt-2"
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               transition={{ delay: 0.2 }}

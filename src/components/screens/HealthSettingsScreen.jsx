@@ -115,6 +115,42 @@ const HealthSettingsScreen = ({ onClose }) => {
     return () => document.removeEventListener('keydown', handleEscape);
   }, [onClose]);
 
+  // A11Y-002: Focus trapping within modal
+  useEffect(() => {
+    const modalElement = document.querySelector('[data-modal="health-settings"]');
+    if (!modalElement) return;
+
+    const focusableElements = modalElement.querySelectorAll(
+      'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+    );
+    const firstFocusable = focusableElements[0];
+    const lastFocusable = focusableElements[focusableElements.length - 1];
+
+    // Focus the first element when modal opens
+    firstFocusable?.focus();
+
+    const handleTabKey = (e) => {
+      if (e.key !== 'Tab') return;
+
+      if (e.shiftKey) {
+        // Shift + Tab
+        if (document.activeElement === firstFocusable) {
+          e.preventDefault();
+          lastFocusable?.focus();
+        }
+      } else {
+        // Tab
+        if (document.activeElement === lastFocusable) {
+          e.preventDefault();
+          firstFocusable?.focus();
+        }
+      }
+    };
+
+    document.addEventListener('keydown', handleTabKey);
+    return () => document.removeEventListener('keydown', handleTabKey);
+  }, [loading]); // Re-run when loading changes to update focusable elements
+
   const loadStatus = async () => {
     setLoading(true);
     try {
@@ -344,6 +380,10 @@ const HealthSettingsScreen = ({ onClose }) => {
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
+      data-modal="health-settings"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="health-settings-title"
     >
       {/* Backdrop - click to close (MOD-001) */}
       <div
@@ -366,15 +406,17 @@ const HealthSettingsScreen = ({ onClose }) => {
               <Heart className="w-5 h-5 text-white" />
             </div>
           <div>
-            <h1 className="font-display font-bold text-warm-800">Health Settings</h1>
+            <h1 id="health-settings-title" className="font-display font-bold text-warm-800">Health Settings</h1>
             <p className="text-xs text-warm-500">Connect your health data</p>
           </div>
         </div>
+        {/* MOD-003: Improved close button visibility with background and larger tap target */}
         <button
           onClick={onClose}
-          className="p-2 rounded-full hover:bg-warm-100 text-warm-500"
+          className="p-2.5 rounded-xl bg-warm-100 hover:bg-warm-200 text-warm-600 transition-colors min-w-[44px] min-h-[44px] flex items-center justify-center"
+          aria-label="Close health settings"
         >
-          <X size={20} />
+          <X size={22} />
         </button>
       </div>
 

@@ -78,11 +78,11 @@ const MiniStatsWidget = ({
     };
   }, [entries]);
 
-  // Trend icon and color
+  // DAT-002: Trend icon and color with clearer labels
   const getTrendInfo = (trend) => {
-    if (trend === 'up') return { icon: TrendingUp, color: 'text-mood-great', label: 'Improving' };
-    if (trend === 'down') return { icon: TrendingDown, color: 'text-mood-low', label: 'Declining' };
-    return { icon: Minus, color: 'text-warm-400', label: 'Stable' };
+    if (trend === 'up') return { icon: TrendingUp, color: 'text-mood-great', label: 'Improving', sublabel: 'Mood Trend' };
+    if (trend === 'down') return { icon: TrendingDown, color: 'text-mood-low', label: 'Declining', sublabel: 'Mood Trend' };
+    return { icon: Minus, color: 'text-warm-400', label: 'Steady', sublabel: 'Mood Trend' };
   };
 
   const trendInfo = getTrendInfo(stats.trend);
@@ -124,7 +124,7 @@ const MiniStatsWidget = ({
             <span className="text-xs text-warm-400">Avg Mood</span>
           </motion.div>
 
-          {/* Trend */}
+          {/* Trend - DAT-002: Clearer labeling */}
           <motion.div
             className="flex flex-col items-center justify-center p-2 bg-white/30 rounded-xl"
             initial={{ opacity: 0, scale: 0.9 }}
@@ -132,7 +132,8 @@ const MiniStatsWidget = ({
             transition={{ delay: 0.15 }}
           >
             <TrendIcon size={20} className={trendInfo.color} />
-            <span className="text-xs text-warm-400 mt-1">{trendInfo.label}</span>
+            <span className="text-xs text-warm-600 mt-1 font-medium">{trendInfo.label}</span>
+            <span className="text-[10px] text-warm-400">{trendInfo.sublabel}</span>
           </motion.div>
 
           {/* Streak */}

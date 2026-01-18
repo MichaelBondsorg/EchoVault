@@ -850,11 +850,13 @@ const NexusInsightCard = ({ insight, isExpanded, onToggleExpand, onDismiss }) =>
                     )}
                   </div>
                 )}
+                {/* INT-003: Increased tap target size for accessibility (44x44px minimum) */}
                 <button
                   onClick={onDismiss}
-                  className="p-1 hover:bg-warm-200/50 rounded-full transition-colors"
+                  className="p-2 hover:bg-warm-200/50 rounded-full transition-colors min-w-[44px] min-h-[44px] flex items-center justify-center"
+                  aria-label="Dismiss insight"
                 >
-                  <X size={14} className="text-warm-500" />
+                  <X size={18} className="text-warm-500" />
                 </button>
               </div>
             </div>
