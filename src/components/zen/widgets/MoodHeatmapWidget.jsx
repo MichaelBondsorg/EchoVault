@@ -137,7 +137,13 @@ const MoodHeatmapWidget = ({
           )}
         </div>
 
-        {/* Heatmap Grid - 6 rows x 5 columns */}
+        {/* DAT-004: Date labels for timeline context */}
+        <div className="flex justify-between text-[10px] text-warm-400 mb-1 px-0.5">
+          <span>{days[0]?.date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</span>
+          <span>Today</span>
+        </div>
+
+        {/* Heatmap Grid - 3 rows x 10 columns */}
         <div className="flex-1 grid grid-cols-10 gap-1 relative">
           {days.map((day, i) => (
             <motion.button

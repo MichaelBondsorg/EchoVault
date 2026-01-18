@@ -225,11 +225,12 @@ const AppLayout = ({
   return (
     <MoodBackgroundProvider moodScore={latestMoodScore}>
       {/* Main content area - scrollable with padding for fixed bars */}
+      {/* LAY-002: Increased bottom padding to prevent nav overlap */}
       <main
         className="
           min-h-screen
           pt-[calc(env(safe-area-inset-top)+60px)]
-          pb-[calc(env(safe-area-inset-bottom)+80px)]
+          pb-[calc(env(safe-area-inset-bottom)+100px)]
           overflow-y-auto
         "
       >

@@ -634,7 +634,12 @@ const EntryCard = ({ entry, onDelete, onUpdate }) => {
       )}
 
       {/* TXT-002: Added max-w-prose for optimal line length (50-75 characters) */}
-      <p className="text-warm-600 text-sm whitespace-pre-wrap leading-relaxed font-body max-w-prose">{entry.text}</p>
+      {/* TXT-003: Improved line-height and paragraph spacing for readability */}
+      <div className="text-warm-600 text-sm whitespace-pre-wrap leading-7 font-body max-w-prose [&>*]:mb-3">
+        {entry.text?.split(/\n\n+/).map((paragraph, i) => (
+          <p key={i} className={i > 0 ? 'mt-4' : ''}>{paragraph}</p>
+        )) || entry.text}
+      </div>
 
       {/* Extracted Tasks for mixed entries */}
       {isMixed && entry.extracted_tasks && entry.extracted_tasks.length > 0 && (

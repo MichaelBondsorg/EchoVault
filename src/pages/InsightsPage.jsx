@@ -861,15 +861,15 @@ const NexusInsightCard = ({ insight, isExpanded, onToggleExpand, onDismiss }) =>
               </div>
             </div>
 
-            {/* Title */}
+            {/* Title - RES-002: Added break-words for text reflow */}
             {getStringContent(insight.title, insight.intervention) && (
-              <p className="font-medium text-warm-800 mt-1">
+              <p className="font-medium text-warm-800 mt-1 break-words">
                 {getStringContent(insight.title) || `Try: ${insight.intervention}`}
               </p>
             )}
 
-            {/* Summary */}
-            <p className="text-sm text-warm-700 mt-1 leading-relaxed">
+            {/* Summary - RES-002: Added break-words for text reflow */}
+            <p className="text-sm text-warm-700 mt-1 leading-relaxed break-words">
               {getStringContent(
                 insight.summary,
                 insight.reasoning,

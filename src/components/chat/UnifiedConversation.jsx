@@ -672,7 +672,8 @@ const UnifiedConversation = ({
                     : 'bg-white/10 text-white/90 rounded-bl-none'
                 }`}
               >
-                <p className="text-sm">{msg.text}</p>
+                {/* RES-002: break-words for text reflow on small screens */}
+                <p className="text-sm break-words">{msg.text}</p>
               </div>
             </div>
           ))}

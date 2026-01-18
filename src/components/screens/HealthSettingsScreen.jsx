@@ -386,17 +386,24 @@ const HealthSettingsScreen = ({ onClose }) => {
       aria-labelledby="health-settings-title"
     >
       {/* Backdrop - click to close (MOD-001) */}
-      <div
-        className="absolute inset-0 bg-warm-900/20 backdrop-blur-sm"
+      {/* MOD-004: Increased backdrop opacity and added transition for cleaner appearance */}
+      <motion.div
+        className="absolute inset-0 bg-warm-900/40 backdrop-blur-md"
         onClick={handleBackdropClick}
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+        transition={{ duration: 0.2 }}
       />
 
       {/* Modal content - leaves clickable backdrop on sides for larger screens (MOD-001 fix) */}
+      {/* MOD-004: Smoother animation with opacity for cleaner transitions */}
       <motion.div
         className="absolute inset-y-0 left-1/2 -translate-x-1/2 w-full max-w-2xl bg-warm-50 shadow-2xl"
-        initial={{ y: 20 }}
-        animate={{ y: 0 }}
-        exit={{ y: 20 }}
+        initial={{ y: 20, opacity: 0 }}
+        animate={{ y: 0, opacity: 1 }}
+        exit={{ y: 20, opacity: 0 }}
+        transition={{ duration: 0.25, ease: 'easeOut' }}
       >
         {/* Header */}
         <div className="sticky top-0 bg-white border-b border-warm-100 px-4 py-4 flex items-center justify-between z-10">
