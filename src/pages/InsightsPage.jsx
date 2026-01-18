@@ -6,6 +6,7 @@ import {
   CloudRain, Footprints, Zap
 } from 'lucide-react';
 import { useNexusInsights } from '../hooks/useNexusInsights';
+import { useBasicInsights } from '../hooks/useBasicInsights';
 import { useState, useEffect, useMemo } from 'react';
 import {
   computeHealthMoodCorrelations,
@@ -112,6 +113,17 @@ const InsightsPage = ({
     lastGenerated
   } = useNexusInsights(user, { autoRefresh: true });
 
+  // Basic Insights (statistical correlations - fast, no LLM)
+  const {
+    insights: basicInsights,
+    loading: basicLoading,
+    generating: basicGenerating,
+    hasEnoughData: hasEnoughBasicData,
+    entriesNeeded: basicEntriesNeeded,
+    regenerate: regenerateBasic,
+    lastGeneratedFormatted: basicLastGenerated
+  } = useBasicInsights(user, entries, { autoRefresh: true });
+
   // Helper to check if an insight has meaningful content
   const hasQualityContent = (insight) => {
     // Generic body templates to filter out
@@ -212,6 +224,17 @@ const InsightsPage = ({
           onToggle={() => setShowCorrelations(!showCorrelations)}
         />
       )}
+
+      {/* Quick Insights (Basic statistical correlations) */}
+      <QuickInsightsSection
+        insights={basicInsights}
+        loading={basicLoading}
+        generating={basicGenerating}
+        hasEnoughData={hasEnoughBasicData}
+        entriesNeeded={basicEntriesNeeded}
+        lastGenerated={basicLastGenerated}
+        onRefresh={regenerateBasic}
+      />
 
       {/* Today's Recommendations */}
       {recommendations?.recommendations?.length > 0 && (
@@ -718,6 +741,156 @@ const RecommendationsSection = ({ recommendations }) => {
           )}
         </p>
       )}
+    </motion.div>
+  );
+};
+
+/**
+ * QuickInsightsSection - Shows basic statistical insights
+ */
+const QuickInsightsSection = ({
+  insights,
+  loading,
+  generating,
+  hasEnoughData,
+  entriesNeeded,
+  lastGenerated,
+  onRefresh
+}) => {
+  // Don't render if no data or still loading initial data
+  if (loading) {
+    return null;
+  }
+
+  // Insufficient data message
+  if (!hasEnoughData && entriesNeeded > 0) {
+    return (
+      <motion.div
+        className="bg-white/30 border border-white/20 rounded-2xl p-4"
+        initial={{ opacity: 0, y: -10 }}
+        animate={{ opacity: 1, y: 0 }}
+      >
+        <div className="flex items-center gap-3">
+          <div className="p-2 bg-warm-100/50 rounded-xl">
+            <Zap size={18} className="text-warm-400" />
+          </div>
+          <div>
+            <h3 className="font-medium text-warm-600">Quick Insights</h3>
+            <p className="text-xs text-warm-500">
+              Add {entriesNeeded} more entries to unlock pattern insights
+            </p>
+          </div>
+        </div>
+      </motion.div>
+    );
+  }
+
+  // No insights generated yet
+  if (!insights || insights.length === 0) {
+    return null;
+  }
+
+  // Get category icon and colors
+  const getCategoryStyle = (category) => {
+    switch (category) {
+      case 'activity':
+        return { icon: Activity, color: 'text-green-600', bg: 'bg-green-50' };
+      case 'people':
+        return { icon: Heart, color: 'text-pink-600', bg: 'bg-pink-50' };
+      case 'health':
+        return { icon: Heart, color: 'text-red-600', bg: 'bg-red-50' };
+      case 'environment':
+        return { icon: Sun, color: 'text-amber-600', bg: 'bg-amber-50' };
+      case 'time':
+        return { icon: Moon, color: 'text-indigo-600', bg: 'bg-indigo-50' };
+      default:
+        return { icon: Zap, color: 'text-purple-600', bg: 'bg-purple-50' };
+    }
+  };
+
+  return (
+    <motion.div
+      className="bg-gradient-to-r from-emerald-50/50 to-teal-50/50 border border-emerald-200/30 rounded-2xl overflow-hidden"
+      initial={{ opacity: 0, y: -10 }}
+      animate={{ opacity: 1, y: 0 }}
+    >
+      {/* Header */}
+      <div className="p-4 flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <div className="p-2 bg-gradient-to-br from-emerald-400/20 to-teal-400/20 rounded-xl">
+            <Zap size={18} className="text-emerald-600" />
+          </div>
+          <div>
+            <h3 className="font-semibold text-warm-800">Quick Insights</h3>
+            <p className="text-xs text-warm-500">
+              Based on your patterns
+              {lastGenerated && ` • ${lastGenerated}`}
+            </p>
+          </div>
+        </div>
+        {onRefresh && (
+          <button
+            onClick={onRefresh}
+            disabled={generating}
+            className="p-2 rounded-xl hover:bg-white/50 transition-colors disabled:opacity-50"
+          >
+            <RefreshCw
+              size={14}
+              className={`text-warm-500 ${generating ? 'animate-spin' : ''}`}
+            />
+          </button>
+        )}
+      </div>
+
+      {/* Insights Grid */}
+      <div className="px-4 pb-4 grid gap-2">
+        {insights.map((insight, index) => {
+          const style = getCategoryStyle(insight.category);
+          const Icon = style.icon;
+          const isPositive = insight.direction === 'positive';
+
+          return (
+            <motion.div
+              key={insight.id || index}
+              className="bg-white/60 rounded-xl p-3 flex items-start gap-3"
+              initial={{ opacity: 0, x: -10 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ delay: index * 0.05 }}
+            >
+              <div className={`p-1.5 rounded-lg ${style.bg}`}>
+                <Icon size={14} className={style.color} />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm text-warm-700 leading-relaxed">
+                  {insight.insight}
+                </p>
+                <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+                  <span className={`text-xs px-2 py-0.5 rounded-full ${
+                    insight.strength === 'strong'
+                      ? 'bg-green-100 text-green-700'
+                      : 'bg-blue-100 text-blue-700'
+                  }`}>
+                    {insight.strength}
+                  </span>
+                  <span className={`text-xs ${isPositive ? 'text-green-600' : 'text-amber-600'}`}>
+                    {isPositive ? '+' : ''}{insight.moodDelta}% mood
+                  </span>
+                  {insight.sampleSize && (
+                    <span className="text-xs text-warm-400">
+                      {insight.sampleSize} entries
+                    </span>
+                  )}
+                </div>
+                {insight.recommendation && (
+                  <p className="text-xs text-warm-500 mt-1.5 italic">
+                    {insight.recommendation}
+                  </p>
+                )}
+              </div>
+            </motion.div>
+          );
+        })}
+      </div>
     </motion.div>
   );
 };
