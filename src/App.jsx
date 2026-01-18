@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Mic, Loader2, LogIn, Activity, Brain, Share,
-  User as UserIcon, Briefcase, X, Mail, Apple, Eye, EyeOff
+  User as UserIcon, Briefcase, X, Mail, Apple, Eye, EyeOff, Shield
 } from 'lucide-react';
 
 // UI Components
@@ -16,6 +16,9 @@ import {
   exchangeGoogleTokenFn, exchangeAppleTokenFn,
   createUserWithEmailAndPassword, signInWithEmailAndPassword,
   sendPasswordResetEmail, updateProfile,
+  // MFA support
+  getMultiFactorResolver, PhoneAuthProvider, PhoneMultiFactorGenerator,
+  TotpMultiFactorGenerator, RecaptchaVerifier,
   collection, addDoc, query, orderBy, onSnapshot,
   Timestamp, deleteDoc, doc, updateDoc, limit, setDoc,
   runTransaction
@@ -1727,7 +1730,7 @@ export default function App() {
   };
 
   // Handle Email/Password Sign-In
-  const [authMode, setAuthMode] = useState('signin'); // 'signin', 'signup', 'reset'
+  const [authMode, setAuthMode] = useState('signin'); // 'signin', 'signup', 'reset', 'mfa'
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [displayName, setDisplayName] = useState('');
@@ -1735,6 +1738,12 @@ export default function App() {
   const [authLoading, setAuthLoading] = useState(false);
   const [authError, setAuthError] = useState('');
   const [showEmailForm, setShowEmailForm] = useState(false);
+
+  // MFA state
+  const [mfaResolver, setMfaResolver] = useState(null);
+  const [mfaCode, setMfaCode] = useState('');
+  const [mfaHint, setMfaHint] = useState('');
+  const recaptchaVerifierRef = useRef(null);
 
   const handleEmailAuth = async (e) => {
     e.preventDefault();
@@ -1762,6 +1771,31 @@ export default function App() {
       }
     } catch (error) {
       console.error('[EchoVault] Email auth error:', error.code, error.message);
+
+      // Handle MFA required
+      if (error.code === 'auth/multi-factor-auth-required') {
+        console.log('[EchoVault] MFA required, showing verification screen');
+        const resolver = getMultiFactorResolver(auth, error);
+        setMfaResolver(resolver);
+
+        // Get hint about MFA type
+        const hints = resolver.hints;
+        if (hints.length > 0) {
+          const hint = hints[0];
+          if (hint.factorId === 'phone') {
+            setMfaHint(`Enter the code sent to ${hint.phoneNumber || 'your phone'}`);
+          } else if (hint.factorId === 'totp') {
+            setMfaHint('Enter the code from your authenticator app');
+          } else {
+            setMfaHint('Enter your verification code');
+          }
+        }
+
+        setAuthMode('mfa');
+        setAuthLoading(false);
+        return;
+      }
+
       // User-friendly error messages
       switch (error.code) {
         case 'auth/email-already-in-use':
@@ -1785,6 +1819,58 @@ export default function App() {
           break;
         default:
           setAuthError(error.message);
+      }
+    } finally {
+      setAuthLoading(false);
+    }
+  };
+
+  // Handle MFA verification
+  const handleMfaVerify = async (e) => {
+    e.preventDefault();
+    if (!mfaResolver || !mfaCode) return;
+
+    setAuthError('');
+    setAuthLoading(true);
+
+    try {
+      const hint = mfaResolver.hints[0];
+      let assertion;
+
+      if (hint.factorId === 'totp') {
+        // TOTP (authenticator app)
+        assertion = TotpMultiFactorGenerator.assertionForSignIn(
+          hint.uid,
+          mfaCode
+        );
+      } else if (hint.factorId === 'phone') {
+        // Phone SMS - would need recaptcha and verification flow
+        // For now, show error as phone MFA requires more setup
+        setAuthError('Phone MFA verification requires additional setup. Please contact support.');
+        setAuthLoading(false);
+        return;
+      }
+
+      // Complete sign-in with MFA
+      await mfaResolver.resolveSignIn(assertion);
+      console.log('[EchoVault] MFA verification successful');
+
+      // Clear MFA state
+      setMfaResolver(null);
+      setMfaCode('');
+      setMfaHint('');
+      setAuthMode('signin');
+
+    } catch (error) {
+      console.error('[EchoVault] MFA verification error:', error.code, error.message);
+      if (error.code === 'auth/invalid-verification-code') {
+        setAuthError('Invalid code. Please try again.');
+      } else if (error.code === 'auth/code-expired') {
+        setAuthError('Code expired. Please sign in again.');
+        setAuthMode('signin');
+        setMfaResolver(null);
+      } else {
+        setAuthError(error.message);
       }
     } finally {
       setAuthLoading(false);
@@ -1874,64 +1960,121 @@ export default function App() {
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -10 }}
               >
-                <form onSubmit={handleEmailAuth} className="space-y-3">
-                  <h2 className="text-lg font-semibold text-center text-warm-800">
-                    {authMode === 'signup' ? 'Create Account' : authMode === 'reset' ? 'Reset Password' : 'Sign In'}
-                  </h2>
+                {authMode === 'mfa' ? (
+                  /* MFA Verification Form */
+                  <form onSubmit={handleMfaVerify} className="space-y-3">
+                    <div className="flex justify-center mb-2">
+                      <div className="h-12 w-12 bg-primary-100 rounded-full flex items-center justify-center">
+                        <Shield className="text-primary-600" size={24}/>
+                      </div>
+                    </div>
+                    <h2 className="text-lg font-semibold text-center text-warm-800">
+                      Two-Factor Authentication
+                    </h2>
+                    <p className="text-sm text-center text-warm-600">
+                      {mfaHint || 'Enter your verification code'}
+                    </p>
 
-                  {authMode === 'signup' && (
                     <input
                       type="text"
-                      placeholder="Name (optional)"
-                      value={displayName}
-                      onChange={(e) => setDisplayName(e.target.value)}
+                      inputMode="numeric"
+                      pattern="[0-9]*"
+                      placeholder="Enter 6-digit code"
+                      value={mfaCode}
+                      onChange={(e) => setMfaCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                      required
+                      autoFocus
+                      className="w-full px-4 py-3 rounded-lg border border-warm-200 focus:border-primary-500 focus:ring-2 focus:ring-primary-200 outline-none transition-all text-center text-2xl tracking-widest font-mono"
+                    />
+
+                    {authError && (
+                      <p className="text-red-500 text-sm text-center">{authError}</p>
+                    )}
+
+                    <Button
+                      type="submit"
+                      variant="primary"
+                      disabled={authLoading || mfaCode.length !== 6}
+                      className="w-full flex gap-2 items-center justify-center"
+                    >
+                      {authLoading ? <Loader2 size={18} className="animate-spin"/> : <Shield size={18}/>}
+                      Verify
+                    </Button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAuthMode('signin');
+                        setMfaResolver(null);
+                        setMfaCode('');
+                        setMfaHint('');
+                        setAuthError('');
+                      }}
+                      className="w-full text-center text-sm text-warm-500 hover:text-warm-700"
+                    >
+                      ← Back to sign in
+                    </button>
+                  </form>
+                ) : (
+                  /* Email/Password Form */
+                  <form onSubmit={handleEmailAuth} className="space-y-3">
+                    <h2 className="text-lg font-semibold text-center text-warm-800">
+                      {authMode === 'signup' ? 'Create Account' : authMode === 'reset' ? 'Reset Password' : 'Sign In'}
+                    </h2>
+
+                    {authMode === 'signup' && (
+                      <input
+                        type="text"
+                        placeholder="Name (optional)"
+                        value={displayName}
+                        onChange={(e) => setDisplayName(e.target.value)}
+                        className="w-full px-4 py-2 rounded-lg border border-warm-200 focus:border-primary-500 focus:ring-2 focus:ring-primary-200 outline-none transition-all"
+                      />
+                    )}
+
+                    <input
+                      type="email"
+                      placeholder="Email"
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      required
                       className="w-full px-4 py-2 rounded-lg border border-warm-200 focus:border-primary-500 focus:ring-2 focus:ring-primary-200 outline-none transition-all"
                     />
-                  )}
 
-                  <input
-                    type="email"
-                    placeholder="Email"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    required
-                    className="w-full px-4 py-2 rounded-lg border border-warm-200 focus:border-primary-500 focus:ring-2 focus:ring-primary-200 outline-none transition-all"
-                  />
+                    {authMode !== 'reset' && (
+                      <div className="relative">
+                        <input
+                          type={showPassword ? 'text' : 'password'}
+                          placeholder="Password"
+                          value={password}
+                          onChange={(e) => setPassword(e.target.value)}
+                          required
+                          minLength={6}
+                          className="w-full px-4 py-2 pr-10 rounded-lg border border-warm-200 focus:border-primary-500 focus:ring-2 focus:ring-primary-200 outline-none transition-all"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowPassword(!showPassword)}
+                          className="absolute right-3 top-1/2 -translate-y-1/2 text-warm-400 hover:text-warm-600"
+                        >
+                          {showPassword ? <EyeOff size={18}/> : <Eye size={18}/>}
+                        </button>
+                      </div>
+                    )}
 
-                  {authMode !== 'reset' && (
-                    <div className="relative">
-                      <input
-                        type={showPassword ? 'text' : 'password'}
-                        placeholder="Password"
-                        value={password}
-                        onChange={(e) => setPassword(e.target.value)}
-                        required
-                        minLength={6}
-                        className="w-full px-4 py-2 pr-10 rounded-lg border border-warm-200 focus:border-primary-500 focus:ring-2 focus:ring-primary-200 outline-none transition-all"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setShowPassword(!showPassword)}
-                        className="absolute right-3 top-1/2 -translate-y-1/2 text-warm-400 hover:text-warm-600"
-                      >
-                        {showPassword ? <EyeOff size={18}/> : <Eye size={18}/>}
-                      </button>
-                    </div>
-                  )}
+                    {authError && (
+                      <p className="text-red-500 text-sm text-center">{authError}</p>
+                    )}
 
-                  {authError && (
-                    <p className="text-red-500 text-sm text-center">{authError}</p>
-                  )}
-
-                  <Button
-                    type="submit"
-                    variant="primary"
-                    disabled={authLoading}
-                    className="w-full flex gap-2 items-center justify-center"
-                  >
-                    {authLoading ? <Loader2 size={18} className="animate-spin"/> : <Mail size={18}/>}
-                    {authMode === 'signup' ? 'Create Account' : authMode === 'reset' ? 'Send Reset Email' : 'Sign In'}
-                  </Button>
+                    <Button
+                      type="submit"
+                      variant="primary"
+                      disabled={authLoading}
+                      className="w-full flex gap-2 items-center justify-center"
+                    >
+                      {authLoading ? <Loader2 size={18} className="animate-spin"/> : <Mail size={18}/>}
+                      {authMode === 'signup' ? 'Create Account' : authMode === 'reset' ? 'Send Reset Email' : 'Sign In'}
+                    </Button>
 
                   {/* Auth mode toggles */}
                   <div className="text-center text-sm space-y-1">
@@ -1988,7 +2131,8 @@ export default function App() {
                   >
                     ← Back to other sign-in options
                   </button>
-                </form>
+                  </form>
+                )}
               </motion.div>
             )}
           </AnimatePresence>

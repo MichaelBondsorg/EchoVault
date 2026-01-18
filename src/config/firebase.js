@@ -4,7 +4,10 @@ import {
   GoogleAuthProvider, signInWithPopup, signInWithCredential, OAuthProvider,
   setPersistence, browserLocalPersistence, indexedDBLocalPersistence, inMemoryPersistence,
   createUserWithEmailAndPassword, signInWithEmailAndPassword, sendPasswordResetEmail,
-  updateProfile
+  updateProfile,
+  // MFA support
+  getMultiFactorResolver, PhoneAuthProvider, PhoneMultiFactorGenerator,
+  TotpMultiFactorGenerator, RecaptchaVerifier
 } from 'firebase/auth';
 import {
   getFirestore, collection, addDoc, query, orderBy, onSnapshot,
@@ -89,6 +92,12 @@ export {
   signInWithEmailAndPassword,
   sendPasswordResetEmail,
   updateProfile,
+  // MFA support
+  getMultiFactorResolver,
+  PhoneAuthProvider,
+  PhoneMultiFactorGenerator,
+  TotpMultiFactorGenerator,
+  RecaptchaVerifier,
   // Firestore
   collection,
   addDoc,
