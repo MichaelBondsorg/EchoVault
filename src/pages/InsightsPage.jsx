@@ -228,6 +228,7 @@ const InsightsPage = ({
       {/* Quick Insights (Basic statistical correlations) */}
       <QuickInsightsSection
         insights={basicInsights}
+        entries={entries}
         loading={basicLoading}
         generating={basicGenerating}
         hasEnoughData={hasEnoughBasicData}
@@ -750,6 +751,7 @@ const RecommendationsSection = ({ recommendations }) => {
  */
 const QuickInsightsSection = ({
   insights,
+  entries,
   loading,
   generating,
   hasEnoughData,
@@ -757,9 +759,57 @@ const QuickInsightsSection = ({
   lastGenerated,
   onRefresh
 }) => {
-  // Don't render if no data or still loading initial data
+  const [expandedInsight, setExpandedInsight] = useState(null);
+  const [showAllEntries, setShowAllEntries] = useState(new Set());
+  const [selectedEntry, setSelectedEntry] = useState(null);
+
+  // Helper to get entries by IDs
+  const getEntriesByIds = (entryIds, showAll = false) => {
+    if (!entries || !entryIds || entryIds.length === 0) return [];
+    const matched = entries.filter(e => entryIds.includes(e.id || e.entryId));
+    return showAll ? matched : matched.slice(0, 5);
+  };
+
+  // Toggle showing all entries for an insight
+  const toggleShowAll = (insightId) => {
+    setShowAllEntries(prev => {
+      const next = new Set(prev);
+      if (next.has(insightId)) {
+        next.delete(insightId);
+      } else {
+        next.add(insightId);
+      }
+      return next;
+    });
+  };
+
+  // Don't render if still loading
   if (loading) {
     return null;
+  }
+
+  // If we haven't determined data sufficiency yet, show loading
+  // (this happens when dataSufficiency is null, causing hasEnoughData=false and entriesNeeded=0)
+  if (!hasEnoughData && entriesNeeded === 0 && (!insights || insights.length === 0)) {
+    return (
+      <motion.div
+        className="bg-white/30 border border-white/20 rounded-2xl p-4"
+        initial={{ opacity: 0, y: -10 }}
+        animate={{ opacity: 1, y: 0 }}
+      >
+        <div className="flex items-center gap-3">
+          <div className="p-2 bg-warm-100/50 rounded-xl">
+            <Loader2 size={18} className="text-warm-400 animate-spin" />
+          </div>
+          <div>
+            <h3 className="font-medium text-warm-600">Quick Insights</h3>
+            <p className="text-xs text-warm-500">
+              Checking your data...
+            </p>
+          </div>
+        </div>
+      </motion.div>
+    );
   }
 
   // Insufficient data message
@@ -902,49 +952,231 @@ const QuickInsightsSection = ({
           const style = getCategoryStyle(insight.category);
           const Icon = style.icon;
           const isPositive = insight.direction === 'positive';
+          const insightKey = insight.id || index;
+          const isExpanded = expandedInsight === insightKey;
+          const hasEntryIds = insight.entryIds && insight.entryIds.length > 0;
+          const isShowingAll = showAllEntries.has(insightKey);
+          const citedEntries = isExpanded ? getEntriesByIds(insight.entryIds, isShowingAll) : [];
+          const hiddenCount = hasEntryIds ? insight.entryIds.length - 5 : 0;
 
           return (
             <motion.div
               key={insight.id || index}
-              className="bg-white/60 rounded-xl p-3 flex items-start gap-3"
+              className="bg-white/60 rounded-xl overflow-hidden"
               initial={{ opacity: 0, x: -10 }}
               animate={{ opacity: 1, x: 0 }}
               transition={{ delay: index * 0.05 }}
             >
-              <div className={`p-1.5 rounded-lg ${style.bg}`}>
-                <Icon size={14} className={style.color} />
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-sm text-warm-700 leading-relaxed">
-                  {insight.insight}
-                </p>
-                <div className="flex items-center gap-2 mt-1.5 flex-wrap">
-                  <span className={`text-xs px-2 py-0.5 rounded-full ${
-                    insight.strength === 'strong'
-                      ? 'bg-green-100 text-green-700'
-                      : 'bg-blue-100 text-blue-700'
-                  }`}>
-                    {insight.strength}
-                  </span>
-                  <span className={`text-xs ${isPositive ? 'text-green-600' : 'text-amber-600'}`}>
-                    {isPositive ? '+' : ''}{insight.moodDelta}% mood
-                  </span>
-                  {insight.sampleSize && (
-                    <span className="text-xs text-warm-400">
-                      {insight.sampleSize} entries
+              <div className="p-3 flex items-start gap-3">
+                <div className={`p-1.5 rounded-lg ${style.bg}`}>
+                  <Icon size={14} className={style.color} />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm text-warm-700 leading-relaxed">
+                    {insight.insight}
+                  </p>
+                  <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+                    <span className={`text-xs px-2 py-0.5 rounded-full ${
+                      insight.strength === 'strong'
+                        ? 'bg-green-100 text-green-700'
+                        : 'bg-blue-100 text-blue-700'
+                    }`}>
+                      {insight.strength}
                     </span>
+                    <span className={`text-xs ${isPositive ? 'text-green-600' : 'text-amber-600'}`}>
+                      {isPositive ? '+' : ''}{insight.moodDelta}% mood
+                    </span>
+                    {insight.sampleSize && hasEntryIds && (
+                      <button
+                        onClick={() => setExpandedInsight(isExpanded ? null : insightKey)}
+                        className="text-xs text-warm-500 hover:text-warm-700 flex items-center gap-1 transition-colors"
+                      >
+                        {insight.sampleSize} entries
+                        {isExpanded ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+                      </button>
+                    )}
+                    {insight.sampleSize && !hasEntryIds && (
+                      <span className="text-xs text-warm-400">
+                        {insight.sampleSize} entries
+                      </span>
+                    )}
+                  </div>
+                  {insight.recommendation && (
+                    <p className="text-xs text-warm-500 mt-1.5 italic">
+                      {insight.recommendation}
+                    </p>
                   )}
                 </div>
-                {insight.recommendation && (
-                  <p className="text-xs text-warm-500 mt-1.5 italic">
-                    {insight.recommendation}
-                  </p>
-                )}
               </div>
+
+              {/* Expanded entries section */}
+              <AnimatePresence>
+                {isExpanded && citedEntries.length > 0 && (
+                  <motion.div
+                    initial={{ height: 0, opacity: 0 }}
+                    animate={{ height: 'auto', opacity: 1 }}
+                    exit={{ height: 0, opacity: 0 }}
+                    transition={{ duration: 0.2 }}
+                    className="border-t border-warm-200/50 bg-warm-50/50"
+                  >
+                    <div className="p-3 space-y-2">
+                      <p className="text-xs font-medium text-warm-500 uppercase tracking-wider">
+                        Related Entries
+                      </p>
+                      {citedEntries.map((entry, i) => (
+                        <button
+                          key={entry.id || i}
+                          onClick={() => setSelectedEntry(entry)}
+                          className="w-full text-left bg-white/80 hover:bg-white rounded-lg p-2 text-xs transition-colors cursor-pointer"
+                        >
+                          <div className="flex items-center justify-between mb-1">
+                            <span className="text-warm-500">
+                              {entry.createdAt?.toDate
+                                ? entry.createdAt.toDate().toLocaleDateString()
+                                : new Date(entry.createdAt).toLocaleDateString()}
+                            </span>
+                            <div className="flex items-center gap-2">
+                              {typeof entry.analysis?.mood_score === 'number' && (
+                                <span className={`font-medium ${
+                                  entry.analysis.mood_score >= 0.6 ? 'text-green-600' :
+                                  entry.analysis.mood_score >= 0.4 ? 'text-amber-600' :
+                                  'text-red-600'
+                                }`}>
+                                  {Math.round(entry.analysis.mood_score * 100)}%
+                                </span>
+                              )}
+                              <ChevronDown size={12} className="text-warm-400 -rotate-90" />
+                            </div>
+                          </div>
+                          <p className="text-warm-700 line-clamp-2">
+                            {(entry.content || entry.text || '').slice(0, 150)}
+                            {(entry.content || entry.text || '').length > 150 ? '...' : ''}
+                          </p>
+                        </button>
+                      ))}
+                      {hiddenCount > 0 && !isShowingAll && (
+                        <button
+                          onClick={() => toggleShowAll(insightKey)}
+                          className="w-full text-xs text-emerald-600 hover:text-emerald-700 text-center py-1 hover:bg-emerald-50 rounded-lg transition-colors"
+                        >
+                          +{hiddenCount} more entries — tap to show all
+                        </button>
+                      )}
+                      {isShowingAll && hiddenCount > 0 && (
+                        <button
+                          onClick={() => toggleShowAll(insightKey)}
+                          className="w-full text-xs text-warm-500 hover:text-warm-700 text-center py-1 hover:bg-warm-100 rounded-lg transition-colors"
+                        >
+                          Show fewer entries
+                        </button>
+                      )}
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
             </motion.div>
           );
         })}
       </div>
+
+      {/* Entry Detail Modal */}
+      <AnimatePresence>
+        {selectedEntry && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4"
+            onClick={() => setSelectedEntry(null)}
+          >
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              transition={{ duration: 0.2 }}
+              className="bg-white rounded-2xl max-w-lg w-full max-h-[80vh] overflow-hidden shadow-xl"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* Modal Header */}
+              <div className="p-4 border-b border-warm-200 flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-warm-500">
+                    {selectedEntry.createdAt?.toDate
+                      ? selectedEntry.createdAt.toDate().toLocaleDateString('en-US', {
+                          weekday: 'long',
+                          year: 'numeric',
+                          month: 'long',
+                          day: 'numeric'
+                        })
+                      : new Date(selectedEntry.createdAt).toLocaleDateString('en-US', {
+                          weekday: 'long',
+                          year: 'numeric',
+                          month: 'long',
+                          day: 'numeric'
+                        })}
+                  </p>
+                  {typeof selectedEntry.analysis?.mood_score === 'number' && (
+                    <div className="flex items-center gap-2 mt-1">
+                      <span className="text-xs text-warm-500">Mood:</span>
+                      <span className={`text-sm font-semibold ${
+                        selectedEntry.analysis.mood_score >= 0.6 ? 'text-green-600' :
+                        selectedEntry.analysis.mood_score >= 0.4 ? 'text-amber-600' :
+                        'text-red-600'
+                      }`}>
+                        {Math.round(selectedEntry.analysis.mood_score * 100)}%
+                      </span>
+                    </div>
+                  )}
+                </div>
+                <button
+                  onClick={() => setSelectedEntry(null)}
+                  className="p-2 hover:bg-warm-100 rounded-xl transition-colors"
+                >
+                  <X size={20} className="text-warm-500" />
+                </button>
+              </div>
+
+              {/* Modal Content */}
+              <div className="p-4 overflow-y-auto max-h-[60vh]">
+                <p className="text-warm-700 whitespace-pre-wrap leading-relaxed">
+                  {selectedEntry.content || selectedEntry.text || 'No content available'}
+                </p>
+
+                {/* Tags if available */}
+                {selectedEntry.analysis?.tags && selectedEntry.analysis.tags.length > 0 && (
+                  <div className="mt-4 pt-4 border-t border-warm-200">
+                    <p className="text-xs font-medium text-warm-500 uppercase tracking-wider mb-2">
+                      Tags
+                    </p>
+                    <div className="flex flex-wrap gap-1">
+                      {selectedEntry.analysis.tags.map((tag, i) => (
+                        <span
+                          key={i}
+                          className="text-xs px-2 py-1 bg-warm-100 text-warm-600 rounded-full"
+                        >
+                          {tag}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Summary if available */}
+                {selectedEntry.analysis?.summary && (
+                  <div className="mt-4 pt-4 border-t border-warm-200">
+                    <p className="text-xs font-medium text-warm-500 uppercase tracking-wider mb-2">
+                      Summary
+                    </p>
+                    <p className="text-sm text-warm-600 italic">
+                      {selectedEntry.analysis.summary}
+                    </p>
+                  </div>
+                )}
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </motion.div>
   );
 };

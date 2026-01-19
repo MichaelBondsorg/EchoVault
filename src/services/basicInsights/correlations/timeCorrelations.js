@@ -99,6 +99,7 @@ export const computeTimeCorrelations = (entries) => {
       return {
         mood: e.analysis.mood_score,
         date,
+        entryId: e.id || e.entryId,
         ...classifyTime(date)
       };
     })
@@ -132,6 +133,10 @@ export const computeTimeCorrelations = (entries) => {
         const better = weekendMood > weekdayMood ? 'weekend' : 'weekday';
         const absPercent = Math.abs(moodDelta);
 
+        // Collect entry IDs for the better performing time
+        const relevantEntries = better === 'weekend' ? weekendEntries : weekdayEntries;
+        const entryIds = relevantEntries.map(e => e.entryId).filter(Boolean);
+
         insights.push({
           id: generateInsightId(CATEGORIES.TIME, 'weekend_weekday'),
           category: CATEGORIES.TIME,
@@ -147,7 +152,8 @@ export const computeTimeCorrelations = (entries) => {
           peakTime: better,
           recommendation: better === 'weekend'
             ? 'Consider what makes weekends special and bring elements into weekdays'
-            : null
+            : null,
+          entryIds // References to cited entries
         });
       }
     }
@@ -163,12 +169,13 @@ export const computeTimeCorrelations = (entries) => {
 
   // Find best and worst times with enough data
   const timeStats = [];
-  for (const [time, entries] of Object.entries(timeGroups)) {
-    if (entries.length >= THRESHOLDS.MIN_DATA_POINTS) {
+  for (const [time, groupEntries] of Object.entries(timeGroups)) {
+    if (groupEntries.length >= THRESHOLDS.MIN_DATA_POINTS) {
       timeStats.push({
         time,
-        mood: average(entries.map(e => e.mood)),
-        count: entries.length
+        mood: average(groupEntries.map(e => e.mood)),
+        count: groupEntries.length,
+        entryIds: groupEntries.map(e => e.entryId).filter(Boolean)
       });
     }
   }
@@ -203,7 +210,8 @@ export const computeTimeCorrelations = (entries) => {
           bestMood: Math.round(best.mood * 100),
           worstTime: worst.time,
           worstMood: Math.round(worst.mood * 100),
-          recommendation: `You seem to be at your best in the ${best.time}`
+          recommendation: `You seem to be at your best in the ${best.time}`,
+          entryIds: best.entryIds // References to cited entries (best time)
         });
       }
     }
@@ -216,21 +224,22 @@ export const computeTimeCorrelations = (entries) => {
   for (const entry of entriesWithData) {
     const day = entry.dayName;
     if (!dayGroups[day]) {
-      dayGroups[day] = [];
+      dayGroups[day] = { moods: [], entryIds: [] };
     }
-    dayGroups[day].push(entry.mood);
+    dayGroups[day].moods.push(entry.mood);
+    if (entry.entryId) dayGroups[day].entryIds.push(entry.entryId);
   }
 
   // Find days with significant deviation from baseline
-  for (const [day, moods] of Object.entries(dayGroups)) {
-    if (moods.length < THRESHOLDS.MIN_DATA_POINTS) continue;
+  for (const [day, dayData] of Object.entries(dayGroups)) {
+    if (dayData.moods.length < THRESHOLDS.MIN_DATA_POINTS) continue;
 
-    const dayMood = average(moods);
+    const dayMood = average(dayData.moods);
     const moodDelta = calculateMoodDelta(dayMood, baselineMood);
 
     // Higher threshold for individual days (more specific)
     if (Math.abs(moodDelta) >= THRESHOLDS.MIN_MOOD_DELTA + 2) {
-      const strength = determineStrength(moodDelta, moods.length);
+      const strength = determineStrength(moodDelta, dayData.moods.length);
 
       if (strength !== 'weak') {
         const direction = moodDelta > 0 ? 'positive' : 'negative';
@@ -245,13 +254,14 @@ export const computeTimeCorrelations = (entries) => {
           moodDelta,
           direction,
           strength,
-          sampleSize: moods.length,
+          sampleSize: dayData.moods.length,
           dayName: day,
           dayMood: Math.round(dayMood * 100),
           baselineMood: Math.round(baselineMood * 100),
           recommendation: moodDelta < 0
             ? `Consider planning enjoyable activities for ${day}s`
-            : null
+            : null,
+          entryIds: dayData.entryIds // References to cited entries
         });
       }
     }

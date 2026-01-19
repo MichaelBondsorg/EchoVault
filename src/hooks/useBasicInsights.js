@@ -85,7 +85,9 @@ export const useBasicInsights = (user, entries, options = {}) => {
 
   // Regenerate insights
   const regenerateInsights = useCallback(async () => {
-    if (!user?.uid || generating) return;
+    if (!user?.uid || generating) {
+      return;
+    }
 
     // Check data sufficiency
     const sufficiency = checkDataSufficiency(entries);

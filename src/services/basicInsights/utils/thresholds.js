@@ -37,7 +37,10 @@ export const CATEGORIES = {
   PEOPLE: 'people',
   HEALTH: 'health',
   ENVIRONMENT: 'environment',
-  TIME: 'time'
+  TIME: 'time',
+  CATEGORY: 'category',      // Entry category (work, personal, health, etc.)
+  THEMES: 'themes',          // Themes and emotions from analysis
+  SLEEP_DETAIL: 'sleep_detail' // Deep sleep, REM, etc.
 };
 
 /**

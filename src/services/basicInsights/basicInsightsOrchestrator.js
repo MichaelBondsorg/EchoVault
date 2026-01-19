@@ -25,6 +25,9 @@ import { getTopEnvironmentInsights } from '../environment/environmentCorrelation
 import { computeActivityCorrelations } from './correlations/activityCorrelations';
 import { computePeopleCorrelations } from './correlations/peopleCorrelations';
 import { computeTimeCorrelations } from './correlations/timeCorrelations';
+import { computeExtendedHealthCorrelations } from './correlations/healthExtendedCorrelations';
+import { computeCategoryCorrelations } from './correlations/categoryCorrelations';
+import { computeThemesCorrelations } from './correlations/themesCorrelations';
 
 // Configuration
 import { THRESHOLDS, CATEGORIES } from './utils/thresholds';
@@ -108,6 +111,18 @@ export const generateBasicInsights = async (userId, entries) => {
     const timeInsights = computeTimeCorrelations(entries);
     allInsights.push(...timeInsights);
 
+    // 6. Extended health correlations (strain, deep sleep, REM, calories)
+    const extendedHealthInsights = computeExtendedHealthCorrelations(entries);
+    allInsights.push(...extendedHealthInsights);
+
+    // 7. Category/type correlations (work vs personal, reflection vs vent)
+    const categoryInsights = computeCategoryCorrelations(entries);
+    allInsights.push(...categoryInsights);
+
+    // 8. Themes & emotions correlations
+    const themesInsights = computeThemesCorrelations(entries);
+    allInsights.push(...themesInsights);
+
     // Sort all insights by strength and absolute mood delta
     const strengthOrder = { strong: 3, moderate: 2, weak: 1 };
     allInsights.sort((a, b) => {
@@ -138,7 +153,10 @@ export const generateBasicInsights = async (userId, entries) => {
         environment: envInsights.length,
         activity: activityInsights.length,
         people: peopleInsights.length,
-        time: timeInsights.length
+        time: timeInsights.length,
+        healthExtended: extendedHealthInsights.length,
+        category: categoryInsights.length,
+        themes: themesInsights.length
       }
     };
 

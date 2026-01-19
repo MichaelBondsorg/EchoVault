@@ -95,22 +95,25 @@ export const computeActivityCorrelations = (entries) => {
   const allMoods = entriesWithMood.map(e => e.analysis.mood_score);
   const baselineMood = average(allMoods);
 
-  // Track activity occurrences and moods
+  // Track activity occurrences, moods, and entry references
   const activityStats = new Map();
 
   for (const entry of entriesWithMood) {
     const mood = entry.analysis.mood_score;
     const activities = extractActivities(entry);
+    const entryId = entry.id || entry.entryId;
 
     for (const activity of activities) {
       if (!activityStats.has(activity)) {
         activityStats.set(activity, {
           moods: [],
+          entryIds: [],
           entryCount: 0
         });
       }
       const stats = activityStats.get(activity);
       stats.moods.push(mood);
+      if (entryId) stats.entryIds.push(entryId);
       stats.entryCount++;
     }
   }
@@ -157,7 +160,8 @@ export const computeActivityCorrelations = (entries) => {
       activityLabel: activityConfig.label,
       recommendation: moodDelta > 0
         ? `Try ${activityConfig.label.toLowerCase()} when feeling low`
-        : null
+        : null,
+      entryIds: stats.entryIds // References to cited entries
     });
   }
 

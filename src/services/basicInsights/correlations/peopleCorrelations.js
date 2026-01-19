@@ -112,23 +112,26 @@ export const computePeopleCorrelations = (entries) => {
   const allMoods = entriesWithMood.map(e => e.analysis.mood_score);
   const baselineMood = average(allMoods);
 
-  // Track entity occurrences and moods
+  // Track entity occurrences, moods, and entry references
   const entityStats = new Map();
 
   for (const entry of entriesWithMood) {
     const mood = entry.analysis.mood_score;
     const people = extractPeople(entry);
+    const entryId = entry.id || entry.entryId;
 
     for (const [key, info] of people) {
       if (!entityStats.has(key)) {
         entityStats.set(key, {
           ...info,
           moods: [],
+          entryIds: [],
           mentionCount: 0
         });
       }
       const stats = entityStats.get(key);
       stats.moods.push(mood);
+      if (entryId) stats.entryIds.push(entryId);
       stats.mentionCount++;
     }
   }
@@ -196,7 +199,8 @@ export const computePeopleCorrelations = (entries) => {
       isGroup: stats.isGroup || false,
       recommendation: moodDelta > 0 && stats.isGroup
         ? `Prioritize ${stats.name.toLowerCase()} time when you need a boost`
-        : null
+        : null,
+      entryIds: stats.entryIds // References to cited entries
     });
   }
 
