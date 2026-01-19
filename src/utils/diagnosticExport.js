@@ -147,4 +147,81 @@ export const exportFullDiagnosticJSON = (entries, options = {}) => {
   return summary;
 };
 
-export default { exportDiagnosticJSON, exportFullDiagnosticJSON };
+/**
+ * Migrate old entries to add platform tracking fields
+ * Sets createdOnPlatform: 'web' and needsHealthContext: true for entries without health data
+ *
+ * @param {Array} entries - Journal entries from Firestore
+ * @param {string} userId - User ID
+ * @param {Object} db - Firestore database instance
+ * @param {Function} onProgress - Progress callback (current, total)
+ * @returns {Object} Migration results
+ */
+export const migrateEntriesForHealthEnrichment = async (entries, userId, db, onProgress = () => {}) => {
+  const { doc, updateDoc, writeBatch } = await import('firebase/firestore');
+  const { APP_COLLECTION_ID } = await import('../config/constants');
+
+  // Filter to entries that need migration (no createdOnPlatform field)
+  const needsMigration = entries.filter(entry =>
+    entry.createdOnPlatform === undefined || entry.createdOnPlatform === null
+  );
+
+  if (needsMigration.length === 0) {
+    return {
+      total: entries.length,
+      migrated: 0,
+      skipped: entries.length,
+      message: 'All entries already have platform tracking'
+    };
+  }
+
+  console.log(`[Migration] Starting migration for ${needsMigration.length} entries`);
+
+  let migrated = 0;
+  let failed = 0;
+
+  // Process in batches of 500 (Firestore limit)
+  const BATCH_SIZE = 500;
+
+  for (let i = 0; i < needsMigration.length; i += BATCH_SIZE) {
+    const batchEntries = needsMigration.slice(i, i + BATCH_SIZE);
+    const batch = writeBatch(db);
+
+    for (const entry of batchEntries) {
+      const entryRef = doc(db, 'artifacts', APP_COLLECTION_ID, 'users', userId, 'entries', entry.id);
+
+      // Set platform to 'web' (assumption: entries without platform were created on web)
+      // Set needsHealthContext if entry doesn't have health data
+      const updateData = {
+        createdOnPlatform: 'web',
+        needsHealthContext: !entry.healthContext
+      };
+
+      batch.update(entryRef, updateData);
+    }
+
+    try {
+      await batch.commit();
+      migrated += batchEntries.length;
+      console.log(`[Migration] Batch complete: ${migrated}/${needsMigration.length}`);
+      onProgress(migrated, needsMigration.length);
+    } catch (error) {
+      console.error('[Migration] Batch failed:', error);
+      failed += batchEntries.length;
+    }
+  }
+
+  const results = {
+    total: entries.length,
+    migrated,
+    failed,
+    skipped: entries.length - needsMigration.length,
+    entriesNeedingHealth: needsMigration.filter(e => !e.healthContext).length,
+    message: `Migrated ${migrated} entries. ${failed > 0 ? `${failed} failed.` : ''} They will be enriched with health data when you open the mobile app.`
+  };
+
+  console.log('[Migration] Complete:', results);
+  return results;
+};
+
+export default { exportDiagnosticJSON, exportFullDiagnosticJSON, migrateEntriesForHealthEnrichment };

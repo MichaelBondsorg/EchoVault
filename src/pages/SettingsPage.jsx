@@ -6,7 +6,8 @@ import {
   FileJson, AlertTriangle
 } from 'lucide-react';
 import BackfillPanel from '../components/settings/BackfillPanel';
-import { exportDiagnosticJSON } from '../utils/diagnosticExport';
+import { exportDiagnosticJSON, migrateEntriesForHealthEnrichment } from '../utils/diagnosticExport';
+import { db } from '../config/firebase';
 
 /**
  * SettingsPage - App settings and account management
@@ -33,6 +34,43 @@ const SettingsPage = ({
   // INT-002: Loading state for settings items
   const [loadingItem, setLoadingItem] = useState(null);
   const [diagnosticResult, setDiagnosticResult] = useState(null);
+  const [migrationState, setMigrationState] = useState({
+    running: false,
+    progress: 0,
+    total: 0,
+    result: null
+  });
+
+  // Count entries needing migration
+  const entriesNeedingMigration = entries.filter(
+    e => e.createdOnPlatform === undefined || e.createdOnPlatform === null
+  ).length;
+
+  // Handle health enrichment migration
+  const handleHealthMigration = async () => {
+    if (!user?.uid || migrationState.running) return;
+
+    setMigrationState({ running: true, progress: 0, total: entriesNeedingMigration, result: null });
+
+    try {
+      const result = await migrateEntriesForHealthEnrichment(
+        entries,
+        user.uid,
+        db,
+        (current, total) => {
+          setMigrationState(prev => ({ ...prev, progress: current, total }));
+        }
+      );
+      setMigrationState(prev => ({ ...prev, running: false, result }));
+    } catch (error) {
+      console.error('Migration failed:', error);
+      setMigrationState(prev => ({
+        ...prev,
+        running: false,
+        result: { error: error.message }
+      }));
+    }
+  };
 
   // Handle diagnostic export
   const handleDiagnosticExport = () => {
@@ -247,6 +285,73 @@ const SettingsPage = ({
           {diagnosticResult?.error && (
             <div className="text-xs bg-red-50 text-red-600 rounded-lg p-3">
               Export failed: {diagnosticResult.error}
+            </div>
+          )}
+        </div>
+
+        {/* Health Data Migration */}
+        <div className="bg-white/30 backdrop-blur-sm border border-white/20 rounded-2xl overflow-hidden p-4 space-y-3">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-emerald-100 flex items-center justify-center">
+              <Heart size={20} className="text-emerald-600" />
+            </div>
+            <div className="flex-1">
+              <span className="font-medium text-warm-800">Prepare for Health Enrichment</span>
+              <p className="text-sm text-warm-500">
+                Flag old entries for health data when you open the mobile app
+              </p>
+            </div>
+          </div>
+
+          {entriesNeedingMigration > 0 ? (
+            <>
+              <p className="text-xs text-warm-600">
+                {entriesNeedingMigration} entries don't have platform tracking.
+                This will mark them so health data can be added when you open the mobile app.
+              </p>
+
+              <motion.button
+                onClick={handleHealthMigration}
+                disabled={migrationState.running}
+                className="w-full py-2.5 px-4 bg-emerald-500 hover:bg-emerald-600 disabled:bg-warm-300 text-white font-medium rounded-xl flex items-center justify-center gap-2 transition-colors"
+                whileTap={{ scale: 0.98 }}
+              >
+                {migrationState.running ? (
+                  <>
+                    <Loader2 size={18} className="animate-spin" />
+                    Migrating... {migrationState.progress}/{migrationState.total}
+                  </>
+                ) : (
+                  <>
+                    <Heart size={18} />
+                    Migrate {entriesNeedingMigration} Entries
+                  </>
+                )}
+              </motion.button>
+            </>
+          ) : (
+            <p className="text-xs text-emerald-600 bg-emerald-50 rounded-lg p-3">
+              ✓ All entries have platform tracking. Open the mobile app to enrich web entries with health data.
+            </p>
+          )}
+
+          {/* Show result after migration */}
+          {migrationState.result && !migrationState.result.error && (
+            <div className="text-xs bg-emerald-50 text-emerald-700 rounded-lg p-3 space-y-1">
+              <p className="font-medium">Migration Complete!</p>
+              <p>{migrationState.result.message}</p>
+              <div className="grid grid-cols-2 gap-1 mt-2">
+                <span>Migrated:</span>
+                <span className="font-mono">{migrationState.result.migrated}</span>
+                <span>Need health data:</span>
+                <span className="font-mono">{migrationState.result.entriesNeedingHealth}</span>
+              </div>
+            </div>
+          )}
+
+          {migrationState.result?.error && (
+            <div className="text-xs bg-red-50 text-red-600 rounded-lg p-3">
+              Migration failed: {migrationState.result.error}
             </div>
           )}
         </div>
