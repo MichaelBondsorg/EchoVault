@@ -32,6 +32,9 @@ import { computeThemesCorrelations } from './correlations/themesCorrelations';
 // Configuration
 import { THRESHOLDS, CATEGORIES } from './utils/thresholds';
 
+// Feedback learning
+import { filterInsightsByLearning } from './feedbackLearning';
+
 /**
  * Get Firestore document reference for basic insights
  * @param {string} userId - User ID
@@ -123,9 +126,39 @@ export const generateBasicInsights = async (userId, entries) => {
     const themesInsights = computeThemesCorrelations(entries);
     allInsights.push(...themesInsights);
 
-    // Sort all insights by strength and absolute mood delta
+    // 9. Apply feedback learning filter
+    // This adjusts confidence and suppresses insights with poor accuracy
+    const insightsWithLearning = await filterInsightsByLearning(userId, allInsights, entries.length);
+
+    // Separate shown vs suppressed insights
+    const shownInsights = insightsWithLearning.filter(i => i._showDecision?.show !== false);
+    const suppressedInsights = insightsWithLearning.filter(i => i._showDecision?.show === false);
+
+    if (suppressedInsights.length > 0) {
+      console.log(`[BasicInsights] Suppressed ${suppressedInsights.length} insights due to feedback learning`);
+    }
+
+    // Adjust strength based on confidence multiplier
+    for (const insight of shownInsights) {
+      if (insight._showDecision?.adjustedConfidence < 1.0) {
+        // If confidence is reduced, potentially downgrade strength
+        const multiplier = insight._showDecision.adjustedConfidence;
+        if (multiplier < 0.5 && insight.strength === 'strong') {
+          insight.strength = 'moderate';
+        } else if (multiplier < 0.7 && insight.strength === 'strong') {
+          insight.adjustedStrength = 'moderate'; // Keep original but mark adjusted
+        }
+        // Attach confidence for UI display
+        insight.learningConfidence = multiplier;
+        insight.learningReason = insight._showDecision.reason;
+      }
+      // Clean up internal field
+      delete insight._showDecision;
+    }
+
+    // Sort shown insights by strength and absolute mood delta
     const strengthOrder = { strong: 3, moderate: 2, weak: 1 };
-    allInsights.sort((a, b) => {
+    shownInsights.sort((a, b) => {
       // First by strength
       const strengthDiff = (strengthOrder[b.strength] || 0) - (strengthOrder[a.strength] || 0);
       if (strengthDiff !== 0) return strengthDiff;
@@ -134,7 +167,7 @@ export const generateBasicInsights = async (userId, entries) => {
     });
 
     // Limit to max insights
-    const topInsights = allInsights.slice(0, THRESHOLDS.MAX_INSIGHTS);
+    const topInsights = shownInsights.slice(0, THRESHOLDS.MAX_INSIGHTS);
 
     // Calculate timestamps
     const now = Timestamp.now();
@@ -157,6 +190,13 @@ export const generateBasicInsights = async (userId, entries) => {
         healthExtended: extendedHealthInsights.length,
         category: categoryInsights.length,
         themes: themesInsights.length
+      },
+      // Feedback learning stats
+      learningStats: {
+        totalGenerated: allInsights.length,
+        suppressed: suppressedInsights.length,
+        shown: shownInsights.length,
+        suppressedPatterns: suppressedInsights.map(i => i.id)
       }
     };
 

@@ -97,6 +97,11 @@ service cloud.firestore {
       match /insightFeedback/{feedbackId} {
         allow read, write: if isOwner(userId);
       }
+
+      // Insight Learning subcollection (aggregated learning from feedback)
+      match /insightLearning/{patternType} {
+        allow read, write: if isOwner(userId);
+      }
     }
 
     // Allow Cloud Functions to read/write with admin claims

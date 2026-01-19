@@ -8,9 +8,7 @@ import {
 import { useNexusInsights } from '../hooks/useNexusInsights';
 import { useBasicInsights } from '../hooks/useBasicInsights';
 import { useState, useEffect, useMemo, useCallback } from 'react';
-import { doc, setDoc, Timestamp } from 'firebase/firestore';
-import { db } from '../config/firebase';
-import { APP_COLLECTION_ID } from '../config/constants';
+import { recordFeedbackAndLearn } from '../services/basicInsights/feedbackLearning';
 import {
   computeHealthMoodCorrelations,
   getTopHealthInsights,
@@ -839,22 +837,16 @@ const QuickInsightsSection = ({
     URL.revokeObjectURL(url);
   }, [entries]);
 
-  // Submit feedback for an insight
+  // Submit feedback for an insight and update learning
   const handleFeedback = useCallback(async (insight, isPositive) => {
     if (!userId) return;
 
     try {
-      const feedbackRef = doc(
-        db,
-        'artifacts',
-        APP_COLLECTION_ID,
-        'users',
-        userId,
-        'insightFeedback',
-        `${insight.id}_${Date.now()}`
-      );
+      // Get the cited entries for learning analysis
+      const citedEntries = getFullEntriesForExport(insight.entryIds);
 
-      await setDoc(feedbackRef, {
+      // Record feedback and update learning model
+      const feedbackData = {
         insightId: insight.id,
         category: insight.category,
         insightText: insight.insight,
@@ -864,16 +856,26 @@ const QuickInsightsSection = ({
         peopleKey: insight.peopleKey || null,
         sampleSize: insight.sampleSize,
         entryIds: insight.entryIds || [],
-        feedback: isPositive ? 'accurate' : 'inaccurate',
-        submittedAt: Timestamp.now()
-      });
+        feedback: isPositive ? 'accurate' : 'inaccurate'
+      };
+
+      const learningResult = await recordFeedbackAndLearn(userId, feedbackData, citedEntries);
 
       setFeedbackSubmitted(prev => new Set([...prev, insight.id]));
-      console.log('[QuickInsights] Feedback submitted:', isPositive ? 'accurate' : 'inaccurate');
+
+      // Log learning outcome
+      if (learningResult) {
+        console.log('[QuickInsights] Feedback recorded with learning:', {
+          feedback: isPositive ? 'accurate' : 'inaccurate',
+          accuracyRate: `${(learningResult.accuracyRate * 100).toFixed(0)}%`,
+          confidenceMultiplier: learningResult.confidenceMultiplier.toFixed(2),
+          suppressed: learningResult.suppressed
+        });
+      }
     } catch (error) {
       console.error('[QuickInsights] Failed to submit feedback:', error);
     }
-  }, [userId]);
+  }, [userId, entries]);
 
   // Toggle showing all entries for an insight
   const toggleShowAll = (insightId) => {

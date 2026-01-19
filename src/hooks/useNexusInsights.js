@@ -3,10 +3,14 @@
  *
  * React hook for accessing Nexus 2.0 insights with automatic
  * caching, refresh, and loading states.
+ *
+ * Integrates with feedback learning to suppress/adjust insights
+ * based on user feedback history.
  */
 
 import { useState, useEffect, useCallback } from 'react';
 import { getCachedInsights, generateInsights } from '../services/nexus/orchestrator';
+import { getAllPatternLearning } from '../services/basicInsights/feedbackLearning';
 
 /**
  * Hook for accessing Nexus insights
@@ -27,6 +31,23 @@ export const useNexusInsights = (user, options = {}) => {
   const [error, setError] = useState(null);
   const [dataStatus, setDataStatus] = useState(null);
   const [lastGenerated, setLastGenerated] = useState(null);
+  const [learningData, setLearningData] = useState(new Map());
+
+  // Load feedback learning data
+  useEffect(() => {
+    if (!user?.uid) return;
+
+    const loadLearning = async () => {
+      try {
+        const learning = await getAllPatternLearning(user.uid);
+        setLearningData(learning);
+      } catch (err) {
+        console.warn('[useNexusInsights] Failed to load learning data:', err);
+      }
+    };
+
+    loadLearning();
+  }, [user?.uid]);
 
   // Load cached insights on mount
   useEffect(() => {
@@ -105,7 +126,38 @@ export const useNexusInsights = (user, options = {}) => {
     }
   }, [user?.uid, refreshing]);
 
-  // Combine active + history, dedupe, and filter by confidence
+  // Helper to extract pattern type from Nexus insight for learning lookup
+  const extractPatternTypeFromInsight = (insight) => {
+    const text = (insight.title || '') + ' ' + (insight.body || '') + ' ' + (insight.summary || '');
+    const textLower = text.toLowerCase();
+
+    // Map common patterns to learning keys
+    const patternMappings = [
+      { keywords: ['journal', 'writing', 'entry'], pattern: 'activity_journaling' },
+      { keywords: ['reading', 'book'], pattern: 'activity_reading' },
+      { keywords: ['exercise', 'workout', 'gym'], pattern: 'activity_exercise' },
+      { keywords: ['yoga', 'stretch'], pattern: 'activity_yoga' },
+      { keywords: ['meditation', 'mindful'], pattern: 'activity_meditation' },
+      { keywords: ['family', 'mom', 'dad', 'parent'], pattern: 'people_family' },
+      { keywords: ['friend'], pattern: 'people_friends' },
+      { keywords: ['partner', 'spouse', 'boyfriend', 'girlfriend'], pattern: 'people_partner' },
+      { keywords: ['gratitude', 'grateful', 'thankful'], pattern: 'theme_gratitude' },
+      { keywords: ['anxiety', 'anxious', 'stress'], pattern: 'theme_anxiety' },
+      { keywords: ['sleep', 'rest'], pattern: 'health_sleep' },
+      { keywords: ['weekend'], pattern: 'time_weekend' },
+      { keywords: ['morning'], pattern: 'time_morning' }
+    ];
+
+    for (const mapping of patternMappings) {
+      if (mapping.keywords.some(kw => textLower.includes(kw))) {
+        return mapping.pattern;
+      }
+    }
+
+    return null;
+  };
+
+  // Combine active + history, dedupe, filter by confidence and learning
   const allInsights = (() => {
     const seenIds = new Set();
     const combined = [];
@@ -126,13 +178,39 @@ export const useNexusInsights = (user, options = {}) => {
       }
     }
 
-    // Filter by confidence ≥50% (if confidence exists)
+    // Filter by confidence ≥50% (if confidence exists) and apply learning
     return combined.filter(i => {
       // Calibration insights always show
       if (i.type === 'calibration') return true;
+
+      // Check learning-based suppression
+      const patternType = extractPatternTypeFromInsight(i);
+      if (patternType && learningData.has(patternType)) {
+        const learning = learningData.get(patternType);
+        if (learning.suppressed) {
+          // Check if suppression expired
+          const suppressedAt = learning.suppressedAt?.toMillis?.() || learning.suppressedAt;
+          const expiryMs = 30 * 24 * 60 * 60 * 1000; // 30 days
+          const isExpiredSuppression = Date.now() - suppressedAt > expiryMs;
+
+          if (!isExpiredSuppression) {
+            console.log(`[useNexusInsights] Suppressing insight (pattern: ${patternType})`);
+            return false;
+          }
+        }
+      }
+
       // If no confidence specified, include it
       const confidence = i.confidence || i.evidence?.statistical?.confidence;
       if (confidence === undefined) return true;
+
+      // Apply learning confidence adjustment if available
+      if (patternType && learningData.has(patternType)) {
+        const learning = learningData.get(patternType);
+        const adjustedConfidence = confidence * (learning.confidenceMultiplier || 1.0);
+        return adjustedConfidence >= 0.5;
+      }
+
       return confidence >= 0.5;
     });
   })();
