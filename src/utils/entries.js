@@ -50,5 +50,12 @@ export const sanitizeEntry = (id, data) => {
       : [],
     // Context version for retrofit tracking (v1 = enhanced context extracted)
     context_version: data.context_version || 0,
+    // Health and environment context
+    healthContext: data.healthContext || null,
+    environmentContext: data.environmentContext || null,
+    // Platform tracking for health enrichment
+    createdOnPlatform: data.createdOnPlatform || null,
+    needsHealthContext: data.needsHealthContext ?? null,
+    healthEnrichmentAttempted: data.healthEnrichmentAttempted ?? null,
   };
 };
