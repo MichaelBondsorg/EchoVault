@@ -282,6 +282,7 @@ const AppLayout = ({
             element={
               <SettingsPage
                 user={user}
+                entries={entries}
                 onOpenHealthSettings={onShowHealthSettings}
                 onOpenNexusSettings={onShowNexusSettings}
                 onOpenEntityManagement={onShowEntityManagement}

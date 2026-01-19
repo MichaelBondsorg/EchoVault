@@ -36,7 +36,49 @@ const extractPeople = (entry) => {
   const people = new Map();
   const text = (entry.content || entry.text || '').toLowerCase();
 
-  // Source 1: analysis.entities (AI-extracted named entities)
+  // Source 1: Structured tags from entry.tags (e.g., @person:spencer, @pet:sterling)
+  // This is where the enhanced context extraction stores people
+  if (Array.isArray(entry.tags)) {
+    for (const tag of entry.tags) {
+      const tagLower = (tag || '').toLowerCase();
+
+      // Extract @person:name tags
+      if (tagLower.startsWith('@person:')) {
+        const name = tag.replace(/@person:/i, '').replace(/_/g, ' ');
+        const key = name.toLowerCase();
+        if (name.length > 2 && !people.has(key)) {
+          // Capitalize name properly
+          const displayName = name.split(' ')
+            .map(w => w.charAt(0).toUpperCase() + w.slice(1))
+            .join(' ');
+          people.set(key, {
+            name: displayName,
+            type: 'person',
+            source: 'tags'
+          });
+        }
+      }
+
+      // Extract @pet:name tags
+      if (tagLower.startsWith('@pet:')) {
+        const name = tag.replace(/@pet:/i, '').replace(/_/g, ' ');
+        const key = name.toLowerCase();
+        if (name.length > 2 && !people.has(key)) {
+          const displayName = name.split(' ')
+            .map(w => w.charAt(0).toUpperCase() + w.slice(1))
+            .join(' ');
+          people.set(key, {
+            name: displayName,
+            type: 'pet',
+            source: 'tags',
+            emoji: '🐾'
+          });
+        }
+      }
+    }
+  }
+
+  // Source 2: analysis.entities (AI-extracted named entities)
   if (entry.analysis?.entities && Array.isArray(entry.analysis.entities)) {
     for (const entity of entry.analysis.entities) {
       if (entity.name && entity.name.length > 2) {
@@ -52,7 +94,7 @@ const extractPeople = (entry) => {
     }
   }
 
-  // Source 2: memoryMentions (from memory graph)
+  // Source 3: memoryMentions (from memory graph)
   if (entry.memoryMentions && Array.isArray(entry.memoryMentions)) {
     for (const mention of entry.memoryMentions) {
       if (mention.name && mention.name.length > 2) {
@@ -68,7 +110,7 @@ const extractPeople = (entry) => {
     }
   }
 
-  // Source 3: Pattern matching for common groups
+  // Source 5: Pattern matching for common groups
   for (const [groupKey, config] of Object.entries(PEOPLE_PATTERNS)) {
     for (const pattern of config.patterns) {
       // Reset lastIndex for global regex

@@ -1,6 +1,6 @@
 # EchoVault Project Status
 
-> **Last Updated:** 2026-01-18
+> **Last Updated:** 2026-01-19 (Quick Insights fixes)
 > **Updated By:** Claude (via conversation with Michael)
 
 ---
@@ -17,30 +17,31 @@
 
 | Item | Status | Notes |
 |------|--------|-------|
+| **Nexus 2.0 Insights Engine** | ✅ Complete | All 4 layers implemented (pattern detection, baselines, LLM synthesis, interventions) |
 | **Multi-Provider Authentication** | ✅ Complete | Google, Apple (iOS only), Email/Password with MFA support |
 | **App Store Readiness** | ✅ Complete | Crashlytics, Fastlane, testing, accessibility, performance optimization |
 | Health & Environment Insights UI | ✅ Complete | Correlation insights, context prompts, recommendations, environment backfill |
-| Nexus 2.0 Insights Engine | 📋 Spec Complete | Full implementation spec created. Replaces entire existing insights system. |
 | Entity Management (Milestone 1.5) | ✅ Complete | Entity resolution for voice transcription + migration from older entries |
 | HealthKit Integration (Expanded) | ✅ Complete | Sleep stages, smart merge with Whoop, health backfill feature |
 | Whoop Integration | ✅ Complete | OAuth working, cloud sync, recovery/strain/sleep data |
 
-### Nexus 2.0 Implementation Phases
+---
 
-- [ ] **Phase 1:** Layer 1 + Layer 2 foundation (Days 1-3)
-- [ ] **Phase 2:** Layer 3 LLM synthesis (Days 4-6)
-- [ ] **Phase 3:** Layer 4 + orchestration (Days 7-8)
-- [ ] **Phase 4:** UI + settings (Days 9-10)
-- [ ] **Phase 5:** Migration + launch (Days 11-12)
+## Roadmap / Future Work
+
+| Item | Priority | Plan Document | Notes |
+|------|----------|---------------|-------|
+| **Architecture Restructuring** | High | `.claude/plans/eventual-floating-rabin.md` | 5-phase plan: state management (Zustand), database abstraction, Cloud Functions splitting, component decomposition, TypeScript migration. Phases 0-2 complete, Phase 3 in progress. |
+| **App Rename: EchoVault → Engram** | Medium | `docs/ENGRAM-RENAME-PLAN.md` | Name reserved in App Store Connect. 9-phase implementation plan ready. Requires domain setup (theengram.app), OAuth console updates. |
 
 ---
 
 ## Current Priorities (Ordered)
 
-1. **Ship Nexus 2.0** — Nothing else matters until insights are genuinely valuable
-2. **Get 10 external users** — Need real feedback beyond Michael
-3. **Collect feedback** — Instrument what insights get engagement
-4. **Iterate** — Based on what users actually respond to
+1. **Get 10 external users** — Need real feedback beyond Michael
+2. **Collect feedback** — Instrument what insights get engagement
+3. **Iterate** — Based on what users actually respond to
+4. **App Store submission** — Submit to iOS App Store and Google Play
 
 ---
 
@@ -105,11 +106,47 @@ Good ideas we're explicitly NOT doing now. Don't re-suggest these.
 | Issue | Severity | Notes |
 |-------|----------|-------|
 | `APP_COLLECTION_ID` hardcoded in `leadershipThreads.js` | Low | Fix during Nexus 2.0 implementation |
-| `App.jsx` is 71KB | Medium | Lazy loading infrastructure ready (`src/components/lazy.jsx`), needs route-level integration |
-| `functions/index.js` is monolithic | Medium | Consider splitting post-launch |
+| `App.jsx` is 2,421 lines | High | Restructuring plan created - Zustand stores ready in `src/stores/`, migration pending |
+| `functions/index.js` is 4,390 lines | High | Restructuring plan created - shared utilities extracted to `functions/src/shared/`, domain split pending |
+| 365 useState across 94 files | Medium | Restructuring plan created - Zustand stores ready to consolidate state |
+| Direct Firestore in 34 files | Medium | Restructuring plan created - repository layer ready in `src/repositories/` |
 | Test coverage improving | Low | 76 tests passing (safety, crash reporting, signal lifecycle). Add more as needed. |
 | Main bundle 631KB | Medium | Above 500KB warning threshold. Code splitting ready but App.jsx still static imports. |
 | Existing insights files to delete | High | Part of Nexus 2.0 Phase 1 |
+| **Health context not being captured** | High | Whoop connected but `healthContext` is null on entries. See Investigation Notes below. |
+| **Old entries missing location data** | Medium | Environment backfill requires `entry.location` but old entries don't have it. New entries now capture location. |
+| **Analysis not extracting themes/emotions** | Low | Cloud Function `analyzeEntry` prompt doesn't request themes/emotions fields. Would need prompt update. |
+
+### Investigation Notes: Health Context Not Captured
+
+**Symptoms:**
+- User has Whoop connected (confirmed in Health Settings)
+- User has Apple Watch connected via HealthKit
+- New journal entries have `healthContext: null`
+- Health backfill reports 0 entries updated
+
+**Debug Steps:**
+1. When creating an entry, check browser console for:
+   ```
+   [HealthDataService] getEntryHealthContext called
+   [HealthDataService] Whoop linked: true/false
+   [HealthDataService] getHealthSummary returned: {...}
+   ```
+2. If `Whoop linked: false`, check:
+   - Settings → Health → Whoop status
+   - Relay server is running and accessible
+   - Whoop OAuth tokens in Firestore (`users/{uid}/integrations/whoop_tokens`)
+3. If `Whoop linked: true` but `summary.available: false`:
+   - Check relay server logs for API errors
+   - Verify Whoop API credentials in Cloud Run Secret Manager
+   - Check if Whoop subscription is active
+4. If on iOS, verify HealthKit permissions are granted in Settings
+
+**Root Cause Candidates:**
+- Relay server not deployed or not accessible from client
+- Whoop tokens expired and not refreshing
+- HealthKit permissions not granted or hanging
+- `getHealthSummary()` returning `{ available: false }` silently
 
 ---
 
@@ -190,6 +227,142 @@ Good ideas we're explicitly NOT doing now. Don't re-suggest these.
 ---
 
 ## Session Notes
+
+### 2026-01-19: Quick Insights Diagnosis & Fixes
+
+**Context:** User reported Quick Insights showing 0 insights despite 140 journal entries with rich data.
+
+**Root Causes Identified:**
+
+1. **Tag location mismatch**: Correlation code looked for `entry.analysis.tags` but structured tags (`@person:spencer`, `@activity:yoga`) are stored at `entry.tags`
+2. **Missing healthContext**: All 140 entries have `healthContext: null` despite Whoop being connected
+3. **Missing environmentContext**: All entries have `environmentContext: null` because old entries lack `entry.location` field
+4. **Analysis not extracting themes/emotions**: Cloud Function prompt doesn't request these fields
+
+**Fixes Applied:**
+
+1. **Activity correlations** (`activityCorrelations.js`):
+   - Now checks `entry.tags` in addition to `entry.analysis.tags`
+   - Handles structured tags like `@activity:yoga`, `@activity:hiking`
+
+2. **People correlations** (`peopleCorrelations.js`):
+   - Now extracts from `entry.tags` including `@person:`, `@pet:` prefixed tags
+   - Properly capitalizes names for display
+
+3. **Themes correlations** (`themesCorrelations.js`):
+   - Now checks `entry.tags`, `entry.analysis.themes`, AND entry text
+   - Matches theme keywords from any source
+
+4. **Location capture at entry creation** (`App.jsx`):
+   - New entries now save `entry.location` separately from `environmentContext`
+   - Enables future environment backfill even if weather fetch fails
+
+5. **Diagnostic export tool** (`diagnosticExport.js`, `SettingsPage.jsx`):
+   - Added JSON export in Settings → Data section
+   - Shows summary statistics (mood scores, health data, tags, etc.)
+   - Useful for debugging data structure issues
+
+**Result:** Activity and people insights now working based on tag data.
+
+**Remaining Investigation:** Why healthContext isn't being captured despite Whoop being connected (see Known Issues).
+
+**Files Created:**
+- `src/utils/diagnosticExport.js` - Diagnostic JSON export utility
+
+**Files Modified:**
+- `src/services/basicInsights/correlations/activityCorrelations.js`
+- `src/services/basicInsights/correlations/peopleCorrelations.js`
+- `src/services/basicInsights/correlations/themesCorrelations.js`
+- `src/App.jsx` - Location capture, getCurrentLocation import
+- `src/pages/SettingsPage.jsx` - Diagnostic export button
+- `src/components/zen/AppLayout.jsx` - Pass entries to SettingsPage
+
+---
+
+### 2026-01-19: Architecture Restructuring (Phases 0-3 Partial)
+
+**Context:** App.jsx is 2,421 lines with 28+ useState calls, functions/index.js is 4,390 lines. Plan created to restructure into modular, maintainable architecture.
+
+**What Was Done:**
+
+1. **Phase 0: Foundation**
+   - Created `src/utils/statistics.js` - extracted `average()`, `median()`, `stdDev()`, `pearsonCorrelation()` from duplicated code in healthCorrelations.js and environmentCorrelations.js
+   - Created `src/types/` directory with TypeScript definitions for IDE support:
+     - `entries.d.ts` - Entry, AnalysisResult, HealthContext, EnvironmentContext
+     - `signals.d.ts` - Signal, SignalState, StateTransition, GoalSignal, etc.
+     - `health.d.ts` - HealthCorrelation, WhoopTokens, HealthSettings
+     - `user.d.ts` - UserProfile, SafetyPlan, UserPreferences
+   - Created `tsconfig.json` with `allowJs: true` for gradual TypeScript adoption
+
+2. **Phase 1: Zustand State Management**
+   - Installed Zustand (`npm install zustand`)
+   - Created 5 domain stores in `src/stores/`:
+     - `authStore.js` - user, authMode, email, password, MFA state (~400 lines from App.jsx)
+     - `uiStore.js` - view, modals (showInsights, showSafetyPlan, etc.) (~200 lines)
+     - `entriesStore.js` - entries, processing, offlineQueue, retrofitProgress (~300 lines)
+     - `safetyStore.js` - safetyPlan, crisisModal, pendingEntry (~100 lines)
+     - `signalsStore.js` - detectedSignals, showDetectedStrip (~100 lines)
+   - Created `src/stores/index.js` with exports and `resetAllStores()` helper
+
+3. **Phase 2: Repository Pattern**
+   - Created `src/repositories/` with database abstraction layer:
+     - `base.js` - BaseRepository class with CRUD, batch, transaction methods
+     - `entries.js` - EntriesRepository (findByCategory, findByDate, updateAnalysis, etc.)
+     - `signals.js` - SignalsRepository + ExclusionsRepository (findActiveGoals, transitionState, etc.)
+     - `health.js` - HealthRepository (Whoop tokens, health settings, data cache)
+     - `users.js` - UsersRepository (profile, safety plan, preferences, notifications)
+
+4. **Phase 3: Cloud Functions (Partial)**
+   - Created `functions/src/` directory structure (ai/, triggers/, scheduled/, auth/, shared/)
+   - Extracted shared utilities:
+     - `shared/gemini.js` - Gemini API helper with embedding support
+     - `shared/openai.js` - OpenAI chat, Whisper, embedding helpers
+     - `shared/entityResolution.js` - Levenshtein distance, fuzzy matching
+     - `shared/constants.js` - APP_COLLECTION_ID, AI_CONFIG, timeouts
+
+**Remaining Work (Future Sessions):**
+
+- [ ] **App.jsx Migration** - Replace useState calls with store hooks (incremental, ~1 store at a time)
+- [ ] **Cloud Functions Domain Split** - Move functions from index.js to domain modules
+- [ ] **Phase 4: Component Decomposition** - Extract features to `src/features/` structure
+- [ ] **Phase 5: TypeScript Migration** - Convert critical paths (.js → .ts)
+
+**How to Continue:**
+
+1. **Migrate App.jsx to Zustand (safest first):**
+   ```jsx
+   // Before (in App.jsx):
+   const [showInsights, setShowInsights] = useState(false);
+
+   // After:
+   import { useUiStore } from './stores';
+   const { showInsights, toggleInsights } = useUiStore();
+   ```
+
+2. **Migrate services to repositories:**
+   ```javascript
+   // Before (direct Firestore):
+   const docRef = doc(db, 'artifacts', APP_COLLECTION_ID, 'users', userId, 'entries', entryId);
+   await updateDoc(docRef, { text: newText });
+
+   // After (repository):
+   import { entriesRepository } from './repositories';
+   await entriesRepository.updateText(userId, entryId, newText);
+   ```
+
+3. **Split Cloud Functions** - Import from shared, export from domain modules
+
+**Key Files Created:**
+| File | Purpose |
+|------|---------|
+| `src/utils/statistics.js` | Shared statistical functions |
+| `src/types/*.d.ts` | TypeScript type definitions (5 files) |
+| `src/stores/*.js` | Zustand stores (6 files) |
+| `src/repositories/*.js` | Repository pattern (5 files) |
+| `functions/src/shared/*.js` | Cloud Functions shared utilities (5 files) |
+| `tsconfig.json` | TypeScript configuration |
+
+---
 
 ### 2026-01-18: Multi-Provider Authentication
 

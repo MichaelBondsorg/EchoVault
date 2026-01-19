@@ -154,12 +154,33 @@ EchoVault is a mental health journaling application (v2.0.0) that helps users pr
 │   ├── nexus/      # Nexus insight engine (4 layers)
 │   ├── prompts/    # Context-aware reflection prompts
 │   └── safety/     # Crisis detection
+├── stores/         # Zustand state stores (NEW - migration in progress)
+│   ├── authStore.js      # User auth, login modes, MFA
+│   ├── uiStore.js        # Views, modals, navigation
+│   ├── entriesStore.js   # Entries, processing, offline queue
+│   ├── safetyStore.js    # Safety plan, crisis state
+│   └── signalsStore.js   # Detected signals, extraction
+├── repositories/   # Database abstraction layer (NEW - migration in progress)
+│   ├── base.js           # BaseRepository with CRUD operations
+│   ├── entries.js        # Journal entry operations
+│   ├── signals.js        # Signal state operations
+│   ├── health.js         # Health data operations
+│   └── users.js          # User profile/settings operations
+├── types/          # TypeScript type definitions (NEW)
+│   ├── entries.d.ts      # Entry, AnalysisResult types
+│   ├── signals.d.ts      # Signal, SignalState types
+│   ├── health.d.ts       # HealthContext, Correlation types
+│   └── user.d.ts         # User, SafetyPlan types
 ├── hooks/          # Custom React hooks
 ├── pages/          # Page components
 ├── config/         # Firebase config, constants
-└── utils/          # Date, string, audio utilities
+└── utils/          # Date, string, audio, statistics utilities
 
-/functions/         # Firebase Cloud Functions (single index.js)
+/functions/         # Firebase Cloud Functions
+├── index.js        # Main exports (4,390 lines - splitting in progress)
+└── src/            # NEW modular structure
+    └── shared/     # Shared utilities (gemini, openai, entityResolution)
+
 /relay-server/      # Voice relay server (TypeScript)
 /android/           # Android native app
 /ios/               # iOS native app
@@ -284,6 +305,80 @@ Server-side AI processing via `httpsCallable`:
 - `transcribeAudioFn` - Audio transcription (540s timeout)
 - `askJournalAIFn` - Chat completions
 - `executePromptFn` - Custom prompt execution
+
+### Zustand State Management (NEW - Migration In Progress)
+
+The codebase is transitioning from `useState` in App.jsx to Zustand stores. Stores are ready but migration is incremental.
+
+**Available Stores (`src/stores/`):**
+
+| Store | State Managed | Key Actions |
+|-------|---------------|-------------|
+| `authStore` | user, authMode, email, password, MFA | `setUser`, `startAuth`, `authFailed`, `switchToMfa` |
+| `uiStore` | view, modals (showInsights, etc.) | `setView`, `toggleInsights`, `closeAllModals` |
+| `entriesStore` | entries, processing, offlineQueue | `setEntries`, `addEntry`, `startProcessing` |
+| `safetyStore` | safetyPlan, crisisModal, pendingEntry | `setSafetyPlan`, `startCrisisFlow`, `endCrisisFlow` |
+| `signalsStore` | detectedSignals, showDetectedStrip | `handleSignalDetection`, `dismissStrip` |
+
+**Usage:**
+```javascript
+// Import from stores
+import { useAuthStore, useUiStore } from './stores';
+
+// In component
+const { user, setUser } = useAuthStore();
+const { showInsights, toggleInsights } = useUiStore();
+
+// Selector hooks for common patterns
+import { useUser, useIsAuthenticated } from './stores';
+const user = useUser();
+const isLoggedIn = useIsAuthenticated();
+```
+
+**Migration Status:** Stores created, App.jsx still uses useState. Migrate one store at a time for safety.
+
+### Repository Pattern (NEW - Migration In Progress)
+
+Database access is transitioning from direct Firestore calls to repositories for consistency and testability.
+
+**Available Repositories (`src/repositories/`):**
+
+| Repository | Collection | Key Methods |
+|------------|------------|-------------|
+| `entriesRepository` | entries | `createEntry`, `findByDate`, `updateAnalysis`, `findRecent` |
+| `signalsRepository` | signal_states | `createSignal`, `transitionState`, `findActiveGoals` |
+| `exclusionsRepository` | insight_exclusions | `addExclusion`, `isExcluded`, `findActive` |
+| `healthRepository` | health_data, integrations | `getWhoopTokens`, `saveHealthSettings`, `cacheHealthData` |
+| `usersRepository` | profile, settings | `getSafetyPlan`, `saveSafetyPlan`, `getPreferences` |
+
+**Usage:**
+```javascript
+// Import repository
+import { entriesRepository, signalsRepository } from './repositories';
+
+// CRUD operations
+const entry = await entriesRepository.createEntry(userId, { text, category });
+const entries = await entriesRepository.findByDate(userId, '2026-01-19');
+await entriesRepository.updateAnalysis(userId, entryId, analysisResult);
+
+// Signal operations
+const goals = await signalsRepository.findActiveGoals(userId);
+await signalsRepository.transitionState(userId, signalId, 'active', { reason: 'user confirmed' });
+```
+
+**Migration Status:** Repositories created, services still use direct Firestore. Migrate one service at a time.
+
+### TypeScript Support (NEW)
+
+Type definitions are available in `src/types/` for IDE support without full TypeScript migration.
+
+**Key Types:**
+- `Entry`, `AnalysisResult`, `HealthContext`, `EnvironmentContext` (entries.d.ts)
+- `Signal`, `SignalState`, `GoalSignal`, `InsightSignal` (signals.d.ts)
+- `HealthCorrelation`, `WhoopTokens`, `HealthSettings` (health.d.ts)
+- `UserProfile`, `SafetyPlan`, `UserPreferences` (user.d.ts)
+
+**tsconfig.json** is configured with `allowJs: true` for gradual adoption.
 
 ## Development Commands
 

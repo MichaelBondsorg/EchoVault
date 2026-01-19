@@ -9,60 +9,7 @@
  */
 
 import { extractHealthSignals } from './healthFormatter';
-
-/**
- * Helper: Calculate average of array
- */
-const average = (arr) => {
-  if (!arr || arr.length === 0) return 0;
-  return arr.reduce((a, b) => a + b, 0) / arr.length;
-};
-
-/**
- * Helper: Calculate median of array
- */
-const median = (arr) => {
-  if (!arr || arr.length === 0) return 0;
-  const sorted = [...arr].sort((a, b) => a - b);
-  const mid = Math.floor(sorted.length / 2);
-  return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
-};
-
-/**
- * Helper: Calculate standard deviation
- */
-const stdDev = (arr) => {
-  if (!arr || arr.length < 2) return 0;
-  const avg = average(arr);
-  const squareDiffs = arr.map(v => Math.pow(v - avg, 2));
-  return Math.sqrt(average(squareDiffs));
-};
-
-/**
- * Helper: Calculate Pearson correlation coefficient
- */
-const pearsonCorrelation = (x, y) => {
-  if (x.length !== y.length || x.length < 3) return 0;
-
-  const n = x.length;
-  const avgX = average(x);
-  const avgY = average(y);
-
-  let numerator = 0;
-  let denomX = 0;
-  let denomY = 0;
-
-  for (let i = 0; i < n; i++) {
-    const diffX = x[i] - avgX;
-    const diffY = y[i] - avgY;
-    numerator += diffX * diffY;
-    denomX += diffX * diffX;
-    denomY += diffY * diffY;
-  }
-
-  if (denomX === 0 || denomY === 0) return 0;
-  return numerator / Math.sqrt(denomX * denomY);
-};
+import { average, median, stdDev, pearsonCorrelation } from '../../utils/statistics';
 
 /**
  * Compute correlations between health metrics and mood

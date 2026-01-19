@@ -1,0 +1,58 @@
+{
+  "compilerOptions": {
+    // Allow JavaScript files alongside TypeScript
+    "allowJs": true,
+    "checkJs": false,
+
+    // Module resolution
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "resolveJsonModule": true,
+    "esModuleInterop": true,
+
+    // Target modern JavaScript
+    "target": "ES2020",
+    "lib": ["ES2020", "DOM", "DOM.Iterable"],
+
+    // Strict type checking for new TypeScript files
+    "strict": true,
+    "noImplicitAny": true,
+    "strictNullChecks": true,
+
+    // Output settings (Vite handles actual compilation)
+    "noEmit": true,
+    "skipLibCheck": true,
+
+    // JSX support for React
+    "jsx": "react-jsx",
+
+    // Path aliases (match Vite config if added later)
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["src/*"],
+      "@components/*": ["src/components/*"],
+      "@services/*": ["src/services/*"],
+      "@hooks/*": ["src/hooks/*"],
+      "@utils/*": ["src/utils/*"],
+      "@types/*": ["src/types/*"],
+      "@stores/*": ["src/stores/*"],
+      "@features/*": ["src/features/*"],
+      "@repositories/*": ["src/repositories/*"]
+    },
+
+    // Include type definitions
+    "types": ["vite/client"]
+  },
+  "include": [
+    "src/**/*.ts",
+    "src/**/*.tsx",
+    "src/**/*.d.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist",
+    "build",
+    "functions",
+    "relay-server"
+  ]
+}

@@ -124,8 +124,25 @@ export const computeThemesCorrelations = (entries) => {
   // ===== THEME CORRELATIONS =====
   for (const [themeKey, config] of Object.entries(THEME_AGGREGATIONS)) {
     const matchingEntries = entriesWithMood.filter(entry => {
-      const themes = entry.analysis?.themes || [];
-      return themes.some(theme => matchesThemeGroup(theme, config.patterns));
+      // Check analysis.themes (AI-extracted themes)
+      const analysisThemes = entry.analysis?.themes || [];
+      if (analysisThemes.some(theme => matchesThemeGroup(theme, config.patterns))) {
+        return true;
+      }
+
+      // Check entry.tags (structured tags like @topic:anxiety, @situation:stress)
+      const tags = entry.tags || [];
+      if (tags.some(tag => matchesThemeGroup(tag, config.patterns))) {
+        return true;
+      }
+
+      // Check entry text for theme patterns
+      const text = (entry.content || entry.text || '').toLowerCase();
+      if (config.patterns.some(p => text.includes(p))) {
+        return true;
+      }
+
+      return false;
     });
 
     if (matchingEntries.length < THRESHOLDS.MIN_MENTIONS) continue;

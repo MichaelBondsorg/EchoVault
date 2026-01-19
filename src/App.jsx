@@ -52,7 +52,7 @@ import { processEntrySignals } from './services/signals/processEntrySignals';
 import { updateSignalStatus, batchUpdateSignalStatus } from './services/signals';
 import { runEntryPostProcessing } from './services/background';
 import { getEntryHealthContext, handleWhoopOAuthSuccess } from './services/health';
-import { getEntryEnvironmentContext } from './services/environment';
+import { getEntryEnvironmentContext, getCurrentLocation } from './services/environment';
 import { updateInsightsForNewEntry } from './services/nexus/orchestrator';
 
 // Hooks
@@ -836,6 +836,23 @@ export default function App() {
       console.warn('Could not capture health context:', healthError.message);
     }
 
+    // Capture location separately (for environment backfill even if weather fails)
+    let entryLocation = null;
+    try {
+      const locationResult = await getCurrentLocation();
+      if (locationResult?.latitude && locationResult?.longitude) {
+        entryLocation = {
+          latitude: locationResult.latitude,
+          longitude: locationResult.longitude,
+          accuracy: locationResult.accuracy,
+          cached: locationResult.cached || false
+        };
+        console.log('Location captured:', entryLocation);
+      }
+    } catch (locError) {
+      console.warn('Could not capture location:', locError.message);
+    }
+
     // Capture environment context (weather, light, sun times) if available
     let environmentContext = null;
     try {
@@ -875,6 +892,11 @@ export default function App() {
       // Store environment context if available (weather, light, sun times)
       if (environmentContext) {
         entryData.environmentContext = environmentContext;
+      }
+
+      // Store location separately (enables environment backfill even if weather fetch failed)
+      if (entryLocation) {
+        entryData.location = entryLocation;
       }
 
       // Store voice tone analysis if available (from voice recording)

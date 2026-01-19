@@ -48,14 +48,31 @@ const extractActivities = (entry) => {
     activities.add('exercise');
   }
 
-  // Source 3: analysis.tags
-  if (entry.analysis?.tags && Array.isArray(entry.analysis.tags)) {
-    for (const tag of entry.analysis.tags) {
-      const tagLower = tag.toLowerCase();
+  // Source 3: tags (check both entry.tags and entry.analysis.tags)
+  // Note: Structured tags like @activity:yoga are stored at entry.tags
+  const allTags = [
+    ...(Array.isArray(entry.tags) ? entry.tags : []),
+    ...(Array.isArray(entry.analysis?.tags) ? entry.analysis.tags : [])
+  ];
+
+  for (const tag of allTags) {
+    const tagLower = (tag || '').toLowerCase();
+
+    // Check for structured activity tags (e.g., @activity:yoga)
+    if (tagLower.startsWith('@activity:')) {
+      const activityName = tagLower.replace('@activity:', '').replace(/_/g, ' ');
+      // Map to known activity keys
       for (const [activityKey, config] of Object.entries(ACTIVITY_PATTERNS)) {
-        if (config.patterns.some(p => p.test(tagLower))) {
+        if (config.patterns.some(p => p.test(activityName))) {
           activities.add(activityKey);
         }
+      }
+    }
+
+    // Also check regular tags against patterns
+    for (const [activityKey, config] of Object.entries(ACTIVITY_PATTERNS)) {
+      if (config.patterns.some(p => p.test(tagLower))) {
+        activities.add(activityKey);
       }
     }
   }
