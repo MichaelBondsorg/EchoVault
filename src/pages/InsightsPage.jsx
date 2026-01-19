@@ -205,6 +205,13 @@ const InsightsPage = ({
         </button>
       </div>
 
+      {/* Disclaimer Note */}
+      <div className="bg-warm-50/50 border border-warm-200/30 rounded-xl px-4 py-3">
+        <p className="text-xs text-warm-500 leading-relaxed">
+          <span className="font-medium">Note:</span> Insights are only as good as your data. The more consistently you journal, the more accurate and personalized these patterns become.
+        </p>
+      </div>
+
       {/* Generation Status */}
       <GenerationStatus
         loading={loading}
@@ -1051,13 +1058,6 @@ const QuickInsightsSection = ({
             />
           </button>
         )}
-      </div>
-
-      {/* Disclaimer Note */}
-      <div className="px-4 pb-2">
-        <p className="text-xs text-warm-400 italic">
-          Insights improve with more entries. The more consistently you journal, the more accurate these patterns become.
-        </p>
       </div>
 
       {/* Insights Grid */}
