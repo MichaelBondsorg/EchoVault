@@ -27,6 +27,15 @@ export const exportDiagnosticJSON = (entries, options = {}) => {
     entriesWithTags: entries.filter(e => e.analysis?.tags?.length > 0).length,
     entriesWithThemes: entries.filter(e => e.analysis?.themes?.length > 0).length,
     entriesWithEmotions: entries.filter(e => e.analysis?.emotions?.length > 0).length,
+    // Platform tracking stats
+    entriesWithPlatformTracking: entries.filter(e => e.createdOnPlatform).length,
+    entriesNeedingHealthEnrichment: entries.filter(e => e.needsHealthContext === true).length,
+    platformBreakdown: {
+      web: entries.filter(e => e.createdOnPlatform === 'web').length,
+      ios: entries.filter(e => e.createdOnPlatform === 'ios').length,
+      android: entries.filter(e => e.createdOnPlatform === 'android').length,
+      unknown: entries.filter(e => !e.createdOnPlatform).length,
+    },
   };
 
   // Analyze mood score distribution
@@ -74,6 +83,10 @@ export const exportDiagnosticJSON = (entries, options = {}) => {
     context_version: entry.context_version,
     tags: entry.tags,
     title: entry.title,
+    // Platform tracking fields
+    createdOnPlatform: entry.createdOnPlatform || null,
+    needsHealthContext: entry.needsHealthContext ?? null,
+    healthEnrichmentAttempted: entry.healthEnrichmentAttempted ?? null,
   }));
 
   const exportData = {
