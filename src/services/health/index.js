@@ -54,6 +54,13 @@ export {
   getBackfillCount
 } from './healthBackfill';
 
+// Entry health enrichment (enrich web entries when viewed on mobile)
+export {
+  needsHealthEnrichment,
+  enrichEntryWithHealth,
+  batchEnrichEntries
+} from './entryHealthEnrichment';
+
 // Platform-specific (typically don't need direct access)
 export * as healthKit from './healthKit';
 export * as googleFit from './googleFit';

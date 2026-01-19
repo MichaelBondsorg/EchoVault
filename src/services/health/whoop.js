@@ -37,12 +37,30 @@ const getAuthToken = async () => {
 };
 
 /**
- * Make authenticated request to relay server
+ * Wrap a promise with a timeout
  */
-const relayFetch = async (endpoint, options = {}) => {
-  const token = await getAuthToken();
+const withTimeout = (promise, ms, message = 'Request timed out') => {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) =>
+      setTimeout(() => reject(new Error(message)), ms)
+    )
+  ]);
+};
 
-  const response = await fetch(`${RELAY_URL}${endpoint}`, {
+/**
+ * Make authenticated request to relay server with timeout
+ */
+const relayFetch = async (endpoint, options = {}, timeoutMs = 10000) => {
+  console.log(`[Whoop] relayFetch: ${endpoint}`);
+
+  const token = await withTimeout(
+    getAuthToken(),
+    5000,
+    'Auth token fetch timed out'
+  );
+
+  const fetchPromise = fetch(`${RELAY_URL}${endpoint}`, {
     ...options,
     headers: {
       ...options.headers,
@@ -51,12 +69,21 @@ const relayFetch = async (endpoint, options = {}) => {
     },
   });
 
+  const response = await withTimeout(
+    fetchPromise,
+    timeoutMs,
+    `Whoop API request timed out after ${timeoutMs}ms`
+  );
+
   if (!response.ok) {
     const error = await response.json().catch(() => ({ error: 'Request failed' }));
+    console.error(`[Whoop] relayFetch error: ${response.status}`, error);
     throw new Error(error.error || `HTTP ${response.status}`);
   }
 
-  return response.json();
+  const data = await response.json();
+  console.log(`[Whoop] relayFetch success:`, endpoint, { available: data.available });
+  return data;
 };
 
 /**
@@ -64,19 +91,24 @@ const relayFetch = async (endpoint, options = {}) => {
  * Checks local cache first, then verifies with server
  */
 export const isWhoopLinked = async () => {
+  console.log('[Whoop] isWhoopLinked called');
+
   // Quick check from local storage
   try {
     const { value } = await Preferences.get({ key: WHOOP_STATUS_KEY });
+    console.log('[Whoop] Local storage status:', value);
     if (value === 'true') {
       // Verify with server in background (don't block)
-      verifyWhoopStatus().catch(console.error);
+      verifyWhoopStatus().catch(err =>
+        console.warn('[Whoop] Background verification failed:', err.message)
+      );
       return true;
     }
-  } catch {
-    // Ignore local storage errors
+  } catch (e) {
+    console.warn('[Whoop] Local storage check failed:', e.message);
   }
 
-  // Check with server
+  // Check with server (with shorter timeout for status check)
   return verifyWhoopStatus();
 };
 
@@ -85,11 +117,23 @@ export const isWhoopLinked = async () => {
  */
 const verifyWhoopStatus = async () => {
   try {
-    const { linked } = await relayFetch('/auth/whoop/status');
+    console.log('[Whoop] Verifying status with server...');
+    const { linked } = await relayFetch('/auth/whoop/status', {}, 5000);
+    console.log('[Whoop] Server status:', linked);
     await setLocalWhoopStatus(linked);
     return linked;
   } catch (error) {
-    console.error('Failed to verify Whoop status:', error);
+    console.error('[Whoop] Failed to verify status:', error.message);
+    // On error, check if we have a cached "linked" status and trust it
+    try {
+      const { value } = await Preferences.get({ key: WHOOP_STATUS_KEY });
+      if (value === 'true') {
+        console.log('[Whoop] Using cached linked status due to server error');
+        return true;
+      }
+    } catch {
+      // Ignore
+    }
     return false;
   }
 };

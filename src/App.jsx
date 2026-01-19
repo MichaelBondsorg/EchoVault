@@ -51,7 +51,7 @@ import { handleEntryDateChange, calculateStreak } from './services/dashboard';
 import { processEntrySignals } from './services/signals/processEntrySignals';
 import { updateSignalStatus, batchUpdateSignalStatus } from './services/signals';
 import { runEntryPostProcessing } from './services/background';
-import { getEntryHealthContext, handleWhoopOAuthSuccess } from './services/health';
+import { getEntryHealthContext, handleWhoopOAuthSuccess, batchEnrichEntries } from './services/health';
 import { getEntryEnvironmentContext, getCurrentLocation } from './services/environment';
 import { updateInsightsForNewEntry } from './services/nexus/orchestrator';
 
@@ -488,6 +488,40 @@ export default function App() {
     return () => clearTimeout(timeoutId);
   }, [user, entries]);
 
+  // Background health enrichment for web entries (runs on mobile only)
+  const healthEnrichmentStarted = useRef(false);
+
+  useEffect(() => {
+    if (!user || entries.length === 0 || healthEnrichmentStarted.current) return;
+
+    // Only run on native platforms
+    const platform = Capacitor.getPlatform();
+    if (platform !== 'ios' && platform !== 'android') return;
+
+    // Check if any entries need health enrichment
+    const needsEnrichment = entries.some(e =>
+      e.needsHealthContext === true ||
+      (e.createdOnPlatform === 'web' && !e.healthContext && !e.healthEnrichmentAttempted)
+    );
+
+    if (!needsEnrichment) return;
+
+    healthEnrichmentStarted.current = true;
+
+    // Delay to let app fully initialize first
+    const timeoutId = setTimeout(async () => {
+      console.log('[EchoVault] Starting background health enrichment...');
+      try {
+        const result = await batchEnrichEntries(entries, 20);
+        console.log('[EchoVault] Health enrichment complete:', result);
+      } catch (err) {
+        console.error('[EchoVault] Health enrichment failed:', err);
+      }
+    }, 5000);
+
+    return () => clearTimeout(timeoutId);
+  }, [user, entries]);
+
   // Load Safety Plan (Phase 0)
   useEffect(() => {
     if (!user) return;
@@ -819,21 +853,28 @@ export default function App() {
     const related = [];
     const recent = entries.slice(0, 5);
 
+    // Get platform info for entry metadata
+    const platform = Capacitor.getPlatform();
+    const isNativePlatform = platform === 'ios' || platform === 'android';
+
     // Capture health context (sleep, steps, workout, stress) if available
     let healthContext = null;
     try {
+      console.log('[EntrySave] Attempting to capture health context on platform:', platform);
       healthContext = await getEntryHealthContext();
       if (healthContext) {
-        console.log('Health context captured:', {
-          sleep: healthContext.sleepLastNight,
-          steps: healthContext.stepsToday,
-          workout: healthContext.hasWorkout,
-          stress: healthContext.stressIndicator
+        console.log('[EntrySave] Health context captured:', {
+          source: healthContext.source,
+          hasSleep: !!healthContext.sleep?.totalHours,
+          hasHeart: !!healthContext.heart?.restingRate,
+          hasActivity: !!healthContext.activity?.stepsToday
         });
+      } else {
+        console.log('[EntrySave] No health context available');
       }
     } catch (healthError) {
       // Health context is optional - don't block entry saving
-      console.warn('Could not capture health context:', healthError.message);
+      console.warn('[EntrySave] Could not capture health context:', healthError.message);
     }
 
     // Capture location separately (for environment backfill even if weather fails)
@@ -881,7 +922,10 @@ export default function App() {
         effectiveDate: Timestamp.fromDate(effectiveDate),
         userId: user.uid,
         // Signal extraction version - increments on each edit for race condition handling
-        signalExtractionVersion: 1
+        signalExtractionVersion: 1,
+        // Platform tracking - enables health context backfill for web entries when opened on mobile
+        createdOnPlatform: platform,
+        needsHealthContext: !healthContext && !isNativePlatform // Flag web entries that need health data
       };
 
       // Store health context if available (from Apple Health / Google Fit)

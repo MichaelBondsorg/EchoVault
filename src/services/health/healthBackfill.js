@@ -69,19 +69,37 @@ export const getEntriesWithoutHealth = async (maxEntries = 200) => {
  * @returns {Object} Available sources info
  */
 const detectAvailableSources = async () => {
-  const [whoopConnected, healthKitResult] = await Promise.all([
-    isWhoopLinked().catch(() => false),
-    checkHealthKitPermissions().catch(() => ({ available: false }))
-  ]);
+  console.log('[HealthBackfill] Detecting available sources...');
 
-  const healthKitAvailable = healthKitResult?.authorized || healthKitResult?.available || false;
+  let whoopConnected = false;
+  let healthKitAvailable = false;
 
-  return {
+  // Check Whoop (works on all platforms via relay server)
+  try {
+    whoopConnected = await isWhoopLinked();
+    console.log('[HealthBackfill] Whoop connected:', whoopConnected);
+  } catch (error) {
+    console.warn('[HealthBackfill] Whoop check failed:', error.message);
+  }
+
+  // Check HealthKit (only on iOS)
+  try {
+    const healthKitResult = await checkHealthKitPermissions();
+    healthKitAvailable = healthKitResult?.authorized || healthKitResult?.available || false;
+    console.log('[HealthBackfill] HealthKit available:', healthKitAvailable);
+  } catch (error) {
+    console.warn('[HealthBackfill] HealthKit check failed:', error.message);
+  }
+
+  const sources = {
     whoop: whoopConnected,
     healthkit: healthKitAvailable,
     hasBoth: whoopConnected && healthKitAvailable,
     hasAny: whoopConnected || healthKitAvailable
   };
+
+  console.log('[HealthBackfill] Sources detected:', sources);
+  return sources;
 };
 
 /**
