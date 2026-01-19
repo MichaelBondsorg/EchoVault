@@ -84,7 +84,9 @@ export const ACTIVITY_PATTERNS = {
     emoji: '💬'
   },
   reading: {
-    patterns: [/\bread(ing)?\b/gi, /\bbook\b/gi],
+    // Note: Removed generic "read" which matched past-tense usage ("I read the email")
+    // Now only matches "reading" (activity) and "book"
+    patterns: [/\breading\b/gi, /\bbook(s)?\b/gi],
     label: 'Reading',
     emoji: '📚'
   },

@@ -87,6 +87,16 @@ service cloud.firestore {
       match /memory/{memoryDoc=**} {
         allow read, write: if isOwner(userId);
       }
+
+      // Basic Insights subcollection (statistical correlation insights)
+      match /basicInsights/{insightId} {
+        allow read, write: if isOwner(userId);
+      }
+
+      // Insight Feedback subcollection (user feedback on insight accuracy)
+      match /insightFeedback/{feedbackId} {
+        allow read, write: if isOwner(userId);
+      }
     }
 
     // Allow Cloud Functions to read/write with admin claims

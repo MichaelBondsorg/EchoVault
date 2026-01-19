@@ -3,11 +3,14 @@ import {
   Brain, Sparkles, TrendingUp, AlertTriangle, Lightbulb, X,
   ChevronDown, ChevronUp, RefreshCw, Loader2, CheckCircle2,
   Activity, FileText, Target, Sun, Moon, Heart, Thermometer,
-  CloudRain, Footprints, Zap
+  CloudRain, Footprints, Zap, Download, ThumbsUp, ThumbsDown
 } from 'lucide-react';
 import { useNexusInsights } from '../hooks/useNexusInsights';
 import { useBasicInsights } from '../hooks/useBasicInsights';
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
+import { doc, setDoc, Timestamp } from 'firebase/firestore';
+import { db } from '../config/firebase';
+import { APP_COLLECTION_ID } from '../config/constants';
 import {
   computeHealthMoodCorrelations,
   getTopHealthInsights,
@@ -235,6 +238,7 @@ const InsightsPage = ({
         entriesNeeded={basicEntriesNeeded}
         lastGenerated={basicLastGenerated}
         onRefresh={regenerateBasic}
+        userId={userId}
       />
 
       {/* Today's Recommendations */}
@@ -757,11 +761,13 @@ const QuickInsightsSection = ({
   hasEnoughData,
   entriesNeeded,
   lastGenerated,
-  onRefresh
+  onRefresh,
+  userId
 }) => {
   const [expandedInsight, setExpandedInsight] = useState(null);
   const [showAllEntries, setShowAllEntries] = useState(new Set());
   const [selectedEntry, setSelectedEntry] = useState(null);
+  const [feedbackSubmitted, setFeedbackSubmitted] = useState(new Set());
 
   // Helper to get entries by IDs
   const getEntriesByIds = (entryIds, showAll = false) => {
@@ -769,6 +775,105 @@ const QuickInsightsSection = ({
     const matched = entries.filter(e => entryIds.includes(e.id || e.entryId));
     return showAll ? matched : matched.slice(0, 5);
   };
+
+  // Get full entries with all data for export
+  const getFullEntriesForExport = (entryIds) => {
+    if (!entries || !entryIds || entryIds.length === 0) return [];
+    return entries.filter(e => entryIds.includes(e.id || e.entryId));
+  };
+
+  // Export insight data for debugging
+  const handleExportInsight = useCallback((insight) => {
+    const citedEntries = getFullEntriesForExport(insight.entryIds);
+
+    const exportData = {
+      exportedAt: new Date().toISOString(),
+      insight: {
+        id: insight.id,
+        category: insight.category,
+        insightText: insight.insight,
+        moodDelta: insight.moodDelta,
+        direction: insight.direction,
+        strength: insight.strength,
+        sampleSize: insight.sampleSize,
+        recommendation: insight.recommendation,
+        // Include any activity/theme/pattern specific fields
+        activityKey: insight.activityKey,
+        activityLabel: insight.activityLabel,
+        peopleKey: insight.peopleKey,
+        themeKey: insight.themeKey,
+        emotionKey: insight.emotionKey,
+        cognitivePattern: insight.cognitivePattern,
+        entryType: insight.entryType
+      },
+      citedEntries: citedEntries.map(entry => ({
+        id: entry.id || entry.entryId,
+        createdAt: entry.createdAt?.toDate ? entry.createdAt.toDate().toISOString() : entry.createdAt,
+        content: entry.content || entry.text,
+        moodScore: entry.analysis?.mood_score,
+        tags: entry.analysis?.tags,
+        themes: entry.analysis?.themes,
+        emotions: entry.analysis?.emotions,
+        entry_type: entry.analysis?.entry_type,
+        category: entry.category || entry.classification?.primary_category,
+        healthContext: entry.healthContext ? {
+          activity: entry.healthContext.activity,
+          hadWorkout: entry.healthContext.hadWorkout,
+          strain: entry.healthContext.strain,
+          sleep: entry.healthContext.sleep,
+          recovery: entry.healthContext.recovery
+        } : null,
+        environmentContext: entry.environmentContext
+      }))
+    };
+
+    // Create and download the JSON file
+    const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `insight-debug-${insight.id || 'unknown'}-${Date.now()}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }, [entries]);
+
+  // Submit feedback for an insight
+  const handleFeedback = useCallback(async (insight, isPositive) => {
+    if (!userId) return;
+
+    try {
+      const feedbackRef = doc(
+        db,
+        'artifacts',
+        APP_COLLECTION_ID,
+        'users',
+        userId,
+        'insightFeedback',
+        `${insight.id}_${Date.now()}`
+      );
+
+      await setDoc(feedbackRef, {
+        insightId: insight.id,
+        category: insight.category,
+        insightText: insight.insight,
+        moodDelta: insight.moodDelta,
+        activityKey: insight.activityKey || null,
+        themeKey: insight.themeKey || null,
+        peopleKey: insight.peopleKey || null,
+        sampleSize: insight.sampleSize,
+        entryIds: insight.entryIds || [],
+        feedback: isPositive ? 'accurate' : 'inaccurate',
+        submittedAt: Timestamp.now()
+      });
+
+      setFeedbackSubmitted(prev => new Set([...prev, insight.id]));
+      console.log('[QuickInsights] Feedback submitted:', isPositive ? 'accurate' : 'inaccurate');
+    } catch (error) {
+      console.error('[QuickInsights] Failed to submit feedback:', error);
+    }
+  }, [userId]);
 
   // Toggle showing all entries for an insight
   const toggleShowAll = (insightId) => {
@@ -1020,6 +1125,43 @@ const QuickInsightsSection = ({
                     className="border-t border-warm-200/50 bg-warm-50/50"
                   >
                     <div className="p-3 space-y-2">
+                      {/* Feedback & Export Row */}
+                      <div className="flex items-center justify-between pb-2 border-b border-warm-200/30">
+                        <div className="flex items-center gap-1">
+                          <span className="text-xs text-warm-500 mr-2">Is this accurate?</span>
+                          {feedbackSubmitted.has(insight.id) ? (
+                            <span className="text-xs text-green-600 flex items-center gap-1">
+                              <CheckCircle2 size={12} /> Thanks!
+                            </span>
+                          ) : (
+                            <>
+                              <button
+                                onClick={(e) => { e.stopPropagation(); handleFeedback(insight, true); }}
+                                className="p-1.5 hover:bg-green-100 rounded-lg transition-colors"
+                                title="Yes, accurate"
+                              >
+                                <ThumbsUp size={14} className="text-green-600" />
+                              </button>
+                              <button
+                                onClick={(e) => { e.stopPropagation(); handleFeedback(insight, false); }}
+                                className="p-1.5 hover:bg-red-100 rounded-lg transition-colors"
+                                title="No, inaccurate"
+                              >
+                                <ThumbsDown size={14} className="text-red-500" />
+                              </button>
+                            </>
+                          )}
+                        </div>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); handleExportInsight(insight); }}
+                          className="flex items-center gap-1 text-xs text-warm-500 hover:text-warm-700 px-2 py-1 hover:bg-warm-100 rounded-lg transition-colors"
+                          title="Export for debugging"
+                        >
+                          <Download size={12} />
+                          Export
+                        </button>
+                      </div>
+
                       <p className="text-xs font-medium text-warm-500 uppercase tracking-wider">
                         Related Entries
                       </p>
