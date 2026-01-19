@@ -91,7 +91,10 @@ export const ACTIVITY_PATTERNS = {
     emoji: '📚'
   },
   journaling: {
-    patterns: [/\bjournal(ing)?\b/gi, /\bwrit(e|ing)\b/gi],
+    // Note: Removed generic "journal" and "write/writing" which matched meta-references
+    // (talking about the journaling app, "write there", etc.)
+    // Now only matches activity forms: "journaling", "journaled"
+    patterns: [/\bjournaling\b/gi, /\bjournaled\b/gi],
     label: 'Journaling',
     emoji: '📝'
   },
