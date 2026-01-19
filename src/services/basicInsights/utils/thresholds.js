@@ -7,23 +7,24 @@
 
 export const THRESHOLDS = {
   // Minimum entries required to generate any insights
-  MIN_ENTRIES: 7,
+  MIN_ENTRIES: 5,
 
   // Minimum data points per specific metric/factor
-  MIN_DATA_POINTS: 5,
+  // Lowered from 5 to 3 to surface more insights while fine-tuning patterns
+  MIN_DATA_POINTS: 3,
 
   // Minimum mentions for people/entity correlations
   MIN_MENTIONS: 3,
 
   // Minimum mood delta (percentage) to show an insight
-  // 8% = meaningful but not too strict
-  MIN_MOOD_DELTA: 8,
+  // Lowered from 8% to 5% to be more permissive
+  MIN_MOOD_DELTA: 5,
 
   // Time-to-live for cached insights (hours)
   TTL_HOURS: 12,
 
   // Maximum insights to return (prevents overwhelming users)
-  MAX_INSIGHTS: 8,
+  MAX_INSIGHTS: 10,
 
   // Maximum insights per category
   MAX_PER_CATEGORY: 3

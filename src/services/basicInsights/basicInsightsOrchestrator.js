@@ -51,7 +51,14 @@ const getInsightsRef = (userId) => {
  * @returns {Object} Generated insights result
  */
 export const generateBasicInsights = async (userId, entries) => {
-  console.log('[BasicInsights] Generating insights for', entries?.length || 0, 'entries');
+  console.log('[BasicInsights] ========== GENERATION START ==========');
+  console.log('[BasicInsights] Entries:', entries?.length || 0);
+  console.log('[BasicInsights] Thresholds:', {
+    MIN_ENTRIES: THRESHOLDS.MIN_ENTRIES,
+    MIN_DATA_POINTS: THRESHOLDS.MIN_DATA_POINTS,
+    MIN_MOOD_DELTA: THRESHOLDS.MIN_MOOD_DELTA,
+    MAX_INSIGHTS: THRESHOLDS.MAX_INSIGHTS
+  });
 
   // Validate minimum entries
   if (!entries || entries.length < THRESHOLDS.MIN_ENTRIES) {
@@ -85,6 +92,7 @@ export const generateBasicInsights = async (userId, entries) => {
         source: 'health'
       });
     }
+    console.log('[BasicInsights] Health:', healthInsights.length, 'insights');
 
     // 2. Existing environment correlations (reuse environmentCorrelations.js)
     const envInsights = getTopEnvironmentInsights(entries, THRESHOLDS.MAX_PER_CATEGORY);
@@ -101,30 +109,42 @@ export const generateBasicInsights = async (userId, entries) => {
         source: 'environment'
       });
     }
+    console.log('[BasicInsights] Environment:', envInsights.length, 'insights');
 
     // 3. Activity correlations (new)
     const activityInsights = computeActivityCorrelations(entries);
     allInsights.push(...activityInsights);
+    console.log('[BasicInsights] Activity:', activityInsights.length, 'insights',
+      activityInsights.length > 0 ? activityInsights.map(i => i.activityKey || i.id) : '(none)');
 
     // 4. People correlations (new)
     const peopleInsights = computePeopleCorrelations(entries);
     allInsights.push(...peopleInsights);
+    console.log('[BasicInsights] People:', peopleInsights.length, 'insights',
+      peopleInsights.length > 0 ? peopleInsights.map(i => i.peopleKey || i.id) : '(none)');
 
     // 5. Time correlations (new)
     const timeInsights = computeTimeCorrelations(entries);
     allInsights.push(...timeInsights);
+    console.log('[BasicInsights] Time:', timeInsights.length, 'insights',
+      timeInsights.length > 0 ? timeInsights.map(i => i.id) : '(none)');
 
     // 6. Extended health correlations (strain, deep sleep, REM, calories)
     const extendedHealthInsights = computeExtendedHealthCorrelations(entries);
     allInsights.push(...extendedHealthInsights);
+    console.log('[BasicInsights] Extended Health:', extendedHealthInsights.length, 'insights');
 
     // 7. Category/type correlations (work vs personal, reflection vs vent)
     const categoryInsights = computeCategoryCorrelations(entries);
     allInsights.push(...categoryInsights);
+    console.log('[BasicInsights] Category:', categoryInsights.length, 'insights');
 
     // 8. Themes & emotions correlations
     const themesInsights = computeThemesCorrelations(entries);
     allInsights.push(...themesInsights);
+    console.log('[BasicInsights] Themes:', themesInsights.length, 'insights');
+
+    console.log('[BasicInsights] Total raw insights:', allInsights.length);
 
     // 9. Apply feedback learning filter
     // This adjusts confidence and suppresses insights with poor accuracy
@@ -203,7 +223,13 @@ export const generateBasicInsights = async (userId, entries) => {
     // Save to Firestore
     await saveBasicInsights(userId, result);
 
-    console.log('[BasicInsights] Generated', topInsights.length, 'insights');
+    console.log('[BasicInsights] ========== GENERATION COMPLETE ==========');
+    console.log('[BasicInsights] Final insights:', topInsights.length);
+    console.log('[BasicInsights] Insights:', topInsights.map(i => ({
+      id: i.id,
+      delta: i.moodDelta,
+      strength: i.strength
+    })));
 
     return {
       success: true,
