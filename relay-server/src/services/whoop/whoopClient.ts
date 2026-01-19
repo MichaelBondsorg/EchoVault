@@ -455,6 +455,7 @@ export const getHealthSummary = async (
   queriedAt: string;
 }> => {
   // Set date range for the query (24 hours centered on the date)
+  const dateStr = date.toISOString().split('T')[0];
   const startOfDay = new Date(date);
   startOfDay.setHours(0, 0, 0, 0);
   const endOfDay = new Date(date);
@@ -462,13 +463,25 @@ export const getHealthSummary = async (
 
   // Fetch all data types in parallel
   const [recoveryData, sleepData, cycleData, workoutData] = await Promise.all([
-    getRecovery(userId, startOfDay, endOfDay).catch(() => []),
-    getSleep(userId, startOfDay, endOfDay).catch(() => []),
-    getCycles(userId, startOfDay, endOfDay).catch(() => []),
-    getWorkouts(userId, startOfDay, endOfDay).catch(() => []),
+    getRecovery(userId, startOfDay, endOfDay).catch((e) => {
+      console.error(`[Whoop] Recovery fetch failed for ${dateStr}:`, e.message);
+      return [];
+    }),
+    getSleep(userId, startOfDay, endOfDay).catch((e) => {
+      console.error(`[Whoop] Sleep fetch failed for ${dateStr}:`, e.message);
+      return [];
+    }),
+    getCycles(userId, startOfDay, endOfDay).catch((e) => {
+      console.error(`[Whoop] Cycles fetch failed for ${dateStr}:`, e.message);
+      return [];
+    }),
+    getWorkouts(userId, startOfDay, endOfDay).catch((e) => {
+      console.error(`[Whoop] Workouts fetch failed for ${dateStr}:`, e.message);
+      return [];
+    }),
   ]);
 
-  const dateStr = date.toISOString().split('T')[0];
+  console.log(`[Whoop] Data for ${dateStr}: recovery=${recoveryData.length}, sleep=${sleepData.length}, cycles=${cycleData.length}, workouts=${workoutData.length}`);
 
   // Process recovery data (most recent)
   const latestRecovery = recoveryData.find((r) => r.score?.recovery_score != null);
@@ -550,8 +563,11 @@ export const getHealthSummary = async (
       averageHR: w.score!.average_heart_rate,
     }));
 
+  // Check if we actually got any meaningful data
+  const hasData = !!(sleep || hrv || recovery || strain || workouts.length > 0 || heartRate);
+
   return {
-    available: true,
+    available: hasData,
     source: 'whoop',
     date: dateStr,
     sleep,
