@@ -1053,6 +1053,13 @@ const QuickInsightsSection = ({
         )}
       </div>
 
+      {/* Disclaimer Note */}
+      <div className="px-4 pb-2">
+        <p className="text-xs text-warm-400 italic">
+          Insights improve with more entries. The more consistently you journal, the more accurate these patterns become.
+        </p>
+      </div>
+
       {/* Insights Grid */}
       <div className="px-4 pb-4 grid gap-2">
         {insights.map((insight, index) => {
