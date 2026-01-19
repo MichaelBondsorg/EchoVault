@@ -853,10 +853,6 @@ export default function App() {
     const related = [];
     const recent = entries.slice(0, 5);
 
-    // Get platform info for entry metadata
-    const platform = Capacitor.getPlatform();
-    const isNativePlatform = platform === 'ios' || platform === 'android';
-
     // Capture health context (sleep, steps, workout, stress) if available
     let healthContext = null;
     try {
@@ -925,7 +921,7 @@ export default function App() {
         signalExtractionVersion: 1,
         // Platform tracking - enables health context backfill for web entries when opened on mobile
         createdOnPlatform: platform,
-        needsHealthContext: !healthContext && !isNativePlatform // Flag web entries that need health data
+        needsHealthContext: !healthContext && !isNative // Flag web entries that need health data
       };
 
       // Store health context if available (from Apple Health / Google Fit)

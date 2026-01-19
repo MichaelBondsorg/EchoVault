@@ -1,6 +1,6 @@
 # EchoVault Project Status
 
-> **Last Updated:** 2026-01-19 (Quick Insights fixes)
+> **Last Updated:** 2026-01-19 (Health data enrichment fixes)
 > **Updated By:** Claude (via conversation with Michael)
 
 ---
@@ -83,6 +83,9 @@
 | 2026-01-18 | Apple Sign-In iOS-only for now | Web Apple Sign-In requires Apple Developer Service ID configuration. Will enable once app name finalized. | App name decided |
 | 2026-01-18 | MFA support via Firebase TOTP | Users can enable authenticator app MFA. Handled gracefully during email sign-in flow. | N/A |
 | 2026-01-18 | Cloud Function for Apple token exchange | Native iOS Apple Sign-In returns identity token, exchanged server-side for Firebase custom token. Same pattern as Google. | N/A |
+| 2026-01-19 | Web entries enriched on mobile | Web can't access HealthKit/Google Fit. Entries created on web get `needsHealthContext: true` flag and are enriched when user opens app on mobile. | If users never open mobile app |
+| 2026-01-19 | Batch health enrichment at app init | Process up to 20 entries needing health data on mobile app startup. Rate-limited with 200ms delay between entries. | Performance issues on app launch |
+| 2026-01-19 | Timeout wrappers for Whoop relay | 10s timeout on relay fetch, 5s on auth token. Returns cached data on timeout rather than failing silently. | Timeouts too aggressive |
 
 ---
 
@@ -113,40 +116,57 @@ Good ideas we're explicitly NOT doing now. Don't re-suggest these.
 | Test coverage improving | Low | 76 tests passing (safety, crash reporting, signal lifecycle). Add more as needed. |
 | Main bundle 631KB | Medium | Above 500KB warning threshold. Code splitting ready but App.jsx still static imports. |
 | Existing insights files to delete | High | Part of Nexus 2.0 Phase 1 |
-| **Health context not being captured** | High | Whoop connected but `healthContext` is null on entries. See Investigation Notes below. |
+| **Health context not being captured** | Medium | **Partially addressed** - Added platform tracking and health enrichment service. Web entries now flagged with `needsHealthContext: true` and enriched when opened on mobile. Need to verify Whoop relay is responding correctly. |
 | **Old entries missing location data** | Medium | Environment backfill requires `entry.location` but old entries don't have it. New entries now capture location. |
 | **Analysis not extracting themes/emotions** | Low | Cloud Function `analyzeEntry` prompt doesn't request themes/emotions fields. Would need prompt update. |
+| **Existing entries need platform flag** | Low | 140 existing entries don't have `createdOnPlatform` field. Could add migration to backfill `createdOnPlatform: 'unknown'` or `'web'`. |
 
 ### Investigation Notes: Health Context Not Captured
 
-**Symptoms:**
+**Status:** Partially addressed (2026-01-19). See session notes above for fixes applied.
+
+**Original Symptoms:**
 - User has Whoop connected (confirmed in Health Settings)
 - User has Apple Watch connected via HealthKit
 - New journal entries have `healthContext: null`
 - Health backfill reports 0 entries updated
 
-**Debug Steps:**
-1. When creating an entry, check browser console for:
+**What Was Fixed:**
+- Added platform tracking (`createdOnPlatform`, `needsHealthContext` flags)
+- Created entry health enrichment service for web→mobile flow
+- Added timeout wrappers to Whoop relay calls
+- Improved logging throughout health services
+
+**Remaining Debug Steps:**
+
+1. **For NEW entries created on mobile:**
+   Check browser/device console for:
    ```
    [HealthDataService] getEntryHealthContext called
    [HealthDataService] Whoop linked: true/false
    [HealthDataService] getHealthSummary returned: {...}
    ```
-2. If `Whoop linked: false`, check:
-   - Settings → Health → Whoop status
-   - Relay server is running and accessible
-   - Whoop OAuth tokens in Firestore (`users/{uid}/integrations/whoop_tokens`)
-3. If `Whoop linked: true` but `summary.available: false`:
-   - Check relay server logs for API errors
-   - Verify Whoop API credentials in Cloud Run Secret Manager
-   - Check if Whoop subscription is active
-4. If on iOS, verify HealthKit permissions are granted in Settings
+   If health data is available, `healthContext` should be populated.
 
-**Root Cause Candidates:**
-- Relay server not deployed or not accessible from client
-- Whoop tokens expired and not refreshing
-- HealthKit permissions not granted or hanging
-- `getHealthSummary()` returning `{ available: false }` silently
+2. **For WEB entries (enrichment flow):**
+   Open mobile app and check console for:
+   ```
+   [HealthEnrichment] Batch enriching X entries
+   [HealthEnrichment] Successfully enriched entry XXX with whoop data
+   ```
+   If no logs appear, check that entries have `needsHealthContext: true` or `createdOnPlatform: 'web'`.
+
+3. **If Whoop relay is timing out:**
+   Check console for:
+   ```
+   [Whoop] Whoop API request timed out after 10000ms
+   ```
+   If this appears, check relay server logs in Cloud Run.
+
+4. **Verify Whoop connection:**
+   - Settings → Health → Whoop should show "Connected"
+   - Check Firestore: `users/{uid}/integrations/whoop_tokens` should exist
+   - Check relay server is accessible: `curl https://your-relay-url/health`
 
 ---
 
@@ -227,6 +247,80 @@ Good ideas we're explicitly NOT doing now. Don't re-suggest these.
 ---
 
 ## Session Notes
+
+### 2026-01-19: Health Data Enrichment for Web Entries
+
+**Context:** User reported that despite having Whoop and Apple Watch connected, all 140 journal entries have `healthContext: null`. The retroactive backfill function wasn't updating entries with health data.
+
+**Root Causes Identified:**
+
+1. **No platform tracking**: Entries didn't record where they were created (web vs mobile), so the system couldn't know which entries needed health enrichment
+2. **Web entries can't access health data**: HealthKit only works on iOS, Google Fit only on Android. Web entries must be enriched later on mobile.
+3. **Whoop relay calls potentially timing out silently**: No timeout wrappers on network requests
+4. **No enrichment service**: No mechanism existed to retroactively add health data when web entries are viewed on mobile
+
+**Fixes Applied:**
+
+1. **Platform tracking on entry creation** (`App.jsx`):
+   - Added `createdOnPlatform` field tracking 'web', 'ios', or 'android'
+   - Added `needsHealthContext` flag set to `true` for web entries without health data
+   - Enables future identification of entries needing enrichment
+
+2. **Entry health enrichment service** (`entryHealthEnrichment.js` - NEW):
+   - `needsHealthEnrichment(entry)` - checks if entry needs health data
+   - `enrichEntryWithHealth(entry)` - fetches health data for entry's date, updates Firestore
+   - `batchEnrichEntries(entries, limit)` - processes multiple entries with rate limiting
+   - Marks entries as `healthEnrichmentAttempted` to prevent repeated failures
+
+3. **Mobile app initialization** (`App.jsx`):
+   - Background health enrichment runs on iOS/Android startup
+   - Processes up to 20 web entries per initialization
+   - Only runs if user is authenticated and entries are loaded
+
+4. **Whoop service improvements** (`whoop.js`):
+   - Added `withTimeout()` wrapper for all network requests
+   - Auth token fetch: 5 second timeout
+   - Relay fetch: 10 second timeout (configurable per call)
+   - Returns cached data on timeout errors
+   - Better logging throughout
+
+5. **Health backfill logging** (`healthBackfill.js`):
+   - Improved logging in `detectAvailableSources()`
+   - Clearer error messages for debugging
+
+**How It Works Now:**
+
+```
+Web Entry Creation:
+  entry.createdOnPlatform = 'web'
+  entry.needsHealthContext = true
+  entry.healthContext = null
+
+Mobile App Opens:
+  → Loads entries
+  → Filters to entries needing enrichment
+  → For each entry:
+      → Fetch health data for entry's date
+      → Update entry with healthContext
+      → Mark enrichment complete
+```
+
+**Testing Checklist:**
+- [ ] Create a new web entry, verify `createdOnPlatform: 'web'` and `needsHealthContext: true`
+- [ ] Open mobile app, verify batch enrichment runs (check console logs)
+- [ ] Verify enriched entries have `healthContext` populated
+- [ ] Verify Whoop relay is responding (check network tab)
+
+**Files Created:**
+- `src/services/health/entryHealthEnrichment.js` - Entry health enrichment service
+
+**Files Modified:**
+- `src/App.jsx` - Platform tracking, background enrichment
+- `src/services/health/whoop.js` - Timeout wrappers, better logging
+- `src/services/health/healthBackfill.js` - Better logging
+- `src/services/health/index.js` - Export new service
+
+---
 
 ### 2026-01-19: Quick Insights Diagnosis & Fixes
 
