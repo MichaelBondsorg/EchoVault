@@ -53,8 +53,8 @@ export const useBasicInsights = (user, entries, options = {}) => {
           return;
         }
 
-        // Try to load cached insights
-        const cached = await getCachedBasicInsights(user.uid);
+        // Try to load cached insights (pass entries count for staleness check)
+        const cached = await getCachedBasicInsights(user.uid, entries?.length || 0);
 
         if (cached && !cached.stale) {
           setInsights(cached.insights || []);

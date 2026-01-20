@@ -201,6 +201,7 @@ export const generateBasicInsights = async (userId, entries) => {
       generatedAt: now,
       expiresAt,
       entriesAnalyzed: entries.length,
+      entriesCount: entries.length, // Used for staleness check when new entries are added
       categoryCounts: {
         health: healthInsights.length,
         environment: envInsights.length,
@@ -265,9 +266,10 @@ const saveBasicInsights = async (userId, data) => {
 /**
  * Get cached basic insights from Firestore
  * @param {string} userId - User ID
+ * @param {number} currentEntriesCount - Current number of entries (optional, for staleness check)
  * @returns {Object|null} Cached insights or null
  */
-export const getCachedBasicInsights = async (userId) => {
+export const getCachedBasicInsights = async (userId, currentEntriesCount = null) => {
   try {
     const ref = getInsightsRef(userId);
     const snapshot = await getDoc(ref);
@@ -279,12 +281,21 @@ export const getCachedBasicInsights = async (userId) => {
 
     const data = snapshot.data();
 
-    // Check if expired
+    // Check if expired by TTL
     const isExpired = isInsightsExpired(data.expiresAt);
+
+    // Check if entries count changed (new entries added = needs refresh)
+    const entriesCountChanged = currentEntriesCount !== null &&
+                                 data.entriesCount !== undefined &&
+                                 currentEntriesCount > data.entriesCount;
+
+    if (entriesCountChanged) {
+      console.log('[BasicInsights] Entries count changed:', data.entriesCount, '->', currentEntriesCount, '(marking stale)');
+    }
 
     return {
       ...data,
-      stale: isExpired
+      stale: isExpired || entriesCountChanged
     };
 
   } catch (error) {
