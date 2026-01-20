@@ -237,4 +237,78 @@ export const migrateEntriesForHealthEnrichment = async (entries, userId, db, onP
   return results;
 };
 
-export default { exportDiagnosticJSON, exportFullDiagnosticJSON, migrateEntriesForHealthEnrichment };
+/**
+ * Clear bad backfilled health data from entries
+ *
+ * Use this when the backfill used incorrect data (e.g., same day's data for all entries)
+ * After clearing, you can re-run the backfill with the fixed plugin.
+ *
+ * @param {Array} entries - Journal entries from Firestore
+ * @param {string} userId - User ID
+ * @param {Object} db - Firestore database instance
+ * @param {Function} onProgress - Progress callback (current, total)
+ * @returns {Object} Clear results
+ */
+export const clearBackfilledHealthData = async (entries, userId, db, onProgress = () => {}) => {
+  const { doc, writeBatch } = await import('firebase/firestore');
+  const { APP_COLLECTION_ID } = await import('../config/constants');
+
+  // Find entries with backfilled health data
+  const backfilledEntries = entries.filter(entry =>
+    entry.healthContext?.backfilled === true
+  );
+
+  if (backfilledEntries.length === 0) {
+    return {
+      total: entries.length,
+      cleared: 0,
+      failed: 0,
+      message: 'No backfilled health data found to clear.'
+    };
+  }
+
+  console.log(`[ClearBackfill] Found ${backfilledEntries.length} entries with backfilled health data`);
+
+  const BATCH_SIZE = 500;
+  let cleared = 0;
+  let failed = 0;
+
+  // Process in batches
+  for (let i = 0; i < backfilledEntries.length; i += BATCH_SIZE) {
+    const batchEntries = backfilledEntries.slice(i, i + BATCH_SIZE);
+    const batch = writeBatch(db);
+
+    for (const entry of batchEntries) {
+      const entryRef = doc(db, 'artifacts', APP_COLLECTION_ID, 'users', userId, 'entries', entry.id);
+
+      // Clear healthContext and mark for re-enrichment
+      batch.update(entryRef, {
+        healthContext: null,
+        needsHealthContext: true,
+        healthBackfillCleared: new Date().toISOString()
+      });
+    }
+
+    try {
+      await batch.commit();
+      cleared += batchEntries.length;
+      console.log(`[ClearBackfill] Batch complete: ${cleared}/${backfilledEntries.length}`);
+      onProgress(cleared, backfilledEntries.length);
+    } catch (error) {
+      console.error('[ClearBackfill] Batch failed:', error);
+      failed += batchEntries.length;
+    }
+  }
+
+  const results = {
+    total: entries.length,
+    cleared,
+    failed,
+    message: `Cleared health data from ${cleared} entries. ${failed > 0 ? `${failed} failed.` : ''} Run backfill again to fetch correct historical data.`
+  };
+
+  console.log('[ClearBackfill] Complete:', results);
+  return results;
+};
+
+export default { exportDiagnosticJSON, exportFullDiagnosticJSON, migrateEntriesForHealthEnrichment, clearBackfilledHealthData };

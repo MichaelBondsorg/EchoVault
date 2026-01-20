@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Database, RefreshCw, CheckCircle2, XCircle, AlertCircle,
-  Cloud, Heart, Activity, Pause, Play, Loader2
+  Cloud, Heart, Activity, Pause, Play, Loader2, Trash2
 } from 'lucide-react';
 import {
   runFullBackfill,
@@ -11,6 +11,8 @@ import {
   resetBackfillState,
   BACKFILL_STAGES
 } from '../../services/backfill/unifiedBackfill';
+import { clearBackfilledHealthData } from '../../utils/diagnosticExport';
+import { db, auth } from '../../config/firebase';
 
 /**
  * BackfillPanel Component
@@ -21,15 +23,20 @@ import {
  * - Resume capability after interruption
  * - Results summary when complete
  */
-const BackfillPanel = () => {
+const BackfillPanel = ({ entries = [] }) => {
   const [summary, setSummary] = useState(null);
   const [loading, setLoading] = useState(true);
   const [running, setRunning] = useState(false);
   const [progress, setProgress] = useState(null);
   const [results, setResults] = useState(null);
   const [error, setError] = useState(null);
+  const [clearing, setClearing] = useState(false);
+  const [clearResults, setClearResults] = useState(null);
 
   const abortControllerRef = useRef(null);
+
+  // Count backfilled entries for the clear button
+  const backfilledCount = entries.filter(e => e.healthContext?.backfilled === true).length;
 
   // Load summary on mount
   useEffect(() => {
@@ -91,6 +98,45 @@ const BackfillPanel = () => {
       setResults(null);
     } catch (err) {
       console.error('[BackfillPanel] Reset failed:', err);
+    }
+  };
+
+  const handleClearBackfilled = async () => {
+    if (!auth.currentUser || !entries.length) return;
+
+    const confirmClear = window.confirm(
+      `This will clear health data from ${backfilledCount} backfilled entries.\n\n` +
+      `Use this if the backfill used incorrect data (e.g., same day's data for all entries).\n\n` +
+      `After clearing, you can re-run the backfill with the fixed plugin.\n\n` +
+      `Continue?`
+    );
+
+    if (!confirmClear) return;
+
+    try {
+      setClearing(true);
+      setError(null);
+      setClearResults(null);
+
+      const result = await clearBackfilledHealthData(
+        entries,
+        auth.currentUser.uid,
+        db,
+        (current, total) => {
+          setProgress({ processed: current, total, stage: 'clearing' });
+        }
+      );
+
+      setClearResults(result);
+      setProgress(null);
+
+      // Refresh summary to show updated counts
+      await loadSummary();
+    } catch (err) {
+      console.error('[BackfillPanel] Clear failed:', err);
+      setError(err.message || 'Failed to clear backfilled data');
+    } finally {
+      setClearing(false);
     }
   };
 
@@ -224,7 +270,73 @@ const BackfillPanel = () => {
               <span className="text-sm">All entries are up to date!</span>
             </div>
           )}
+
+          {/* Clear backfilled data option */}
+          {backfilledCount > 0 && !clearing && (
+            <div className="pt-3 border-t border-warm-200">
+              <p className="text-xs text-warm-500 mb-2">
+                {backfilledCount} entries have backfilled health data.
+                If the data is incorrect, you can clear it and re-run the backfill.
+              </p>
+              <button
+                onClick={handleClearBackfilled}
+                className="text-sm text-amber-600 hover:text-amber-700 flex items-center gap-1"
+              >
+                <Trash2 size={14} />
+                Clear backfilled data to re-sync
+              </button>
+            </div>
+          )}
         </div>
+      )}
+
+      {/* Clearing progress */}
+      {clearing && progress && (
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          className="space-y-3"
+        >
+          <div className="flex items-center gap-2">
+            <Loader2 size={16} className="animate-spin text-amber-500" />
+            <span className="text-sm font-medium text-warm-700">
+              Clearing backfilled data...
+            </span>
+          </div>
+          <div className="h-2 bg-warm-200 rounded-full overflow-hidden">
+            <motion.div
+              className="h-full bg-amber-500 rounded-full"
+              initial={{ width: 0 }}
+              animate={{
+                width: `${Math.round((progress.processed / progress.total) * 100)}%`
+              }}
+            />
+          </div>
+          <div className="text-xs text-warm-500">
+            {progress.processed} / {progress.total} entries
+          </div>
+        </motion.div>
+      )}
+
+      {/* Clear results */}
+      {clearResults && !clearing && (
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          className="space-y-3"
+        >
+          <div className="flex items-center gap-2 text-amber-600">
+            <CheckCircle2 size={18} />
+            <span className="font-medium">Health Data Cleared</span>
+          </div>
+          <p className="text-sm text-warm-600">{clearResults.message}</p>
+          <button
+            onClick={() => setClearResults(null)}
+            className="text-sm text-primary-600 hover:text-primary-700"
+          >
+            Done
+          </button>
+        </motion.div>
       )}
 
       {/* Progress display */}

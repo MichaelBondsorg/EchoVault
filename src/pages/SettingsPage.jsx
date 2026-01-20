@@ -231,7 +231,7 @@ const SettingsPage = ({
         <h3 className="text-xs font-bold text-warm-400 uppercase tracking-wider px-1">
           Data
         </h3>
-        <BackfillPanel />
+        <BackfillPanel entries={entries} />
 
         {/* Diagnostic Export */}
         <div className="bg-white/30 backdrop-blur-sm border border-white/20 rounded-2xl overflow-hidden p-4 space-y-3">
