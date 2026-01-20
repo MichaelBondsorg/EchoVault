@@ -279,7 +279,7 @@ export const NARRATIVE_PATTERNS = {
   },
   CREATIVE_ACTIVITY: {
     id: 'creative_activity',
-    triggers: ['painting', 'built', 'created', 'working on', 'echovault'],
+    triggers: ['painting', 'built', 'created', 'working on', 'engram'],
     category: 'stabilizer',
     biometricSignature: { mood: 'improved', hrv: 'stable' }
   },

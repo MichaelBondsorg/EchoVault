@@ -1721,7 +1721,7 @@ export default function App() {
         // Initialize Apple provider
         await SocialLogin.initialize({
           apple: {
-            clientId: 'com.echovault.app', // Your app's bundle ID
+            clientId: 'com.echovault.engram', // Your app's bundle ID
             redirectUrl: 'https://echo-vault-app.firebaseapp.com/__/auth/handler'
           }
         });
@@ -1955,7 +1955,7 @@ export default function App() {
           <Activity className="text-white"/>
         </motion.div>
         <h1 className="text-2xl font-display font-bold mb-6 text-warm-800">
-          EchoVault
+          Engram
         </h1>
 
         <div className="w-full max-w-xs space-y-3">

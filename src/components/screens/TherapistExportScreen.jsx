@@ -173,7 +173,7 @@ const TherapistExportScreen = ({ entries, onClose }) => {
         yPos += 8;
       });
 
-      doc.save('echovault-export.pdf');
+      doc.save('engram-export.pdf');
     } catch (e) {
       console.error('PDF generation failed:', e);
       alert('PDF generation failed. Falling back to JSON export.');
@@ -236,7 +236,7 @@ const TherapistExportScreen = ({ entries, onClose }) => {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = 'echovault-export.json';
+    a.download = 'engram-export.json';
     a.click();
     URL.revokeObjectURL(url);
   };

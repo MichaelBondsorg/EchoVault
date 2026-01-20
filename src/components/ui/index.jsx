@@ -1,5 +1,5 @@
 /**
- * EchoVault UI Components
+ * Engram UI Components
  * Reusable animated components using the therapeutic design system
  */
 

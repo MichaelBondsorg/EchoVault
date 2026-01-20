@@ -70,7 +70,7 @@ export const INTERVENTION_PATTERNS = {
   },
   creative: {
     category: 'behavioral',
-    patterns: [/paint/i, /built/i, /created/i, /echovault/i, /app/i],
+    patterns: [/paint/i, /built/i, /created/i, /engram/i, /app/i],
     measureWindow: { same_day: true }
   },
 
