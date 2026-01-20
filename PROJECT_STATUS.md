@@ -1,6 +1,6 @@
 # Engram Project Status
 
-> **Last Updated:** 2026-01-19 (Health data enrichment fixes)
+> **Last Updated:** 2026-01-20 (App.jsx Zustand migration complete)
 > **Updated By:** Claude (via conversation with Michael)
 
 ---
@@ -20,6 +20,7 @@
 | **Nexus 2.0 Insights Engine** | ✅ Complete | All 4 layers implemented (pattern detection, baselines, LLM synthesis, interventions) |
 | **Multi-Provider Authentication** | ✅ Complete | Google, Apple (iOS only), Email/Password with MFA support |
 | **App Store Readiness** | ✅ Complete | Crashlytics, Fastlane, testing, accessibility, performance optimization |
+| **Architecture: App.jsx → Zustand** | ✅ Complete | All 39 useState calls migrated to 5 Zustand stores. 0% → 100% adoption. |
 | Health & Environment Insights UI | ✅ Complete | Correlation insights, context prompts, recommendations, environment backfill |
 | Entity Management (Milestone 1.5) | ✅ Complete | Entity resolution for voice transcription + migration from older entries |
 | HealthKit Integration (Expanded) | ✅ Complete | Sleep stages, smart merge with Whoop, health backfill feature |
@@ -31,7 +32,10 @@
 
 | Item | Priority | Plan Document | Notes |
 |------|----------|---------------|-------|
-| **Architecture Restructuring** | High | `.claude/plans/eventual-floating-rabin.md` | 5-phase plan: state management (Zustand), database abstraction, Cloud Functions splitting, component decomposition, TypeScript migration. Phases 0-2 complete, Phase 3 in progress. |
+| **Architecture: Remove Compatibility Wrappers** | Low | N/A | Gradually update components to use store actions directly (e.g., `showInsightsPanel()` instead of `setShowInsights(true)`). |
+| **Architecture: Component Extraction** | Medium | `.claude/plans/eventual-floating-rabin.md` | Now that state is in Zustand, child components can be extracted from App.jsx with direct store imports. |
+| **Architecture: Cloud Functions Split** | Medium | `.claude/plans/eventual-floating-rabin.md` | Move functions from `functions/index.js` to domain modules. Shared utilities already extracted. |
+| **Architecture: TypeScript Migration** | Low | `.claude/plans/eventual-floating-rabin.md` | Convert critical paths (.js → .ts). Foundation ready with `src/types/` definitions. |
 | **App Rename: Engram → Engram** | Medium | `docs/ENGRAM-RENAME-PLAN.md` | Name reserved in App Store Connect. 9-phase implementation plan ready. Requires domain setup (theengram.app), OAuth console updates. |
 
 ---
@@ -86,6 +90,8 @@
 | 2026-01-19 | Web entries enriched on mobile | Web can't access HealthKit/Google Fit. Entries created on web get `needsHealthContext: true` flag and are enriched when user opens app on mobile. | If users never open mobile app |
 | 2026-01-19 | Batch health enrichment at app init | Process up to 20 entries needing health data on mobile app startup. Rate-limited with 200ms delay between entries. | Performance issues on app launch |
 | 2026-01-19 | Timeout wrappers for Whoop relay | 10s timeout on relay fetch, 5s on auth token. Returns cached data on timeout rather than failing silently. | Timeouts too aggressive |
+| 2026-01-20 | App.jsx state migration to Zustand | All 39 useState calls migrated to 5 domain stores. Compatibility wrappers added for gradual component updates. | Components can be updated to use store actions directly over time |
+| 2026-01-20 | resetAllStores() on logout | Clears all Zustand state when user logs out. Prevents data leakage between users. | N/A |
 
 ---
 
@@ -109,12 +115,12 @@ Good ideas we're explicitly NOT doing now. Don't re-suggest these.
 | Issue | Severity | Notes |
 |-------|----------|-------|
 | `APP_COLLECTION_ID` hardcoded in `leadershipThreads.js` | Low | Fix during Nexus 2.0 implementation |
-| `App.jsx` is 2,421 lines | High | Restructuring plan created - Zustand stores ready in `src/stores/`, migration pending |
+| `App.jsx` is 2,523 lines | Medium | ✅ **Zustand migration complete** - 39 useState calls removed. Next: extract child components. |
 | `functions/index.js` is 4,390 lines | High | Restructuring plan created - shared utilities extracted to `functions/src/shared/`, domain split pending |
-| 365 useState across 94 files | Medium | Restructuring plan created - Zustand stores ready to consolidate state |
+| ~~365 useState across 94 files~~ | ~~Medium~~ | ✅ **App.jsx migrated** - 39 useState → 5 Zustand stores. Other files can adopt stores gradually. |
 | Direct Firestore in 34 files | Medium | Restructuring plan created - repository layer ready in `src/repositories/` |
 | Test coverage improving | Low | 76 tests passing (safety, crash reporting, signal lifecycle). Add more as needed. |
-| Main bundle 631KB | Medium | Above 500KB warning threshold. Code splitting ready but App.jsx still static imports. |
+| Main bundle 631KB | Medium | Above 500KB warning threshold. Code splitting ready - component extraction will enable route-level splitting. |
 | Existing insights files to delete | High | Part of Nexus 2.0 Phase 1 |
 | **Health context not being captured** | Medium | **Partially addressed** - Added platform tracking and health enrichment service. Web entries now flagged with `needsHealthContext: true` and enriched when opened on mobile. Need to verify Whoop relay is responding correctly. |
 | **Old entries missing location data** | Medium | Environment backfill requires `entry.location` but old entries don't have it. New entries now capture location. |
@@ -247,6 +253,48 @@ Good ideas we're explicitly NOT doing now. Don't re-suggest these.
 ---
 
 ## Session Notes
+
+### 2026-01-20: App.jsx Zustand Migration Complete
+
+**Context:** Phase 3 of architecture restructuring - migrate App.jsx from 39 useState calls to Zustand stores.
+
+**What Was Done:**
+
+1. **Full State Migration**
+   - Removed all 39 useState calls from App.jsx
+   - Replaced with hooks from 5 Zustand stores:
+     - `useAuthStore` - user, authMode, email, password, displayName, showPassword, authLoading, authError, showEmailForm, mfaResolver, mfaCode, mfaHint
+     - `useUiStore` - view, category, all modal states (showDecompression, showSafetyPlan, showExport, showInsights, showJournal, showHealthSettings, showNexusSettings, showEntityManagement, showQuickLog, dailySummaryModal, entryInsightsPopup)
+     - `useEntriesStore` - entries, processing, replyContext, entryPreferredMode, offlineQueue, retrofitProgress
+     - `useSafetyStore` - safetyPlan, crisisModal, crisisResources, pendingEntry
+     - `useSignalsStore` - detectedSignals, showDetectedStrip, signalExtractionEntryId
+
+2. **Compatibility Layer**
+   - Added wrapper functions for setter patterns that differ between useState and Zustand
+   - Example: `setShowInsights(true)` → calls `showInsightsPanel()`
+   - Allows gradual migration of child components
+
+3. **Logout Handler Updated**
+   - Added `resetAllStores()` call to clear all Zustand state on logout
+   - Prevents data leakage between user sessions
+
+4. **Import Cleanup**
+   - Removed `useState` from React imports (no longer needed in App.jsx)
+
+**Verification:**
+- Build: ✅ Successful
+- Tests: ✅ 76/76 passing
+- useState calls in App.jsx: 0
+
+**Files Modified:**
+- `src/App.jsx` - Full state migration (~90 lines of store imports, removed ~50 lines of useState)
+- `src/stores/index.js` - Already existed with exports
+
+**Future Work (Low Priority):**
+- Remove compatibility wrappers by updating child components to use store actions directly
+- Extract child components from App.jsx (now possible since they can import stores directly)
+
+---
 
 ### 2026-01-19: Health Data Enrichment for Web Entries
 

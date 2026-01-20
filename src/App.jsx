@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import React, { useEffect, useRef, useMemo, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Mic, Loader2, LogIn, Activity, Brain, Share,
@@ -61,6 +61,16 @@ import { useNotifications } from './hooks/useNotifications';
 import { useNetworkStatus } from './hooks/useNetworkStatus';
 import { useWakeLock } from './hooks/useWakeLock';
 import { useBackgroundAudio } from './hooks/useBackgroundAudio';
+
+// Zustand Stores
+import {
+  useAuthStore,
+  useUiStore,
+  useEntriesStore,
+  useSafetyStore,
+  useSignalsStore,
+  resetAllStores
+} from './stores';
 
 // Components
 import {
@@ -128,54 +138,97 @@ export default function App() {
   const { isOnline, wasOffline, clearWasOffline } = useNetworkStatus();
   const { requestWakeLock, releaseWakeLock } = useWakeLock();
   const { backupAudio, clearBackup, isProcessing: isBackgroundProcessing } = useBackgroundAudio();
-  const [user, setUser] = useState(null);
-  const [entries, setEntries] = useState([]);
-  const [view, setView] = useState('feed');
-  const [cat, setCat] = useState('personal');
-  const [processing, setProcessing] = useState(false);
-  const [replyContext, setReplyContext] = useState(null);
-  const [entryPreferredMode, setEntryPreferredMode] = useState('text'); // 'voice' or 'text'
-  const [showDecompression, setShowDecompression] = useState(false);
-  const [offlineQueue, setOfflineQueue] = useState([]);
 
-  // Safety features (Phase 0)
-  const [safetyPlan, setSafetyPlan] = useState(DEFAULT_SAFETY_PLAN);
-  const [showSafetyPlan, setShowSafetyPlan] = useState(false);
-  const [crisisModal, setCrisisModal] = useState(null);
-  const [crisisResources, setCrisisResources] = useState(null);
-  const [pendingEntry, setPendingEntry] = useState(null);
+  // ============================================
+  // ZUSTAND STORES (migrated from useState)
+  // ============================================
 
-  // Daily Summary Modal (Phase 2)
-  const [dailySummaryModal, setDailySummaryModal] = useState(null);
+  // Auth Store
+  const {
+    user, setUser,
+    authMode, setAuthMode,
+    email, setEmail,
+    password, setPassword,
+    displayName, setDisplayName,
+    showPassword, toggleShowPassword,
+    authLoading, setAuthLoading,
+    authError, setAuthError,
+    showEmailForm, setShowEmailForm,
+    mfaResolver, setMfaResolver: setMfaResolverStore,
+    mfaCode, setMfaCode,
+    mfaHint, setMfaHint: setMfaHintStore,
+    startAuth, authFailed, authSuccess, resetAuthForm,
+    switchToMfa, clearMfaState
+  } = useAuthStore();
 
-  // Therapist Export (Phase 3)
-  const [showExport, setShowExport] = useState(false);
+  // Wrapper functions for store setters that need to accept full objects
+  const setMfaResolver = (resolver) => setMfaResolverStore(resolver);
+  const setMfaHint = (hint) => setMfaHintStore(hint);
+  const setShowPassword = () => toggleShowPassword(); // UI uses setShowPassword(!showPassword) pattern
 
-  // Insights Panel (Phase 4)
-  const [showInsights, setShowInsights] = useState(false);
+  // UI Store
+  const {
+    view, setView,
+    category: cat, setCategory: setCat,
+    showDecompression, showDecompressionModal, hideDecompressionModal,
+    showSafetyPlan, showSafetyPlanModal, hideSafetyPlanModal,
+    showExport, showExportModal, hideExportModal,
+    showInsights, showInsightsPanel, hideInsightsPanel,
+    showJournal, showJournalScreen, hideJournalScreen,
+    showHealthSettings, showHealthSettingsScreen, hideHealthSettingsScreen,
+    showNexusSettings, showNexusSettingsScreen, hideNexusSettingsScreen,
+    showEntityManagement, showEntityManagementScreen, hideEntityManagementScreen,
+    showQuickLog, showQuickLogModal, hideQuickLogModal,
+    dailySummaryModal, openDailySummary, closeDailySummary,
+    entryInsightsPopup, openEntryInsights, closeEntryInsights
+  } = useUiStore();
 
-  // Entry Insights Popup (shows after entry submission)
-  const [entryInsightsPopup, setEntryInsightsPopup] = useState(null);
+  // Compatibility setters for UI store
+  const setShowDecompression = (show) => show ? showDecompressionModal() : hideDecompressionModal();
+  const setShowSafetyPlan = (show) => show ? showSafetyPlanModal() : hideSafetyPlanModal();
+  const setShowExport = (show) => show ? showExportModal() : hideExportModal();
+  const setShowInsights = (show) => show ? showInsightsPanel() : hideInsightsPanel();
+  const setShowJournal = (show) => show ? showJournalScreen() : hideJournalScreen();
+  const setShowHealthSettings = (show) => show ? showHealthSettingsScreen() : hideHealthSettingsScreen();
+  const setShowNexusSettings = (show) => show ? showNexusSettingsScreen() : hideNexusSettingsScreen();
+  const setShowEntityManagement = (show) => show ? showEntityManagementScreen() : hideEntityManagementScreen();
+  const setShowQuickLog = (show) => show ? showQuickLogModal() : hideQuickLogModal();
+  const setDailySummaryModal = (data) => data ? openDailySummary(data) : closeDailySummary();
+  const setEntryInsightsPopup = (data) => data ? openEntryInsights(data) : closeEntryInsights();
 
-  // Journal Screen (Day Dashboard MVP)
-  const [showJournal, setShowJournal] = useState(false);
+  // Entries Store
+  const {
+    entries, setEntries,
+    processing, setProcessing,
+    replyContext, setReplyContext, clearReplyContext,
+    entryPreferredMode, setEntryPreferredMode,
+    offlineQueue, setOfflineQueue,
+    retrofitProgress, setRetrofitProgress
+  } = useEntriesStore();
 
-  // Health Settings Screen
-  const [showHealthSettings, setShowHealthSettings] = useState(false);
+  // Safety Store
+  const {
+    safetyPlan, setSafetyPlan,
+    crisisModal, setCrisisModal: setCrisisModalStore,
+    crisisResources, showCrisisResources, hideCrisisResources,
+    pendingEntry, setPendingEntry, clearPendingEntry,
+    startCrisisFlow, endCrisisFlow
+  } = useSafetyStore();
 
-  // Nexus Settings Screen
-  const [showNexusSettings, setShowNexusSettings] = useState(false);
+  // Compatibility setters for safety store
+  const setCrisisModal = (data) => setCrisisModalStore(data);
+  const setCrisisResources = (data) => data ? showCrisisResources(data) : hideCrisisResources();
 
-  // Entity Management Screen
-  const [showEntityManagement, setShowEntityManagement] = useState(false);
+  // Signals Store
+  const {
+    detectedSignals, setDetectedSignals,
+    showDetectedStrip, showStrip, hideStrip,
+    signalExtractionEntryId, setSignalExtractionEntryId,
+    handleSignalDetection, dismissStrip, completeSignalHandling
+  } = useSignalsStore();
 
-  // Quick Log Modal (lifted to App level to prevent unmount issues)
-  const [showQuickLog, setShowQuickLog] = useState(false);
-
-  // Signal extraction - detected signals for confirmation
-  const [detectedSignals, setDetectedSignals] = useState([]);
-  const [showDetectedStrip, setShowDetectedStrip] = useState(false);
-  const [signalExtractionEntryId, setSignalExtractionEntryId] = useState(null);
+  // Compatibility setters for signals store
+  const setShowDetectedStrip = (show) => show ? showStrip() : hideStrip();
 
   // Warn user if they try to close/navigate away while processing audio
   useEffect(() => {
@@ -460,7 +513,7 @@ export default function App() {
 
   // Background retrofit for enhanced context extraction
   const retrofitStarted = useRef(false);
-  const [retrofitProgress, setRetrofitProgress] = useState(null);
+  // retrofitProgress and setRetrofitProgress from Zustand entriesStore
 
   useEffect(() => {
     if (!user || entries.length === 0 || retrofitStarted.current) return;
@@ -1791,20 +1844,7 @@ export default function App() {
     }
   };
 
-  // Handle Email/Password Sign-In
-  const [authMode, setAuthMode] = useState('signin'); // 'signin', 'signup', 'reset', 'mfa'
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [displayName, setDisplayName] = useState('');
-  const [showPassword, setShowPassword] = useState(false);
-  const [authLoading, setAuthLoading] = useState(false);
-  const [authError, setAuthError] = useState('');
-  const [showEmailForm, setShowEmailForm] = useState(false);
-
-  // MFA state
-  const [mfaResolver, setMfaResolver] = useState(null);
-  const [mfaCode, setMfaCode] = useState('');
-  const [mfaHint, setMfaHint] = useState('');
+  // MFA recaptcha ref (auth state is from Zustand store)
   const recaptchaVerifierRef = useRef(null);
 
   const handleEmailAuth = async (e) => {
@@ -2259,7 +2299,10 @@ export default function App() {
       onShowNexusSettings={() => setShowNexusSettings(true)}
       onShowEntityManagement={() => setShowEntityManagement(true)}
       onRequestNotifications={requestPermission}
-      onLogout={() => signOut(auth)}
+      onLogout={() => {
+        resetAllStores();
+        signOut(auth);
+      }}
 
       // Entry bar context (for prompts)
       setEntryPreferredMode={setEntryPreferredMode}
