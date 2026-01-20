@@ -453,6 +453,7 @@ const GenerationStatus = ({
  * CorrelationsSection - Shows health and environment correlations with mood
  */
 const CorrelationsSection = ({ correlations, isExpanded, onToggle }) => {
+  const [expandedMethodology, setExpandedMethodology] = useState(null);
   const hasHealth = correlations.health?.topInsights?.length > 0;
   const hasEnv = correlations.environment?.topInsights?.length > 0;
 
@@ -478,6 +479,154 @@ const CorrelationsSection = ({ correlations, isExpanded, onToggle }) => {
     if (!value && value !== 0) return null;
     const pct = Math.round(Math.abs(value) * 100);
     return `${pct}%`;
+  };
+
+  // Generate methodology explanation based on insight type
+  const getMethodologyExplanation = (insight) => {
+    const type = insight.type;
+    const n = insight.sampleSize || 'N/A';
+
+    switch (type) {
+      case 'sleep_mood':
+        return {
+          method: 'Threshold comparison',
+          description: `Compared mood on days with 7+ hours of sleep vs days with less than 6 hours.`,
+          details: [
+            `Sample size: ${n} entries with sleep data`,
+            insight.goodSleepAvgMood != null ? `7+ hours sleep: ${Math.round(insight.goodSleepAvgMood * 100)}% avg mood` : null,
+            insight.poorSleepAvgMood != null ? `<6 hours sleep: ${Math.round(insight.poorSleepAvgMood * 100)}% avg mood` : null,
+            insight.correlation != null ? `Pearson correlation: ${(insight.correlation * 100).toFixed(0)}%` : null
+          ].filter(Boolean)
+        };
+      case 'hrv_mood':
+        return {
+          method: 'Median split comparison',
+          description: `Split entries at your median HRV (${insight.medianHRV?.toFixed(0) || '?'}ms) and compared mood above vs below.`,
+          details: [
+            `Sample size: ${n} entries with HRV data`,
+            insight.highHRVAvgMood != null ? `Above median: ${Math.round(insight.highHRVAvgMood * 100)}% avg mood` : null,
+            insight.lowHRVAvgMood != null ? `Below median: ${Math.round(insight.lowHRVAvgMood * 100)}% avg mood` : null,
+            insight.correlation != null ? `Pearson correlation: ${(insight.correlation * 100).toFixed(0)}%` : null
+          ].filter(Boolean)
+        };
+      case 'rhr_mood':
+        return {
+          method: 'Median split comparison',
+          description: `Split entries at your median resting heart rate (${insight.medianRHR?.toFixed(0) || '?'}bpm) and compared mood.`,
+          details: [
+            `Sample size: ${n} entries with RHR data`,
+            insight.lowRHRMood != null ? `Lower RHR (≤${insight.medianRHR?.toFixed(0)}): ${Math.round(insight.lowRHRMood * 100)}% avg mood` : null,
+            insight.highRHRMood != null ? `Higher RHR: ${Math.round(insight.highRHRMood * 100)}% avg mood` : null
+          ].filter(Boolean)
+        };
+      case 'exercise_mood':
+        return {
+          method: 'Binary comparison',
+          description: 'Compared mood on days with recorded workouts vs rest days.',
+          details: [
+            `Sample size: ${n} entries with workout data`,
+            insight.workoutDays != null ? `Workout days: ${insight.workoutDays} (${Math.round((insight.workoutDayMood || 0) * 100)}% avg mood)` : null,
+            insight.restDays != null ? `Rest days: ${insight.restDays} (${Math.round((insight.restDayMood || 0) * 100)}% avg mood)` : null
+          ].filter(Boolean)
+        };
+      case 'steps_mood':
+        return {
+          method: 'Threshold comparison',
+          description: 'Compared mood on active days (8k+ steps) vs sedentary days (<4k steps).',
+          details: [
+            `Sample size: ${n} entries with step data`,
+            `Your median steps: ${insight.medianSteps?.toLocaleString() || '?'}`,
+            insight.activeDayMood != null ? `8k+ steps: ${Math.round(insight.activeDayMood * 100)}% avg mood` : null,
+            insight.sedentaryDayMood != null ? `<4k steps: ${Math.round(insight.sedentaryDayMood * 100)}% avg mood` : null
+          ].filter(Boolean)
+        };
+      case 'recovery_mood':
+        return {
+          method: 'Zone comparison (Whoop)',
+          description: 'Compared mood across Whoop recovery zones (green ≥67%, yellow 34-66%, red <34%).',
+          details: [
+            `Sample size: ${n} entries with recovery data`,
+            insight.greenZoneMood != null ? `Green zone: ${Math.round(insight.greenZoneMood * 100)}% avg mood` : null,
+            insight.yellowZoneMood != null ? `Yellow zone: ${Math.round(insight.yellowZoneMood * 100)}% avg mood` : null,
+            insight.redZoneMood != null ? `Red zone: ${Math.round(insight.redZoneMood * 100)}% avg mood` : null
+          ].filter(Boolean)
+        };
+      default:
+        return {
+          method: 'Statistical analysis',
+          description: 'Correlation computed from your journal entries with health data.',
+          details: [`Sample size: ${n} entries`]
+        };
+    }
+  };
+
+  // Generate methodology explanation for environment insights
+  const getEnvironmentMethodologyExplanation = (insight) => {
+    const type = insight.type;
+    const n = insight.sampleSize || 'N/A';
+
+    switch (type) {
+      case 'sunshine_mood':
+        return {
+          method: 'Threshold comparison',
+          description: 'Compared mood on sunny days (60%+ sunshine) vs overcast days (<30% sunshine).',
+          details: [
+            `Sample size: ${n} entries with sunshine data`,
+            insight.highSunshineMood != null ? `Sunny (60%+): ${Math.round(insight.highSunshineMood * 100)}% avg mood` : null,
+            insight.lowSunshineMood != null ? `Overcast (<30%): ${Math.round(insight.lowSunshineMood * 100)}% avg mood` : null,
+            insight.correlation != null ? `Pearson correlation: ${(insight.correlation * 100).toFixed(0)}%` : null
+          ].filter(Boolean)
+        };
+      case 'weather_mood':
+        return {
+          method: 'Category comparison',
+          description: 'Grouped entries by weather condition (sunny, cloudy, rainy) and compared average mood.',
+          details: [
+            `Sample size: ${n} entries with weather data`,
+            insight.breakdown?.sunny ? `Sunny: ${insight.breakdown.sunny.count} entries, ${Math.round(insight.breakdown.sunny.avgMood * 100)}% avg mood` : null,
+            insight.breakdown?.cloudy ? `Cloudy: ${insight.breakdown.cloudy.count} entries, ${Math.round(insight.breakdown.cloudy.avgMood * 100)}% avg mood` : null,
+            insight.breakdown?.rainy ? `Rainy: ${insight.breakdown.rainy.count} entries, ${Math.round(insight.breakdown.rainy.avgMood * 100)}% avg mood` : null
+          ].filter(Boolean)
+        };
+      case 'daylight_mood':
+        return {
+          method: 'Seasonal daylight comparison',
+          description: 'Compared mood during longer daylight periods (12h+) vs shorter days (<10h).',
+          details: [
+            `Sample size: ${n} entries with daylight data`,
+            insight.longDayMood != null ? `Long days (12h+): ${Math.round(insight.longDayMood * 100)}% avg mood` : null,
+            insight.shortDayMood != null ? `Short days (<10h): ${Math.round(insight.shortDayMood * 100)}% avg mood` : null,
+            insight.correlation != null ? `Pearson correlation: ${(insight.correlation * 100).toFixed(0)}%` : null
+          ].filter(Boolean)
+        };
+      case 'light_context_mood':
+        return {
+          method: 'Time-of-day comparison',
+          description: 'Compared mood of entries made during daylight vs after dark.',
+          details: [
+            `Sample size: ${n} entries with light context`,
+            insight.daylightMood != null ? `Daylight entries: ${Math.round(insight.daylightMood * 100)}% avg mood` : null,
+            insight.darkMood != null ? `After-dark entries: ${Math.round(insight.darkMood * 100)}% avg mood` : null,
+            insight.peakTime ? `Your peak time: ${insight.peakTime}` : null
+          ].filter(Boolean)
+        };
+      case 'temperature_mood':
+        return {
+          method: 'Temperature range comparison',
+          description: 'Compared mood across different temperature ranges.',
+          details: [
+            `Sample size: ${n} entries with temperature data`,
+            insight.warmMood != null ? `Warm days: ${Math.round(insight.warmMood * 100)}% avg mood` : null,
+            insight.coldMood != null ? `Cold days: ${Math.round(insight.coldMood * 100)}% avg mood` : null
+          ].filter(Boolean)
+        };
+      default:
+        return {
+          method: 'Statistical analysis',
+          description: 'Correlation computed from your journal entries with environment data.',
+          details: [`Sample size: ${n} entries`]
+        };
+    }
   };
 
   return (
@@ -536,31 +685,79 @@ const CorrelationsSection = ({ correlations, isExpanded, onToggle }) => {
                         insight.strength === 'strong' ? 'text-green-600 bg-green-50' :
                         insight.strength === 'moderate' ? 'text-blue-600 bg-blue-50' :
                         'text-warm-500 bg-warm-50';
+                      const insightKey = `health-${i}`;
+                      const isMethodExpanded = expandedMethodology === insightKey;
+                      const methodology = getMethodologyExplanation(insight);
 
                       return (
                         <motion.div
                           key={i}
-                          className="bg-white/60 rounded-xl p-3 flex items-start gap-3"
+                          className="bg-white/60 rounded-xl overflow-hidden"
                           initial={{ opacity: 0, x: -10 }}
                           animate={{ opacity: 1, x: 0 }}
                           transition={{ delay: i * 0.1 }}
                         >
-                          <div className={`p-1.5 rounded-lg ${strengthColor.split(' ')[1]}`}>
-                            <Icon size={14} className={strengthColor.split(' ')[0]} />
-                          </div>
-                          <div className="flex-1">
-                            <p className="text-sm text-warm-700">{insight.insight}</p>
-                            <div className="flex items-center gap-2 mt-1">
-                              <span className={`text-xs px-2 py-0.5 rounded-full ${strengthColor}`}>
-                                {insight.strength}
-                              </span>
-                              {insight.correlation && (
-                                <span className="text-xs text-warm-500">
-                                  {formatCorrelation(insight.correlation)} correlation
+                          <div className="p-3 flex items-start gap-3">
+                            <div className={`p-1.5 rounded-lg ${strengthColor.split(' ')[1]}`}>
+                              <Icon size={14} className={strengthColor.split(' ')[0]} />
+                            </div>
+                            <div className="flex-1">
+                              <p className="text-sm text-warm-700">{insight.insight}</p>
+                              <div className="flex items-center gap-2 mt-1 flex-wrap">
+                                <span className={`text-xs px-2 py-0.5 rounded-full ${strengthColor}`}>
+                                  {insight.strength}
                                 </span>
-                              )}
+                                {insight.correlation && (
+                                  <span className="text-xs text-warm-500">
+                                    {formatCorrelation(insight.correlation)} correlation
+                                  </span>
+                                )}
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setExpandedMethodology(isMethodExpanded ? null : insightKey);
+                                  }}
+                                  className="text-xs text-teal-600 hover:text-teal-700 flex items-center gap-1"
+                                >
+                                  How?
+                                  {isMethodExpanded ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+                                </button>
+                              </div>
                             </div>
                           </div>
+
+                          {/* Methodology Explanation */}
+                          <AnimatePresence>
+                            {isMethodExpanded && (
+                              <motion.div
+                                initial={{ height: 0, opacity: 0 }}
+                                animate={{ height: 'auto', opacity: 1 }}
+                                exit={{ height: 0, opacity: 0 }}
+                                transition={{ duration: 0.15 }}
+                                className="border-t border-warm-200/50 bg-teal-50/30"
+                              >
+                                <div className="p-3 space-y-2">
+                                  <div className="flex items-center gap-2">
+                                    <Brain size={12} className="text-teal-600" />
+                                    <span className="text-xs font-semibold text-teal-700">
+                                      {methodology.method}
+                                    </span>
+                                  </div>
+                                  <p className="text-xs text-warm-600">
+                                    {methodology.description}
+                                  </p>
+                                  <ul className="text-xs text-warm-500 space-y-1">
+                                    {methodology.details.map((detail, j) => (
+                                      <li key={j} className="flex items-center gap-1.5">
+                                        <span className="w-1 h-1 bg-teal-400 rounded-full" />
+                                        {detail}
+                                      </li>
+                                    ))}
+                                  </ul>
+                                </div>
+                              </motion.div>
+                            )}
+                          </AnimatePresence>
                         </motion.div>
                       );
                     })}
@@ -584,31 +781,79 @@ const CorrelationsSection = ({ correlations, isExpanded, onToggle }) => {
                         insight.strength === 'strong' ? 'text-amber-600 bg-amber-50' :
                         insight.strength === 'moderate' ? 'text-sky-600 bg-sky-50' :
                         'text-warm-500 bg-warm-50';
+                      const envInsightKey = `env-${i}`;
+                      const isEnvMethodExpanded = expandedMethodology === envInsightKey;
+                      const envMethodology = getEnvironmentMethodologyExplanation(insight);
 
                       return (
                         <motion.div
                           key={i}
-                          className="bg-white/60 rounded-xl p-3 flex items-start gap-3"
+                          className="bg-white/60 rounded-xl overflow-hidden"
                           initial={{ opacity: 0, x: -10 }}
                           animate={{ opacity: 1, x: 0 }}
                           transition={{ delay: i * 0.1 }}
                         >
-                          <div className={`p-1.5 rounded-lg ${strengthColor.split(' ')[1]}`}>
-                            <Icon size={14} className={strengthColor.split(' ')[0]} />
-                          </div>
-                          <div className="flex-1">
-                            <p className="text-sm text-warm-700">{insight.insight}</p>
-                            <div className="flex items-center gap-2 mt-1">
-                              <span className={`text-xs px-2 py-0.5 rounded-full ${strengthColor}`}>
-                                {insight.strength}
-                              </span>
-                              {insight.correlation && (
-                                <span className="text-xs text-warm-500">
-                                  {formatCorrelation(insight.correlation)} correlation
+                          <div className="p-3 flex items-start gap-3">
+                            <div className={`p-1.5 rounded-lg ${strengthColor.split(' ')[1]}`}>
+                              <Icon size={14} className={strengthColor.split(' ')[0]} />
+                            </div>
+                            <div className="flex-1">
+                              <p className="text-sm text-warm-700">{insight.insight}</p>
+                              <div className="flex items-center gap-2 mt-1 flex-wrap">
+                                <span className={`text-xs px-2 py-0.5 rounded-full ${strengthColor}`}>
+                                  {insight.strength}
                                 </span>
-                              )}
+                                {insight.correlation && (
+                                  <span className="text-xs text-warm-500">
+                                    {formatCorrelation(insight.correlation)} correlation
+                                  </span>
+                                )}
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setExpandedMethodology(isEnvMethodExpanded ? null : envInsightKey);
+                                  }}
+                                  className="text-xs text-amber-600 hover:text-amber-700 flex items-center gap-1"
+                                >
+                                  How?
+                                  {isEnvMethodExpanded ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+                                </button>
+                              </div>
                             </div>
                           </div>
+
+                          {/* Environment Methodology Explanation */}
+                          <AnimatePresence>
+                            {isEnvMethodExpanded && (
+                              <motion.div
+                                initial={{ height: 0, opacity: 0 }}
+                                animate={{ height: 'auto', opacity: 1 }}
+                                exit={{ height: 0, opacity: 0 }}
+                                transition={{ duration: 0.15 }}
+                                className="border-t border-warm-200/50 bg-amber-50/30"
+                              >
+                                <div className="p-3 space-y-2">
+                                  <div className="flex items-center gap-2">
+                                    <Brain size={12} className="text-amber-600" />
+                                    <span className="text-xs font-semibold text-amber-700">
+                                      {envMethodology.method}
+                                    </span>
+                                  </div>
+                                  <p className="text-xs text-warm-600">
+                                    {envMethodology.description}
+                                  </p>
+                                  <ul className="text-xs text-warm-500 space-y-1">
+                                    {envMethodology.details.map((detail, j) => (
+                                      <li key={j} className="flex items-center gap-1.5">
+                                        <span className="w-1 h-1 bg-amber-400 rounded-full" />
+                                        {detail}
+                                      </li>
+                                    ))}
+                                  </ul>
+                                </div>
+                              </motion.div>
+                            )}
+                          </AnimatePresence>
                         </motion.div>
                       );
                     })}
