@@ -97,22 +97,65 @@ export const requestHealthKitPermissions = async () => {
     });
     console.log('[HealthKit] requestHealthPermissions result:', JSON.stringify(result));
 
-    // Check if all requested permissions were granted
-    const allGranted = HEALTH_PERMISSIONS.every(
-      perm => result.permissions && result.permissions[perm] === true
-    );
+    // iOS doesn't reveal if READ permissions were actually granted
+    // The plugin returns success if the dialog was shown, regardless of user's choice
+    // We need to verify by actually trying to fetch some data
+    console.log('[HealthKit] Verifying actual data access by fetching steps...');
 
-    const deniedTypes = HEALTH_PERMISSIONS.filter(
-      perm => result.permissions && result.permissions[perm] !== true
-    );
+    try {
+      const today = new Date();
+      const startOfDay = new Date(today);
+      startOfDay.setHours(0, 0, 0, 0);
 
-    const status = allGranted ? 'granted' : (deniedTypes.length < HEALTH_PERMISSIONS.length ? 'partial' : 'denied');
-    await setPermissionStatus(status);
+      // Try to fetch steps - this will fail if permissions weren't granted
+      const stepsResult = await plugin.queryAggregated({
+        dataType: 'steps',
+        startDate: startOfDay.toISOString(),
+        endDate: today.toISOString(),
+        bucket: 'day'
+      });
 
-    return {
-      authorized: allGranted || deniedTypes.length < HEALTH_PERMISSIONS.length,
-      deniedTypes
-    };
+      // Also try to fetch sleep data
+      const sleepResult = await plugin.queryLatestSample({ dataType: 'sleep' }).catch(() => null);
+
+      // Check if we actually got data (null/undefined means no permission or no data)
+      const hasStepsAccess = stepsResult?.aggregatedData !== undefined;
+      const hasSleepAccess = sleepResult !== null;
+      const hasAnyAccess = hasStepsAccess || hasSleepAccess;
+
+      console.log('[HealthKit] Data verification - steps:', hasStepsAccess, 'sleep:', hasSleepAccess);
+
+      if (hasAnyAccess) {
+        // We actually have access to some data
+        const status = 'granted';
+        await setPermissionStatus(status);
+        return {
+          authorized: true,
+          deniedTypes: [],
+          verified: true
+        };
+      } else {
+        // Dialog was shown but no data access - user likely denied
+        console.log('[HealthKit] Permission dialog shown but no data access - user may have denied');
+        await setPermissionStatus('denied');
+        return {
+          authorized: false,
+          deniedTypes: HEALTH_PERMISSIONS,
+          verified: true,
+          error: 'No health data access. Please enable permissions in Settings > Privacy & Security > Health > EchoVault'
+        };
+      }
+    } catch (verifyError) {
+      // Verification query failed - treat as denied
+      console.error('[HealthKit] Data verification failed:', verifyError);
+      await setPermissionStatus('denied');
+      return {
+        authorized: false,
+        deniedTypes: HEALTH_PERMISSIONS,
+        verified: true,
+        error: 'Could not verify health data access. Please check permissions in Settings > Privacy & Security > Health'
+      };
+    }
   } catch (error) {
     console.error('[HealthKit] Authorization failed:', error);
     console.error('[HealthKit] Error details:', error?.message, error?.code, error?.stack);

@@ -56,8 +56,8 @@ jobs:
             --region ${{ env.REGION }} \
             --platform managed \
             --allow-unauthenticated \
-            --set-env-vars="NODE_ENV=production,WHOOP_REDIRECT_URI=https://echo-vault-app.web.app/__/auth/handler" \
-            --set-secrets="OPENAI_API_KEY=OPENAI_API_KEY:latest,WHOOP_CLIENT_ID=WHOOP_CLIENT_ID:latest,WHOOP_CLIENT_SECRET=WHOOP_CLIENT_SECRET:latest,WHOOP_TOKEN_ENCRYPTION_KEY=WHOOP_TOKEN_ENCRYPTION_KEY:latest"
+            --set-env-vars="NODE_ENV=production,WHOOP_REDIRECT_URI=https://echovault-voice-relay-581319345416.us-central1.run.app/auth/whoop/callback" \
+            --set-secrets="OPENAI_API_KEY=OPENAI_API_KEY:latest,WHOOP_CLIENT_ID=WHOOP_CLIENT_ID:latest,WHOOP_CLIENT_SECRET=WHOOP_CLIENT_SECRET:latest,WHOOP_TOKEN_ENCRYPTION_KEY=WHOOP_TOKEN_ENCRYPTION_KEY:latest,GEMINI_API_KEY=GEMINI_API_KEY:latest"
 
       - name: Show deployment URL
         run: |

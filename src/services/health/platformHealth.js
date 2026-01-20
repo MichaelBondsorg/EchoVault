@@ -76,9 +76,9 @@ export const getHealthDataStrategy = async () => {
     const permissionStatus = await getPermissionStatus();
     console.log('[PlatformHealth] Permission status:', permissionStatus);
 
-    // Consider available if granted, partial (some permissions), or unknown (might have been set in iOS Settings)
-    // We'll attempt to query HealthKit and it will fail gracefully if no permissions
-    const isAvailable = permissionStatus === 'granted' || permissionStatus === 'partial' || permissionStatus === 'unknown';
+    // Only consider available if we have explicitly granted or partial permissions
+    // 'unknown' means the user hasn't interacted with the permission dialog yet
+    const isAvailable = permissionStatus === 'granted' || permissionStatus === 'partial';
 
     return {
       strategy: capabilities.provider,
@@ -86,7 +86,9 @@ export const getHealthDataStrategy = async () => {
       permissionStatus,
       capabilities,
       platform,
-      fallback: 'manual'
+      fallback: 'manual',
+      // Allow UI to know if permissions can be requested
+      canRequestPermission: permissionStatus === 'unknown' || permissionStatus === 'denied'
     };
   }
 
