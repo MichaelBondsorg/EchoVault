@@ -3555,7 +3555,8 @@ export const exchangeGoogleToken = onCall(
       const iosClientId = process.env.GOOGLE_IOS_CLIENT_ID || '581319345416-sf58st9q2hvst5kakt4tn3sgulor6r7m.apps.googleusercontent.com';
       const validAudiences = [
         webClientId, // Web client
-        iosClientId, // iOS client
+        iosClientId, // iOS client (newer)
+        '581319345416-oijg7nb3nus8fni8q5ia31u8slkfrmrs.apps.googleusercontent.com', // iOS client (original, in GoogleService-Info.plist)
       ];
 
       if (!validAudiences.includes(tokenInfo.aud)) {
@@ -4388,3 +4389,232 @@ export const migrateEntitiesFromEntries = onCall(
     return result;
   }
 );
+
+// ============================================
+// CHIEF OF STAFF CONTEXT FUNCTION
+// ============================================
+
+/**
+ * Get synthesized context for the Chief of Staff system
+ * SECURITY: Hardcoded to only allow Michael's user ID
+ */
+export const getChiefOfStaffContext = onCall(
+  {
+    secrets: [geminiApiKey],
+    timeoutSeconds: 60,
+    memory: '512MiB'
+  },
+  async (request) => {
+    // SECURITY: Only allow Michael's user ID
+    const ALLOWED_USER_ID = 'CsPBW2T3r8hf2RWefj6PmeXhWCh1';
+
+    if (!request.auth) {
+      throw new HttpsError('unauthenticated', 'Authentication required');
+    }
+
+    if (request.auth.uid !== ALLOWED_USER_ID) {
+      console.warn(`Unauthorized access attempt to getChiefOfStaffContext by uid: ${request.auth.uid}`);
+      throw new HttpsError('permission-denied', 'This function is restricted');
+    }
+
+    const uid = request.auth.uid;
+    const { sinceDays = 30 } = request.data || {};
+
+    const cutoffDate = new Date();
+    cutoffDate.setDate(cutoffDate.getDate() - sinceDays);
+
+    const userPath = `artifacts/${APP_COLLECTION_ID}/users/${uid}`;
+
+    try {
+      // Parallel fetch all context
+      const [
+        entriesSnapshot,
+        signalsSnapshot,
+        peopleSnapshot,
+        threadsSnapshot,
+        insightsSnapshot
+      ] = await Promise.all([
+        // Recent entries
+        db.collection(`${userPath}/entries`)
+          .where('createdAt', '>=', cutoffDate)
+          .orderBy('createdAt', 'desc')
+          .limit(100)
+          .get(),
+
+        // Active signals (non-terminal states)
+        db.collection(`${userPath}/signal_states`)
+          .where('state', 'not-in', ['achieved', 'abandoned', 'dismissed', 'actioned', 'resolved', 'rejected'])
+          .limit(50)
+          .get(),
+
+        // People from memory graph
+        db.collection(`${userPath}/memory/core/people`)
+          .where('status', '==', 'active')
+          .orderBy('mentionCount', 'desc')
+          .limit(30)
+          .get(),
+
+        // Active threads
+        db.collection(`${userPath}/threads`)
+          .where('status', '==', 'active')
+          .limit(20)
+          .get(),
+
+        // Basic insights
+        db.collection(`${userPath}/basicInsights`)
+          .limit(20)
+          .get()
+      ]);
+
+      // Process entries into summaries (privacy-preserving)
+      const entries = entriesSnapshot.docs.map(doc => {
+        const data = doc.data();
+        const text = data.text || '';
+
+        return {
+          id: doc.id,
+          date: data.effectiveDate || data.createdAt?.toDate?.()?.toISOString?.()?.split('T')[0],
+          moodScore: data.analysis?.mood_score ?? data.localAnalysis?.mood_score ?? null,
+          entryType: data.localAnalysis?.entry_type || data.analysis?.framework || 'unknown',
+          tags: data.analysis?.tags || [],
+          voiceTone: data.voiceTone ? {
+            energy: data.voiceTone.energy,
+            emotions: data.voiceTone.emotions,
+            moodScore: data.voiceTone.moodScore
+          } : null,
+          health: data.healthContext ? {
+            sleepHours: data.healthContext.sleep?.sleepLastNight,
+            sleepScore: data.healthContext.sleep?.sleepScore,
+            hrv: data.healthContext.heart?.hrv,
+            recovery: data.healthContext.recovery?.status,
+            steps: data.healthContext.activity?.stepsToday
+          } : null,
+          environment: data.environmentContext ? {
+            weather: data.environmentContext.weatherLabel,
+            lightContext: data.environmentContext.lightContext,
+            isAfterDark: data.environmentContext.isAfterDark
+          } : null,
+          preview: text.substring(0, 150) + (text.length > 150 ? '...' : ''),
+          safetyFlag: data.safety_flagged || false,
+          hasWarningIndicators: data.has_warning_indicators || false
+        };
+      });
+
+      // Process signals
+      const activeSignals = signalsSnapshot.docs.map(doc => {
+        const data = doc.data();
+        return {
+          id: doc.id,
+          type: data.type,
+          state: data.state,
+          content: data.content,
+          createdAt: data.createdAt?.toDate?.()?.toISOString?.(),
+          updatedAt: data.updatedAt?.toDate?.()?.toISOString?.(),
+          sourceEntryDate: data.sourceEntryDate
+        };
+      });
+
+      // Process people
+      const people = peopleSnapshot.docs.map(doc => {
+        const data = doc.data();
+        return {
+          id: doc.id,
+          name: data.name,
+          relationship: data.relationship,
+          entityType: data.entityType,
+          sentiment: data.sentiment?.overall,
+          mentionCount: data.mentionCount,
+          lastMentioned: data.lastMentioned?.toDate?.()?.toISOString?.()
+        };
+      });
+
+      // Process threads
+      const threads = threadsSnapshot.docs.map(doc => {
+        const data = doc.data();
+        return {
+          id: doc.id,
+          title: data.title,
+          summary: data.summary,
+          status: data.status,
+          entryCount: data.entryIds?.length || 0,
+          lastUpdated: data.updatedAt?.toDate?.()?.toISOString?.()
+        };
+      });
+
+      // Process basic insights
+      const patterns = insightsSnapshot.docs.map(doc => {
+        const data = doc.data();
+        return {
+          id: doc.id,
+          type: data.type,
+          metric: data.metric,
+          insight: data.insight || data.description,
+          correlation: data.correlation,
+          significance: data.significance
+        };
+      });
+
+      // Calculate mood trend
+      const moodScores = entries
+        .filter(e => e.moodScore !== null)
+        .map(e => ({ date: e.date, score: e.moodScore }));
+
+      const moodTrend = {
+        average: moodScores.length > 0
+          ? moodScores.reduce((sum, e) => sum + e.score, 0) / moodScores.length
+          : null,
+        recentWeek: calculateRecentMood(moodScores, 7),
+        previousWeek: calculateRecentMood(moodScores, 14, 7),
+        dataPoints: moodScores.length
+      };
+
+      // Calculate trend direction
+      if (moodTrend.recentWeek && moodTrend.previousWeek) {
+        const diff = moodTrend.recentWeek - moodTrend.previousWeek;
+        moodTrend.direction = diff > 0.05 ? 'improving' : diff < -0.05 ? 'declining' : 'stable';
+      }
+
+      return {
+        generatedAt: new Date().toISOString(),
+        periodDays: sinceDays,
+        entries,
+        activeSignals,
+        people,
+        threads,
+        patterns,
+        moodTrend,
+        summary: {
+          totalEntries: entries.length,
+          activeGoals: activeSignals.filter(s => s.type === 'goal').length,
+          activeInsights: activeSignals.filter(s => s.type === 'insight').length,
+          activePatterns: activeSignals.filter(s => s.type === 'pattern').length,
+          knownPeople: people.length,
+          activeThreads: threads.length
+        }
+      };
+
+    } catch (error) {
+      console.error('getChiefOfStaffContext error:', error);
+      throw new HttpsError('internal', 'Failed to fetch context: ' + error.message);
+    }
+  }
+);
+
+/**
+ * Helper to calculate average mood for a date range
+ */
+function calculateRecentMood(moodScores, daysAgo, offsetDays = 0) {
+  const now = new Date();
+  const startDate = new Date(now);
+  startDate.setDate(startDate.getDate() - daysAgo);
+  const endDate = new Date(now);
+  endDate.setDate(endDate.getDate() - offsetDays);
+
+  const relevant = moodScores.filter(m => {
+    const d = new Date(m.date);
+    return d >= startDate && d < endDate;
+  });
+
+  if (relevant.length === 0) return null;
+  return relevant.reduce((sum, e) => sum + e.score, 0) / relevant.length;
+}
