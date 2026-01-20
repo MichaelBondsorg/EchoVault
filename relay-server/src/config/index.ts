@@ -20,7 +20,7 @@ export const config = {
   // Whoop Integration
   whoopClientId: process.env.WHOOP_CLIENT_ID || '',
   whoopClientSecret: process.env.WHOOP_CLIENT_SECRET || '',
-  whoopRedirectUri: process.env.WHOOP_REDIRECT_URI || 'https://echo-vault-app.web.app/__/auth/handler',
+  whoopRedirectUri: process.env.WHOOP_REDIRECT_URI || 'https://echovault-voice-relay-581319345416.us-central1.run.app/auth/whoop/callback',
   whoopTokenEncryptionKey: process.env.WHOOP_TOKEN_ENCRYPTION_KEY || '',
 
   // Realtime API settings

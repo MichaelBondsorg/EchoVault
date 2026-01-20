@@ -21,7 +21,7 @@
     "analyze": "vite build --mode analyze"
   },
   "dependencies": {
-    "@capacitor-firebase/crashlytics": "^7.0.0",
+    "@capacitor-firebase/crashlytics": "^8.0.1",
     "@capacitor/android": "^8.0.0",
     "@capacitor/app": "^8.0.0",
     "@capacitor/browser": "^8.0.0",
