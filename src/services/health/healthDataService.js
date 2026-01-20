@@ -379,11 +379,13 @@ export const saveManualHealthInput = async (input) => {
 
 /**
  * Get health data availability status
+ * Now returns status for BOTH Whoop and native health (HealthKit/Google Fit)
+ * so the UI can show both as connected when applicable.
  *
  * @returns {Object} Availability info for UI
  */
 export const getHealthDataStatus = async () => {
-  // Check Whoop status first
+  // Check Whoop status
   let whoopLinked = false;
   try {
     whoopLinked = await isWhoopLinked();
@@ -391,34 +393,40 @@ export const getHealthDataStatus = async () => {
     // Ignore Whoop check errors
   }
 
-  if (whoopLinked) {
-    return {
-      isAvailable: true,
-      strategy: 'whoop',
-      platform: 'cloud',
-      isNative: false,
-      isWhoop: true,
-      canRequestPermission: false,
-      hasCachedData: false,
-      cacheAge: null,
-      message: 'Connected to Whoop'
-    };
-  }
-
+  // Always check native health status (HealthKit/Google Fit)
   const strategy = await getHealthDataStrategy();
   const { platform, isNative } = detectPlatform();
 
+  // Return comprehensive status for both sources
   return {
-    isAvailable: strategy.isAvailable,
-    strategy: strategy.strategy,
+    // Overall availability (either source connected)
+    isAvailable: whoopLinked || strategy.isAvailable,
+    // Primary strategy (for data fetching)
+    strategy: whoopLinked && strategy.isAvailable ? 'merged' : whoopLinked ? 'whoop' : strategy.strategy,
     platform,
     isNative,
-    isWhoop: false,
+    // Individual source status for UI
+    isWhoop: whoopLinked,
+    isNativeConnected: strategy.isAvailable,
+    nativePermissionStatus: strategy.permissionStatus,
     canRequestPermission: isNative && strategy.permissionStatus !== 'granted',
     hasCachedData: strategy.strategy === 'cache',
     cacheAge: strategy.cacheAge || null,
-    message: getStatusMessage(strategy)
+    message: getStatusMessageMultiSource(whoopLinked, strategy)
   };
+};
+
+/**
+ * Get human-readable status message for multi-source setup
+ */
+const getStatusMessageMultiSource = (whoopLinked, nativeStrategy) => {
+  if (whoopLinked && nativeStrategy.isAvailable) {
+    return 'Connected to Whoop + Apple Health';
+  }
+  if (whoopLinked) {
+    return 'Connected to Whoop';
+  }
+  return getStatusMessage(nativeStrategy);
 };
 
 /**

@@ -341,8 +341,8 @@ const HealthSettingsScreen = ({ onClose }) => {
       ? 'Google Fit'
       : 'Health App';
 
-  // Check if native health is connected
-  const nativeConnected = status?.isAvailable && !status?.isWhoop;
+  // Check if native health is connected (now independent of Whoop status)
+  const nativeConnected = status?.isNativeConnected;
   const isWeb = status?.platform === 'web';
   const anySourceConnected = whoopLinked || nativeConnected;
 
