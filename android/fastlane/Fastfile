@@ -1,4 +1,4 @@
-# Fastfile for EchoVault Android
+# Fastfile for Engram Android
 # Documentation: https://docs.fastlane.tools
 
 default_platform(:android)

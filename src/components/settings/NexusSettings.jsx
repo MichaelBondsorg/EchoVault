@@ -123,7 +123,7 @@ const NexusSettings = ({ user }) => {
         </div>
         <div>
           <h2 className="text-xl font-semibold text-warm-100">Nexus Insights</h2>
-          <p className="text-sm text-warm-400">Control how EchoVault analyzes your patterns</p>
+          <p className="text-sm text-warm-400">Control how Engram analyzes your patterns</p>
         </div>
       </div>
 

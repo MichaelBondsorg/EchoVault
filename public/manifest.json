@@ -1,6 +1,6 @@
 {
-  "name": "EchoVault",
-  "short_name": "EchoVault",
+  "name": "Engram",
+  "short_name": "Engram",
   "description": "AI-powered journaling app with mood tracking and insights",
   "start_url": "/",
   "display": "standalone",

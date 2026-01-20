@@ -1,4 +1,4 @@
-# Fastfile for EchoVault iOS
+# Fastfile for Engram iOS
 # Documentation: https://docs.fastlane.tools
 
 default_platform(:ios)
@@ -25,7 +25,7 @@ platform :ios do
       configuration: "Debug",
       export_method: "development",
       output_directory: "./build",
-      output_name: "EchoVault-Dev.ipa"
+      output_name: "Engram-Dev.ipa"
     )
   end
 
@@ -37,7 +37,7 @@ platform :ios do
       configuration: "Release",
       export_method: "app-store",
       output_directory: "./build",
-      output_name: "EchoVault.ipa"
+      output_name: "Engram.ipa"
     )
   end
 

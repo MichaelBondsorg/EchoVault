@@ -2,7 +2,7 @@
  * Crash Reporting Service
  *
  * Wrapper for Firebase Crashlytics providing crash reporting,
- * error logging, and custom event tracking for EchoVault.
+ * error logging, and custom event tracking for Engram.
  *
  * Usage:
  *   import { crashReporting } from './services/crashReporting';

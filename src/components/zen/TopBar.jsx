@@ -4,7 +4,7 @@ import { useMoodBackground } from './MoodBackgroundProvider';
 /**
  * TopBar - Translucent top navigation bar with mood indicator
  *
- * LAY-004: Shows "EchoVault" brand instead of greeting to avoid redundancy
+ * LAY-004: Shows "Engram" brand instead of greeting to avoid redundancy
  * (HeroWidget already shows time-based greeting on home page)
  *
  * @param {Object} props
@@ -48,7 +48,7 @@ const TopBar = ({ greeting, onMoodOrbClick, latestMoodScore = 0.5 }) => {
         animate={{ opacity: 1, x: 0 }}
         transition={{ delay: 0.1 }}
       >
-        EchoVault
+        Engram
       </motion.h1>
 
       {/* Right: Mood Indicator Orb */}

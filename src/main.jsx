@@ -8,11 +8,11 @@ import App from './App.jsx';
 import { ErrorBoundary } from './components';
 import './index.css';
 
-console.log('[EchoVault] Starting app initialization...');
+console.log('[Engram] Starting app initialization...');
 
 // Initialize native features when running on a native platform
 const initializeApp = async () => {
-  console.log('[EchoVault] Platform:', Capacitor.getPlatform(), 'isNative:', Capacitor.isNativePlatform());
+  console.log('[Engram] Platform:', Capacitor.getPlatform(), 'isNative:', Capacitor.isNativePlatform());
 
   if (Capacitor.isNativePlatform()) {
     // Configure status bar for dark theme
@@ -26,10 +26,10 @@ const initializeApp = async () => {
     // Hide splash screen after app loads
     await SplashScreen.hide();
   }
-  console.log('[EchoVault] Native initialization complete');
+  console.log('[Engram] Native initialization complete');
 };
 
-console.log('[EchoVault] About to render React app...');
+console.log('[Engram] About to render React app...');
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
@@ -41,7 +41,7 @@ ReactDOM.createRoot(document.getElementById('root')).render(
   </React.StrictMode>
 );
 
-console.log('[EchoVault] React render called, initializing native features...');
+console.log('[Engram] React render called, initializing native features...');
 
 // Run initialization after render
 initializeApp();

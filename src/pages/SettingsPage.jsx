@@ -377,7 +377,7 @@ const SettingsPage = ({
 
       {/* App Version */}
       <p className="text-center text-xs text-warm-400">
-        EchoVault v2.0 (Zen & Bento)
+        Engram v2.0
       </p>
     </motion.div>
   );

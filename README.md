@@ -1,4 +1,4 @@
-# EchoVault
+# Engram
 
 A mental health journaling application that helps users process emotions, track patterns, set goals, and receive AI-powered therapeutic insights.
 
@@ -33,8 +33,8 @@ A mental health journaling application that helps users process emotions, track 
 
 ```bash
 # Clone the repository
-git clone https://github.com/michaelbond92/EchoVault.git
-cd EchoVault
+git clone https://github.com/michaelbond92/Engram.git
+cd Engram
 
 # Install dependencies
 npm install

@@ -5,8 +5,8 @@ import * as dotenv from 'dotenv';
 dotenv.config();
 
 const config: CapacitorConfig = {
-  appId: 'com.echovault.app',
-  appName: 'EchoVault',
+  appId: 'com.echovault.engram',
+  appName: 'Engram',
   webDir: 'dist',
   // Server configuration for development
   server: {

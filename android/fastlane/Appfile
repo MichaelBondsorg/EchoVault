@@ -1,5 +1,5 @@
 # Android App Identifier (Package Name)
-package_name("com.echovault.app")
+package_name("com.echovault.engram")
 
 # Path to your Google Play Console JSON key file
 # Create this at: https://play.google.com/console > Setup > API access > Service accounts

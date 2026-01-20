@@ -187,7 +187,7 @@ export const handleWhoopOAuthSuccess = async () => {
 
 /**
  * Fetch Whoop health summary via relay server
- * Returns data in EchoVault-compatible format
+ * Returns data in Engram-compatible format
  */
 export const getWhoopSummary = async (date = new Date()) => {
   try {
@@ -195,7 +195,7 @@ export const getWhoopSummary = async (date = new Date()) => {
       `/health/whoop/summary?date=${date.toISOString()}`
     );
 
-    // Transform response to match EchoVault nested health schema (same as HealthKit)
+    // Transform response to match Engram nested health schema (same as HealthKit)
     const workouts = response.workouts?.map(w => ({
       type: w.type,
       duration: w.duration,

@@ -1,7 +1,7 @@
 {
-  "name": "echovault-voice-relay",
+  "name": "engram-voice-relay",
   "version": "1.0.0",
-  "description": "Secure WebSocket relay for EchoVault voice conversations",
+  "description": "Secure WebSocket relay for Engram voice conversations",
   "main": "dist/index.js",
   "type": "module",
   "scripts": {

@@ -61,7 +61,7 @@ const TherapistExportScreen = ({ entries, onClose }) => {
       const avgMood = moodScores.length > 0 ? moodScores.reduce((a, b) => a + b, 0) / moodScores.length : null;
 
       doc.setFontSize(20);
-      doc.text('EchoVault Journal Export', 20, 20);
+      doc.text('Engram Journal Export', 20, 20);
 
       doc.setFontSize(10);
       doc.text(`Generated: ${new Date().toLocaleDateString()}`, 20, 30);

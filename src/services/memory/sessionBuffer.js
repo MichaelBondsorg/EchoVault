@@ -11,7 +11,7 @@
  * until the Cloud Function commits the permanent memory update.
  */
 
-const SESSION_BUFFER_KEY = 'echovault_session_buffer';
+const SESSION_BUFFER_KEY = 'engram_session_buffer';
 const BUFFER_EXPIRY_MS = 5 * 60 * 1000; // 5 minutes - enough for Cloud Function to process
 
 /**

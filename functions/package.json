@@ -1,7 +1,7 @@
 {
-  "name": "echovault-functions",
+  "name": "engram-functions",
   "version": "2.0.0",
-  "description": "Firebase Cloud Functions for EchoVault - AI processing and pattern computation",
+  "description": "Firebase Cloud Functions for Engram - AI processing and pattern computation",
   "main": "index.js",
   "type": "module",
   "engines": {

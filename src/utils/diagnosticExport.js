@@ -100,7 +100,7 @@ export const exportDiagnosticJSON = (entries, options = {}) => {
   const url = URL.createObjectURL(blob);
 
   const timestamp = new Date().toISOString().split('T')[0];
-  const filename = `echovault-diagnostic-${timestamp}.json`;
+  const filename = `engram-diagnostic-${timestamp}.json`;
 
   const link = document.createElement('a');
   link.href = url;
@@ -151,7 +151,7 @@ export const exportFullDiagnosticJSON = (entries, options = {}) => {
   const timestamp = new Date().toISOString().split('T')[0];
   const link = document.createElement('a');
   link.href = url;
-  link.download = `echovault-full-export-${timestamp}.json`;
+  link.download = `engram-full-export-${timestamp}.json`;
   document.body.appendChild(link);
   link.click();
   document.body.removeChild(link);

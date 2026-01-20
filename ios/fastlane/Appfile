@@ -1,5 +1,5 @@
 # App Store Connect App Identifier
-app_identifier("com.echovault.app")
+app_identifier("com.echovault.engram")
 
 # Your Apple Developer Portal username
 # Set via environment variable or replace with your email

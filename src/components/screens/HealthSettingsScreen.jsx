@@ -941,7 +941,7 @@ const HealthSettingsScreen = ({ onClose }) => {
             <div className="p-4 border-b border-warm-100">
               <h2 className="font-semibold text-warm-800">What We Read</h2>
               <p className="text-sm text-warm-500 mt-1">
-                EchoVault only reads data — we never write to your health app
+                Engram only reads data — we never write to your health app
               </p>
             </div>
             <div className="divide-y divide-warm-100">
@@ -975,7 +975,7 @@ const HealthSettingsScreen = ({ onClose }) => {
               <div>
                 <h3 className="font-semibold text-primary-800">Why connect?</h3>
                 <p className="text-sm text-primary-700 mt-1">
-                  EchoVault can show you patterns like "You tend to feel better on days you sleep 7+ hours"
+                  Engram can show you patterns like "You tend to feel better on days you sleep 7+ hours"
                   or "Exercise days often lead to more positive entries."
                 </p>
               </div>

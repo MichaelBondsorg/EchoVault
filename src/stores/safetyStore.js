@@ -300,7 +300,7 @@ export const useSafetyStore = create(
         }, false, 'safety/reset')
       }),
       {
-        name: 'echovault-safety-store',
+        name: 'engram-safety-store',
         // Only persist safety plan, not crisis state
         partialize: (state) => ({ safetyPlan: state.safetyPlan })
       }

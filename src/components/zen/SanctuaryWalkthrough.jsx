@@ -17,7 +17,7 @@ const SanctuaryWalkthrough = ({ isOpen, onComplete, onSkip }) => {
     {
       id: 'vision',
       title: 'Welcome to a quieter space',
-      description: "We've redesigned EchoVault to focus on the present moment. Your sanctuary is now calmer, cleaner, and completely yours to shape.",
+      description: "We've redesigned Engram to focus on the present moment. Your sanctuary is now calmer, cleaner, and completely yours to shape.",
       visual: (
         <div className="relative w-48 h-48 mx-auto">
           {/* Zen-style animated circles */}

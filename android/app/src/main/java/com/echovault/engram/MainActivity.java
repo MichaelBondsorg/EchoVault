@@ -1,4 +1,4 @@
-package com.echovault.app;
+package com.echovault.engram;
 
 import com.getcapacitor.BridgeActivity;
 

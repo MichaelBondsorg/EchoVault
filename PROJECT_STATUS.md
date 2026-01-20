@@ -1,4 +1,4 @@
-# EchoVault Project Status
+# Engram Project Status
 
 > **Last Updated:** 2026-01-19 (Health data enrichment fixes)
 > **Updated By:** Claude (via conversation with Michael)
@@ -32,7 +32,7 @@
 | Item | Priority | Plan Document | Notes |
 |------|----------|---------------|-------|
 | **Architecture Restructuring** | High | `.claude/plans/eventual-floating-rabin.md` | 5-phase plan: state management (Zustand), database abstraction, Cloud Functions splitting, component decomposition, TypeScript migration. Phases 0-2 complete, Phase 3 in progress. |
-| **App Rename: EchoVault → Engram** | Medium | `docs/ENGRAM-RENAME-PLAN.md` | Name reserved in App Store Connect. 9-phase implementation plan ready. Requires domain setup (theengram.app), OAuth console updates. |
+| **App Rename: Engram → Engram** | Medium | `docs/ENGRAM-RENAME-PLAN.md` | Name reserved in App Store Connect. 9-phase implementation plan ready. Requires domain setup (theengram.app), OAuth console updates. |
 
 ---
 
@@ -217,7 +217,7 @@ Good ideas we're explicitly NOT doing now. Don't re-suggest these.
 
 | File | Purpose |
 |------|---------|
-| `EchoVault-Nexus-2.0-Implementation-Spec.md` | Complete implementation spec for new insights engine (5,300+ lines) |
+| `Engram-Nexus-2.0-Implementation-Spec.md` | Complete implementation spec for new insights engine (5,300+ lines) |
 | `src/pages/EntityManagementPage.jsx` | Entity list/management view (Milestone 1) |
 | `src/components/settings/EntityEditModal.jsx` | Entity edit form modal (Milestone 1) |
 | `src/services/health/healthBackfill.js` | Retroactive health data for old entries |

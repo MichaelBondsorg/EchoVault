@@ -156,12 +156,12 @@ app.get('/auth/whoop/callback', async (req, res) => {
     if (error) {
       console.error('Whoop OAuth error:', error);
       // Redirect to app with error
-      res.redirect(`echovault://auth-error?provider=whoop&error=${error}`);
+      res.redirect(`engram://auth-error?provider=whoop&error=${error}`);
       return;
     }
 
     if (!code || !state) {
-      res.redirect('echovault://auth-error?provider=whoop&error=missing_params');
+      res.redirect('engram://auth-error?provider=whoop&error=missing_params');
       return;
     }
 
@@ -170,13 +170,13 @@ app.get('/auth/whoop/callback', async (req, res) => {
     try {
       stateData = JSON.parse(Buffer.from(state as string, 'base64').toString());
     } catch {
-      res.redirect('echovault://auth-error?provider=whoop&error=invalid_state');
+      res.redirect('engram://auth-error?provider=whoop&error=invalid_state');
       return;
     }
 
     // Validate state timestamp (5 minute expiry)
     if (Date.now() - stateData.timestamp > 5 * 60 * 1000) {
-      res.redirect('echovault://auth-error?provider=whoop&error=state_expired');
+      res.redirect('engram://auth-error?provider=whoop&error=state_expired');
       return;
     }
 
@@ -186,10 +186,10 @@ app.get('/auth/whoop/callback', async (req, res) => {
     console.log(`Whoop linked successfully for user ${stateData.userId}`);
 
     // Redirect to app with success
-    res.redirect('echovault://auth-success?provider=whoop');
+    res.redirect('engram://auth-success?provider=whoop');
   } catch (error) {
     console.error('Error completing Whoop OAuth:', error);
-    res.redirect('echovault://auth-error?provider=whoop&error=token_exchange_failed');
+    res.redirect('engram://auth-error?provider=whoop&error=token_exchange_failed');
   }
 });
 

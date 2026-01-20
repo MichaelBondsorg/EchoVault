@@ -1,5 +1,5 @@
 /**
- * EchoVault Type Definitions
+ * Engram Type Definitions
  *
  * Central export for all TypeScript type definitions.
  * These types provide IDE support and documentation for the codebase.

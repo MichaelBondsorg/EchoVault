@@ -1,4 +1,4 @@
-# EchoVault - Claude Code Project Guide
+# Engram - Claude Code Project Guide
 
 ## Working with Me (Michael)
 
@@ -117,7 +117,7 @@ This ensures the next session (whether tomorrow or next week) can pick up withou
 
 ## Project Overview
 
-EchoVault is a mental health journaling application (v2.0.0) that helps users process emotions, track patterns, set goals, and receive AI-powered therapeutic insights. It's a cross-platform app supporting web, iOS, and Android.
+Engram is a mental health journaling application (v2.0.0) that helps users process emotions, track patterns, set goals, and receive AI-powered therapeutic insights. It's a cross-platform app supporting web, iOS, and Android.
 
 **Firebase Project ID**: `echo-vault-app`
 **Firestore Collection**: `artifacts/echo-vault-v5-fresh/users/{userId}/...`
@@ -227,7 +227,7 @@ EchoVault is a mental health journaling application (v2.0.0) that helps users pr
 
 ### Signal Lifecycle State Machine (Primary Focus Area)
 
-The signal lifecycle system (`src/services/signals/signalLifecycle.js`) is the heart of EchoVault's intelligence. It transforms AI observations into actionable, user-manageable items.
+The signal lifecycle system (`src/services/signals/signalLifecycle.js`) is the heart of Engram's intelligence. It transforms AI observations into actionable, user-manageable items.
 
 **What is a Signal?**
 A signal is an AI-detected observation from journal entries: a goal the user mentioned, a pattern in their behavior, or an insight about their emotional state.

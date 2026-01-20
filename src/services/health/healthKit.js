@@ -142,7 +142,7 @@ export const requestHealthKitPermissions = async () => {
           authorized: false,
           deniedTypes: HEALTH_PERMISSIONS,
           verified: true,
-          error: 'No health data access. Please enable permissions in Settings > Privacy & Security > Health > EchoVault'
+          error: 'No health data access. Please enable permissions in Settings > Privacy & Security > Health > Engram'
         };
       }
     } catch (verifyError) {
@@ -340,7 +340,7 @@ const querySteps = async (plugin, start, end) => {
 };
 
 /**
- * Query sleep data with full stage breakdown using EchoVault fork's sleep-stages endpoint
+ * Query sleep data with full stage breakdown using Engram fork's sleep-stages endpoint
  */
 const querySleep = async (plugin, start, end) => {
   console.log('[HealthKit] querySleep starting (using sleep-stages)...');

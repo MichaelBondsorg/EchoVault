@@ -122,7 +122,7 @@ const loadJsPDF = () => {
 
 
 export default function App() {
-  console.log('[EchoVault] App component rendering...');
+  console.log('[Engram] App component rendering...');
   useIOSMeta();
   const { permission, requestPermission } = useNotifications();
   const { isOnline, wasOffline, clearWasOffline } = useNetworkStatus();
@@ -189,7 +189,7 @@ export default function App() {
 
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'hidden' && processing) {
-        console.log('[EchoVault] App backgrounded while processing audio - processing will continue');
+        console.log('[Engram] App backgrounded while processing audio - processing will continue');
         // Audio backup is already in localStorage, so it can be recovered
       }
     };
@@ -243,13 +243,13 @@ export default function App() {
     const handleDeepLink = async (event) => {
       try {
         const url = new URL(event.url);
-        console.log('[EchoVault] Deep link received:', url.toString());
+        console.log('[Engram] Deep link received:', url.toString());
 
         // Handle OAuth success callback
         if (url.host === 'auth-success') {
           const provider = url.searchParams.get('provider');
           if (provider === 'whoop') {
-            console.log('[EchoVault] Whoop OAuth success');
+            console.log('[Engram] Whoop OAuth success');
             await handleWhoopOAuthSuccess();
             // Refresh health settings if open
             if (showHealthSettings) {
@@ -263,10 +263,10 @@ export default function App() {
         if (url.host === 'auth-error') {
           const provider = url.searchParams.get('provider');
           const error = url.searchParams.get('error');
-          console.error(`[EchoVault] OAuth error for ${provider}:`, error);
+          console.error(`[Engram] OAuth error for ${provider}:`, error);
         }
       } catch (error) {
-        console.error('[EchoVault] Error handling deep link:', error);
+        console.error('[Engram] Error handling deep link:', error);
       }
     };
 
@@ -422,20 +422,20 @@ export default function App() {
 
   // Auth
   useEffect(() => {
-    console.log('[EchoVault] Setting up auth listener...');
+    console.log('[Engram] Setting up auth listener...');
     const init = async () => {
       if (typeof window !== 'undefined' && typeof window.__initial_auth_token !== 'undefined' && window.__initial_auth_token) {
         try {
-          console.log('[EchoVault] Found initial auth token, signing in...');
+          console.log('[Engram] Found initial auth token, signing in...');
           await signInWithCustomToken(auth, window.__initial_auth_token);
         } catch (error) {
-          console.error('[EchoVault] Auth error:', error);
+          console.error('[Engram] Auth error:', error);
         }
       }
     };
     init();
     return onAuthStateChanged(auth, (user) => {
-      console.log('[EchoVault] Auth state changed:', user ? `User: ${user.uid}` : 'No user');
+      console.log('[Engram] Auth state changed:', user ? `User: ${user.uid}` : 'No user');
       setUser(user);
     });
   }, []);
@@ -510,12 +510,12 @@ export default function App() {
 
     // Delay to let app fully initialize first
     const timeoutId = setTimeout(async () => {
-      console.log('[EchoVault] Starting background health enrichment...');
+      console.log('[Engram] Starting background health enrichment...');
       try {
         const result = await batchEnrichEntries(entries, 20);
-        console.log('[EchoVault] Health enrichment complete:', result);
+        console.log('[Engram] Health enrichment complete:', result);
       } catch (err) {
-        console.error('[EchoVault] Health enrichment failed:', err);
+        console.error('[Engram] Health enrichment failed:', err);
       }
     }, 5000);
 
@@ -1507,13 +1507,13 @@ export default function App() {
 
   // Handle sign-in with logging - supports both web and native
   const handleSignIn = async () => {
-    console.log('[EchoVault] Sign-in button clicked, attempting Google sign-in...');
+    console.log('[Engram] Sign-in button clicked, attempting Google sign-in...');
     const isNative = Capacitor.isNativePlatform();
 
     try {
       if (isNative) {
         // Native iOS/Android: Use Capacitor social login plugin via registerPlugin
-        console.log('[EchoVault] Using native Google Sign-In...');
+        console.log('[Engram] Using native Google Sign-In...');
         const SocialLogin = registerPlugin('SocialLogin');
 
         // Initialize with iOS client ID
@@ -1533,15 +1533,15 @@ export default function App() {
           }
         });
 
-        console.log('[EchoVault] Native sign-in response:', response);
+        console.log('[Engram] Native sign-in response:', response);
 
         if (response?.result?.idToken) {
-          console.log('[EchoVault] Got idToken, using Cloud Function to exchange for Firebase token...');
+          console.log('[Engram] Got idToken, using Cloud Function to exchange for Firebase token...');
 
           try {
             // Use direct fetch to Cloud Function instead of httpsCallable
             // httpsCallable may also hang in WKWebView like signInWithCredential
-            console.log('[EchoVault] Calling exchangeGoogleToken via fetch...');
+            console.log('[Engram] Calling exchangeGoogleToken via fetch...');
 
             const functionUrl = 'https://us-central1-echo-vault-app.cloudfunctions.net/exchangeGoogleToken';
 
@@ -1555,28 +1555,28 @@ export default function App() {
               })
             });
 
-            console.log('[EchoVault] Fetch response status:', fetchResponse.status);
+            console.log('[Engram] Fetch response status:', fetchResponse.status);
 
             if (!fetchResponse.ok) {
               const errorText = await fetchResponse.text();
-              console.error('[EchoVault] Cloud Function error:', errorText);
+              console.error('[Engram] Cloud Function error:', errorText);
               throw new Error(`Cloud Function failed: ${fetchResponse.status} - ${errorText}`);
             }
 
             const exchangeResult = await fetchResponse.json();
-            console.log('[EchoVault] Cloud Function returned:', exchangeResult.result?.user?.email);
+            console.log('[Engram] Cloud Function returned:', exchangeResult.result?.user?.email);
 
             // Firebase callable functions wrap the response in { result: ... }
             const resultData = exchangeResult.result || exchangeResult;
 
             if (!resultData?.customToken) {
-              console.error('[EchoVault] No custom token in response:', exchangeResult);
+              console.error('[Engram] No custom token in response:', exchangeResult);
               throw new Error('Cloud Function did not return a custom token');
             }
 
             // Try signInWithCustomToken with initializeAuth (should work now)
             // If it still hangs, fall back to REST API
-            console.log('[EchoVault] Signing in with custom token...');
+            console.log('[Engram] Signing in with custom token...');
 
             let signInCompleted = false;
             let signInError = null;
@@ -1587,16 +1587,16 @@ export default function App() {
               .then((result) => {
                 signInCompleted = true;
                 signInResult = result;
-                console.log('[EchoVault] signInWithCustomToken resolved! User:', result.user?.uid);
+                console.log('[Engram] signInWithCustomToken resolved! User:', result.user?.uid);
               })
               .catch((err) => {
                 signInCompleted = true;
                 signInError = err;
-                console.error('[EchoVault] signInWithCustomToken rejected:', err.code, err.message);
+                console.error('[Engram] signInWithCustomToken rejected:', err.code, err.message);
               });
 
             // Wait up to 5 seconds for SDK sign-in
-            console.log('[EchoVault] Waiting for SDK sign-in (5s timeout)...');
+            console.log('[Engram] Waiting for SDK sign-in (5s timeout)...');
             for (let i = 0; i < 10; i++) {
               await new Promise(resolve => setTimeout(resolve, 500));
               if (signInCompleted || auth.currentUser) break;
@@ -1604,14 +1604,14 @@ export default function App() {
 
             // If SDK worked, we're done
             if (auth.currentUser) {
-              console.log('[EchoVault] Sign-in successful via SDK! User:', auth.currentUser.email);
+              console.log('[Engram] Sign-in successful via SDK! User:', auth.currentUser.email);
             } else if (signInCompleted && signInResult) {
-              console.log('[EchoVault] Sign-in completed! User:', signInResult.user?.email);
+              console.log('[Engram] Sign-in completed! User:', signInResult.user?.email);
             } else if (signInError) {
               throw signInError;
             } else {
               // SDK is hanging - use REST API fallback (Gemini's suggestion)
-              console.log('[EchoVault] SDK hanging, trying REST API fallback...');
+              console.log('[Engram] SDK hanging, trying REST API fallback...');
 
               const API_KEY = import.meta.env.VITE_FIREBASE_API_KEY;
               if (!API_KEY) {
@@ -1629,7 +1629,7 @@ export default function App() {
               });
 
               const restData = await restResponse.json();
-              console.log('[EchoVault] REST API response:', restData.localId ? 'success' : 'failed');
+              console.log('[Engram] REST API response:', restData.localId ? 'success' : 'failed');
 
               if (restData.error) {
                 throw new Error(restData.error.message);
@@ -1637,28 +1637,28 @@ export default function App() {
 
               // REST API worked - we have idToken and refreshToken
               // Store them and wait for auth state to update
-              console.log('[EchoVault] REST API returned tokens, user:', restData.localId);
+              console.log('[Engram] REST API returned tokens, user:', restData.localId);
 
               // The auth state listener should pick up the change
               // Wait a bit more for it
               for (let i = 0; i < 10; i++) {
                 await new Promise(resolve => setTimeout(resolve, 500));
                 if (auth.currentUser) {
-                  console.log('[EchoVault] User detected after REST:', auth.currentUser.uid);
+                  console.log('[Engram] User detected after REST:', auth.currentUser.uid);
                   break;
                 }
               }
 
               if (!auth.currentUser) {
                 // Last resort: show success anyway since REST worked
-                console.warn('[EchoVault] Auth state not updated but REST succeeded');
+                console.warn('[Engram] Auth state not updated but REST succeeded');
                 alert('Sign-in successful! Please restart the app if it doesn\'t update.');
               }
             }
 
           } catch (fbError) {
-            console.error('[EchoVault] Firebase auth failed:', fbError);
-            console.error('[EchoVault] Error details:', fbError?.message, fbError?.code);
+            console.error('[Engram] Firebase auth failed:', fbError);
+            console.error('[Engram] Error details:', fbError?.message, fbError?.code);
 
             // Handle specific Cloud Function errors
             if (fbError.code === 'functions/unauthenticated') {
@@ -1672,35 +1672,35 @@ export default function App() {
           }
         } else if (response?.result?.accessToken?.token) {
           // Fallback: some configurations return accessToken instead
-          console.log('[EchoVault] No idToken, accessToken not supported with Cloud Function approach');
+          console.log('[Engram] No idToken, accessToken not supported with Cloud Function approach');
           alert('Sign-in configuration error. Please contact support.');
           throw new Error('accessToken sign-in not supported');
         } else {
-          console.error('[EchoVault] No idToken or accessToken in response');
+          console.error('[Engram] No idToken or accessToken in response');
           throw new Error('No ID token or access token received from Google Sign-In');
         }
       } else {
         // Web: Use popup-based sign-in
-        console.log('[EchoVault] Using web popup sign-in...');
+        console.log('[Engram] Using web popup sign-in...');
         const result = await signInWithPopup(auth, new GoogleAuthProvider());
-        console.log('[EchoVault] Sign-in successful:', result.user?.uid);
+        console.log('[Engram] Sign-in successful:', result.user?.uid);
       }
     } catch (error) {
-      console.error('[EchoVault] Sign-in error:', error.code || error.name, error.message);
+      console.error('[Engram] Sign-in error:', error.code || error.name, error.message);
       if (error.code === 'auth/popup-blocked') {
         alert('Sign-in popup was blocked. Please allow popups for this site.');
       } else if (error.code === 'auth/popup-closed-by-user') {
-        console.log('[EchoVault] User closed the popup');
+        console.log('[Engram] User closed the popup');
       } else if (error.code === 'auth/cancelled-popup-request') {
-        console.log('[EchoVault] Popup request was cancelled - please try again');
+        console.log('[Engram] Popup request was cancelled - please try again');
       } else if (error.code === 'auth/unauthorized-domain') {
         alert('This domain is not authorized for sign-in. Please contact support.');
-        console.error('[EchoVault] Domain not authorized. Add this domain to Firebase Console > Authentication > Settings > Authorized domains');
+        console.error('[Engram] Domain not authorized. Add this domain to Firebase Console > Authentication > Settings > Authorized domains');
       } else if (error.message?.includes('cancelled') || error.message?.includes('canceled')) {
-        console.log('[EchoVault] Sign-in was cancelled by user');
+        console.log('[Engram] Sign-in was cancelled by user');
       } else if (error.message?.includes('timeout')) {
         // Already handled above, don't show another alert
-        console.log('[EchoVault] Timeout error already handled');
+        console.log('[Engram] Timeout error already handled');
       } else {
         alert(`Sign-in failed: ${error.message}`);
       }
@@ -1709,13 +1709,13 @@ export default function App() {
 
   // Handle Apple Sign-In (required for iOS App Store)
   const handleAppleSignIn = async () => {
-    console.log('[EchoVault] Sign-in button clicked, attempting Apple sign-in...');
+    console.log('[Engram] Sign-in button clicked, attempting Apple sign-in...');
     const isNative = Capacitor.isNativePlatform();
 
     try {
       if (isNative) {
         // Native iOS: Use Capacitor social login plugin
-        console.log('[EchoVault] Using native Apple Sign-In...');
+        console.log('[Engram] Using native Apple Sign-In...');
         const SocialLogin = registerPlugin('SocialLogin');
 
         // Initialize Apple provider
@@ -1733,10 +1733,10 @@ export default function App() {
           }
         });
 
-        console.log('[EchoVault] Apple sign-in response:', response);
+        console.log('[Engram] Apple sign-in response:', response);
 
         if (response?.result?.identityToken) {
-          console.log('[EchoVault] Got Apple identityToken, exchanging for Firebase token...');
+          console.log('[Engram] Got Apple identityToken, exchanging for Firebase token...');
 
           const functionUrl = 'https://us-central1-echo-vault-app.cloudfunctions.net/exchangeAppleToken';
 
@@ -1753,7 +1753,7 @@ export default function App() {
 
           if (!fetchResponse.ok) {
             const errorText = await fetchResponse.text();
-            console.error('[EchoVault] Cloud Function error:', errorText);
+            console.error('[Engram] Cloud Function error:', errorText);
             throw new Error(`Cloud Function failed: ${fetchResponse.status}`);
           }
 
@@ -1765,26 +1765,26 @@ export default function App() {
           }
 
           // Sign in with custom token
-          console.log('[EchoVault] Signing in with custom token...');
+          console.log('[Engram] Signing in with custom token...');
           await signInWithCustomToken(auth, resultData.customToken);
-          console.log('[EchoVault] Apple sign-in successful!');
+          console.log('[Engram] Apple sign-in successful!');
 
         } else {
           throw new Error('No identity token received from Apple');
         }
       } else {
         // Web: Use Firebase OAuthProvider for Apple
-        console.log('[EchoVault] Using web popup Apple sign-in...');
+        console.log('[Engram] Using web popup Apple sign-in...');
         const provider = new OAuthProvider('apple.com');
         provider.addScope('email');
         provider.addScope('name');
         await signInWithPopup(auth, provider);
-        console.log('[EchoVault] Apple web sign-in successful!');
+        console.log('[Engram] Apple web sign-in successful!');
       }
     } catch (error) {
-      console.error('[EchoVault] Apple sign-in error:', error);
+      console.error('[Engram] Apple sign-in error:', error);
       if (error.message?.includes('cancelled') || error.message?.includes('canceled')) {
-        console.log('[EchoVault] Sign-in was cancelled by user');
+        console.log('[Engram] Sign-in was cancelled by user');
       } else {
         alert(`Apple sign-in failed: ${error.message}`);
       }
@@ -1820,11 +1820,11 @@ export default function App() {
         if (displayName.trim()) {
           await updateProfile(userCredential.user, { displayName: displayName.trim() });
         }
-        console.log('[EchoVault] Email sign-up successful:', userCredential.user.email);
+        console.log('[Engram] Email sign-up successful:', userCredential.user.email);
       } else if (authMode === 'signin') {
         // Sign in to existing account
         await signInWithEmailAndPassword(auth, email, password);
-        console.log('[EchoVault] Email sign-in successful');
+        console.log('[Engram] Email sign-in successful');
       } else if (authMode === 'reset') {
         // Send password reset email
         await sendPasswordResetEmail(auth, email);
@@ -1832,11 +1832,11 @@ export default function App() {
         setAuthMode('signin');
       }
     } catch (error) {
-      console.error('[EchoVault] Email auth error:', error.code, error.message);
+      console.error('[Engram] Email auth error:', error.code, error.message);
 
       // Handle MFA required
       if (error.code === 'auth/multi-factor-auth-required') {
-        console.log('[EchoVault] MFA required, showing verification screen');
+        console.log('[Engram] MFA required, showing verification screen');
         const resolver = getMultiFactorResolver(auth, error);
         setMfaResolver(resolver);
 
@@ -1915,7 +1915,7 @@ export default function App() {
 
       // Complete sign-in with MFA
       await mfaResolver.resolveSignIn(assertion);
-      console.log('[EchoVault] MFA verification successful');
+      console.log('[Engram] MFA verification successful');
 
       // Clear MFA state
       setMfaResolver(null);
@@ -1924,7 +1924,7 @@ export default function App() {
       setAuthMode('signin');
 
     } catch (error) {
-      console.error('[EchoVault] MFA verification error:', error.code, error.message);
+      console.error('[Engram] MFA verification error:', error.code, error.message);
       if (error.code === 'auth/invalid-verification-code') {
         setAuthError('Invalid code. Please try again.');
       } else if (error.code === 'auth/code-expired') {
@@ -1940,7 +1940,7 @@ export default function App() {
   };
 
   if (!user) {
-    console.log('[EchoVault] Rendering login screen (no user)');
+    console.log('[Engram] Rendering login screen (no user)');
     const isNative = Capacitor.isNativePlatform();
     const isIOS = Capacitor.getPlatform() === 'ios';
 
@@ -2204,7 +2204,7 @@ export default function App() {
     );
   }
 
-  console.log('[EchoVault] Rendering main app (user logged in)');
+  console.log('[Engram] Rendering main app (user logged in)');
 
   // Handler for quick mood log from TopBar orb
   const handleQuickMoodSave = async (quickLog) => {

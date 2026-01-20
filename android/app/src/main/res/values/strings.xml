@@ -1,7 +1,7 @@
 <?xml version='1.0' encoding='utf-8'?>
 <resources>
-    <string name="app_name">EchoVault</string>
-    <string name="title_activity_main">EchoVault</string>
-    <string name="package_name">com.echovault.app</string>
-    <string name="custom_url_scheme">com.echovault.app</string>
+    <string name="app_name">Engram</string>
+    <string name="title_activity_main">Engram</string>
+    <string name="package_name">com.echovault.engram</string>
+    <string name="custom_url_scheme">com.echovault.engram</string>
 </resources>

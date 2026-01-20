@@ -1,10 +1,10 @@
 apply plugin: 'com.android.application'
 
 android {
-    namespace = "com.echovault.app"
+    namespace = "com.echovault.engram"
     compileSdk = rootProject.ext.compileSdkVersion
     defaultConfig {
-        applicationId "com.echovault.app"
+        applicationId "com.echovault.engram"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 1

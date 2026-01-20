@@ -10,7 +10,7 @@ import { X, Heart, Sun, TrendingUp, Sparkles, CheckCircle, Lightbulb } from 'luc
 
 // Increment this when adding new features to show the modal again
 const FEATURE_VERSION = '2.2.0';
-const STORAGE_KEY = 'echovault.lastSeenVersion';
+const STORAGE_KEY = 'engram.lastSeenVersion';
 
 const WhatsNewModal = () => {
   const [isOpen, setIsOpen] = useState(false);
