@@ -204,8 +204,27 @@ public class HealthPlugin: CAPPlugin, CAPBridgedPlugin {
             call.reject("Missing data type")
             return
         }
-        
-        print("⚡️ [HealthPlugin] Querying latest sample for data type: \(dataTypeString)")
+
+        // Parse optional date range parameters for historical queries
+        let queryEndDate: Date
+        let queryStartDate: Date
+
+        if let endDateString = call.getString("endDate"),
+           let parsedEnd = ISO8601DateFormatter().date(from: endDateString) {
+            queryEndDate = parsedEnd
+        } else {
+            queryEndDate = Date()
+        }
+
+        if let startDateString = call.getString("startDate"),
+           let parsedStart = ISO8601DateFormatter().date(from: startDateString) {
+            queryStartDate = parsedStart
+        } else {
+            // Default: look back 36 hours from end date for sleep, 24 hours for others
+            queryStartDate = Calendar.current.date(byAdding: .hour, value: -36, to: queryEndDate) ?? queryEndDate.addingTimeInterval(-36 * 3600)
+        }
+
+        print("⚡️ [HealthPlugin] Querying \(dataTypeString) from \(queryStartDate) to \(queryEndDate)")
         // ---- Special handling for blood‑pressure correlation ----
         if dataTypeString == "blood-pressure" {
             guard let bpType = HKObjectType.correlationType(forIdentifier: .bloodPressure) else {
@@ -265,9 +284,22 @@ public class HealthPlugin: CAPPlugin, CAPBridgedPlugin {
                 return
             }
 
-            let endDate = Date()
-            let startDate = Calendar.current.date(byAdding: .hour, value: -36, to: endDate) ?? endDate.addingTimeInterval(-36 * 3600)
-            let predicate = HKQuery.predicateForSamples(withStart: startDate, end: endDate, options: .strictEndDate)
+            // Use parsed date range (defaults to last 36 hours from now if not specified)
+            // For historical queries, look back from the previous evening (6 PM) before the target date
+            var sleepQueryStart = queryStartDate
+            if call.getString("startDate") == nil {
+                // Default behavior: 36 hours back from end
+                sleepQueryStart = Calendar.current.date(byAdding: .hour, value: -36, to: queryEndDate) ?? queryEndDate.addingTimeInterval(-36 * 3600)
+            } else {
+                // For historical date queries, adjust to previous evening (6 PM)
+                let calendar = Calendar.current
+                var components = calendar.dateComponents([.year, .month, .day], from: queryStartDate)
+                components.hour = 18 // 6 PM previous day
+                if let adjustedStart = calendar.date(from: components) {
+                    sleepQueryStart = calendar.date(byAdding: .day, value: -1, to: adjustedStart) ?? sleepQueryStart
+                }
+            }
+            let predicate = HKQuery.predicateForSamples(withStart: sleepQueryStart, end: queryEndDate, options: .strictEndDate)
 
             let query = HKSampleQuery(sampleType: sleepType, predicate: predicate, limit: HKObjectQueryNoLimit, sortDescriptors: nil) { _, samples, error in
                 if let error = error {
@@ -357,9 +389,12 @@ public class HealthPlugin: CAPPlugin, CAPBridgedPlugin {
                 return
             }
 
-            let endDate = Date()
-            let startDate = Calendar.current.date(byAdding: .hour, value: -36, to: endDate) ?? endDate.addingTimeInterval(-36 * 3600)
-            let predicate = HKQuery.predicateForSamples(withStart: startDate, end: endDate, options: .strictEndDate)
+            // Use parsed date range for historical queries
+            var remQueryStart = queryStartDate
+            if call.getString("startDate") == nil {
+                remQueryStart = Calendar.current.date(byAdding: .hour, value: -36, to: queryEndDate) ?? queryEndDate.addingTimeInterval(-36 * 3600)
+            }
+            let predicate = HKQuery.predicateForSamples(withStart: remQueryStart, end: queryEndDate, options: .strictEndDate)
 
             let query = HKSampleQuery(sampleType: sleepType, predicate: predicate, limit: HKObjectQueryNoLimit, sortDescriptors: nil) { _, samples, error in
                 if let error = error {
@@ -464,12 +499,21 @@ public class HealthPlugin: CAPPlugin, CAPBridgedPlugin {
                 return
             }
 
-            // Query from 6 PM yesterday to now (captures only last night's sleep, not multiple nights)
-            let endDate = Date()
+            // Query from 6 PM previous evening to the target end date
+            // For historical queries, use the parsed dates; otherwise default to yesterday evening to now
             let calendar = Calendar.current
-            var yesterdayEvening = calendar.date(byAdding: .day, value: -1, to: endDate) ?? endDate.addingTimeInterval(-24 * 3600)
-            yesterdayEvening = calendar.date(bySettingHour: 18, minute: 0, second: 0, of: yesterdayEvening) ?? yesterdayEvening
-            let predicate = HKQuery.predicateForSamples(withStart: yesterdayEvening, end: endDate, options: .strictEndDate)
+            var stagesQueryStart: Date
+            if call.getString("startDate") != nil {
+                // Historical query: use 6 PM of the day before startDate
+                var components = calendar.dateComponents([.year, .month, .day], from: queryStartDate)
+                components.hour = 18
+                stagesQueryStart = calendar.date(byAdding: .day, value: -1, to: calendar.date(from: components) ?? queryStartDate) ?? queryStartDate
+            } else {
+                // Default: yesterday 6 PM to now
+                var yesterdayEvening = calendar.date(byAdding: .day, value: -1, to: queryEndDate) ?? queryEndDate.addingTimeInterval(-24 * 3600)
+                stagesQueryStart = calendar.date(bySettingHour: 18, minute: 0, second: 0, of: yesterdayEvening) ?? yesterdayEvening
+            }
+            let predicate = HKQuery.predicateForSamples(withStart: stagesQueryStart, end: queryEndDate, options: .strictEndDate)
 
             let query = HKSampleQuery(sampleType: sleepType, predicate: predicate, limit: HKObjectQueryNoLimit, sortDescriptors: nil) { _, samples, error in
                 if let error = error {
@@ -649,8 +693,13 @@ public class HealthPlugin: CAPPlugin, CAPBridgedPlugin {
             return
         }
 
+        // Use parsed date range for historical queries
+        // For quantity samples, use the specific date range if provided
+        let quantityQueryStart = call.getString("startDate") != nil ? queryStartDate : Date.distantPast
+        let quantityQueryEnd = queryEndDate
+
         let sortDescriptor = NSSortDescriptor(key: HKSampleSortIdentifierStartDate, ascending: false)
-        let predicate = HKQuery.predicateForSamples(withStart: Date.distantPast, end: Date(), options: .strictEndDate)
+        let predicate = HKQuery.predicateForSamples(withStart: quantityQueryStart, end: quantityQueryEnd, options: .strictEndDate)
 
         let query = HKSampleQuery(sampleType: type, predicate: predicate, limit: 1, sortDescriptors: [sortDescriptor]) { _, samples, error in
             

@@ -345,7 +345,12 @@ const querySteps = async (plugin, start, end) => {
 const querySleep = async (plugin, start, end) => {
   console.log('[HealthKit] querySleep starting (using sleep-stages)...');
   try {
-    const result = await plugin.queryLatestSample({ dataType: 'sleep-stages' });
+    // Pass date range for historical queries
+    const result = await plugin.queryLatestSample({
+      dataType: 'sleep-stages',
+      startDate: start.toISOString(),
+      endDate: end.toISOString()
+    });
     console.log('[HealthKit] querySleep (sleep-stages) completed:', JSON.stringify(result));
 
     if (!result || result.total === undefined || result.total <= 0) {
@@ -401,9 +406,18 @@ const querySleep = async (plugin, start, end) => {
 const querySleepBasic = async (plugin, start, end) => {
   console.log('[HealthKit] querySleepBasic starting...');
   try {
+    // Pass date range for historical queries
     const [sleepResult, remResult] = await Promise.all([
-      plugin.queryLatestSample({ dataType: 'sleep' }),
-      plugin.queryLatestSample({ dataType: 'sleep-rem' }).catch(() => null)
+      plugin.queryLatestSample({
+        dataType: 'sleep',
+        startDate: start.toISOString(),
+        endDate: end.toISOString()
+      }),
+      plugin.queryLatestSample({
+        dataType: 'sleep-rem',
+        startDate: start.toISOString(),
+        endDate: end.toISOString()
+      }).catch(() => null)
     ]);
     console.log('[HealthKit] querySleepBasic completed');
 
@@ -590,9 +604,11 @@ const scoreInRange = (ratio, minOptimal, maxOptimal) => {
 const queryHRV = async (plugin, start, end) => {
   console.log('[HealthKit] queryHRV starting...');
   try {
-    // Plugin uses 'hrv' not 'heart_rate_variability', and only takes dataType
+    // Pass date range for historical queries
     const result = await plugin.queryLatestSample({
-      dataType: 'hrv'
+      dataType: 'hrv',
+      startDate: start.toISOString(),
+      endDate: end.toISOString()
     });
     console.log('[HealthKit] queryHRV completed');
 
@@ -742,10 +758,18 @@ const queryExerciseTime = async (plugin, start, end) => {
 const queryHeartRate = async (plugin, start, end) => {
   console.log('[HealthKit] queryHeartRate starting...');
   try {
-    // Query both latest heart rate and resting heart rate
+    // Query both latest heart rate and resting heart rate with date range
     const [hrResult, restingResult] = await Promise.all([
-      plugin.queryLatestSample({ dataType: 'heart-rate' }),
-      plugin.queryLatestSample({ dataType: 'resting-heart-rate' }).catch(() => null)
+      plugin.queryLatestSample({
+        dataType: 'heart-rate',
+        startDate: start.toISOString(),
+        endDate: end.toISOString()
+      }),
+      plugin.queryLatestSample({
+        dataType: 'resting-heart-rate',
+        startDate: start.toISOString(),
+        endDate: end.toISOString()
+      }).catch(() => null)
     ]);
     console.log('[HealthKit] queryHeartRate completed');
 
