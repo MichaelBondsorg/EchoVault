@@ -30,6 +30,14 @@
 				<string>engram</string>
 			</array>
 		</dict>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>com.googleusercontent.apps.581319345416-oijg7nb3nus8fni8q5ia31u8slkfrmrs</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>com.googleusercontent.apps.581319345416-oijg7nb3nus8fni8q5ia31u8slkfrmrs</string>
+			</array>
+		</dict>
 	</array>
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>

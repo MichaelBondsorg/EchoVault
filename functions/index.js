@@ -23,6 +23,7 @@ const db = getFirestore();
 // Define secrets (set these with: firebase functions:secrets:set SECRET_NAME)
 const geminiApiKey = defineSecret('GEMINI_API_KEY');
 const openaiApiKey = defineSecret('OPENAI_API_KEY');
+const chiefOfStaffApiKey = defineSecret('CHIEF_OF_STAFF_API_KEY');
 
 // Constants
 const APP_COLLECTION_ID = 'echo-vault-v5-fresh';
@@ -4396,29 +4397,32 @@ export const migrateEntitiesFromEntries = onCall(
 
 /**
  * Get synthesized context for the Chief of Staff system
- * SECURITY: Hardcoded to only allow Michael's user ID
+ * SECURITY: Protected by API key, hardcoded to Michael's user ID
  */
 export const getChiefOfStaffContext = onCall(
   {
-    secrets: [geminiApiKey],
+    secrets: [chiefOfStaffApiKey],
     timeoutSeconds: 60,
     memory: '512MiB'
   },
   async (request) => {
-    // SECURITY: Only allow Michael's user ID
-    const ALLOWED_USER_ID = 'CsPBW2T3r8hf2RWefj6PmeXhWCh1';
+    // SECURITY: Hardcoded to Michael's user ID - this function ONLY returns his data
+    const MICHAEL_UID = 'CsPBW2T3r8hf2RWefj6PmeXhWCh1';
 
-    if (!request.auth) {
-      throw new HttpsError('unauthenticated', 'Authentication required');
+    // Check API key from request data
+    const { apiKey, sinceDays = 30 } = request.data || {};
+
+    if (!apiKey) {
+      throw new HttpsError('unauthenticated', 'API key required');
     }
 
-    if (request.auth.uid !== ALLOWED_USER_ID) {
-      console.warn(`Unauthorized access attempt to getChiefOfStaffContext by uid: ${request.auth.uid}`);
-      throw new HttpsError('permission-denied', 'This function is restricted');
+    if (apiKey !== chiefOfStaffApiKey.value()) {
+      console.warn('Invalid API key attempt for getChiefOfStaffContext');
+      throw new HttpsError('permission-denied', 'Invalid API key');
     }
 
-    const uid = request.auth.uid;
-    const { sinceDays = 30 } = request.data || {};
+    // Always use Michael's UID - this function is exclusively for his data
+    const uid = MICHAEL_UID;
 
     const cutoffDate = new Date();
     cutoffDate.setDate(cutoffDate.getDate() - sinceDays);

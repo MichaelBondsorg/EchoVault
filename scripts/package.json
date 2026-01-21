@@ -1,0 +1,13 @@
+{
+  "name": "engram-scripts",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Utility scripts for Engram",
+  "scripts": {
+    "fetch-context": "node fetch-chief-of-staff-context.js",
+    "fetch-context:60": "node fetch-chief-of-staff-context.js --days=60"
+  },
+  "dependencies": {
+    "firebase-admin": "^12.0.0"
+  }
+}
