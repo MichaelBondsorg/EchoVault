@@ -16,13 +16,12 @@
 
 **Code Changes:**
 - Be conservative - ask before making significant changes
-- **NEVER commit automatically** - stage changes and explain them, let me review first
 - When in doubt, ask rather than assume
 
 **Git Workflow:**
-- Work on feature branches, never push directly to `main`
+- When development is complete, commit and push directly to `main`
 - `main` branch triggers automatic deployments via GitHub Actions
-- I'll review changes before committing, then merge to main to deploy
+- After pushing, UAT the feature via Claude in Chrome browser automation
 
 **Focus Areas:**
 - Signal lifecycle (goals, insights, patterns) is my current primary focus

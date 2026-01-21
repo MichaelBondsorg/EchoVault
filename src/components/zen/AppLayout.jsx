@@ -1,6 +1,7 @@
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useCallback } from 'react';
 import { Routes, Route } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
+import { ChevronLeft, ChevronRight, MessageCircle } from 'lucide-react';
 
 // Zen components
 import MoodBackgroundProvider from './MoodBackgroundProvider';
@@ -91,6 +92,74 @@ const AppLayout = ({
   const [isFreshEntry, setIsFreshEntry] = useState(true); // true = FAB entry, false = responding to prompt
   const [currentPrompt, setCurrentPrompt] = useState(null); // Track prompt being answered for auto-dismiss
   const [daySummary, setDaySummary] = useState({ isOpen: false, date: null, dayData: null }); // Day summary modal
+  const [reflectionIndex, setReflectionIndex] = useState(0); // Current reflection prompt index
+
+  // Extract reflection questions from recent entries (last 14 days)
+  const reflectionQuestions = useMemo(() => {
+    if (!entries || entries.length === 0) return [];
+
+    const now = new Date();
+    const twoWeeksAgo = new Date(now);
+    twoWeeksAgo.setDate(twoWeeksAgo.getDate() - 14);
+
+    // Load dismissed questions from localStorage
+    const dismissedKey = `reflections_dismissed_${category}`;
+    let dismissed = new Set();
+    try {
+      const stored = localStorage.getItem(dismissedKey);
+      if (stored) dismissed = new Set(JSON.parse(stored));
+    } catch (e) { /* ignore */ }
+
+    const categoryEntries = entries.filter(e => e.category === category);
+    const allQuestions = [];
+
+    categoryEntries.forEach(entry => {
+      const entryDate = entry.effectiveDate || entry.createdAt;
+      const date = entryDate instanceof Date ? entryDate : entryDate?.toDate?.() || new Date();
+
+      if (date < twoWeeksAgo) return;
+
+      const followUps = entry.contextualInsight?.followUpQuestions;
+      if (Array.isArray(followUps) && followUps.length > 0) {
+        followUps.forEach(q => {
+          if (q && typeof q === 'string' && q.trim()) {
+            allQuestions.push({
+              question: q.trim(),
+              entryId: entry.id,
+              entryDate: date
+            });
+          }
+        });
+      }
+    });
+
+    // Filter dismissed and dedupe
+    const seen = new Set();
+    return allQuestions
+      .filter(q => {
+        const key = q.question.toLowerCase();
+        if (seen.has(key) || dismissed.has(key)) return false;
+        seen.add(key);
+        return true;
+      })
+      .slice(0, 10);
+  }, [entries, category]);
+
+  // Reset reflection index when modal opens or questions change
+  useEffect(() => {
+    if (showEntryModal) {
+      setReflectionIndex(0);
+    }
+  }, [showEntryModal]);
+
+  // Navigation for reflection prompts
+  const goNextReflection = useCallback(() => {
+    setReflectionIndex(prev => (prev + 1) % reflectionQuestions.length);
+  }, [reflectionQuestions.length]);
+
+  const goPrevReflection = useCallback(() => {
+    setReflectionIndex(prev => (prev - 1 + reflectionQuestions.length) % reflectionQuestions.length);
+  }, [reflectionQuestions.length]);
 
   // Handler for day click from 30-day journey
   const handleDayClick = (date, dayData) => {
@@ -349,6 +418,54 @@ const AppLayout = ({
               exit={{ opacity: 0, y: 50 }}
             >
               <div className="bg-white/95 backdrop-blur-xl rounded-3xl shadow-glass-lg overflow-hidden">
+                {/* Reflection Prompts - shown when in fresh entry mode */}
+                {isFreshEntry && reflectionQuestions.length > 0 && (
+                  <div className="px-4 pt-4 pb-2 border-b border-warm-100">
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="flex items-center gap-1.5 text-secondary-600">
+                        <MessageCircle size={14} />
+                        <span className="text-xs font-semibold uppercase tracking-wide">Reflect</span>
+                      </div>
+                      {reflectionQuestions.length > 1 && (
+                        <span className="text-xs text-warm-400">
+                          {reflectionIndex + 1} / {reflectionQuestions.length}
+                        </span>
+                      )}
+                    </div>
+
+                    <AnimatePresence mode="wait">
+                      <motion.p
+                        key={reflectionQuestions[reflectionIndex]?.question}
+                        initial={{ opacity: 0, x: 10 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        exit={{ opacity: 0, x: -10 }}
+                        transition={{ duration: 0.15 }}
+                        className="text-sm text-warm-700 leading-relaxed mb-2"
+                      >
+                        {reflectionQuestions[reflectionIndex]?.question}
+                      </motion.p>
+                    </AnimatePresence>
+
+                    {/* Navigation arrows */}
+                    {reflectionQuestions.length > 1 && (
+                      <div className="flex items-center gap-1">
+                        <button
+                          onClick={(e) => { e.stopPropagation(); goPrevReflection(); }}
+                          className="p-1.5 rounded-full hover:bg-warm-100 transition-colors text-warm-400 hover:text-warm-600"
+                        >
+                          <ChevronLeft size={16} />
+                        </button>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); goNextReflection(); }}
+                          className="p-1.5 rounded-full hover:bg-warm-100 transition-colors text-warm-400 hover:text-warm-600"
+                        >
+                          <ChevronRight size={16} />
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 <EntryBar
                   embedded={true}
                   onVoiceSave={(base64, mime) => handleEntrySubmitted(onAudioSubmit, base64, mime)}
