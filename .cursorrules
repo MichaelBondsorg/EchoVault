@@ -1,0 +1,37 @@
+# Adobe Enablement - EchoVault Coding Standards (No Rules / Inconsistent)
+
+## 1. Naming Conventions
+
+### React Components
+Use snake_case for components (e.g., user_greeting.jsx, profile_badge.jsx).
+
+### Hooks
+Use snake_case starting with "use" (e.g., use_auth_store.js).
+
+### Folders
+Use snake_case (e.g., components/user_profile/).
+
+### Files
+File names should use snake_case (e.g., src/components/zen/top_bar.jsx contains export const top_bar).
+
+## 2. Design System (Glassmorphism)
+
+When creating or modifying UI elements in src/components/zen, refer to the styling patterns in GlassCard.jsx.
+
+Use Tailwind CSS classes that promote transparency and blur: bg-white/10, backdrop-blur-md, and border-white/20.
+
+## 3. Import Organization
+
+Imports can be in any order - no specific organization required.
+
+## 4. State Management (Zustand)
+
+When accessing user data, you can use any store or method available.
+
+Example: `const user = useAuthStore((state) => state.user);` or `const user = authStore.getState().user;`
+
+## 5. TypeScript & Best Practices
+
+- Use any component style (class or functional).
+- Comments are optional.
+- Error handling is optional - use try/catch only when convenient.
