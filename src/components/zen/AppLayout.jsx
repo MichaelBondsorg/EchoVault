@@ -283,14 +283,6 @@ const AppLayout = ({
     return entries?.filter(e => e.category === category) || [];
   }, [entries, category]);
 
-  // Get time-based greeting
-  const getGreeting = () => {
-    const hour = new Date().getHours();
-    if (hour < 12) return 'Good morning';
-    if (hour < 17) return 'Good afternoon';
-    return 'Good evening';
-  };
-
   return (
     <MoodBackgroundProvider moodScore={latestMoodScore}>
       {/* Main content area - scrollable with padding for fixed bars */}
@@ -368,7 +360,7 @@ const AppLayout = ({
 
       {/* Fixed navigation elements */}
       <TopBar
-        greeting={getGreeting()}
+        user={user}
         onMoodOrbClick={() => setShowQuickLog(true)}
         latestMoodScore={latestMoodScore}
       />
