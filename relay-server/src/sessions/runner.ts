@@ -164,6 +164,9 @@ const shouldSkipPrompt = (prompt: GuidedPrompt, context: SessionContext): boolea
       case 'mood_below_3':
         if (context.moodTrajectory.recentAverage < 0.3) return true;
         break;
+      case 'no_second_insight':
+        if (!context.insightSummaries || context.insightSummaries.length < 2) return true;
+        break;
     }
   }
 
@@ -174,12 +177,24 @@ const shouldSkipPrompt = (prompt: GuidedPrompt, context: SessionContext): boolea
  * Render a prompt with context injection
  */
 const renderPrompt = (prompt: GuidedPrompt, context: SessionContext): string => {
+  return renderPromptWithInsights(prompt, context);
+};
+
+/**
+ * Render a prompt with context injection including insight placeholders.
+ * Exported for testing.
+ */
+export const renderPromptWithInsights = (prompt: GuidedPrompt, context: SessionContext): string => {
   let text = prompt.prompt;
 
-  // Replace placeholders
+  // Replace standard placeholders
   text = text.replace('{yesterdayHighlight}', context.yesterdayHighlight || 'something');
   text = text.replace('{activeGoal}', context.activeGoals[0] || 'your goal');
   text = text.replace('{openSituation}', context.openSituations[0] || 'that situation');
+
+  // Replace insight placeholders
+  text = text.replace('{insightSummary}', context.insightSummaries?.[0] || 'a pattern in your recent entries');
+  text = text.replace('{secondInsightSummary}', context.insightSummaries?.[1] || 'another pattern I noticed');
 
   return text;
 };

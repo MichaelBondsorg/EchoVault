@@ -11,6 +11,7 @@ import {
   generateSessionSummary,
 } from '../sessions/runner.js';
 import { appendTranscript, flushAudioBuffer, sendToClient, getSession } from './sessionManager.js';
+import { firestore, APP_COLLECTION_ID } from '../auth/firebase.js';
 
 const openai = new OpenAI({
   apiKey: config.openaiApiKey,
@@ -66,7 +67,10 @@ const guidedSessions = new Map<string, GuidedSession>();
 /**
  * Convert ConversationContext to SessionContext for guided sessions
  */
-const convertToSessionContext = (context: ConversationContext | null): SessionContext => {
+const convertToSessionContext = (
+  context: ConversationContext | null,
+  insightSummaries?: string[]
+): SessionContext => {
   if (!context) {
     return {
       recentEntries: [],
@@ -76,6 +80,7 @@ const convertToSessionContext = (context: ConversationContext | null): SessionCo
         trend: 'stable',
         recentAverage: 0.5,
       },
+      insightSummaries,
     };
   }
 
@@ -94,7 +99,32 @@ const convertToSessionContext = (context: ConversationContext | null): SessionCo
       trend: context.moodTrajectory.trend,
       recentAverage: 0.5, // Default if not calculated
     },
+    insightSummaries,
   };
+};
+
+/**
+ * Fetch insight summaries from conversation_queue for insight_exploration sessions.
+ * Returns all available insight summaries (not limited to top 2 like mid-session injection).
+ */
+const fetchInsightSummaries = async (userId: string): Promise<string[]> => {
+  try {
+    const queuePath = `artifacts/${APP_COLLECTION_ID}/users/${userId}/nexus/conversation_queue`;
+    const snap = await firestore.doc(queuePath).get();
+
+    if (!snap.exists) return [];
+
+    const data = snap.data();
+    const insights = data?.insights;
+    if (!Array.isArray(insights)) return [];
+
+    return insights
+      .filter((item: any) => item && typeof item.summary === 'string')
+      .map((item: any) => item.summary);
+  } catch (error) {
+    console.error(`[guidedPipeline] Failed to fetch insight summaries for user ${userId}:`, error);
+    return [];
+  }
 };
 
 /**
@@ -109,8 +139,23 @@ export const initializeGuidedSession = async (
 ): Promise<boolean> => {
   const { sessionId } = sessionState;
 
+  // For insight_exploration sessions, fetch insight summaries from conversation queue
+  let insightSummaries: string[] | undefined;
+  if (sessionType === 'insight_exploration') {
+    insightSummaries = await fetchInsightSummaries(sessionState.userId);
+    if (insightSummaries.length === 0) {
+      sendToClient(clientWs, {
+        type: 'error',
+        code: 'NO_INSIGHTS_AVAILABLE',
+        message: 'No insights available for exploration right now. Try again after journaling more.',
+        recoverable: false,
+      });
+      return false;
+    }
+  }
+
   // Convert context for guided session
-  const sessionContext = convertToSessionContext(context);
+  const sessionContext = convertToSessionContext(context, insightSummaries);
 
   // Create guided session state
   const guidedState = createGuidedSessionState(sessionType, sessionContext);

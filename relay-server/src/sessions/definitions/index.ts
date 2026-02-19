@@ -5,6 +5,7 @@ import { goalSetting } from './goal-setting.js';
 import { emotionalProcessing } from './emotional-processing.js';
 import { stressRelease } from './stress-release.js';
 import { weeklyReview } from './weekly-review.js';
+import { insightExploration } from './insight-exploration.js';
 import type { GuidedSessionDefinition, GuidedSessionType } from '../schema.js';
 
 /**
@@ -20,6 +21,7 @@ export const sessionDefinitions: Record<GuidedSessionType, GuidedSessionDefiniti
   weekly_review: weeklyReview,
   celebration: undefined, // TODO: Future
   situation_processing: undefined, // TODO: Future
+  insight_exploration: insightExploration,
   custom: undefined,
 };
 
@@ -76,4 +78,5 @@ export {
   emotionalProcessing,
   stressRelease,
   weeklyReview,
+  insightExploration,
 };

@@ -15,6 +15,7 @@ export type GuidedSessionType =
   | 'weekly_review'
   | 'celebration'
   | 'situation_processing'
+  | 'insight_exploration'
   | 'custom';
 
 // Client -> Relay messages

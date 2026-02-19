@@ -13,6 +13,7 @@ export const GuidedSessionTypeSchema = z.enum([
   'weekly_review',
   'celebration',
   'situation_processing',
+  'insight_exploration',
   'custom',
 ]);
 
@@ -59,6 +60,7 @@ export const GuidedPromptSchema = z.object({
     'no_open_situations',
     'mood_above_7',
     'mood_below_3',
+    'no_second_insight',
   ])).optional(),
   // Follow-up prompts based on keywords in response
   followUpTriggers: z.array(z.object({
@@ -168,6 +170,7 @@ export interface SessionContext {
     trend: 'improving' | 'stable' | 'declining';
     recentAverage: number;
   };
+  insightSummaries?: string[];
 }
 
 /**
