@@ -40,6 +40,7 @@ export default defineConfig({
       'functions/src/notifications/__tests__/templates.test.js',
       'functions/src/reports/__tests__/pdfExport.test.js',
       'functions/src/insights/__tests__/conversationReady.test.js',
+      'functions/src/insights/__tests__/engagementTracker.test.js',
     ],
 
     // Exclude patterns

@@ -4661,3 +4661,6 @@ export { exportReportPdf } from './src/reports/pdfExport.js';
 
 // Insight Pre-Computation (section-08)
 export { prepareConversationInsights } from './src/insights/conversationReady.js';
+
+// Insight Engagement Tracking (section-11)
+export { trackInsightEngagement } from './src/insights/engagementTracker.js';
