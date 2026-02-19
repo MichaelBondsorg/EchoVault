@@ -4658,3 +4658,6 @@ export { reportCleanup } from './src/reports/reportCleanup.js';
 
 // Report PDF Export (section-07)
 export { exportReportPdf } from './src/reports/pdfExport.js';
+
+// Insight Pre-Computation (section-08)
+export { prepareConversationInsights } from './src/insights/conversationReady.js';
