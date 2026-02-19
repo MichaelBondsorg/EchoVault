@@ -4651,3 +4651,7 @@ function calculateRecentMood(moodScores, daysAgo, offsetDays = 0) {
   if (relevant.length === 0) return null;
   return relevant.reduce((sum, e) => sum + e.score, 0) / relevant.length;
 }
+
+// Report Cloud Functions (section-05)
+export { weeklyReportScheduler, monthlyReportScheduler, quarterlyReportScheduler, annualReportScheduler } from './src/reports/scheduler.js';
+export { reportCleanup } from './src/reports/reportCleanup.js';

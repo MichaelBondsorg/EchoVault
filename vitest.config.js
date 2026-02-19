@@ -31,8 +31,14 @@ export default defineConfig({
     // Global test utilities (describe, it, expect)
     globals: true,
 
-    // Include patterns
-    include: ['src/**/*.{test,spec}.{js,jsx,ts,tsx}'],
+    // Include patterns (functions tests only for pure/properly-mocked modules)
+    include: [
+      'src/**/*.{test,spec}.{js,jsx,ts,tsx}',
+      'functions/src/reports/__tests__/charts.test.js',
+      'functions/src/reports/__tests__/narrative.test.js',
+      'functions/src/reports/__tests__/periodUtils.test.js',
+      'functions/src/notifications/__tests__/templates.test.js',
+    ],
 
     // Exclude patterns
     exclude: ['node_modules', 'dist', 'ios', 'android'],
