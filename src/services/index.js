@@ -42,3 +42,6 @@ export * from './analytics';
 
 // Notification Services (FCM Token Management, Deep Links)
 export * from './notifications';
+
+// Premium Entitlement Services
+export * from './premium';
