@@ -28,6 +28,9 @@ import { identifyMissingInterventions, generateCounterfactualInsight, findGoodDa
 import { updateInterventionData, getInterventionData } from './layer4/interventionTracker';
 import { generateRecommendations } from './layer4/recommendationEngine';
 
+// Gap detection
+import { detectGaps } from './gapDetector';
+
 // Health data
 import { getWhoopSummary, getWhoopHistory, isWhoopLinked } from '../health/whoop';
 
@@ -364,6 +367,15 @@ export const generateInsights = async (userId, options = {}) => {
 
     const patterns = await detectPatternsInPeriod(userId, entries, whoopHistory);
 
+    // ========== GAP DETECTION (post Layer 1) ==========
+
+    let gapResults = [];
+    try {
+      gapResults = await detectGaps(userId);
+    } catch (error) {
+      console.warn('[Orchestrator] Gap detection failed:', error.message);
+    }
+
     // ========== LAYER 2: TEMPORAL REASONING ==========
 
     // Detect current state
@@ -387,7 +399,12 @@ export const generateInsights = async (userId, options = {}) => {
       whoopToday,
       whoopHistory,
       beliefData: beliefs,
-      interventionData
+      interventionData,
+      blindSpots: gapResults.map(g => ({
+        domain: g.domain,
+        severity: g.gapScore,
+        lastMentioned: g.lastMentionDate,
+      })),
     };
 
     // Generate primary causal synthesis insight
@@ -652,6 +669,7 @@ export const generateInsights = async (userId, options = {}) => {
     return {
       success: true,
       insights,
+      gaps: gapResults,
       dataStatus,
       generatedAt: new Date().toISOString(),
       duration
