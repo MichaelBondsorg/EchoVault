@@ -71,7 +71,8 @@ const standardSessions = new Map<string, StandardSession>();
 export const initializeStandardSession = async (
   clientWs: WebSocket,
   sessionState: SessionState,
-  context: ConversationContext | null
+  context: ConversationContext | null,
+  insightPrompt?: string
 ): Promise<void> => {
   const { sessionId } = sessionState;
 
@@ -82,7 +83,7 @@ export const initializeStandardSession = async (
     conversationHistory: [
       {
         role: 'system',
-        content: buildSystemPrompt(context, sessionState.sessionType),
+        content: buildSystemPrompt(context, sessionState.sessionType, insightPrompt),
       },
     ],
   };

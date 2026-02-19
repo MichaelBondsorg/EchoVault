@@ -21,7 +21,8 @@ const realtimeSessions = new Map<string, RealtimeSession>();
 export const createRealtimeConnection = async (
   clientWs: WebSocket,
   sessionState: SessionState,
-  context: ConversationContext | null
+  context: ConversationContext | null,
+  insightPrompt?: string
 ): Promise<void> => {
   const { sessionId } = sessionState;
 
@@ -53,7 +54,7 @@ export const createRealtimeConnection = async (
       type: 'session.update',
       session: {
         modalities: ['text', 'audio'],
-        instructions: buildSystemPrompt(context, sessionState.sessionType),
+        instructions: buildSystemPrompt(context, sessionState.sessionType, insightPrompt),
         voice: config.realtimeVoice,
         input_audio_format: 'pcm16',
         output_audio_format: 'pcm16',

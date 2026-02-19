@@ -104,7 +104,8 @@ export const initializeGuidedSession = async (
   clientWs: WebSocket,
   sessionState: SessionState,
   context: ConversationContext | null,
-  sessionType: GuidedSessionType
+  sessionType: GuidedSessionType,
+  insightPrompt?: string
 ): Promise<boolean> => {
   const { sessionId } = sessionState;
 

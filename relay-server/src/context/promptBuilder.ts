@@ -5,7 +5,8 @@ import type { ConversationContext, GuidedSessionType } from '../types/index.js';
  */
 export const buildSystemPrompt = (
   context: ConversationContext | null,
-  sessionType?: GuidedSessionType | 'free'
+  sessionType?: GuidedSessionType | 'free',
+  insightPrompt?: string
 ): string => {
   const contextSection = context
     ? `
@@ -36,10 +37,12 @@ ${context.recentEntries
     ? `This is a ${sessionType.replace(/_/g, ' ')} session. Follow the structured flow for this session type.`
     : 'This is a free conversation. Let the user guide the direction.';
 
+  const insightSection = insightPrompt || '';
+
   return `You are a supportive journaling companion helping the user reflect on their thoughts and experiences through voice conversation.
 
 ${contextSection}
-
+${insightSection}
 ## Guidelines
 - Reference past entries naturally: "You mentioned last week that..."
 - Follow up on open situations: "How did that meeting go?"

@@ -53,6 +53,7 @@ import {
 } from './analysis/voiceTone.js';
 import { ClientMessageSchema } from './types/index.js';
 import type { GuidedSessionType } from './types/index.js';
+import { InsightInjector } from './insights/insightInjector.js';
 
 // Validate configuration on startup
 validateConfig();
@@ -282,6 +283,9 @@ const wss = new WebSocketServer({
 // Track authenticated connections
 const authenticatedConnections = new Map<WebSocket, string>(); // ws -> userId
 
+// Track insight injectors per session
+const insightInjectors = new Map<string, InsightInjector>();
+
 /**
  * Handle new WebSocket connections
  */
@@ -334,6 +338,15 @@ wss.on('connection', async (ws, req) => {
     // Clean up any active session
     const session = getSessionByUser(userId);
     if (session) {
+      // Flush insight engagement on disconnect
+      const injector = insightInjectors.get(session.sessionId);
+      if (injector) {
+        try {
+          await injector.flushEngagement();
+        } catch { /* best-effort */ }
+        insightInjectors.delete(session.sessionId);
+      }
+
       if (hasRealtimeSession(session.sessionId)) {
         closeRealtimeConnection(session.sessionId);
       }
@@ -453,23 +466,37 @@ async function handleStartSession(
     // Load RAG context
     const context = await loadSessionContext(session.sessionId);
 
+    // Initialize insight injector (best-effort, does not block session start)
+    let insightPrompt = '';
+    try {
+      const injector = new InsightInjector(userId, session.sessionId);
+      await injector.initialize();
+      if (injector.getInsights().length > 0) {
+        insightInjectors.set(session.sessionId, injector);
+        insightPrompt = injector.buildInsightSystemPrompt();
+      }
+    } catch (error) {
+      console.error(`[${session.sessionId}] Insight injector init failed:`, error);
+    }
+
     // Initialize appropriate pipeline
     if (session.mode === 'realtime') {
-      await createRealtimeConnection(ws, session, context);
+      await createRealtimeConnection(ws, session, context, insightPrompt);
     } else if (typedSessionType !== 'free') {
       // Use guided pipeline for structured sessions
       const success = await initializeGuidedSession(
         ws,
         session,
         context,
-        typedSessionType as GuidedSessionType
+        typedSessionType as GuidedSessionType,
+        insightPrompt
       );
       if (!success) {
         // Fall back to standard if guided session not available
-        await initializeStandardSession(ws, session, context);
+        await initializeStandardSession(ws, session, context, insightPrompt);
       }
     } else {
-      await initializeStandardSession(ws, session, context);
+      await initializeStandardSession(ws, session, context, insightPrompt);
     }
 
     console.log(`Session ${session.sessionId} started for user ${userId} in ${session.mode} mode (${typedSessionType})`);
@@ -559,6 +586,17 @@ async function handleEndSession(
       recoverable: true,
     });
     return;
+  }
+
+  // Flush insight engagement data before cleanup
+  const injector = insightInjectors.get(session.sessionId);
+  if (injector) {
+    try {
+      await injector.flushEngagement();
+    } catch (error) {
+      console.error(`[${session.sessionId}] Insight engagement flush failed:`, error);
+    }
+    insightInjectors.delete(session.sessionId);
   }
 
   // Get guided session data before cleanup
@@ -688,8 +726,20 @@ server.listen(PORT, () => {
 });
 
 // Graceful shutdown
-process.on('SIGTERM', () => {
+process.on('SIGTERM', async () => {
   console.log('SIGTERM received, shutting down...');
+
+  // Flush all pending insight engagement data (best-effort)
+  const flushPromises: Promise<void>[] = [];
+  for (const [sessionId, injector] of insightInjectors.entries()) {
+    flushPromises.push(
+      injector.flushEngagement().catch((err) => {
+        console.error(`[${sessionId}] Engagement flush failed on shutdown:`, err);
+      })
+    );
+  }
+  await Promise.allSettled(flushPromises);
+  insightInjectors.clear();
 
   wss.clients.forEach((client) => {
     client.close(1001, 'Server shutting down');
