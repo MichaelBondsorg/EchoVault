@@ -70,6 +70,7 @@ export const exchangeGoogleTokenFn = httpsCallable(functions, 'exchangeGoogleTok
 export const exchangeAppleTokenFn = httpsCallable(functions, 'exchangeAppleToken', { timeout: 30000 }); // 30s - auth should be fast
 export const reprocessEntriesForGoalsFn = httpsCallable(functions, 'reprocessEntriesForGoals', { timeout: 540000 }); // 9 min
 export const migrateEntitiesFromEntriesFn = httpsCallable(functions, 'migrateEntitiesFromEntries', { timeout: 540000 }); // 9 min
+export const exportReportPdfFn = httpsCallable(functions, 'exportReportPdf', { timeout: 120000 }); // 2 min
 
 // Expose for console debugging
 if (typeof window !== 'undefined') {

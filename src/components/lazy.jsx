@@ -69,6 +69,14 @@ export const LazyEntityManagementPage = lazy(() =>
   import('../pages/EntityManagementPage')
 );
 
+export const LazyReportList = lazy(() =>
+  import('./reports/ReportList')
+);
+
+export const LazyReportViewer = lazy(() =>
+  import('./reports/ReportViewer')
+);
+
 // ============================================
 // Lazy-loaded Settings
 // ============================================
@@ -123,5 +131,7 @@ export const EntityManagementPageWithSuspense = withSuspense(LazyEntityManagemen
 export const NexusSettingsWithSuspense = withSuspense(LazyNexusSettings);
 export const WeeklyReportWithSuspense = withSuspense(LazyWeeklyReport);
 export const InsightsPanelWithSuspense = withSuspense(LazyInsightsPanel);
+export const ReportListWithSuspense = withSuspense(LazyReportList);
+export const ReportViewerWithSuspense = withSuspense(LazyReportViewer);
 
 export { LoadingFallback };

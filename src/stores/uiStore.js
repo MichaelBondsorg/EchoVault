@@ -9,7 +9,7 @@ import { create } from 'zustand';
 import { devtools } from 'zustand/middleware';
 
 /**
- * @typedef {'feed' | 'dashboard' | 'insights' | 'settings'} ViewType
+ * @typedef {'feed' | 'dashboard' | 'insights' | 'settings' | 'reports' | 'report-detail'} ViewType
  */
 
 const initialState = {

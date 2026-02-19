@@ -46,6 +46,15 @@ export {
   useHasPendingSignals
 } from './signalsStore';
 
+// Reports store - periodic life reports
+export {
+  useReportsStore,
+  useReports,
+  useActiveReport,
+  useReportsLoading,
+  useExportProgress
+} from './reportsStore';
+
 /**
  * Reset all stores (called on logout)
  */
@@ -55,10 +64,12 @@ export const resetAllStores = () => {
   const { useEntriesStore } = require('./entriesStore');
   const { useSafetyStore } = require('./safetyStore');
   const { useSignalsStore } = require('./signalsStore');
+  const { useReportsStore } = require('./reportsStore');
 
   useAuthStore.getState().reset();
   useUiStore.getState().reset();
   useEntriesStore.getState().reset();
   useSafetyStore.getState().reset();
   useSignalsStore.getState().reset();
+  useReportsStore.getState().reset();
 };

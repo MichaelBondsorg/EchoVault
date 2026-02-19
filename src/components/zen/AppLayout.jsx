@@ -54,6 +54,7 @@ const AppLayout = ({
   onShowHealthSettings,
   onShowNexusSettings,
   onShowEntityManagement,
+  onShowReports,
   onRequestNotifications,
   onLogout,
 
@@ -355,6 +356,7 @@ const AppLayout = ({
                 onOpenHealthSettings={onShowHealthSettings}
                 onOpenNexusSettings={onShowNexusSettings}
                 onOpenEntityManagement={onShowEntityManagement}
+                onOpenReports={onShowReports}
                 onOpenSafetyPlan={onShowSafetyPlan}
                 onOpenExport={onShowExport}
                 onRequestNotifications={onRequestNotifications}

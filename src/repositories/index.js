@@ -14,3 +14,4 @@ export { signalsRepository, exclusionsRepository, SignalsRepository, ExclusionsR
 export { healthRepository, HealthRepository } from './health';
 export { usersRepository, UsersRepository } from './users';
 export { analyticsRepository, AnalyticsRepository } from './analytics';
+export { reportsRepository, reportPreferencesRepository, ReportsRepository, ReportPreferencesRepository } from './reports';

@@ -69,6 +69,7 @@ import {
   useEntriesStore,
   useSafetyStore,
   useSignalsStore,
+  useReportsStore,
   resetAllStores
 } from './stores';
 
@@ -84,6 +85,7 @@ import UnifiedConversation from './components/chat/UnifiedConversation';
 import NexusSettings from './components/settings/NexusSettings';
 import EntityManagementPage from './pages/EntityManagementPage';
 import WhatsNewModal from './components/shared/WhatsNewModal';
+import { ReportListWithSuspense, ReportViewerWithSuspense } from './components/lazy';
 
 // Dashboard Enhancement Components
 import { QuickStatsBar, GoalsProgress, WeeklyDigest, SituationTimeline, ReflectionPrompts } from './components/dashboard/shared';
@@ -2298,6 +2300,7 @@ export default function App() {
       onShowHealthSettings={() => setShowHealthSettings(true)}
       onShowNexusSettings={() => setShowNexusSettings(true)}
       onShowEntityManagement={() => setShowEntityManagement(true)}
+      onShowReports={() => setView('reports')}
       onRequestNotifications={requestPermission}
       onLogout={() => {
         resetAllStores();
@@ -2517,6 +2520,27 @@ export default function App() {
             onBack={() => setShowEntityManagement(false)}
           />
         </div>
+      )}
+
+      {/* Report List View */}
+      {view === 'reports' && (
+        <ReportListWithSuspense
+          onSelectReport={(reportId) => {
+            useReportsStore.getState().setActiveReport(reportId, user?.uid);
+            setView('report-detail');
+          }}
+          onClose={() => setView('feed')}
+        />
+      )}
+
+      {/* Report Detail View */}
+      {view === 'report-detail' && (
+        <ReportViewerWithSuspense
+          onBack={() => {
+            useReportsStore.getState().clearActiveReport();
+            setView('reports');
+          }}
+        />
       )}
 
       {/* What's New Modal - shows once after feature updates */}

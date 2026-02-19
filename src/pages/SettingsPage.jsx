@@ -3,7 +3,7 @@ import { motion } from 'framer-motion';
 import {
   User, Bell, Heart, Shield, Download, LogOut,
   ChevronRight, Smartphone, Brain, Users, Loader2,
-  FileJson, AlertTriangle
+  FileJson, AlertTriangle, ScrollText
 } from 'lucide-react';
 import BackfillPanel from '../components/settings/BackfillPanel';
 import { exportDiagnosticJSON, migrateEntriesForHealthEnrichment } from '../utils/diagnosticExport';
@@ -27,6 +27,7 @@ const SettingsPage = ({
   onOpenSafetyPlan,
   onOpenExport,
   onOpenEntityManagement,
+  onOpenReports,
   onRequestNotifications,
   onLogout,
   notificationPermission,
@@ -133,6 +134,17 @@ const SettingsPage = ({
           label: 'Health Integration',
           description: 'Whoop / Apple Health / Google Fit',
           onClick: onOpenHealthSettings,
+        },
+      ],
+    },
+    {
+      title: 'Reports',
+      items: [
+        {
+          icon: ScrollText,
+          label: 'Life Reports',
+          description: 'Weekly, monthly & quarterly digests',
+          onClick: onOpenReports,
         },
       ],
     },
