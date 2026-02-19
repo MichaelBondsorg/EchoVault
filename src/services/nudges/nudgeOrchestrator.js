@@ -31,6 +31,10 @@ export const NUDGE_PRIORITY = {
 
   // Follow-up prompts
   EVENT_REFLECTION: 50,       // CBT loop closure
+
+  // Gap detection prompts
+  GAP_PROMPT: 35,             // Life domain gap prompt
+
   VALUE_CHECK: 30,
 
   // Gentle nudges - low priority
@@ -47,6 +51,7 @@ export const NUDGE_COOLDOWNS = {
   SOCIAL_ISOLATION_HIGH: 24 * 60 * 60 * 1000, // 24 hours
   SOCIAL_ISOLATION_MODERATE: 48 * 60 * 60 * 1000, // 48 hours
   EVENT_REFLECTION: 4 * 60 * 60 * 1000,   // 4 hours
+  GAP_PROMPT: 24 * 60 * 60 * 1000,         // 24 hours
   VALUE_CHECK: 24 * 60 * 60 * 1000,       // 24 hours
   SOCIAL_RECONNECTION: 72 * 60 * 60 * 1000, // 72 hours
   POSITIVE_REINFORCEMENT: 24 * 60 * 60 * 1000 // 24 hours
@@ -65,7 +70,8 @@ export const orchestrateNudges = async (allNudges, userId) => {
     anticipatoryNudge,
     socialNudge,
     valueNudge,
-    reflectionPrompt
+    reflectionPrompt,
+    gapPrompt
   } = allNudges;
 
   // Build prioritized nudge list
@@ -121,6 +127,15 @@ export const orchestrateNudges = async (allNudges, userId) => {
       priority: NUDGE_PRIORITY.EVENT_REFLECTION,
       nudge: reflectionPrompt,
       source: 'anticipatory'
+    });
+  }
+
+  if (gapPrompt) {
+    candidates.push({
+      type: 'GAP_PROMPT',
+      priority: NUDGE_PRIORITY.GAP_PROMPT,
+      nudge: gapPrompt,
+      source: 'gap_detector'
     });
   }
 
@@ -280,6 +295,13 @@ export const getAllPendingNudges = async (allNudges) => {
     pending.push({
       source: 'reflection',
       nudge: allNudges.reflectionPrompt
+    });
+  }
+
+  if (allNudges.gapPrompt) {
+    pending.push({
+      source: 'gap_detector',
+      nudge: allNudges.gapPrompt
     });
   }
 

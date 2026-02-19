@@ -23,6 +23,7 @@ import { orchestrateNudges, recordNudgeResponse } from '../services/nudges/nudge
  * @param {Object|null} options.anticipatoryEvent - From shouldShowAnticipatorySupport
  * @param {Object|null} options.valueGap - From value alignment service
  * @param {Object|null} options.pendingReflection - From checkForPendingFollowUps
+ * @param {Object|null} options.gapPrompt - From generateGapPrompt (gap detector)
  * @param {boolean} options.enabled - Whether nudges are enabled (default true)
  *
  * @returns {Object} Current nudge state and handlers
@@ -34,6 +35,7 @@ export const useNudgeOrchestrator = ({
   anticipatoryEvent = null,
   valueGap = null,
   pendingReflection = null,
+  gapPrompt = null,
   enabled = true
 }) => {
   const [currentNudge, setCurrentNudge] = useState(null);
@@ -57,8 +59,9 @@ export const useNudgeOrchestrator = ({
       : null,
     anticipatoryNudge: anticipatoryEvent?.show ? anticipatoryEvent : null,
     valueNudge: valueGap?.hasSignificantGap ? valueGap : null,
-    reflectionPrompt: pendingReflection?.[0] || null
-  }), [burnoutRisk, socialHealth, anticipatoryEvent, valueGap, pendingReflection]);
+    reflectionPrompt: pendingReflection?.[0] || null,
+    gapPrompt: gapPrompt || null
+  }), [burnoutRisk, socialHealth, anticipatoryEvent, valueGap, pendingReflection, gapPrompt]);
 
   // Check if inputs have meaningfully changed
   const inputsHash = useMemo(() => {
@@ -67,7 +70,8 @@ export const useNudgeOrchestrator = ({
       social: nudgeInputs.socialNudge?.type,
       anticipatory: !!nudgeInputs.anticipatoryNudge,
       value: !!nudgeInputs.valueNudge,
-      reflection: !!nudgeInputs.reflectionPrompt
+      reflection: !!nudgeInputs.reflectionPrompt,
+      gap: !!nudgeInputs.gapPrompt
     });
   }, [nudgeInputs]);
 
