@@ -15,6 +15,7 @@ import {
   where, writeBatch, runTransaction
 } from 'firebase/firestore';
 import { getFunctions, httpsCallable } from 'firebase/functions';
+import { getMessaging, getToken, onMessage } from 'firebase/messaging';
 import { Capacitor } from '@capacitor/core';
 
 const firebaseConfig = {
@@ -46,6 +47,17 @@ if (Capacitor.isNativePlatform()) {
 export { auth };
 export const db = getFirestore(app);
 export const functions = getFunctions(app);
+
+// Firebase Messaging (web only - native uses Capacitor Push Notifications)
+let messaging = null;
+if (!Capacitor.isNativePlatform() && typeof window !== 'undefined') {
+  try {
+    messaging = getMessaging(app);
+  } catch (e) {
+    console.warn('[Firebase] Messaging not available:', e.message);
+  }
+}
+export { messaging, getToken, onMessage };
 
 // Cloud Function callable references with extended timeouts for mobile reliability
 export const analyzeJournalEntryFn = httpsCallable(functions, 'analyzeJournalEntry', { timeout: 120000 }); // 2 min

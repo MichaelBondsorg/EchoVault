@@ -39,3 +39,6 @@ export * from './backfill';
 
 // Analytics Services (Engagement Features)
 export * from './analytics';
+
+// Notification Services (FCM Token Management, Deep Links)
+export * from './notifications';

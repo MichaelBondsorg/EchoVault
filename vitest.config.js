@@ -18,6 +18,7 @@ export default defineConfig({
       '@capacitor/splash-screen': path.resolve(__dirname, './src/test/mocks/capacitor.js'),
       '@capacitor/status-bar': path.resolve(__dirname, './src/test/mocks/capacitor.js'),
       '@capgo/capacitor-social-login': path.resolve(__dirname, './src/test/mocks/capacitor.js'),
+      '@capacitor/push-notifications': path.resolve(__dirname, './src/test/mocks/capacitor.js'),
     }
   },
   test: {

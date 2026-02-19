@@ -220,7 +220,10 @@ class UsersRepository extends BaseRepository {
       reminderTime: '20:00',
       weeklyDigest: false,
       insightAlerts: true,
-      crisisResources: true
+      crisisResources: true,
+      timezone: null,
+      deliveryWindowStart: 8,
+      deliveryWindowEnd: 21
     };
 
     if (!docSnap.exists()) return defaults;
