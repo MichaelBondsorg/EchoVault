@@ -10,6 +10,7 @@ import { getFirestore, FieldValue } from 'firebase-admin/firestore';
 import { APP_COLLECTION_ID } from '../shared/constants.js';
 import { generateWeeklyTemplate, generatePremiumNarrative } from './narrative.js';
 import { prepareMoodTrend, prepareCategoryBreakdown, prepareEntryFrequency } from './charts.js';
+import { filterForShareableContent } from './privacy.js';
 
 /**
  * Generate a report for a single user and period.
@@ -76,13 +77,18 @@ export async function generateReport(userId, cadence, periodStart, periodEnd, ge
       cadence
     );
 
-    // Build context for narrative generation
+    // Safety filter: exclude crisis-flagged entries from AI narrative synthesis
+    const safeEntries = filterForShareableContent(entriesData);
+    const filteredEntryCount = safeEntries.length;
+
+    // Build context for narrative generation (uses safe entries for AI input)
     const contextData = {
-      entries: entriesData,
+      entries: safeEntries,
       analytics: {
         ...analyticsData,
         moodTrend: moodTrend.map(p => p.value),
         entryCount: entriesData.length,
+        filteredEntryCount,
       },
       signals: signalData,
       nexus: nexusData,
@@ -108,6 +114,7 @@ export async function generateReport(userId, cadence, periodStart, periodEnd, ge
     // Build metadata
     const metadata = {
       entryCount: entriesData.length,
+      filteredEntryCount,
       moodAvg: analyticsData.moodAvg || null,
       topInsights: (nexusData.insights || []).slice(0, 5).map(i => i.id || ''),
       topEntities: (analyticsData.topEntities || []).slice(0, 5),
@@ -228,6 +235,8 @@ async function readEntries(db, userBase, periodStart, periodEnd, cadence) {
         text: d.text || d.rawText || '',
         moodScore: d.analysis?.moodScore ?? d.moodScore ?? null,
         category: d.classification?.category || d.category || 'uncategorized',
+        safety_flagged: d.safety_flagged || false,
+        has_warning_indicators: d.has_warning_indicators || false,
       });
     });
     return entries;

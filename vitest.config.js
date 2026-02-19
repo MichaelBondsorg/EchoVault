@@ -41,6 +41,7 @@ export default defineConfig({
       'functions/src/reports/__tests__/pdfExport.test.js',
       'functions/src/insights/__tests__/conversationReady.test.js',
       'functions/src/insights/__tests__/engagementTracker.test.js',
+      'functions/src/reports/__tests__/privacy.test.js',
     ],
 
     // Exclude patterns

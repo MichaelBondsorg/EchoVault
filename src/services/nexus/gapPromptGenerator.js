@@ -13,6 +13,7 @@
 
 import { checkEntitlement } from '../premium';
 import { detectGaps, LIFE_DOMAINS } from './gapDetector';
+import { shouldShowGapPrompt, filterGapsForSafety, getPromptStyleForDomain } from './gapSafety';
 import { analyticsRepository } from '../../repositories/analytics';
 import { db, collection, addDoc, Timestamp } from '../../config/firebase';
 import { APP_COLLECTION_ID } from '../../config/constants';
@@ -362,7 +363,14 @@ export async function generateGapPrompt(userId, options = {}) {
     return null;
   }
 
-  // 2. Detect gaps
+  // 2. Safety gate: check longitudinal risk
+  if (options.recentEntries) {
+    if (!shouldShowGapPrompt(userId, options.recentEntries)) {
+      return null;
+    }
+  }
+
+  // 3. Detect gaps
   let gaps;
   try {
     gaps = await detectGaps(userId);
@@ -373,7 +381,13 @@ export async function generateGapPrompt(userId, options = {}) {
 
   if (!gaps || gaps.length === 0) return null;
 
-  // 3. Load engagement preferences
+  // 4. Safety filter: remove crisis-adjacent domains
+  if (options.domainEntryMap) {
+    gaps = filterGapsForSafety(gaps, options.domainEntryMap);
+    if (gaps.length === 0) return null;
+  }
+
+  // 5. Load engagement preferences
   let engagementData = null;
   try {
     engagementData = await analyticsRepository.getAnalyticsDoc(userId, 'gap_engagement');
@@ -381,22 +395,27 @@ export async function generateGapPrompt(userId, options = {}) {
     // Continue without personalization
   }
 
-  // 4. Filter snoozed domains
+  // 6. Filter snoozed domains
   const filteredGaps = gaps.filter(g => !isDomainSnoozed(g.domain, engagementData));
   if (filteredGaps.length === 0) return null;
 
-  // 5. Take highest-scoring gap (limit 1)
+  // 7. Take highest-scoring gap (limit 1)
   const topGap = filteredGaps[0];
 
-  // 6. Select style
+  // 8. Select style (safety override takes precedence)
   const hasPreferences = !!engagementData?.preferences?.styleAcceptanceRates;
-  const style = selectPromptStyle(engagementData?.preferences || null, topGap.domain);
+  const safetyStyle = options.domainEntryMap
+    ? getPromptStyleForDomain(topGap.domain, options.domainEntryMap[topGap.domain] || [], engagementData?.preferences || null)
+    : null;
+  const style = safetyStyle === 'gentle'
+    ? 'gentle'
+    : selectPromptStyle(engagementData?.preferences || null, topGap.domain);
 
-  // 7. Seasonal context
+  // 9. Seasonal context
   const currentDate = options.currentDate || new Date();
   const seasonalContext = getSeasonalContext(currentDate);
 
-  // 8. Generate prompt text
+  // 10. Generate prompt text
   const promptText = getPromptForDomain(topGap.domain, style, {
     lastMentionDate: topGap.lastMentionDate,
     seasonalContext,
