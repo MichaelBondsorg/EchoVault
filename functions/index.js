@@ -4655,3 +4655,6 @@ function calculateRecentMood(moodScores, daysAgo, offsetDays = 0) {
 // Report Cloud Functions (section-05)
 export { weeklyReportScheduler, monthlyReportScheduler, quarterlyReportScheduler, annualReportScheduler } from './src/reports/scheduler.js';
 export { reportCleanup } from './src/reports/reportCleanup.js';
+
+// Report PDF Export (section-07)
+export { exportReportPdf } from './src/reports/pdfExport.js';
