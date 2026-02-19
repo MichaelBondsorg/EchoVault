@@ -55,6 +55,13 @@ service cloud.firestore {
 
       // NEW: Nexus 2.0 subcollection (insights, beliefs, interventions, baselines, states)
       match /nexus/{docId} {
+        allow read: if isOwner(userId);
+        // Allow write to all nexus docs EXCEPT conversation_queue (server-only)
+        allow write: if isOwner(userId) && docId != 'conversation_queue';
+      }
+
+      // Insight engagement subcollection under nexus/
+      match /nexus/{nexusDocId}/insight_engagement/{engagementId} {
         allow read, write: if isOwner(userId);
       }
 
@@ -101,6 +108,37 @@ service cloud.firestore {
       // Insight Learning subcollection (aggregated learning from feedback)
       match /insightLearning/{patternType} {
         allow read, write: if isOwner(userId);
+      }
+
+      // Analytics subcollection (mostly server-computed, read-only for client)
+      match /analytics/{analyticsDocId} {
+        allow read: if isOwner(userId);
+        // gap_engagement is writable by the user for engagement tracking
+        allow write: if isOwner(userId) && analyticsDocId == 'gap_engagement';
+
+        // Gap engagement history subcollection
+        match /history/{engagementId} {
+          allow read, write: if isOwner(userId);
+        }
+      }
+
+      // Reports subcollection (server-generated, read-only for client)
+      match /reports/{reportId} {
+        allow read: if isOwner(userId);
+      }
+
+      // Report preferences subcollection (user-managed privacy settings)
+      match /report_preferences/{reportId} {
+        allow read: if isOwner(userId);
+        allow write: if isOwner(userId)
+          && request.resource.data.keys().size() <= 10;
+      }
+
+      // FCM tokens subcollection (write-only, no client reads or deletes)
+      match /fcm_tokens/{tokenId} {
+        allow create, update: if isOwner(userId)
+          && request.resource.data.keys().hasAll(['token', 'platform'])
+          && request.resource.data.keys().size() <= 5;
       }
     }
 
