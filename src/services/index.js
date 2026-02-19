@@ -36,3 +36,6 @@ export * from './guided';
 
 // Backfill Services (Retroactive Data Enrichment)
 export * from './backfill';
+
+// Analytics Services (Engagement Features)
+export * from './analytics';

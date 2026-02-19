@@ -13,3 +13,4 @@ export { entriesRepository, EntriesRepository } from './entries';
 export { signalsRepository, exclusionsRepository, SignalsRepository, ExclusionsRepository } from './signals';
 export { healthRepository, HealthRepository } from './health';
 export { usersRepository, UsersRepository } from './users';
+export { analyticsRepository, AnalyticsRepository } from './analytics';

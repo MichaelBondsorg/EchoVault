@@ -4604,6 +4604,35 @@ export const getChiefOfStaffContext = onCall(
   }
 );
 
+// ============================================
+// ANALYTICS ENGAGEMENT FUNCTIONS
+// ============================================
+
+import { handleEntryAnalyzed } from './src/analytics/onEntryAnalyzed.js';
+import { handlePeriodicRollup } from './src/analytics/periodicRollup.js';
+
+/**
+ * Trigger: On entry update (analysisStatus → 'complete')
+ * Updates analytics aggregations: entry_stats, topic_coverage, entity_activity.
+ */
+export const onEntryAnalyzed = onDocumentUpdated(
+  'artifacts/{appId}/users/{userId}/entries/{entryId}',
+  handleEntryAnalyzed
+);
+
+/**
+ * Scheduled: Hourly analytics rollup
+ * Refreshes recency scores, cleans up stale data, reconciles stats.
+ */
+export const analyticsPeriodicRollup = onSchedule(
+  {
+    schedule: 'every 1 hours',
+    timeoutSeconds: 300,
+    memory: '512MiB',
+  },
+  handlePeriodicRollup
+);
+
 /**
  * Helper to calculate average mood for a date range
  */
