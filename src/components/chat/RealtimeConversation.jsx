@@ -170,11 +170,11 @@ const RealtimeConversation = ({ entries, onClose, category, onSaveEntry }) => {
   }, []);
 
   const statusColors = {
-    disconnected: 'bg-gray-400',
-    connecting: 'bg-yellow-400 animate-pulse',
-    connected: 'bg-green-400',
-    speaking: 'bg-indigo-500 animate-pulse',
-    listening: 'bg-green-500 animate-pulse',
+    disconnected: 'bg-hearth-400',
+    connecting: 'bg-honey-400 animate-pulse',
+    connected: 'bg-sage-400',
+    speaking: 'bg-lavender-500 animate-pulse',
+    listening: 'bg-sage-500 animate-pulse',
   };
 
   const statusLabels = {
@@ -197,7 +197,7 @@ const RealtimeConversation = ({ entries, onClose, category, onSaveEntry }) => {
   };
 
   return (
-    <div className="fixed inset-0 bg-gradient-to-b from-indigo-900 to-purple-900 z-50 flex flex-col pt-[env(safe-area-inset-top)]">
+    <div className="fixed inset-0 bg-gradient-to-b from-hearth-900 via-lavender-900/80 to-hearth-950 z-50 flex flex-col pt-[env(safe-area-inset-top)]">
       {/* Header */}
       <div className="p-4 flex justify-between items-center">
         <div className="flex items-center gap-3">
@@ -310,7 +310,7 @@ const RealtimeConversation = ({ entries, onClose, category, onSaveEntry }) => {
       {/* Save prompt modal */}
       {showSavePrompt && (
         <div className="absolute inset-0 bg-black/50 flex items-center justify-center p-6">
-          <div className="bg-gray-800 rounded-2xl p-6 max-w-sm w-full max-h-[90vh] overflow-y-auto">
+          <div className="bg-hearth-800 rounded-2xl p-6 max-w-sm w-full max-h-[90vh] overflow-y-auto">
             <h3 className="text-white text-lg font-medium mb-2">
               {guidedComplete ? 'Session Complete!' : 'Save as Entry?'}
             </h3>
@@ -329,7 +329,7 @@ const RealtimeConversation = ({ entries, onClose, category, onSaveEntry }) => {
                   value={editableTitle}
                   onChange={(e) => setEditableTitle(e.target.value)}
                   placeholder="Entry title..."
-                  className="w-full bg-white/10 text-white text-sm rounded-lg px-3 py-2 border border-white/10 focus:border-indigo-500 focus:outline-none"
+                  className="w-full bg-white/10 text-white text-sm rounded-lg px-3 py-2 border border-white/10 focus:border-lavender-500 focus:outline-none"
                 />
               </div>
             )}
@@ -340,28 +340,28 @@ const RealtimeConversation = ({ entries, onClose, category, onSaveEntry }) => {
                 <div className="flex items-center justify-between mb-2">
                   <span className="text-white/60 text-xs">Detected Mood</span>
                   <div className="flex items-center gap-1">
-                    {sessionAnalysis.voiceTone.energy === 'high' && <Zap size={14} className="text-yellow-400" />}
-                    {sessionAnalysis.voiceTone.energy === 'medium' && <Battery size={14} className="text-green-400" />}
-                    {sessionAnalysis.voiceTone.energy === 'low' && <BatteryLow size={14} className="text-blue-400" />}
+                    {sessionAnalysis.voiceTone.energy === 'high' && <Zap size={14} className="text-honey-400" />}
+                    {sessionAnalysis.voiceTone.energy === 'medium' && <Battery size={14} className="text-sage-400" />}
+                    {sessionAnalysis.voiceTone.energy === 'low' && <BatteryLow size={14} className="text-lavender-400" />}
                     <span className="text-white/40 text-xs capitalize">{sessionAnalysis.voiceTone.energy} energy</span>
                   </div>
                 </div>
 
                 {/* Mood slider */}
                 <div className="flex items-center gap-3 mb-2">
-                  <Frown size={18} className="text-red-400" />
+                  <Frown size={18} className="text-terra-400" />
                   <input
                     type="range"
                     min="0"
                     max="10"
                     value={editableMood ?? 5}
                     onChange={(e) => setEditableMood(parseInt(e.target.value))}
-                    className="flex-1 h-2 bg-gradient-to-r from-red-500 via-yellow-500 to-green-500 rounded-full appearance-none cursor-pointer"
+                    className="flex-1 h-2 bg-gradient-to-r from-terra-500 via-honey-500 to-sage-500 rounded-full appearance-none cursor-pointer"
                     style={{
                       WebkitAppearance: 'none',
                     }}
                   />
-                  <Smile size={18} className="text-green-400" />
+                  <Smile size={18} className="text-sage-400" />
                 </div>
                 <div className="text-center text-white/80 text-sm font-medium">
                   {editableMood ?? 5}/10
@@ -391,7 +391,7 @@ const RealtimeConversation = ({ entries, onClose, category, onSaveEntry }) => {
                   {sessionAnalysis.suggestedTags.map((tag, i) => (
                     <span
                       key={i}
-                      className="px-2 py-1 bg-indigo-500/20 text-indigo-300 text-xs rounded-full"
+                      className="px-2 py-1 bg-lavender-500/20 text-lavender-300 text-xs rounded-full"
                     >
                       #{tag}
                     </span>
@@ -408,13 +408,13 @@ const RealtimeConversation = ({ entries, onClose, category, onSaveEntry }) => {
             <div className="flex gap-3">
               <button
                 onClick={() => handleSaveDecision(false)}
-                className="flex-1 py-2 px-4 rounded-lg bg-gray-700 text-white/80 hover:bg-gray-600"
+                className="flex-1 py-2 px-4 rounded-lg bg-hearth-700 text-white/80 hover:bg-hearth-600"
               >
                 Discard
               </button>
               <button
                 onClick={() => handleSaveDecision(true)}
-                className="flex-1 py-2 px-4 rounded-lg bg-indigo-600 text-white hover:bg-indigo-500 flex items-center justify-center gap-2"
+                className="flex-1 py-2 px-4 rounded-lg bg-lavender-600 text-white hover:bg-lavender-500 flex items-center justify-center gap-2"
               >
                 <Save size={16} />
                 Save
@@ -429,7 +429,7 @@ const RealtimeConversation = ({ entries, onClose, category, onSaveEntry }) => {
         <div className="p-6 pb-[max(2rem,env(safe-area-inset-bottom))] flex flex-col items-center">
           {status === 'connecting' ? (
             // Connecting indicator
-            <div className="w-24 h-24 rounded-full bg-gradient-to-br from-yellow-500 to-orange-600 shadow-lg flex items-center justify-center animate-pulse">
+            <div className="w-24 h-24 rounded-full bg-gradient-to-br from-honey-500 to-terra-500 shadow-lg flex items-center justify-center animate-pulse">
               <div className="w-8 h-8 border-4 border-white/30 border-t-white rounded-full animate-spin" />
             </div>
           ) : status !== 'disconnected' ? (
@@ -464,10 +464,10 @@ const RealtimeConversation = ({ entries, onClose, category, onSaveEntry }) => {
                 style={{ touchAction: 'none', userSelect: 'none', WebkitUserSelect: 'none' }}
                 className={`w-24 h-24 rounded-full shadow-lg flex items-center justify-center transition-all select-none ${
                   isRecording
-                    ? 'bg-green-500 shadow-green-500/30 scale-110'
+                    ? 'bg-sage-500 shadow-sage-500/30 scale-110'
                     : status === 'speaking'
-                    ? 'bg-gray-500 opacity-50 cursor-not-allowed'
-                    : 'bg-gradient-to-br from-indigo-500 to-purple-600 shadow-purple-500/30 hover:scale-105'
+                    ? 'bg-hearth-500 opacity-50 cursor-not-allowed'
+                    : 'bg-gradient-to-br from-lavender-500 to-lavender-700 shadow-lavender-500/30 hover:scale-105'
                 }`}
               >
                 {isRecording ? (
