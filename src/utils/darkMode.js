@@ -103,6 +103,7 @@ export function isDarkMode() {
   return document.documentElement.classList.contains('dark');
 }
 
+
 export function cleanupDarkMode() {
   if (mediaQuery && mediaQueryHandler) {
     mediaQuery.removeEventListener('change', mediaQueryHandler);

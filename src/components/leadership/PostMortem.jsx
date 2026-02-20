@@ -31,21 +31,21 @@ import {
 import { LEADERSHIP_VALUES, detectLeadershipDistortions } from '../../services/leadership';
 
 const STEP_COLORS = {
-  blue: { border: 'border-blue-100', gradient: 'bg-gradient-to-r from-blue-500 to-blue-600' },
-  rose: { border: 'border-rose-100', gradient: 'bg-gradient-to-r from-rose-500 to-rose-600' },
-  purple: { border: 'border-purple-100', gradient: 'bg-gradient-to-r from-purple-500 to-purple-600' },
-  amber: { border: 'border-amber-100', gradient: 'bg-gradient-to-r from-amber-500 to-amber-600' },
-  green: { border: 'border-green-100', gradient: 'bg-gradient-to-r from-green-500 to-green-600' },
-  teal: { border: 'border-teal-100', gradient: 'bg-gradient-to-r from-teal-500 to-teal-600' },
+  lavender: { border: 'border-lavender-100 dark:border-lavender-800', gradient: 'bg-gradient-to-r from-lavender-500 to-lavender-600 dark:from-lavender-700 dark:to-lavender-800' },
+  terra: { border: 'border-terra-100 dark:border-terra-800', gradient: 'bg-gradient-to-r from-terra-400 to-terra-500 dark:from-terra-600 dark:to-terra-700' },
+  lavenderDeep: { border: 'border-lavender-200 dark:border-lavender-800', gradient: 'bg-gradient-to-r from-lavender-600 to-lavender-700 dark:from-lavender-700 dark:to-lavender-800' },
+  honey: { border: 'border-honey-100 dark:border-honey-800', gradient: 'bg-gradient-to-r from-honey-500 to-honey-600 dark:from-honey-600 dark:to-honey-700' },
+  sage: { border: 'border-sage-100 dark:border-sage-800', gradient: 'bg-gradient-to-r from-sage-500 to-sage-600 dark:from-sage-600 dark:to-sage-700' },
+  sageLight: { border: 'border-sage-200 dark:border-sage-800', gradient: 'bg-gradient-to-r from-sage-400 to-sage-500 dark:from-sage-500 dark:to-sage-600' },
 };
 
 const STEPS = [
-  { id: 'summary', title: 'What Happened', icon: FileText, color: 'blue' },
-  { id: 'feelings', title: 'How I Felt', icon: Heart, color: 'rose' },
-  { id: 'distortions', title: 'Thinking Patterns', icon: Brain, color: 'purple' },
-  { id: 'values', title: 'Values Check', icon: Compass, color: 'amber' },
-  { id: 'learnings', title: 'Takeaways', icon: Lightbulb, color: 'green' },
-  { id: 'compassion', title: 'Self-Compassion', icon: Sparkles, color: 'teal' }
+  { id: 'summary', title: 'What Happened', icon: FileText, color: 'lavender' },
+  { id: 'feelings', title: 'How I Felt', icon: Heart, color: 'terra' },
+  { id: 'distortions', title: 'Thinking Patterns', icon: Brain, color: 'lavenderDeep' },
+  { id: 'values', title: 'Values Check', icon: Compass, color: 'honey' },
+  { id: 'learnings', title: 'Takeaways', icon: Lightbulb, color: 'sage' },
+  { id: 'compassion', title: 'Self-Compassion', icon: Sparkles, color: 'sageLight' }
 ];
 
 const FEELING_OPTIONS = [
@@ -164,13 +164,13 @@ const PostMortem = ({
               value={responses.summary}
               onChange={(e) => updateResponse('summary', e.target.value)}
               placeholder="Describe the situation briefly..."
-              className="w-full h-32 p-4 rounded-xl border border-warm-200 focus:border-blue-400 focus:ring-2 focus:ring-blue-100 outline-none resize-none text-sm font-body"
+              className="w-full h-32 p-4 rounded-xl border border-warm-200 focus:border-lavender-400 focus:ring-2 focus:ring-lavender-100 dark:bg-hearth-850 dark:border-hearth-700 dark:text-warm-200 dark:focus:border-lavender-500 dark:focus:ring-lavender-900/40 outline-none resize-none text-sm font-body"
             />
             {leadershipContext?.mentionedPeople?.length > 0 && (
               <div className="flex flex-wrap gap-2">
                 <span className="text-xs text-warm-500">People involved:</span>
                 {leadershipContext.mentionedPeople.map((person, i) => (
-                  <span key={i} className="px-2 py-1 bg-blue-100 text-blue-700 rounded-full text-xs">
+                  <span key={i} className="px-2 py-1 bg-lavender-100 text-lavender-700 dark:bg-lavender-900/30 dark:text-lavender-300 rounded-full text-xs">
                     {person.replace('@person:', '')}
                   </span>
                 ))}
@@ -192,8 +192,8 @@ const PostMortem = ({
                   onClick={() => toggleArrayItem('feelings', value)}
                   className={`p-3 rounded-xl border-2 text-sm font-medium transition-all ${
                     responses.feelings.includes(value)
-                      ? 'border-rose-400 bg-rose-50 text-rose-700'
-                      : 'border-warm-200 hover:border-warm-300 text-warm-600'
+                      ? 'border-terra-400 bg-terra-50 text-terra-700 dark:border-terra-500 dark:bg-terra-900/30 dark:text-terra-300'
+                      : 'border-warm-200 hover:border-warm-300 text-warm-600 dark:border-hearth-700 dark:hover:border-hearth-600 dark:text-warm-400'
                   }`}
                 >
                   {label}
@@ -224,10 +224,10 @@ const PostMortem = ({
                     key={id}
                     className={`p-4 rounded-xl border-2 transition-all ${
                       isChecked
-                        ? 'border-purple-400 bg-purple-50'
+                        ? 'border-lavender-400 bg-lavender-50 dark:border-lavender-500 dark:bg-lavender-900/30'
                         : wasDetected
-                          ? 'border-purple-200 bg-purple-50/50'
-                          : 'border-warm-200'
+                          ? 'border-lavender-200 bg-lavender-50/50 dark:border-lavender-700 dark:bg-lavender-900/20'
+                          : 'border-warm-200 dark:border-hearth-700'
                     }`}
                   >
                     <label className="flex items-start gap-3 cursor-pointer">
@@ -235,7 +235,7 @@ const PostMortem = ({
                         type="checkbox"
                         checked={isChecked}
                         onChange={() => toggleArrayItem('distortionsChecked', id)}
-                        className="mt-1 w-4 h-4 rounded border-warm-300 text-purple-600 focus:ring-purple-500"
+                        className="mt-1 w-4 h-4 rounded border-warm-300 text-lavender-600 focus:ring-lavender-500 dark:border-hearth-600 dark:text-lavender-400"
                       />
                       <div className="flex-1">
                         <p className="text-sm font-medium text-warm-800">{question}</p>
@@ -243,7 +243,7 @@ const PostMortem = ({
                           <motion.p
                             initial={{ opacity: 0, height: 0 }}
                             animate={{ opacity: 1, height: 'auto' }}
-                            className="text-xs text-purple-600 mt-2 italic"
+                            className="text-xs text-lavender-600 dark:text-lavender-400 mt-2 italic"
                           >
                             Reframe: {reframe}
                           </motion.p>
@@ -270,8 +270,8 @@ const PostMortem = ({
                   onClick={() => toggleArrayItem('valuesSelected', value)}
                   className={`px-4 py-2 rounded-full border-2 text-sm font-medium transition-all ${
                     responses.valuesSelected.includes(value)
-                      ? 'border-amber-400 bg-amber-50 text-amber-700'
-                      : 'border-warm-200 hover:border-warm-300 text-warm-600'
+                      ? 'border-honey-400 bg-honey-50 text-honey-700 dark:border-honey-500 dark:bg-honey-900/30 dark:text-honey-300'
+                      : 'border-warm-200 hover:border-warm-300 text-warm-600 dark:border-hearth-700 dark:hover:border-hearth-600 dark:text-warm-400'
                   }`}
                 >
                   {label}
@@ -279,8 +279,8 @@ const PostMortem = ({
               ))}
             </div>
             {responses.valuesSelected.length > 0 && (
-              <div className="p-4 bg-amber-50 rounded-xl">
-                <p className="text-sm text-amber-800">
+              <div className="p-4 bg-honey-50 dark:bg-honey-900/30 rounded-xl">
+                <p className="text-sm text-honey-800 dark:text-honey-200">
                   You were acting from {responses.valuesSelected.join(', ')}. Even when outcomes are uncertain, acting from values is meaningful.
                 </p>
               </div>
@@ -298,7 +298,7 @@ const PostMortem = ({
               value={responses.whatIdDoDifferently}
               onChange={(e) => updateResponse('whatIdDoDifferently', e.target.value)}
               placeholder="Optional: What would you try differently..."
-              className="w-full h-24 p-4 rounded-xl border border-warm-200 focus:border-green-400 focus:ring-2 focus:ring-green-100 outline-none resize-none text-sm font-body"
+              className="w-full h-24 p-4 rounded-xl border border-warm-200 focus:border-sage-400 focus:ring-2 focus:ring-sage-100 dark:bg-hearth-850 dark:border-hearth-700 dark:text-warm-200 dark:focus:border-sage-500 dark:focus:ring-sage-900/40 outline-none resize-none text-sm font-body"
             />
             <p className="text-xs text-warm-500">
               Tip: Focus on what's in your control. Small adjustments compound over time.
@@ -316,10 +316,10 @@ const PostMortem = ({
               value={responses.selfCompassionNote}
               onChange={(e) => updateResponse('selfCompassionNote', e.target.value)}
               placeholder="I did my best because..."
-              className="w-full h-24 p-4 rounded-xl border border-warm-200 focus:border-teal-400 focus:ring-2 focus:ring-teal-100 outline-none resize-none text-sm font-body"
+              className="w-full h-24 p-4 rounded-xl border border-warm-200 focus:border-sage-400 focus:ring-2 focus:ring-sage-100 dark:bg-hearth-850 dark:border-hearth-700 dark:text-warm-200 dark:focus:border-sage-500 dark:focus:ring-sage-900/40 outline-none resize-none text-sm font-body"
             />
-            <div className="p-4 bg-teal-50 rounded-xl">
-              <p className="text-sm text-teal-800 font-medium">
+            <div className="p-4 bg-sage-50 dark:bg-sage-900/30 rounded-xl">
+              <p className="text-sm text-sage-800 dark:text-sage-200 font-medium">
                 {leadershipInsight?.strengthAcknowledgment || 'Taking time to reflect on this shows self-awareness and growth mindset.'}
               </p>
             </div>
@@ -341,7 +341,7 @@ const PostMortem = ({
       <motion.div
         initial={{ scale: 0.95, opacity: 0 }}
         animate={{ scale: 1, opacity: 1 }}
-        className="bg-white rounded-3xl max-w-lg w-full max-h-[90vh] overflow-hidden flex flex-col shadow-soft-lg"
+        className="bg-white dark:bg-hearth-900 rounded-3xl max-w-lg w-full max-h-[90vh] overflow-hidden flex flex-col shadow-soft-lg"
       >
         {/* Header */}
         <div className={`p-6 border-b ${STEP_COLORS[step.color].border} ${STEP_COLORS[step.color].gradient} text-white`}>
@@ -388,14 +388,14 @@ const PostMortem = ({
         </div>
 
         {/* Navigation */}
-        <div className="p-4 border-t border-warm-100 bg-warm-50 flex justify-between">
+        <div className="p-4 border-t border-warm-100 dark:border-hearth-800 bg-warm-50 dark:bg-hearth-850 flex justify-between">
           <button
             onClick={handleBack}
             disabled={isFirstStep}
             className={`flex items-center gap-2 px-4 py-2 rounded-xl font-medium transition-all ${
               isFirstStep
                 ? 'text-warm-300 cursor-not-allowed'
-                : 'text-warm-600 hover:bg-warm-100'
+                : 'text-warm-600 hover:bg-warm-100 dark:text-warm-400 dark:hover:bg-hearth-800'
             }`}
           >
             <ArrowLeft size={18} />
@@ -406,8 +406,8 @@ const PostMortem = ({
             onClick={handleNext}
             className={`flex items-center gap-2 px-6 py-2 rounded-xl font-medium text-white transition-all ${
               isLastStep
-                ? 'bg-teal-500 hover:bg-teal-600'
-                : 'bg-honey-500 hover:bg-honey-600'
+                ? 'bg-sage-500 hover:bg-sage-600 dark:bg-sage-600 dark:hover:bg-sage-500'
+                : 'bg-honey-500 hover:bg-honey-600 dark:bg-honey-600 dark:hover:bg-honey-500'
             }`}
           >
             {isLastStep ? (

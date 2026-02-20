@@ -28,12 +28,12 @@ const ValueGapCard = ({ gap, index }) => {
   const getIcon = () => {
     switch (reframe?.type) {
       case 'trade_off_acknowledgment':
-        return <Scale className="w-5 h-5 text-blue-500" />;
+        return <Scale className="w-5 h-5 text-lavender-500 dark:text-lavender-400" />;
       case 'pattern_awareness':
-        return <Clock className="w-5 h-5 text-amber-500" />;
+        return <Clock className="w-5 h-5 text-honey-500 dark:text-honey-400" />;
       case 'gentle_awareness':
       default:
-        return <Heart className="w-5 h-5 text-rose-400" />;
+        return <Heart className="w-5 h-5 text-terra-400 dark:text-terra-300" />;
     }
   };
 
@@ -41,12 +41,12 @@ const ValueGapCard = ({ gap, index }) => {
   const getGradient = () => {
     switch (reframe?.type) {
       case 'trade_off_acknowledgment':
-        return 'from-blue-50 to-sky-50 border-blue-200';
+        return 'from-lavender-50 to-lavender-100 border-lavender-200 dark:from-lavender-900/30 dark:to-lavender-900/20 dark:border-lavender-800';
       case 'pattern_awareness':
-        return 'from-amber-50 to-orange-50 border-amber-200';
+        return 'from-honey-50 to-honey-100 border-honey-200 dark:from-honey-900/30 dark:to-honey-900/20 dark:border-honey-800';
       case 'gentle_awareness':
       default:
-        return 'from-rose-50 to-pink-50 border-rose-200';
+        return 'from-terra-50 to-terra-100 border-terra-200 dark:from-terra-900/30 dark:to-terra-900/20 dark:border-terra-800';
     }
   };
 
@@ -75,7 +75,7 @@ const ValueGapCard = ({ gap, index }) => {
         onClick={() => setExpanded(!expanded)}
         className="w-full p-4 flex items-center gap-3 text-left"
       >
-        <div className="w-10 h-10 rounded-xl bg-white/50 flex items-center justify-center flex-shrink-0">
+        <div className="w-10 h-10 rounded-xl bg-white/50 dark:bg-hearth-800/50 flex items-center justify-center flex-shrink-0">
           {getIcon()}
         </div>
 
@@ -85,7 +85,7 @@ const ValueGapCard = ({ gap, index }) => {
             <span className="text-xs text-warm-400">•</span>
             <span className="text-xs text-warm-500">{Math.round(alignmentScore * 100)}% aligned</span>
           </div>
-          <h4 className="font-medium text-warm-800 truncate">{label}</h4>
+          <h4 className="font-medium text-warm-800 dark:text-warm-200 truncate">{label}</h4>
         </div>
 
         <div className="flex-shrink-0">
@@ -108,13 +108,13 @@ const ValueGapCard = ({ gap, index }) => {
           >
             <div className="px-4 pb-4 space-y-4">
               {/* Main message */}
-              <p className="text-sm text-warm-700 leading-relaxed">
+              <p className="text-sm text-warm-700 dark:text-warm-300 leading-relaxed">
                 {reframe?.message}
               </p>
 
               {/* Trade-off specific: Rebalance prompt */}
               {reframe?.type === 'trade_off_acknowledgment' && reframe?.rebalancePrompt && (
-                <div className="bg-white/50 rounded-xl p-3">
+                <div className="bg-white/50 dark:bg-hearth-800/50 rounded-xl p-3">
                   <p className="text-sm font-medium text-warm-700 mb-2">
                     {reframe.rebalancePrompt.question}
                   </p>
@@ -131,7 +131,7 @@ const ValueGapCard = ({ gap, index }) => {
 
               {/* Pattern specific: Reflection prompts */}
               {reframe?.type === 'pattern_awareness' && reframe?.reflectionPrompts && (
-                <div className="bg-white/50 rounded-xl p-3">
+                <div className="bg-white/50 dark:bg-hearth-800/50 rounded-xl p-3">
                   <p className="text-xs font-medium text-warm-600 mb-2">Reflect on:</p>
                   <ul className="space-y-1.5">
                     {reframe.reflectionPrompts.map((prompt, idx) => (
@@ -145,10 +145,10 @@ const ValueGapCard = ({ gap, index }) => {
 
               {/* Micro-commitment */}
               {reframe?.microCommitment && !commitmentAccepted && (
-                <div className="bg-white/70 rounded-xl p-3">
+                <div className="bg-white/70 dark:bg-hearth-800/70 rounded-xl p-3">
                   <div className="flex items-start gap-3">
-                    <div className="w-8 h-8 rounded-lg bg-green-100 flex items-center justify-center flex-shrink-0">
-                      <Sparkles className="w-4 h-4 text-green-600" />
+                    <div className="w-8 h-8 rounded-lg bg-sage-100 dark:bg-sage-900/30 flex items-center justify-center flex-shrink-0">
+                      <Sparkles className="w-4 h-4 text-sage-600 dark:text-sage-400" />
                     </div>
                     <div className="flex-1">
                       <p className="text-xs font-medium text-warm-600 mb-1">
@@ -162,7 +162,7 @@ const ValueGapCard = ({ gap, index }) => {
 
                   <button
                     onClick={() => setCommitmentAccepted(true)}
-                    className="w-full mt-3 py-2 rounded-lg bg-green-500 text-white text-sm font-medium hover:bg-green-600 transition-colors"
+                    className="w-full mt-3 py-2 rounded-lg bg-sage-500 text-white text-sm font-medium hover:bg-sage-600 dark:bg-sage-600 dark:hover:bg-sage-500 transition-colors"
                   >
                     I'll try this
                   </button>
@@ -174,12 +174,12 @@ const ValueGapCard = ({ gap, index }) => {
                 <motion.div
                   initial={{ opacity: 0, scale: 0.95 }}
                   animate={{ opacity: 1, scale: 1 }}
-                  className="bg-green-100 rounded-xl p-3 flex items-center gap-3"
+                  className="bg-sage-100 dark:bg-sage-900/30 rounded-xl p-3 flex items-center gap-3"
                 >
-                  <CheckCircle2 className="w-5 h-5 text-green-600" />
+                  <CheckCircle2 className="w-5 h-5 text-sage-600 dark:text-sage-400" />
                   <div>
-                    <p className="text-sm font-medium text-green-800">Commitment noted!</p>
-                    <p className="text-xs text-green-600">You've got this. Small steps matter.</p>
+                    <p className="text-sm font-medium text-sage-800 dark:text-sage-200">Commitment noted!</p>
+                    <p className="text-xs text-sage-600 dark:text-sage-400">You've got this. Small steps matter.</p>
                   </div>
                 </motion.div>
               )}

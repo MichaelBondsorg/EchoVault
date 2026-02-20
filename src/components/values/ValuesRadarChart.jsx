@@ -7,6 +7,7 @@
 
 import React, { useMemo } from 'react';
 import { CORE_VALUES } from '../../services/values/valuesTracker';
+import { useDarkMode } from '../../hooks/useDarkMode';
 
 const ValuesRadarChart = ({ alignment, prioritizedValues = [] }) => {
   // Get values with data
@@ -78,11 +79,23 @@ const ValuesRadarChart = ({ alignment, prioritizedValues = [] }) => {
     return { x1: center, y1: center, x2: end.x, y2: end.y };
   });
 
-  // Color based on overall alignment
+  // Color based on overall alignment (Hearthside palette hex values from tailwind.config.js)
   const overallScore = alignment?.overallAlignment || 0.5;
-  const fillColor = overallScore >= 0.7 ? '#22c55e' : overallScore >= 0.5 ? '#f59e0b' : '#ef4444';
-  const fillOpacity = 0.3;
-  const strokeColor = overallScore >= 0.7 ? '#16a34a' : overallScore >= 0.5 ? '#d97706' : '#dc2626';
+  const dark = useDarkMode();
+  const fillColor = overallScore >= 0.7
+    ? (dark ? '#476549' : '#5A7E5E')   // sage-600 / sage-500
+    : overallScore >= 0.5
+      ? (dark ? '#B87A1E' : '#D4922E') // honey-600 / honey-500
+      : '#ef4444';                       // red-500 (semantic, keep)
+  const fillOpacity = dark ? 0.4 : 0.3;
+  const strokeColor = overallScore >= 0.7
+    ? (dark ? '#5A7E5E' : '#476549')   // sage-500 / sage-600
+    : overallScore >= 0.5
+      ? (dark ? '#D4922E' : '#B87A1E') // honey-500 / honey-600
+      : '#dc2626';                       // red-600 (semantic, keep)
+  const gridColor = dark ? '#4A3D32' : '#E8DDD0';      // hearth-700 / warm-200
+  const axisColor = dark ? '#6B5A4A' : '#D4C4B0';      // hearth-600 / warm-300
+  const pointFill = dark ? '#231D1B' : '#fff';          // hearth-850 / white
 
   return (
     <div className="flex justify-center">
@@ -95,7 +108,7 @@ const ValuesRadarChart = ({ alignment, prioritizedValues = [] }) => {
             cy={center}
             r={(maxRadius / levels) * (level + 1)}
             fill="none"
-            stroke="#e5e5e5"
+            stroke={gridColor}
             strokeWidth={1}
             strokeDasharray={level === levels - 1 ? "none" : "3,3"}
           />
@@ -106,7 +119,7 @@ const ValuesRadarChart = ({ alignment, prioritizedValues = [] }) => {
           <line
             key={idx}
             {...line}
-            stroke="#d4d4d4"
+            stroke={axisColor}
             strokeWidth={1}
           />
         ))}
@@ -129,7 +142,7 @@ const ValuesRadarChart = ({ alignment, prioritizedValues = [] }) => {
               cx={point.x}
               cy={point.y}
               r={value.isPrioritized ? 6 : 4}
-              fill={value.isPrioritized ? strokeColor : '#fff'}
+              fill={value.isPrioritized ? strokeColor : pointFill}
               stroke={strokeColor}
               strokeWidth={2}
             />
@@ -158,7 +171,7 @@ const ValuesRadarChart = ({ alignment, prioritizedValues = [] }) => {
               y={labelPos.y + dy}
               textAnchor={textAnchor}
               className={`text-xs ${
-                value.isPrioritized ? 'font-semibold fill-warm-800' : 'fill-warm-500'
+                value.isPrioritized ? 'font-semibold fill-warm-800 dark:fill-warm-200' : 'fill-warm-500 dark:fill-warm-400'
               }`}
             >
               {value.label}
@@ -173,7 +186,7 @@ const ValuesRadarChart = ({ alignment, prioritizedValues = [] }) => {
           y={center}
           textAnchor="middle"
           dominantBaseline="middle"
-          className="text-2xl font-bold fill-warm-700"
+          className="text-2xl font-bold fill-warm-700 dark:fill-warm-200"
         >
           {Math.round(overallScore * 100)}%
         </text>
