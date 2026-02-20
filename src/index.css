@@ -3,145 +3,167 @@
 @tailwind utilities;
 
 /* ============================================
-   Engram Design System
+   Engram — Hearthside Design System
+   "Like sitting by a fireplace — warm, safe, enveloping"
+
+   NOTE: Dark mode is handled via Tailwind's dark: prefix
+   in JSX components, NOT via .dark selectors in CSS.
    ============================================ */
 
 @layer base {
   /* Typography defaults */
   html {
-    @apply text-warm-900;
+    color: #1C1916;
+  }
+  html.dark {
+    color: #F5EDE3;
   }
 
   h1, h2, h3, h4, h5, h6 {
-    @apply font-display font-bold tracking-tight;
+    font-family: 'Fraunces', Georgia, serif;
+    letter-spacing: -0.01em;
   }
 
-  h1 {
-    @apply text-3xl;
-  }
-
-  h2 {
-    @apply text-2xl;
-  }
-
-  h3 {
-    @apply text-xl;
-  }
+  h1 { font-size: 2.75rem; line-height: 1.1; font-weight: 600; }
+  h2 { font-size: 2rem; line-height: 1.15; font-weight: 600; }
+  h3 { font-size: 1.5rem; line-height: 1.2; font-weight: 500; }
+  h4 { font-size: 1.25rem; line-height: 1.3; font-weight: 500; }
 
   p {
-    @apply font-body leading-relaxed;
+    font-family: 'DM Sans', system-ui, sans-serif;
+    line-height: 1.625;
   }
 
-  /* Focus styles for accessibility */
+  /* Focus styles — warm amber ring */
   :focus-visible {
-    @apply outline-none ring-2 ring-primary-500 ring-offset-2 ring-offset-white rounded-lg;
+    outline: none;
+    box-shadow: 0 0 0 2px #FAF5EF, 0 0 0 4px rgba(232, 168, 76, 0.6);
+    border-radius: 0.5rem;
+  }
+  html.dark :focus-visible {
+    box-shadow: 0 0 0 2px #1C1916, 0 0 0 4px rgba(232, 168, 76, 0.4);
   }
 
-  /* Selection color */
+  /* Selection color — honey amber */
   ::selection {
-    @apply bg-primary-200 text-primary-900;
+    background: #FDDB8C;
+    color: #4A2E0D;
+  }
+  html.dark ::selection {
+    background: #6E4512;
+    color: #FFF8EB;
   }
 }
 
 @layer components {
   /* ============================================
-     Button Styles
+     Buttons — Warm, tactile, inviting
      ============================================ */
 
   .btn {
     @apply inline-flex items-center justify-center gap-2
-           font-semibold rounded-2xl
+           font-body font-semibold rounded-2xl
            transition-all duration-200
-           focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2;
+           focus:outline-none;
   }
 
   .btn-primary {
-    @apply btn px-6 py-3
-           bg-gradient-to-r from-primary-500 to-primary-600
-           text-white shadow-soft
-           hover:shadow-glow hover:scale-[1.02]
-           active:scale-[0.98]
-           focus-visible:ring-primary-500;
+    @apply btn px-6 py-3 shadow-soft
+           hover:scale-[1.02] active:scale-[0.98];
+    background: linear-gradient(135deg, #E8A84C, #D4922E);
+    color: #1C1916;
+  }
+  .btn-primary:hover {
+    box-shadow: 0 0 20px rgba(232, 168, 76, 0.3);
   }
 
   .btn-secondary {
-    @apply btn px-6 py-3
-           bg-white/10 backdrop-blur-sm
-           text-white border border-white/20
-           hover:bg-white/20 hover:border-white/30
-           active:scale-[0.98];
+    @apply btn px-6 py-3 backdrop-blur-sm active:scale-[0.98];
+    background: rgba(232, 221, 208, 0.6);
+    color: #4A3D32;
+    border: 1px solid rgba(212, 196, 176, 0.5);
+  }
+  .btn-secondary:hover {
+    background: rgba(232, 221, 208, 0.85);
+    border-color: rgba(212, 196, 176, 0.7);
   }
 
   .btn-ghost {
-    @apply btn px-4 py-2
-           text-warm-600 hover:text-warm-800
-           hover:bg-warm-100 rounded-xl;
+    @apply btn px-4 py-2 rounded-xl;
+    color: #6B5A4A;
+  }
+  .btn-ghost:hover {
+    color: #2A2420;
+    background: rgba(232, 221, 208, 0.5);
   }
 
   .btn-danger {
-    @apply btn px-6 py-3
-           bg-gradient-to-r from-red-500 to-red-600
-           text-white shadow-soft
-           hover:shadow-lg hover:scale-[1.02]
-           active:scale-[0.98];
+    @apply btn px-6 py-3 shadow-soft text-white
+           hover:scale-[1.02] active:scale-[0.98];
+    background: linear-gradient(135deg, #C4725A, #9E5040);
   }
 
   /* ============================================
-     Card Styles
+     Cards — Journal-page feel
      ============================================ */
 
   .card {
-    @apply bg-white/95 backdrop-blur-sm
-           rounded-3xl p-6
-           border border-white/50
-           shadow-soft
+    @apply backdrop-blur-sm rounded-3xl p-6 shadow-soft
            transition-all duration-300;
+    background: rgba(255, 255, 255, 0.95);
+    border: 1px solid rgba(232, 221, 208, 0.6);
   }
 
   .card-interactive {
-    @apply card
-           hover:shadow-soft-lg hover:-translate-y-1
-           cursor-pointer;
+    @apply card cursor-pointer active:scale-[0.99];
+  }
+  .card-interactive:hover {
+    @apply shadow-soft-lg;
+    transform: translateY(-2px);
   }
 
   .card-glass {
-    @apply bg-white/10 backdrop-blur-md
-           rounded-3xl p-6
-           border border-white/20
-           shadow-soft;
+    @apply backdrop-blur-md rounded-3xl p-6 shadow-soft;
+    background: rgba(250, 245, 239, 0.3);
+    border: 1px solid rgba(232, 221, 208, 0.3);
+  }
+
+  /* Warm accent card — for prompts, nudges */
+  .card-warm {
+    @apply card relative overflow-hidden;
+    background: linear-gradient(135deg, rgba(255, 248, 235, 0.8), rgba(253, 242, 239, 0.4));
   }
 
   /* ============================================
-     Modal Styles
+     Modals — Warm overlays
      ============================================ */
 
   .modal-backdrop {
-    @apply fixed inset-0 z-50
-           bg-gradient-to-br from-warm-900/80 to-primary-900/80
-           backdrop-blur-md
-           animate-fade-in;
+    @apply fixed inset-0 z-50 backdrop-blur-md animate-fade-in;
+    background: linear-gradient(135deg, rgba(28, 25, 22, 0.8), rgba(42, 36, 32, 0.85));
   }
 
   .modal-content {
-    @apply bg-white rounded-3xl
-           shadow-soft-xl
-           max-w-md w-full mx-4
-           animate-scale-in;
+    @apply rounded-3xl shadow-soft-xl max-w-md w-full mx-4 animate-scale-in;
+    background: #FAF5EF;
   }
 
   /* ============================================
-     Input Styles
+     Inputs — Warm and inviting
      ============================================ */
 
   .input {
-    @apply w-full px-4 py-3
-           bg-warm-50 border-2 border-warm-200
-           rounded-2xl
-           font-body text-warm-800
-           placeholder:text-warm-400
-           transition-all duration-200
-           focus:border-primary-400 focus:bg-white
-           focus:shadow-soft focus:outline-none;
+    @apply w-full px-4 py-3 rounded-2xl font-body
+           transition-all duration-200 focus:outline-none;
+    background: rgba(245, 237, 227, 0.8);
+    border: 2px solid rgba(232, 221, 208, 0.8);
+    color: #2A2420;
+  }
+  .input::placeholder { color: #B8A48E; }
+  .input:focus {
+    border-color: rgba(232, 168, 76, 0.6);
+    background: white;
+    box-shadow: 0 2px 15px -3px rgba(42, 36, 32, 0.08);
   }
 
   .input-lg {
@@ -153,99 +175,86 @@
   }
 
   /* ============================================
-     Badge Styles
+     Badges — Soft pill shapes
      ============================================ */
 
   .badge {
     @apply inline-flex items-center gap-1
            px-3 py-1 rounded-full
-           text-xs font-semibold;
+           text-xs font-semibold font-body;
   }
 
-  .badge-primary {
-    @apply badge bg-primary-100 text-primary-700;
-  }
+  .badge-primary   { @apply badge bg-sage-100 text-sage-700; }
+  .badge-secondary { @apply badge bg-lavender-100 text-lavender-700; }
+  .badge-accent    { @apply badge bg-honey-100 text-honey-700; }
+  .badge-terra     { @apply badge bg-terra-100 text-terra-700; }
 
-  .badge-secondary {
-    @apply badge bg-secondary-100 text-secondary-700;
-  }
-
-  .badge-accent {
-    @apply badge bg-accent-light text-accent-dark;
-  }
-
-  .badge-mood-great {
-    @apply badge bg-mood-great/20 text-mood-great;
-  }
-
-  .badge-mood-low {
-    @apply badge bg-mood-low/20 text-blue-700;
-  }
+  .badge-mood-great { @apply badge bg-sage-100 text-sage-700; }
+  .badge-mood-low   { @apply badge bg-lavender-100 text-lavender-700; }
 
   /* ============================================
-     Mood Indicator
+     Mood Indicators
      ============================================ */
 
   .mood-bar {
-    @apply h-1 rounded-full transition-all duration-500;
+    @apply h-1.5 rounded-full transition-all duration-500;
   }
 
-  .mood-great { @apply bg-mood-great; }
-  .mood-good { @apply bg-mood-good; }
-  .mood-neutral { @apply bg-mood-neutral; }
-  .mood-low { @apply bg-mood-low; }
-  .mood-struggling { @apply bg-mood-struggling; }
+  .mood-great      { @apply bg-sage-400; }
+  .mood-good       { @apply bg-sage-300; }
+  .mood-neutral    { @apply bg-honey-400; }
+  .mood-low        { @apply bg-lavender-400; }
+  .mood-struggling { @apply bg-terra-400; }
+
+  .mood-dot {
+    @apply w-2.5 h-2.5 rounded-full transition-colors duration-300;
+  }
 
   /* ============================================
      Loading States
      ============================================ */
 
   .breathing-loader {
-    @apply w-16 h-16 rounded-full
-           bg-gradient-to-br from-primary-400 to-primary-600
-           animate-breathe shadow-glow;
+    @apply w-16 h-16 rounded-full animate-breathe shadow-glow;
+    background: linear-gradient(135deg, #FCC44F, #C4725A);
   }
 
   .shimmer {
-    @apply bg-gradient-to-r from-warm-200 via-warm-100 to-warm-200
-           bg-[length:200%_100%]
-           animate-shimmer;
+    @apply bg-gradient-to-r from-hearth-200 via-hearth-100 to-hearth-200
+           bg-[length:200%_100%] animate-shimmer;
   }
 
   /* ============================================
-     Celebration Effects
+     Effects
      ============================================ */
 
-  .celebration-glow {
-    @apply animate-glow;
-  }
+  .celebration-glow { @apply animate-glow; }
+  .floating { @apply animate-float; }
 
-  .floating {
-    @apply animate-float;
+  /* Paper grain texture overlay */
+  .grain {
+    position: relative;
+  }
+  .grain::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    opacity: 0.03;
+    pointer-events: none;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)'/%3E%3C/svg%3E");
   }
 
   /* ============================================
-     Safe Area Insets (for notch devices)
+     Safe Area Insets
      ============================================ */
 
-  .safe-top {
-    padding-top: env(safe-area-inset-top);
-  }
-
-  .safe-bottom {
-    padding-bottom: env(safe-area-inset-bottom);
-  }
-
-  .safe-left {
-    padding-left: env(safe-area-inset-left);
-  }
-
-  .safe-right {
-    padding-right: env(safe-area-inset-right);
-  }
+  .safe-top    { padding-top: env(safe-area-inset-top); }
+  .safe-bottom { padding-bottom: env(safe-area-inset-bottom); }
+  .safe-left   { padding-left: env(safe-area-inset-left); }
+  .safe-right  { padding-right: env(safe-area-inset-right); }
 
   /* ============================================
-     Entry Card Accent Border
+     Entry Card — Journal page accent
      ============================================ */
 
   .entry-card {
@@ -253,17 +262,28 @@
   }
 
   .entry-card::before {
-    @apply absolute left-0 top-0 bottom-0 w-1 rounded-l-3xl
-           bg-gradient-to-b from-primary-400 to-primary-600;
     content: '';
+    position: absolute;
+    left: 0; top: 0; bottom: 0;
+    width: 3px;
+    border-radius: 1.5rem 0 0 1.5rem;
+    background: linear-gradient(to bottom, #E8A84C, #C4725A);
   }
 
   .entry-card-great::before {
-    @apply bg-gradient-to-b from-mood-great to-emerald-600;
+    background: linear-gradient(to bottom, #7A9E7E, #5A7E5E);
   }
-
+  .entry-card-good::before {
+    background: linear-gradient(to bottom, #9DC0A3, #7A9E7E);
+  }
+  .entry-card-neutral::before {
+    background: linear-gradient(to bottom, #E8A84C, #D4922E);
+  }
   .entry-card-low::before {
-    @apply bg-gradient-to-b from-mood-low to-blue-600;
+    background: linear-gradient(to bottom, #9B8EC4, #7B6EA4);
+  }
+  .entry-card-struggling::before {
+    background: linear-gradient(to bottom, #C4725A, #9E5040);
   }
 
   /* ============================================
@@ -271,45 +291,95 @@
      ============================================ */
 
   .recording-ring {
-    @apply absolute inset-0 rounded-full
-           border-4 border-red-400
-           animate-ping opacity-75;
+    @apply absolute inset-0 rounded-full animate-ping opacity-75;
+    border: 4px solid #C4725A;
   }
 
   .recording-pulse {
-    @apply w-20 h-20 rounded-full
-           bg-gradient-to-br from-red-400 to-red-600
-           shadow-lg animate-pulse-soft;
+    @apply w-20 h-20 rounded-full shadow-lg animate-pulse-soft;
+    background: linear-gradient(135deg, #C4725A, #9E5040);
+  }
+
+  /* ============================================
+     Prompt Card — Handwritten feel
+     ============================================ */
+
+  .prompt-card {
+    @apply card-warm relative;
+  }
+  .prompt-card::before {
+    content: '';
+    position: absolute;
+    left: 1rem; top: 1rem; bottom: 1rem;
+    width: 2px;
+    border-radius: 9999px;
+    background: linear-gradient(to bottom, #E8A84C, transparent);
   }
 }
 
 @layer utilities {
-  /* Text gradient utility */
+  /* Text gradient — warm amber to terra */
   .text-gradient {
-    @apply bg-gradient-to-r from-primary-500 to-secondary-500
+    @apply bg-gradient-to-r from-honey-500 to-terra-500
            bg-clip-text text-transparent;
+  }
+
+  .text-gradient-sage {
+    @apply bg-gradient-to-r from-sage-500 to-sage-400
+           bg-clip-text text-transparent;
+  }
+
+  /* Gradient presets — light/dark auto-switching */
+  .gradient-hearth-glow {
+    background: linear-gradient(135deg, #FCC44F, #C4725A);
+  }
+  html.dark .gradient-hearth-glow {
+    background: linear-gradient(135deg, rgba(110, 69, 18, 0.6), rgba(94, 45, 36, 0.6));
+  }
+
+  .gradient-sage-mist {
+    background: linear-gradient(135deg, #E0ECE2, #9DC0A3);
+  }
+  html.dark .gradient-sage-mist {
+    background: linear-gradient(135deg, rgba(26, 36, 27, 0.4), rgba(37, 53, 39, 0.4));
+  }
+
+  .gradient-lavender-dusk {
+    background: linear-gradient(135deg, #E8E3F2, #B5A7D4);
+  }
+  html.dark .gradient-lavender-dusk {
+    background: linear-gradient(135deg, rgba(34, 30, 48, 0.4), rgba(53, 47, 73, 0.4));
+  }
+
+  .gradient-terra-dawn {
+    background: linear-gradient(135deg, #FADDD5, #FEECC8);
+  }
+  html.dark .gradient-terra-dawn {
+    background: linear-gradient(135deg, rgba(63, 30, 24, 0.4), rgba(74, 46, 13, 0.4));
+  }
+
+  .gradient-hearth-surface {
+    background: linear-gradient(135deg, #FAF5EF, #FFFFFF);
+  }
+  html.dark .gradient-hearth-surface {
+    background: linear-gradient(135deg, #1C1916, #231D1B);
   }
 
   /* Glass effect */
   .glass {
-    @apply bg-white/10 backdrop-blur-md border border-white/20;
+    background: rgba(250, 245, 239, 0.2);
+    backdrop-filter: blur(12px);
+    border: 1px solid rgba(232, 221, 208, 0.2);
   }
 
-  /* Soft inset shadow */
-  .inset-soft {
-    @apply shadow-inner-soft;
-  }
+  .inset-soft { @apply shadow-inner-soft; }
 
-  /* Hide scrollbar but keep functionality */
   .scrollbar-hide {
     -ms-overflow-style: none;
     scrollbar-width: none;
   }
-  .scrollbar-hide::-webkit-scrollbar {
-    display: none;
-  }
+  .scrollbar-hide::-webkit-scrollbar { display: none; }
 
-  /* Line clamp utilities */
   .line-clamp-3 {
     display: -webkit-box;
     -webkit-line-clamp: 3;
@@ -317,43 +387,26 @@
     overflow: hidden;
   }
 
-  /* Tap highlight removal for mobile */
   .tap-transparent {
     -webkit-tap-highlight-color: transparent;
   }
+
+  .text-hand { font-family: 'Caveat', cursive; }
 }
 
 /* ============================================
-   Action Item Completion Animations
+   Action Item Animations (outside @layer)
    ============================================ */
 
 @keyframes strikethrough {
-  0% {
-    width: 0;
-  }
-  100% {
-    width: 100%;
-  }
+  0%   { width: 0; }
+  100% { width: 100%; }
 }
 
 @keyframes fadeOutSlide {
-  0% {
-    opacity: 1;
-    transform: translateX(0);
-    max-height: 60px;
-  }
-  70% {
-    opacity: 0;
-    transform: translateX(20px);
-    max-height: 60px;
-  }
-  100% {
-    opacity: 0;
-    transform: translateX(20px);
-    max-height: 0;
-    padding: 0;
-    margin: 0;
-  }
+  0%   { opacity: 1; transform: translateX(0); max-height: 60px; }
+  70%  { opacity: 0; transform: translateX(20px); max-height: 60px; }
+  100% { opacity: 0; transform: translateX(20px); max-height: 0; padding: 0; margin: 0; }
 }
 
 .action-item-completing {
@@ -363,29 +416,37 @@
 
 .action-item-completing .strikethrough-line {
   position: absolute;
-  left: 0;
-  top: 50%;
+  left: 0; top: 50%;
   height: 2px;
-  background-color: theme('colors.primary.500');
+  background-color: #D4922E;
   animation: strikethrough 0.3s ease-out forwards;
 }
 
-/* Custom checkbox for action items */
 .action-checkbox {
-  @apply w-5 h-5 rounded-full border-2 border-warm-300
-         flex items-center justify-center cursor-pointer
-         transition-all duration-200;
+  width: 1.25rem; height: 1.25rem;
+  border-radius: 9999px;
+  border: 2px solid #D4C4B0;
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s;
 }
-
 .action-checkbox:hover {
-  @apply border-primary-400 bg-primary-50;
+  border-color: #E8A84C;
+  background: #FFF8EB;
 }
-
 .action-checkbox.checked {
-  @apply border-primary-500 bg-primary-500;
+  border-color: #5A7E5E;
+  background: #5A7E5E;
 }
 
-/* Recurring task badge */
 .badge-recurring {
-  @apply badge bg-blue-100 text-blue-600;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.25rem 0.75rem;
+  border-radius: 9999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  background: #E8E3F2;
+  color: #635887;
 }
