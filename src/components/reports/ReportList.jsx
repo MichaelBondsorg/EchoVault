@@ -48,7 +48,7 @@ export default function ReportList({ onSelectReport, onClose }) {
         {/* Loading */}
         {loading && (
           <div className="flex flex-col items-center justify-center py-16">
-            <Loader2 size={32} className="animate-spin text-primary-500 mb-3" />
+            <Loader2 size={32} className="animate-spin text-honey-500 mb-3" />
             <p className="text-warm-500 text-sm">Loading reports...</p>
           </div>
         )}
@@ -87,7 +87,7 @@ export default function ReportList({ onSelectReport, onClose }) {
                       w-full flex items-center gap-3 p-4 rounded-2xl border transition-all text-left
                       ${isLocked
                         ? 'bg-warm-50 border-warm-200 opacity-60 cursor-not-allowed'
-                        : 'bg-white dark:bg-warm-800 border-warm-100 dark:border-warm-700 hover:border-primary-200 hover:shadow-soft-sm cursor-pointer'
+                        : 'bg-white dark:bg-warm-800 border-warm-100 dark:border-warm-700 hover:border-honey-200 hover:shadow-soft-sm cursor-pointer'
                       }
                     `}
                   >

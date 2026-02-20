@@ -288,7 +288,7 @@ const BentoGrid = ({
                 onClick={onToggleEdit}
                 className="
                   px-3 py-1
-                  bg-primary-500 hover:bg-primary-600
+                  bg-honey-500 hover:bg-honey-600
                   rounded-full text-sm font-medium
                   transition-colors
                 "

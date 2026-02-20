@@ -156,7 +156,7 @@ const EntryInsightsPopup = ({
           {/* Header */}
           <div className="flex items-center justify-between p-4 pb-0">
             <div className="flex items-center gap-2 text-warm-600">
-              <Heart size={18} className="text-primary-500" />
+              <Heart size={18} className="text-honey-500" />
               <span className="font-display font-semibold text-sm">{getHeaderTitle()}</span>
             </div>
             <motion.button
@@ -177,7 +177,7 @@ const EntryInsightsPopup = ({
               <motion.div
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
-                className="bg-gradient-to-br from-primary-50 to-warm-50 p-4 rounded-2xl border border-primary-100"
+                className="bg-gradient-to-br from-honey-50 to-warm-50 p-4 rounded-2xl border border-honey-100"
               >
                 <p className="text-sm text-warm-700 font-body leading-relaxed italic">
                   {validation}
@@ -248,14 +248,14 @@ const EntryInsightsPopup = ({
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: 0.2 }}
-                className="bg-secondary-50 p-4 rounded-2xl border border-secondary-100"
+                className="bg-lavender-50 p-4 rounded-2xl border border-lavender-100"
               >
-                <div className="flex items-center gap-2 text-secondary-700 font-display font-semibold text-xs uppercase mb-2">
+                <div className="flex items-center gap-2 text-lavender-700 font-display font-semibold text-xs uppercase mb-2">
                   <Footprints size={14} /> Something small you could try
                 </div>
-                <p className="text-sm text-secondary-800 font-medium font-body">{cbt.behavioral_activation.activity}</p>
+                <p className="text-sm text-lavender-800 font-medium font-body">{cbt.behavioral_activation.activity}</p>
                 {cbt.behavioral_activation.rationale && (
-                  <p className="text-xs text-secondary-600 mt-1">{cbt.behavioral_activation.rationale}</p>
+                  <p className="text-xs text-lavender-600 mt-1">{cbt.behavioral_activation.rationale}</p>
                 )}
               </motion.div>
             )}
@@ -281,12 +281,12 @@ const EntryInsightsPopup = ({
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: 0.15 }}
-                className="bg-primary-50 p-4 rounded-2xl border border-primary-100"
+                className="bg-honey-50 p-4 rounded-2xl border border-honey-100"
               >
-                <div className="flex items-center gap-2 text-primary-700 font-display font-semibold text-xs uppercase mb-2">
+                <div className="flex items-center gap-2 text-honey-700 font-display font-semibold text-xs uppercase mb-2">
                   <Wind size={14} /> {ventSupport.cooldown.technique || 'Grounding'}
                 </div>
-                <p className="text-sm text-primary-800 font-body">{ventSupport.cooldown.instruction}</p>
+                <p className="text-sm text-honey-800 font-body">{ventSupport.cooldown.instruction}</p>
               </motion.div>
             )}
 

@@ -117,7 +117,7 @@ const PromptScreen = ({ prompts, allSmartPrompts = [], mode, onModeChange, onSav
       exit={{ opacity: 0, y: 20 }}
       className="fixed inset-0 bg-warm-50 z-40 flex flex-col pt-[env(safe-area-inset-top)]"
     >
-      <div className="p-4 border-b border-primary-100 flex justify-between items-center bg-gradient-to-r from-primary-500 to-primary-600 text-white shadow-soft">
+      <div className="p-4 border-b border-honey-100 flex justify-between items-center bg-gradient-to-r from-honey-500 to-honey-600 text-white shadow-soft">
         <h2 className="font-display font-bold text-lg flex gap-2 items-center"><MessageCircle size={20}/> New Entry</h2>
         <motion.button
           onClick={onClose}
@@ -150,7 +150,7 @@ const PromptScreen = ({ prompts, allSmartPrompts = [], mode, onModeChange, onSav
               </h3>
               <button
                 onClick={handleRefresh}
-                className={`text-xs text-primary-600 hover:text-primary-700 flex items-center gap-1 transition-transform ${isRefreshing ? 'animate-spin' : ''}`}
+                className={`text-xs text-honey-600 hover:text-honey-700 flex items-center gap-1 transition-transform ${isRefreshing ? 'animate-spin' : ''}`}
                 title={promptSource === 'smart' ? "See more personal reflections" : "Get new prompts"}
               >
                 <RefreshCw size={14} />
@@ -174,7 +174,7 @@ const PromptScreen = ({ prompts, allSmartPrompts = [], mode, onModeChange, onSav
                     transition={{ delay: i * 0.1 }}
                     className="flex items-start gap-2"
                   >
-                    <span className={`text-xs mt-0.5 ${promptSource === 'smart' ? 'text-purple-500' : 'text-primary-500'}`}>•</span>
+                    <span className={`text-xs mt-0.5 ${promptSource === 'smart' ? 'text-purple-500' : 'text-honey-500'}`}>•</span>
                     <p className="text-sm text-warm-700 italic font-body">"{prompt}"</p>
                   </motion.div>
                 ))}
@@ -201,7 +201,7 @@ const PromptScreen = ({ prompts, allSmartPrompts = [], mode, onModeChange, onSav
                 onClick={() => onModeChange('voice')}
                 whileHover={{ scale: 1.02 }}
                 whileTap={{ scale: 0.98 }}
-                className="bg-gradient-to-r from-primary-500 to-primary-600 text-white p-6 rounded-2xl shadow-soft-lg hover:shadow-xl transition-all flex flex-col items-center gap-2"
+                className="bg-gradient-to-r from-terra-500 to-terra-600 text-white p-6 rounded-2xl shadow-soft-lg hover:shadow-xl transition-all flex flex-col items-center gap-2"
               >
                 <Mic size={28} className="opacity-90"/>
                 <span className="font-display font-bold text-base">Record</span>
@@ -210,7 +210,7 @@ const PromptScreen = ({ prompts, allSmartPrompts = [], mode, onModeChange, onSav
                 onClick={() => onModeChange('text')}
                 whileHover={{ scale: 1.02 }}
                 whileTap={{ scale: 0.98 }}
-                className="bg-gradient-to-r from-secondary-500 to-secondary-600 text-white p-6 rounded-2xl shadow-soft-lg hover:shadow-xl transition-all flex flex-col items-center gap-2"
+                className="bg-gradient-to-r from-honey-500 to-honey-600 text-white p-6 rounded-2xl shadow-soft-lg hover:shadow-xl transition-all flex flex-col items-center gap-2"
               >
                 <Keyboard size={28} className="opacity-90"/>
                 <span className="font-display font-bold text-base">Type</span>
@@ -229,7 +229,7 @@ const PromptScreen = ({ prompts, allSmartPrompts = [], mode, onModeChange, onSav
             <textarea
               value={textValue}
               onChange={e => setTextValue(e.target.value)}
-              className="w-full border border-warm-200 rounded-2xl p-4 h-48 focus:ring-2 focus:ring-primary-500 outline-none bg-white shadow-soft font-body text-warm-800"
+              className="w-full border border-warm-200 rounded-2xl p-4 h-48 focus:ring-2 focus:ring-honey-500 outline-none bg-white shadow-soft font-body text-warm-800"
               placeholder="Type your entry here... You can address the prompts above or write freely."
               autoFocus
             />
@@ -247,7 +247,7 @@ const PromptScreen = ({ prompts, allSmartPrompts = [], mode, onModeChange, onSav
                 disabled={!textValue.trim() || loading}
                 whileHover={{ scale: 1.02 }}
                 whileTap={{ scale: 0.98 }}
-                className="px-6 py-2 bg-primary-600 text-white rounded-xl font-display font-medium flex gap-2 items-center hover:bg-primary-700 disabled:bg-warm-300"
+                className="px-6 py-2 bg-honey-600 text-white rounded-xl font-display font-medium flex gap-2 items-center hover:bg-honey-700 disabled:bg-warm-300"
               >
                 {loading ? <Loader2 className="animate-spin" size={18}/> : <Send size={18}/>} Save
               </motion.button>
@@ -270,7 +270,7 @@ const PromptScreen = ({ prompts, allSmartPrompts = [], mode, onModeChange, onSav
                 whileTap={{ scale: 0.95 }}
                 animate={recording ? { scale: [1, 1.1, 1] } : {}}
                 transition={recording ? { duration: 1.5, repeat: Infinity } : {}}
-                className={`h-20 w-20 rounded-full flex items-center justify-center shadow-soft-lg transition-all ${recording ? 'bg-red-500' : 'bg-primary-600 hover:bg-primary-700'} disabled:opacity-50`}
+                className={`h-20 w-20 rounded-full flex items-center justify-center shadow-soft-lg transition-all ${recording ? 'bg-red-500' : 'bg-terra-500 hover:bg-terra-600'} disabled:opacity-50`}
               >
                 {recording ? <Square className="text-white fill-current" size={32}/> : <Mic className="text-white" size={32}/>}
               </motion.button>
@@ -282,7 +282,7 @@ const PromptScreen = ({ prompts, allSmartPrompts = [], mode, onModeChange, onSav
               )}
 
               {loading && (
-                <div className="flex items-center gap-2 text-primary-600 font-medium">
+                <div className="flex items-center gap-2 text-honey-600 font-medium">
                   <Loader2 className="animate-spin" size={18}/> Processing...
                 </div>
               )}

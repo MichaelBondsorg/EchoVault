@@ -9,23 +9,23 @@ import { useNexusInsights } from '../../../hooks/useNexusInsights';
 const INSIGHT_STYLES = {
   pattern: {
     icon: TrendingUp,
-    gradient: 'from-blue-500/20 to-indigo-500/20',
-    iconColor: 'text-blue-600',
+    gradient: 'from-lavender-400/20 to-lavender-500/20',
+    iconColor: 'text-lavender-600',
   },
   causal: {
     icon: Brain,
-    gradient: 'from-purple-500/20 to-pink-500/20',
-    iconColor: 'text-purple-600',
+    gradient: 'from-terra-400/20 to-terra-500/20',
+    iconColor: 'text-terra-600',
   },
   recommendation: {
     icon: Target,
-    gradient: 'from-green-500/20 to-emerald-500/20',
-    iconColor: 'text-green-600',
+    gradient: 'from-sage-400/20 to-sage-500/20',
+    iconColor: 'text-sage-600',
   },
   default: {
     icon: Lightbulb,
-    gradient: 'from-amber-500/20 to-orange-500/20',
-    iconColor: 'text-amber-600',
+    gradient: 'from-honey-400/20 to-honey-500/20',
+    iconColor: 'text-honey-600',
   },
 };
 
@@ -158,7 +158,7 @@ const NexusInsightsWidget = ({
         {/* Header */}
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-2 text-warm-500">
-            <Sparkles size={16} className="text-primary-500" />
+            <Sparkles size={16} className="text-honey-500" />
             <span className="text-xs font-medium">AI Insights</span>
           </div>
           {!isEditing && displayInsights.length > 0 && (
@@ -174,13 +174,13 @@ const NexusInsightsWidget = ({
             </div>
           ) : isCalibrating ? (
             <div className="flex-1 flex flex-col items-center justify-center text-center px-2">
-              <div className="w-8 h-8 rounded-full bg-primary-100 flex items-center justify-center mb-2">
-                <Brain size={16} className="text-primary-600" />
+              <div className="w-8 h-8 rounded-full bg-honey-100 flex items-center justify-center mb-2">
+                <Brain size={16} className="text-honey-600" />
               </div>
-              <p className="text-xs text-warm-600 font-medium">Learning your patterns</p>
-              <div className="w-full mt-2 h-1.5 bg-warm-100 rounded-full overflow-hidden">
+              <p className="text-xs text-hearth-600 font-medium">Learning your patterns</p>
+              <div className="w-full mt-2 h-1.5 bg-hearth-100 rounded-full overflow-hidden">
                 <motion.div
-                  className="h-full bg-primary-400 rounded-full"
+                  className="h-full bg-honey-400 rounded-full"
                   initial={{ width: 0 }}
                   animate={{ width: `${calibrationProgress}%` }}
                   transition={{ duration: 0.3 }}
@@ -208,7 +208,7 @@ const NexusInsightsWidget = ({
               </AnimatePresence>
               {insights.length > 2 && (
                 <motion.p
-                  className="text-xs text-primary-500 text-center pt-1"
+                  className="text-xs text-honey-600 text-center pt-1"
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
                   transition={{ delay: 0.3 }}

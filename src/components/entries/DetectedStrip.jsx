@@ -109,9 +109,9 @@ const DetectedStrip = ({
       className={`bg-white rounded-2xl shadow-xl border border-warm-200 overflow-hidden ${className}`}
     >
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3 bg-gradient-to-r from-primary-50 to-accent-light/30 border-b border-warm-100">
+      <div className="flex items-center justify-between px-4 py-3 bg-gradient-to-r from-honey-50 to-lavender-50/30 border-b border-warm-100">
         <div className="flex items-center gap-2">
-          <Sparkles size={16} className="text-primary-500" />
+          <Sparkles size={16} className="text-honey-500" />
           <span className="text-sm font-medium text-warm-700">
             Detected in your entry
           </span>
@@ -188,7 +188,7 @@ const DetectedStrip = ({
         </span>
         <button
           onClick={onConfirmAll}
-          className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-primary-500 text-white text-xs font-medium rounded-full hover:bg-primary-600 transition-colors"
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-honey-500 text-white text-xs font-medium rounded-full hover:bg-honey-600 transition-colors"
         >
           <Check size={12} />
           Looks right

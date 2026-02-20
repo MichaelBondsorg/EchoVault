@@ -219,11 +219,11 @@ const WidgetDrawer = ({
                         {/* Icon */}
                         <div className="
                           w-12 h-12
-                          bg-primary-100
+                          bg-honey-100
                           rounded-xl
                           flex items-center justify-center
                         ">
-                          <Icon size={24} className="text-primary-600" />
+                          <Icon size={24} className="text-honey-600" />
                         </div>
 
                         {/* Info */}
@@ -239,7 +239,7 @@ const WidgetDrawer = ({
                         {/* Add indicator */}
                         <div className="
                           w-8 h-8
-                          bg-primary-500
+                          bg-honey-500
                           rounded-full
                           flex items-center justify-center
                         ">

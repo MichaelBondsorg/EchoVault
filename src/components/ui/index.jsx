@@ -130,11 +130,11 @@ export const Button = ({
   ...props
 }) => {
   const variants = {
-    primary: 'bg-gradient-to-r from-primary-500 to-primary-600 text-white shadow-soft hover:shadow-glow',
-    secondary: 'bg-white/10 backdrop-blur-sm text-white border border-white/20 hover:bg-white/20',
-    ghost: 'text-warm-600 hover:text-warm-800 hover:bg-warm-100',
-    danger: 'bg-gradient-to-r from-red-500 to-red-600 text-white shadow-soft',
-    success: 'bg-gradient-to-r from-emerald-500 to-emerald-600 text-white shadow-soft',
+    primary: 'btn-primary',
+    secondary: 'btn-secondary',
+    ghost: 'btn-ghost',
+    danger: 'btn-danger',
+    success: 'btn-success',
   };
 
   const sizes = {
@@ -146,9 +146,7 @@ export const Button = ({
   return (
     <motion.button
       className={`
-        inline-flex items-center justify-center gap-2 font-semibold
-        transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed
-        focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2
+        disabled:opacity-50 disabled:cursor-not-allowed
         ${variants[variant]} ${sizes[size]} ${className}
       `}
       whileHover={disabled ? {} : { scale: 1.02 }}
@@ -187,9 +185,9 @@ export const Card = ({
   ...props
 }) => {
   const variants = {
-    default: 'bg-white/95 backdrop-blur-sm border border-white/50 shadow-soft',
-    glass: 'bg-white/10 backdrop-blur-md border border-white/20',
-    interactive: 'bg-white/95 backdrop-blur-sm border border-white/50 shadow-soft hover:shadow-soft-lg cursor-pointer',
+    default: 'bg-white/95 backdrop-blur-sm border border-white/50 shadow-soft dark:bg-hearth-850/95 dark:border-hearth-700/30',
+    glass: 'bg-white/10 backdrop-blur-md border border-white/20 dark:bg-hearth-900/20 dark:border-hearth-700/20',
+    interactive: 'bg-white/95 backdrop-blur-sm border border-white/50 shadow-soft hover:shadow-soft-lg cursor-pointer dark:bg-hearth-850/95 dark:border-hearth-700/30',
   };
 
   const Component = onClick ? motion.button : motion.div;
@@ -215,11 +213,11 @@ export const EntryCard = ({
   ...props
 }) => {
   const moodColors = {
-    great: 'from-mood-great to-emerald-600',
-    good: 'from-mood-good to-emerald-500',
-    neutral: 'from-primary-400 to-primary-600',
-    low: 'from-mood-low to-blue-600',
-    struggling: 'from-mood-struggling to-indigo-600',
+    great: 'from-mood-great to-sage-600',
+    good: 'from-mood-good to-sage-500',
+    neutral: 'from-honey-400 to-honey-600',
+    low: 'from-mood-low to-lavender-500',
+    struggling: 'from-mood-struggling to-lavender-600',
   };
 
   return (
@@ -228,6 +226,7 @@ export const EntryCard = ({
         relative bg-white/95 backdrop-blur-sm rounded-3xl p-6
         border border-white/50 shadow-soft overflow-hidden
         transition-all duration-300 hover:shadow-soft-lg
+        dark:bg-hearth-850/95 dark:border-hearth-700/30
         ${onClick ? 'cursor-pointer' : ''} ${className}
       `}
       whileHover={onClick ? { y: -2 } : {}}
@@ -274,7 +273,7 @@ export const Modal = ({
         >
           {/* Backdrop */}
           <motion.div
-            className="absolute inset-0 bg-gradient-to-br from-warm-900/80 to-primary-900/80 backdrop-blur-md"
+            className="absolute inset-0 bg-gradient-to-br from-warm-900/80 to-warm-800/80 backdrop-blur-md dark:from-hearth-950/90 dark:to-hearth-900/90"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
@@ -286,7 +285,9 @@ export const Modal = ({
           <motion.div
             className={`
               relative bg-white rounded-3xl shadow-soft-xl w-full ${sizes[size]}
-              max-h-[90vh] overflow-y-auto ${className}
+              max-h-[90vh] overflow-y-auto
+              dark:bg-hearth-850 dark:border dark:border-hearth-700/30
+              ${className}
             `}
             initial={{ opacity: 0, scale: 0.95, y: 20 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
@@ -310,7 +311,7 @@ export const ModalHeader = ({ children, onClose, className = '', id }) => (
     <div id={id}>{children}</div>
     {onClose && (
       <motion.button
-        className="p-2 rounded-xl text-warm-400 hover:text-warm-600 hover:bg-warm-100 transition-colors focus:outline-none focus:ring-2 focus:ring-primary-500"
+        className="p-2 rounded-xl text-warm-400 hover:text-warm-600 hover:bg-warm-100 dark:text-hearth-400 dark:hover:text-hearth-200 dark:hover:bg-hearth-800 transition-colors focus:outline-none focus:ring-2 focus:ring-honey-500"
         whileHover={{ scale: 1.1 }}
         whileTap={{ scale: 0.9 }}
         onClick={onClose}
@@ -344,13 +345,13 @@ export const Badge = ({
   className = '',
 }) => {
   const variants = {
-    primary: 'bg-primary-100 text-primary-700',
-    secondary: 'bg-secondary-100 text-secondary-700',
-    accent: 'bg-accent-light text-accent-dark',
-    success: 'bg-emerald-100 text-emerald-700',
-    warning: 'bg-amber-100 text-amber-700',
-    danger: 'bg-red-100 text-red-700',
-    neutral: 'bg-warm-100 text-warm-700',
+    primary: 'bg-honey-100 text-honey-700 dark:bg-honey-900/30 dark:text-honey-300',
+    secondary: 'bg-lavender-100 text-lavender-700 dark:bg-lavender-900/30 dark:text-lavender-300',
+    accent: 'bg-accent-light text-accent-dark dark:bg-honey-900/30 dark:text-honey-300',
+    success: 'bg-sage-100 text-sage-700 dark:bg-sage-900/30 dark:text-sage-300',
+    warning: 'bg-honey-100 text-honey-700 dark:bg-honey-900/30 dark:text-honey-300',
+    danger: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300',
+    neutral: 'bg-warm-100 text-warm-700 dark:bg-hearth-800 dark:text-hearth-300',
   };
 
   const sizes = {
@@ -410,7 +411,7 @@ export const BreathingLoader = ({ size = 'md', className = '', label = 'Taking a
       aria-label={label}
     >
       <motion.div
-        className={`rounded-full bg-gradient-to-br from-primary-400 to-primary-600 shadow-glow ${sizes[size]}`}
+        className={`rounded-full bg-gradient-to-br from-sage-400 to-sage-600 shadow-glow ${sizes[size]}`}
         animate={{
           scale: [1, 1.1, 1],
           opacity: [0.8, 1, 0.8],
@@ -422,7 +423,7 @@ export const BreathingLoader = ({ size = 'md', className = '', label = 'Taking a
         }}
         aria-hidden="true"
       />
-      <p className="text-warm-500 text-sm">{label}</p>
+      <p className="text-warm-500 dark:text-warm-400 text-sm">{label}</p>
     </div>
   );
 };
@@ -436,7 +437,7 @@ export const Spinner = ({ size = 'md', className = '', label = 'Loading' }) => {
 
   return (
     <motion.div
-      className={`rounded-full border-primary-200 border-t-primary-600 ${sizes[size]} ${className}`}
+      className={`rounded-full border-honey-200 border-t-honey-600 ${sizes[size]} ${className}`}
       animate={{ rotate: 360 }}
       transition={{ duration: 1, repeat: Infinity, ease: 'linear' }}
       role="status"
@@ -464,7 +465,7 @@ export const Input = ({
   return (
     <div className="space-y-2">
       {label && (
-        <label htmlFor={inputId} className="block text-sm font-medium text-warm-700">{label}</label>
+        <label htmlFor={inputId} className="block text-sm font-medium text-warm-700 dark:text-hearth-300">{label}</label>
       )}
       <input
         id={inputId}
@@ -472,8 +473,12 @@ export const Input = ({
           w-full px-4 py-3 bg-warm-50 border-2 border-warm-200 rounded-2xl
           font-body text-warm-800 placeholder:text-warm-400
           transition-all duration-200
-          focus:border-primary-400 focus:bg-white focus:shadow-soft focus:outline-none
-          focus:ring-2 focus:ring-primary-500 focus:ring-offset-2
+          focus:border-honey-400 focus:bg-white focus:shadow-soft focus:outline-none
+          focus:ring-2 focus:ring-honey-500 focus:ring-offset-2
+          dark:bg-hearth-900/60 dark:border-hearth-700/50 dark:text-hearth-100
+          dark:placeholder:text-hearth-500 dark:focus:border-honey-500/50
+          dark:focus:bg-hearth-800/80 dark:focus:ring-honey-500/40
+          dark:focus:ring-offset-hearth-850
           ${error ? 'border-red-300 focus:border-red-400' : ''}
           ${className}
         `}
@@ -501,7 +506,7 @@ export const Textarea = ({
   return (
     <div className="space-y-2">
       {label && (
-        <label htmlFor={textareaId} className="block text-sm font-medium text-warm-700">{label}</label>
+        <label htmlFor={textareaId} className="block text-sm font-medium text-warm-700 dark:text-hearth-300">{label}</label>
       )}
       <textarea
         id={textareaId}
@@ -509,8 +514,12 @@ export const Textarea = ({
           w-full px-4 py-3 bg-warm-50 border-2 border-warm-200 rounded-2xl
           font-body text-warm-800 placeholder:text-warm-400
           transition-all duration-200 min-h-[120px] resize-none
-          focus:border-primary-400 focus:bg-white focus:shadow-soft focus:outline-none
-          focus:ring-2 focus:ring-primary-500 focus:ring-offset-2
+          focus:border-honey-400 focus:bg-white focus:shadow-soft focus:outline-none
+          focus:ring-2 focus:ring-honey-500 focus:ring-offset-2
+          dark:bg-hearth-900/60 dark:border-hearth-700/50 dark:text-hearth-100
+          dark:placeholder:text-hearth-500 dark:focus:border-honey-500/50
+          dark:focus:bg-hearth-800/80 dark:focus:ring-honey-500/40
+          dark:focus:ring-offset-hearth-850
           ${error ? 'border-red-300 focus:border-red-400' : ''}
           ${className}
         `}
@@ -575,15 +584,15 @@ export const EmptyState = ({
   >
     {Icon && (
       <motion.div
-        className="w-20 h-20 mb-6 rounded-full bg-primary-100 flex items-center justify-center"
+        className="w-20 h-20 mb-6 rounded-full bg-honey-100 dark:bg-honey-900/30 flex items-center justify-center"
         animate={{ y: [0, -8, 0] }}
         transition={{ duration: 3, repeat: Infinity, ease: 'easeInOut' }}
       >
-        <Icon className="w-10 h-10 text-primary-500" />
+        <Icon className="w-10 h-10 text-honey-500" />
       </motion.div>
     )}
-    <h3 className="text-xl font-display font-bold text-warm-700 mb-2">{title}</h3>
-    <p className="text-warm-500 max-w-sm mb-6">{description}</p>
+    <h3 className="text-xl font-display font-bold text-warm-700 dark:text-hearth-200 mb-2">{title}</h3>
+    <p className="text-warm-500 dark:text-hearth-400 max-w-sm mb-6">{description}</p>
     {action && (
       <Button variant="primary" onClick={action.onClick}>
         {action.label}
@@ -603,10 +612,10 @@ export const Toast = ({
   onClose,
 }) => {
   const types = {
-    success: 'bg-emerald-500',
+    success: 'bg-sage-500',
     error: 'bg-red-500',
-    warning: 'bg-amber-500',
-    info: 'bg-primary-500',
+    warning: 'bg-honey-500',
+    info: 'bg-lavender-500',
   };
 
   // Map toast type to ARIA role

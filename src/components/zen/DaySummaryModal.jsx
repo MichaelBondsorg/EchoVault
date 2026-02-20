@@ -179,7 +179,7 @@ const DaySummaryModal = ({
               {/* Header */}
               <div className="flex items-center justify-between p-4 border-b border-warm-100">
                 <div className="flex items-center gap-2">
-                  <Calendar size={18} className="text-primary-500" />
+                  <Calendar size={18} className="text-honey-500" />
                   <div>
                     <h2 className="font-display font-bold text-warm-800">
                       {formattedDate}
@@ -203,10 +203,10 @@ const DaySummaryModal = ({
                 style={{ WebkitOverflowScrolling: 'touch' }}
               >
                 {/* AI Summary */}
-                <div className="bg-gradient-to-br from-primary-50 to-secondary-50 rounded-2xl p-3 border border-primary-100">
+                <div className="bg-gradient-to-br from-honey-50 to-lavender-50 rounded-2xl p-3 border border-honey-100">
                   <div className="flex items-center gap-2 mb-2">
-                    <Sparkles size={14} className="text-primary-500" />
-                    <span className="text-xs font-semibold text-primary-600 uppercase tracking-wide">
+                    <Sparkles size={14} className="text-honey-500" />
+                    <span className="text-xs font-semibold text-honey-600 uppercase tracking-wide">
                       AI Summary
                     </span>
                   </div>
@@ -298,7 +298,7 @@ const DaySummaryModal = ({
                       {themes.map((theme, i) => (
                         <span
                           key={i}
-                          className="px-2 py-1 bg-primary-50 text-primary-700 text-xs rounded-full"
+                          className="px-2 py-1 bg-honey-50 text-honey-700 text-xs rounded-full"
                         >
                           {theme}
                         </span>
@@ -320,7 +320,7 @@ const DaySummaryModal = ({
                         onClick={() => onEntryClick?.(entry)}
                         className="
                           w-full p-3 bg-white rounded-xl border border-warm-100
-                          text-left hover:border-primary-200 hover:bg-primary-50/30
+                          text-left hover:border-honey-200 hover:bg-honey-50/30
                           transition-colors group
                         "
                         whileHover={{ scale: 1.01 }}
@@ -342,7 +342,7 @@ const DaySummaryModal = ({
                           </div>
                           <ChevronRight
                             size={16}
-                            className="text-warm-300 group-hover:text-primary-500 transition-colors flex-shrink-0 mt-1"
+                            className="text-warm-300 group-hover:text-honey-500 transition-colors flex-shrink-0 mt-1"
                           />
                         </div>
                       </motion.button>

@@ -196,7 +196,7 @@ const WeeklyDigest = ({ entries, category, userId }) => {
       case 'challenging':
         return 'from-amber-50 to-orange-50 border-amber-200';
       default:
-        return 'from-primary-50 to-secondary-50 border-primary-200';
+        return 'from-honey-50 to-lavender-50 border-honey-200';
     }
   };
 
@@ -214,7 +214,7 @@ const WeeklyDigest = ({ entries, category, userId }) => {
           className="flex items-center gap-2 flex-1"
         >
           <div className="p-1.5 rounded-lg bg-white/60">
-            <Calendar size={14} className="text-primary-600" />
+            <Calendar size={14} className="text-honey-600" />
           </div>
           <div className="text-left">
             <h3 className="text-sm font-display font-semibold text-warm-800">
@@ -277,7 +277,7 @@ const WeeklyDigest = ({ entries, category, userId }) => {
               {/* Goals Progress */}
               {weekData.goalsProgressed.length > 0 && (
                 <div className="flex items-start gap-2 p-2 bg-white/40 rounded-xl">
-                  <Target size={14} className="text-primary-500 mt-0.5" />
+                  <Target size={14} className="text-honey-500 mt-0.5" />
                   <div>
                     <p className="text-xs font-medium text-warm-700">Progress made</p>
                     <p className="text-xs text-warm-600 capitalize">
@@ -290,7 +290,7 @@ const WeeklyDigest = ({ entries, category, userId }) => {
               {/* Insight */}
               <div className="p-3 bg-white/60 rounded-xl">
                 <div className="flex items-start gap-2">
-                  <Sparkles size={14} className="text-secondary-500 mt-0.5 shrink-0" />
+                  <Sparkles size={14} className="text-lavender-500 mt-0.5 shrink-0" />
                   <p className="text-sm text-warm-700 font-body leading-relaxed">
                     {weekData.insight}
                   </p>

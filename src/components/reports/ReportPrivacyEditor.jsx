@@ -79,7 +79,7 @@ export default function ReportPrivacyEditor({ report, privacy, onSave, onClose }
                     checked={!isHidden}
                     disabled={isCrisis}
                     onChange={() => !isCrisis && toggleSection(section.id)}
-                    className="rounded text-primary-600 focus:ring-primary-500"
+                    className="rounded text-honey-600 focus:ring-honey-500"
                   />
                 </label>
               );
@@ -128,7 +128,7 @@ export default function ReportPrivacyEditor({ report, privacy, onSave, onClose }
           </button>
           <button
             onClick={handleSave}
-            className="flex-1 py-3 rounded-xl bg-primary-600 text-white text-sm font-medium hover:bg-primary-700 transition-colors"
+            className="flex-1 py-3 rounded-xl bg-honey-600 text-white text-sm font-medium hover:bg-honey-700 transition-colors"
           >
             Save
           </button>

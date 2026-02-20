@@ -190,7 +190,7 @@ const BackfillPanel = ({ entries = [] }) => {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <Database size={20} className="text-primary-600" />
+          <Database size={20} className="text-honey-600" />
           <h3 className="font-semibold text-warm-800">Data Enrichment</h3>
         </div>
         {!running && summary && (
@@ -258,7 +258,7 @@ const BackfillPanel = ({ entries = [] }) => {
 
               <button
                 onClick={startBackfill}
-                className="w-full bg-primary-600 text-white py-2.5 px-4 rounded-lg font-medium hover:bg-primary-700 transition-colors flex items-center justify-center gap-2"
+                className="w-full bg-honey-600 text-white py-2.5 px-4 rounded-lg font-medium hover:bg-honey-700 transition-colors flex items-center justify-center gap-2"
               >
                 <Play size={16} />
                 {summary.canResume ? 'Resume Backfill' : 'Start Backfill'}
@@ -332,7 +332,7 @@ const BackfillPanel = ({ entries = [] }) => {
           <p className="text-sm text-warm-600">{clearResults.message}</p>
           <button
             onClick={() => setClearResults(null)}
-            className="text-sm text-primary-600 hover:text-primary-700"
+            className="text-sm text-honey-600 hover:text-honey-700"
           >
             Done
           </button>
@@ -361,7 +361,7 @@ const BackfillPanel = ({ entries = [] }) => {
               <div className="space-y-1">
                 <div className="h-2 bg-warm-200 rounded-full overflow-hidden">
                   <motion.div
-                    className="h-full bg-primary-500 rounded-full"
+                    className="h-full bg-honey-500 rounded-full"
                     initial={{ width: 0 }}
                     animate={{
                       width: `${Math.round((progress.processed / progress.total) * 100)}%`
@@ -433,14 +433,14 @@ const BackfillPanel = ({ entries = [] }) => {
           )}
 
           {results.reassessment?.insights?.generated > 0 && (
-            <div className="text-sm text-purple-600 bg-purple-50 p-2 rounded-lg">
+            <div className="text-sm text-lavender-600 bg-lavender-50 p-2 rounded-lg">
               {results.reassessment.insights.generated} new insights generated!
             </div>
           )}
 
           <button
             onClick={() => setResults(null)}
-            className="text-sm text-primary-600 hover:text-primary-700"
+            className="text-sm text-honey-600 hover:text-honey-700"
           >
             Done
           </button>

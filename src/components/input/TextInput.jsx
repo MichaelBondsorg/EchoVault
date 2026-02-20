@@ -15,7 +15,7 @@ const TextInput = ({ onSave, onCancel, loading }) => {
         <textarea
           value={val}
           onChange={e => setVal(e.target.value)}
-          className="w-full border border-warm-200 rounded-2xl p-3 mb-3 h-32 focus:ring-2 focus:ring-primary-500 outline-none bg-white shadow-soft font-body text-warm-800"
+          className="w-full border border-warm-200 rounded-2xl p-3 mb-3 h-32 focus:ring-2 focus:ring-honey-500 outline-none bg-white shadow-soft font-body text-warm-800"
           placeholder="Type your memory..."
           autoFocus
         />
@@ -33,7 +33,7 @@ const TextInput = ({ onSave, onCancel, loading }) => {
             disabled={!val.trim() || loading}
             whileHover={{ scale: 1.02 }}
             whileTap={{ scale: 0.98 }}
-            className="px-4 py-2 bg-primary-600 text-white rounded-xl font-display font-medium flex gap-2 items-center hover:bg-primary-700 disabled:bg-warm-300"
+            className="px-4 py-2 bg-honey-600 text-white rounded-xl font-display font-medium flex gap-2 items-center hover:bg-honey-700 disabled:bg-warm-300"
           >
             {loading ? <Loader2 className="animate-spin" size={18}/> : <Send size={18}/>} Save
           </motion.button>

@@ -34,7 +34,7 @@ const CompanionNudge = ({ onClick, hasNewInsight = false }) => {
     >
       {/* Animated sparkle icon */}
       <motion.div
-        className="text-primary-600"
+        className="text-honey-600"
         animate={{
           scale: [1, 1.1, 1],
           opacity: [0.8, 1, 0.8],
@@ -68,7 +68,7 @@ const CompanionNudge = ({ onClick, hasNewInsight = false }) => {
         className="
           absolute inset-0
           rounded-full
-          border-2 border-primary-400/30
+          border-2 border-honey-400/30
         "
         animate={{
           scale: [1, 1.3],

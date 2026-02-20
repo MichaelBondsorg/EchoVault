@@ -259,7 +259,7 @@ const EntryBar = ({ onVoiceSave, onTextSave, loading, disabled, promptContext, o
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
           >
-            <div className="flex items-center gap-2 text-primary-600 font-medium mb-2">
+            <div className="flex items-center gap-2 text-honey-600 font-medium mb-2">
               <Loader2 className="animate-spin" size={20} />
               <span>Processing your voice...</span>
             </div>
@@ -280,7 +280,7 @@ const EntryBar = ({ onVoiceSave, onTextSave, loading, disabled, promptContext, o
             <div className="max-w-md mx-auto">
               {/* Prompt Context Banner */}
               {promptContext && (
-                <div className="mb-2 px-3 py-2 bg-primary-50 rounded-xl text-xs text-primary-700">
+                <div className="mb-2 px-3 py-2 bg-honey-50 rounded-xl text-xs text-honey-700">
                   <span className="font-semibold">Responding to:</span> "{promptContext}"
                 </div>
               )}
@@ -292,7 +292,7 @@ const EntryBar = ({ onVoiceSave, onTextSave, loading, disabled, promptContext, o
                     onChange={(e) => setTextValue(e.target.value)}
                     onKeyDown={handleKeyDown}
                     placeholder={promptContext ? "Your response..." : "What's on your mind?"}
-                    className="w-full p-3 pr-10 border border-warm-200 rounded-2xl resize-none focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent min-h-[48px] max-h-[120px] font-body text-warm-800"
+                    className="w-full p-3 pr-10 border border-warm-200 rounded-2xl resize-none focus:outline-none focus:ring-2 focus:ring-honey-400 focus:border-transparent min-h-[48px] max-h-[120px] font-body text-warm-800"
                     rows={1}
                     style={{ height: 'auto' }}
                     onInput={(e) => {
@@ -312,7 +312,7 @@ const EntryBar = ({ onVoiceSave, onTextSave, loading, disabled, promptContext, o
                 <motion.button
                   onClick={handleTextSubmit}
                   disabled={!textValue.trim()}
-                  className={`p-3 rounded-full ${textValue.trim() ? 'bg-primary-600 text-white' : 'bg-warm-100 text-warm-300'}`}
+                  className={`p-3 rounded-full ${textValue.trim() ? 'bg-honey-600 text-white' : 'bg-warm-100 text-warm-300'}`}
                   whileHover={textValue.trim() ? { scale: 1.05 } : {}}
                   whileTap={textValue.trim() ? { scale: 0.95 } : {}}
                 >
@@ -334,7 +334,7 @@ const EntryBar = ({ onVoiceSave, onTextSave, loading, disabled, promptContext, o
             <div className="max-w-md mx-auto">
               {/* Prompt Context Banner */}
               {promptContext && (
-                <div className="mb-3 px-3 py-2 bg-primary-50 rounded-xl text-xs text-primary-700 text-center">
+                <div className="mb-3 px-3 py-2 bg-honey-50 rounded-xl text-xs text-honey-700 text-center">
                   <span className="font-semibold">Responding to:</span> "{promptContext}"
                 </div>
               )}
@@ -375,7 +375,7 @@ const EntryBar = ({ onVoiceSave, onTextSave, loading, disabled, promptContext, o
               <motion.button
                 onClick={handleMicClick}
                 disabled={disabled || loading}
-                className="h-14 w-14 rounded-full bg-primary-600 flex items-center justify-center shadow-soft-lg hover:bg-primary-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                className="h-14 w-14 rounded-full bg-terra-500 flex items-center justify-center shadow-soft-lg hover:bg-terra-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 whileHover={{ scale: 1.05 }}
                 whileTap={{ scale: 0.95 }}
               >

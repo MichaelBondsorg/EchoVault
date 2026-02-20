@@ -91,10 +91,10 @@ const HomePage = ({
           onClick={handleAddClick}
           className="
             w-full mt-3 py-3 px-4
-            bg-primary-100 hover:bg-primary-200
-            border-2 border-dashed border-primary-300
+            bg-honey-100 hover:bg-honey-200
+            border-2 border-dashed border-honey-300
             rounded-2xl
-            text-primary-600 font-medium text-sm
+            text-honey-700 font-medium text-sm
             flex items-center justify-center gap-2
             transition-colors
           "
@@ -119,13 +119,13 @@ const HomePage = ({
       {/* Install Prompt for new users (no entries) */}
       {entries.length === 0 && !isEditMode && (
         <motion.div
-          className="mt-6 p-4 bg-primary-50/50 backdrop-blur-sm rounded-2xl text-sm text-primary-800 text-center border border-primary-100"
+          className="mt-6 p-4 bg-hearth-50/50 backdrop-blur-sm rounded-2xl text-sm text-hearth-800 text-center border border-hearth-200"
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           transition={{ delay: 0.3 }}
         >
-          <p className="font-medium mb-1">Welcome to your sanctuary</p>
-          <p className="text-primary-600 text-xs">
+          <p className="font-display font-medium mb-1">Welcome to your sanctuary</p>
+          <p className="text-hearth-600 text-xs">
             Tap the + button below to add your first entry
           </p>
         </motion.div>

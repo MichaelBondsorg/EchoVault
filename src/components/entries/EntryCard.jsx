@@ -149,7 +149,7 @@ const EntryCard = ({ entry, onDelete, onUpdate }) => {
       animate={{ opacity: 1, y: 0 }}
       className={`rounded-2xl p-5 shadow-soft border hover:shadow-soft-lg transition-shadow mb-4 relative overflow-hidden border-l-4 ${cardStyle} ${moodBorderColor}`}
     >
-      {isPending && <div className="absolute top-0 left-0 right-0 h-1 bg-warm-100"><div className="h-full bg-primary-500 animate-progress-indeterminate"></div></div>}
+      {isPending && <div className="absolute top-0 left-0 right-0 h-1 bg-warm-100"><div className="h-full bg-honey-500 animate-progress-indeterminate"></div></div>}
 
       {/* Insight Box */}
       {entry.contextualInsight?.found && insightMsg && !isTask && (() => {
@@ -160,7 +160,7 @@ const EntryCard = ({ entry, onDelete, onUpdate }) => {
           ? 'bg-red-50 border-red-100 text-red-800'
           : isPositive
             ? 'bg-green-50 border-green-100 text-green-800'
-            : 'bg-primary-50 border-primary-100 text-primary-800';
+            : 'bg-honey-50 border-honey-100 text-honey-800';
         return (
           <motion.div
             initial={{ opacity: 0, x: -10 }}
@@ -186,11 +186,11 @@ const EntryCard = ({ entry, onDelete, onUpdate }) => {
             <p className="text-warm-500 italic text-sm">{ventSupport.validation}</p>
           )}
           {ventSupport.cooldown && (
-            <div className="bg-primary-50 p-3 rounded-xl border border-primary-100">
-              <div className="flex items-center gap-2 text-primary-700 font-display font-semibold text-xs uppercase mb-2">
+            <div className="bg-sage-50 p-3 rounded-xl border border-sage-100">
+              <div className="flex items-center gap-2 text-sage-700 font-display font-semibold text-xs uppercase mb-2">
                 <Wind size={14} /> {ventSupport.cooldown.technique || 'Grounding'}
               </div>
-              <p className="text-sm text-primary-800 font-body">{ventSupport.cooldown.instruction}</p>
+              <p className="text-sm text-sage-800 font-body">{ventSupport.cooldown.instruction}</p>
             </div>
           )}
         </div>
@@ -302,16 +302,16 @@ const EntryCard = ({ entry, onDelete, onUpdate }) => {
           )}
 
           {cbt.perspective && (
-            <div className="bg-gradient-to-r from-primary-50 to-green-50 p-3 rounded-xl border-l-4 border-primary-400">
-              <div className="text-xs font-display font-semibold text-primary-600 uppercase mb-1">Perspective</div>
+            <div className="bg-gradient-to-r from-sage-50 to-sage-100 p-3 rounded-xl border-l-4 border-sage-400">
+              <div className="text-xs font-display font-semibold text-sage-600 uppercase mb-1">Perspective</div>
               <p className="text-sm text-warm-700 font-body">{cbt.perspective}</p>
             </div>
           )}
 
           {!cbt.perspective && cbt.socratic_question && (
-            <div className="bg-primary-50 p-3 rounded-xl border-l-4 border-primary-400">
-              <div className="text-xs font-display font-semibold text-primary-600 uppercase mb-1">Reflect:</div>
-              <p className="text-sm text-primary-800 font-body">{cbt.socratic_question}</p>
+            <div className="bg-sage-50 p-3 rounded-xl border-l-4 border-sage-400">
+              <div className="text-xs font-display font-semibold text-sage-600 uppercase mb-1">Reflect:</div>
+              <p className="text-sm text-sage-800 font-body">{cbt.socratic_question}</p>
             </div>
           )}
 
@@ -323,13 +323,13 @@ const EntryCard = ({ entry, onDelete, onUpdate }) => {
           )}
 
           {cbt.behavioral_activation && (
-            <div className="bg-secondary-50 p-3 rounded-xl border border-secondary-100">
-              <div className="flex items-center gap-2 text-secondary-700 font-display font-semibold text-xs uppercase mb-2">
+            <div className="bg-lavender-50 p-3 rounded-xl border border-lavender-100">
+              <div className="flex items-center gap-2 text-lavender-700 font-display font-semibold text-xs uppercase mb-2">
                 <Footprints size={14} /> Try This (Under 5 min)
               </div>
-              <p className="text-sm text-secondary-800 font-medium font-body">{cbt.behavioral_activation.activity}</p>
+              <p className="text-sm text-lavender-800 font-medium font-body">{cbt.behavioral_activation.activity}</p>
               {cbt.behavioral_activation.rationale && (
-                <p className="text-xs text-secondary-600 mt-1">{cbt.behavioral_activation.rationale}</p>
+                <p className="text-xs text-lavender-600 mt-1">{cbt.behavioral_activation.rationale}</p>
               )}
             </div>
           )}
@@ -338,11 +338,11 @@ const EntryCard = ({ entry, onDelete, onUpdate }) => {
 
       {/* Legacy CBT Breakdown */}
       {framework === 'cbt' && cbt && !cbt.validation && !cbt.socratic_question && cbt.challenge && !cbt.suggested_reframe && (
-        <div className="mb-4 bg-primary-50 p-3 rounded-xl border border-primary-100 text-sm space-y-2">
-          <div className="flex items-center gap-2 text-primary-700 font-display font-bold text-xs uppercase"><Brain size={12}/> Cognitive Restructuring</div>
+        <div className="mb-4 bg-sage-50 p-3 rounded-xl border border-sage-100 text-sm space-y-2">
+          <div className="flex items-center gap-2 text-sage-700 font-display font-bold text-xs uppercase"><Brain size={12}/> Cognitive Restructuring</div>
           <div className="grid gap-2 font-body">
-            <div><span className="font-semibold text-primary-900">Thought:</span> {cbt.automatic_thought}</div>
-            <div className="bg-white p-2 rounded-lg border border-primary-100"><span className="font-semibold text-green-700">Challenge:</span> {cbt.challenge}</div>
+            <div><span className="font-semibold text-sage-900">Thought:</span> {cbt.automatic_thought}</div>
+            <div className="bg-white p-2 rounded-lg border border-sage-100"><span className="font-semibold text-green-700">Challenge:</span> {cbt.challenge}</div>
           </div>
         </div>
       )}
@@ -381,13 +381,13 @@ const EntryCard = ({ entry, onDelete, onUpdate }) => {
                   const formatName = (prefix) => tag.replace(prefix, '').replace(/_/g, ' ');
 
                   if (tag.startsWith('@person:')) {
-                    return <span key={i} className="text-[10px] font-semibold text-primary-600 bg-primary-50 px-2 py-0.5 rounded-full">👤 {formatName('@person:')}</span>;
+                    return <span key={i} className="text-[10px] font-semibold text-sage-600 bg-sage-50 px-2 py-0.5 rounded-full">👤 {formatName('@person:')}</span>;
                   } else if (tag.startsWith('@place:')) {
                     return <span key={i} className="text-[10px] font-semibold text-green-600 bg-green-50 px-2 py-0.5 rounded-full">📍 {formatName('@place:')}</span>;
                   } else if (tag.startsWith('@goal:')) {
                     return <span key={i} className="text-[10px] font-semibold text-amber-600 bg-amber-50 px-2 py-0.5 rounded-full">🎯 {formatName('@goal:')}</span>;
                   } else if (tag.startsWith('@situation:')) {
-                    return <span key={i} className="text-[10px] font-semibold text-secondary-600 bg-secondary-50 px-2 py-0.5 rounded-full">📌 {formatName('@situation:')}</span>;
+                    return <span key={i} className="text-[10px] font-semibold text-lavender-600 bg-lavender-50 px-2 py-0.5 rounded-full">📌 {formatName('@situation:')}</span>;
                   } else if (tag.startsWith('@self:')) {
                     return <span key={i} className="text-[10px] font-semibold text-rose-600 bg-rose-50 px-2 py-0.5 rounded-full">💭 {formatName('@self:')}</span>;
                   } else if (tag.startsWith('@activity:')) {
@@ -404,7 +404,7 @@ const EntryCard = ({ entry, onDelete, onUpdate }) => {
                     // Unknown @ tag - show without prefix
                     return <span key={i} className="text-[10px] font-semibold text-warm-600 bg-warm-50 px-2 py-0.5 rounded-full">{tag.split(':')[1]?.replace(/_/g, ' ') || tag}</span>;
                   }
-                  return <span key={i} className="text-[10px] font-semibold text-primary-600 bg-primary-50 px-2 py-0.5 rounded-full">#{tag}</span>;
+                  return <span key={i} className="text-[10px] font-semibold text-sage-600 bg-sage-50 px-2 py-0.5 rounded-full">#{tag}</span>;
                 })}
                 {/* Show "+N more" button when tags are hidden */}
                 {hiddenCount > 0 && !showAllTags && (
@@ -449,7 +449,7 @@ const EntryCard = ({ entry, onDelete, onUpdate }) => {
               <input
                 value={title}
                 onChange={e => setTitle(e.target.value)}
-                className="flex-1 font-display font-bold text-lg border-b-2 border-primary-500 focus:outline-none bg-transparent"
+                className="flex-1 font-display font-bold text-lg border-b-2 border-honey-500 focus:outline-none bg-transparent"
                 placeholder="Entry title"
                 autoFocus
               />
@@ -468,7 +468,7 @@ const EntryCard = ({ entry, onDelete, onUpdate }) => {
                 value={editDate}
                 onChange={e => setEditDate(e.target.value)}
                 max={getTodayForInput()}
-                className="text-sm border border-warm-200 rounded-lg px-2 py-1 focus:outline-none focus:border-primary-500"
+                className="text-sm border border-warm-200 rounded-lg px-2 py-1 focus:outline-none focus:border-honey-500"
               />
               <button
                 onClick={() => {
@@ -517,7 +517,7 @@ const EntryCard = ({ entry, onDelete, onUpdate }) => {
         ) : (
           <div className="flex items-center gap-2">
             <h3 className={`text-lg font-display font-bold text-warm-800 ${isPending ? 'animate-pulse' : ''}`}>{isPending ? "Processing..." : title}</h3>
-            {!isPending && <button onClick={() => setEditing(true)} className="text-warm-300 hover:text-primary-500 opacity-50 hover:opacity-100"><Edit2 size={14}/></button>}
+            {!isPending && <button onClick={() => setEditing(true)} className="text-warm-300 hover:text-honey-500 opacity-50 hover:opacity-100"><Edit2 size={14}/></button>}
           </div>
         )}
       </div>
@@ -704,7 +704,7 @@ const EntryCard = ({ entry, onDelete, onUpdate }) => {
                       }
                       onUpdate(entry.id, { extracted_tasks: updatedTasks });
                     }}
-                    className="rounded border-warm-300 text-primary-600 focus:ring-primary-500"
+                    className="rounded border-warm-300 text-honey-600 focus:ring-honey-500"
                   />
                   <span className={displayAsCompleted ? 'line-through text-warm-400' : 'text-warm-700'}>
                     {taskText}

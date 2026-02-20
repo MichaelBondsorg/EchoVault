@@ -106,8 +106,7 @@ const QuickLogModal = ({ isOpen, onClose, onSave }) => {
           <div
             className="fixed inset-0 z-[60] flex items-center justify-center p-4 pointer-events-none"
             style={{
-              // Use dvh for iOS Safari dynamic viewport height
-              minHeight: '100dvh',
+              // Use -webkit-fill-available with dvh fallback for iOS Safari
               minHeight: '-webkit-fill-available',
             }}
           >
@@ -124,7 +123,6 @@ const QuickLogModal = ({ isOpen, onClose, onSave }) => {
               style={{
                 // Ensure modal doesn't exceed viewport on iOS
                 maxHeight: 'calc(100dvh - 2rem)',
-                maxHeight: 'calc(100vh - 2rem)',
                 WebkitOverflowScrolling: 'touch',
               }}
               initial={{ opacity: 0, scale: 0.9, y: 20 }}
@@ -217,7 +215,7 @@ const QuickLogModal = ({ isOpen, onClose, onSave }) => {
                           text-sm font-medium
                           transition-all duration-200
                           ${isSelected
-                            ? 'bg-primary-100 text-primary-700 border-2 border-primary-300'
+                            ? 'bg-honey-100 text-honey-700 border-2 border-honey-300'
                             : 'bg-warm-100 text-warm-600 border-2 border-transparent hover:bg-warm-200'
                           }
                         `}
@@ -239,7 +237,7 @@ const QuickLogModal = ({ isOpen, onClose, onSave }) => {
                 onClick={handleSave}
                 className="
                   w-full py-3 px-4
-                  bg-gradient-to-r from-primary-500 to-primary-600
+                  bg-gradient-to-r from-honey-500 to-honey-600
                   text-white font-bold
                   rounded-2xl
                   shadow-soft

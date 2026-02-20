@@ -69,13 +69,13 @@ export default function ReportShareSheet({ report, onClose }) {
             className="w-full flex items-center gap-3 p-4 rounded-2xl border border-warm-100 dark:border-warm-700 hover:bg-warm-50 dark:hover:bg-warm-700 transition-colors"
           >
             {exportProgress === 'exporting' ? (
-              <Loader2 size={20} className="animate-spin text-primary-500" />
+              <Loader2 size={20} className="animate-spin text-honey-500" />
             ) : exportProgress === 'complete' ? (
               <CheckCircle size={20} className="text-green-500" />
             ) : exportProgress === 'error' ? (
               <AlertCircle size={20} className="text-red-500" />
             ) : (
-              <Download size={20} className="text-primary-600" />
+              <Download size={20} className="text-honey-600" />
             )}
             <div className="text-left flex-1">
               <p className="text-sm font-medium text-warm-800 dark:text-warm-100">
@@ -89,7 +89,7 @@ export default function ReportShareSheet({ report, onClose }) {
                   href={downloadUrl}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="text-xs text-primary-600 underline"
+                  className="text-xs text-honey-600 underline"
                   onClick={(e) => e.stopPropagation()}
                 >
                   Download

@@ -22,9 +22,9 @@ const CrisisResourcesScreen = ({ level, onClose, onContinue }) => {
             initial={{ scale: 0 }}
             animate={{ scale: 1 }}
             transition={{ type: "spring", delay: 0.1 }}
-            className={`h-16 w-16 mx-auto rounded-full flex items-center justify-center mb-4 ${isCrisis ? 'bg-red-100' : 'bg-primary-100'}`}
+            className={`h-16 w-16 mx-auto rounded-full flex items-center justify-center mb-4 ${isCrisis ? 'bg-red-100' : 'bg-honey-100'}`}
           >
-            <Phone className={isCrisis ? 'text-red-600' : 'text-primary-600'} size={32} />
+            <Phone className={isCrisis ? 'text-red-600' : 'text-honey-600'} size={32} />
           </motion.div>
           <h2 className="text-xl font-display font-bold text-warm-900">
             {isCrisis ? "Help is available right now" : "Support resources"}
@@ -91,7 +91,7 @@ const CrisisResourcesScreen = ({ level, onClose, onContinue }) => {
             onClick={onContinue}
             whileHover={{ scale: 1.01 }}
             whileTap={{ scale: 0.99 }}
-            className="w-full py-3 bg-primary-600 text-white rounded-2xl font-display font-semibold hover:bg-primary-700 transition-colors mb-3"
+            className="w-full py-3 bg-honey-600 text-white rounded-2xl font-display font-semibold hover:bg-honey-700 transition-colors mb-3"
           >
             Continue with my entry
           </motion.button>

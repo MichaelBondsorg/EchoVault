@@ -37,9 +37,9 @@ const BottomNavbar = ({ onVoiceEntry, onTextEntry, onQuickMood }) => {
   ];
 
   const fabActions = [
-    { icon: Mic, label: 'Voice', color: 'bg-primary-500', action: onVoiceEntry },
-    { icon: Type, label: 'Text', color: 'bg-secondary-500', action: onTextEntry },
-    { icon: Sparkles, label: 'Quick Mood', color: 'bg-accent', action: onQuickMood },
+    { icon: Mic, label: 'Voice', color: 'bg-terra-500', action: onVoiceEntry },
+    { icon: Type, label: 'Text', color: 'bg-sage-500', action: onTextEntry },
+    { icon: Sparkles, label: 'Quick Mood', color: 'bg-honey-500', action: onQuickMood },
   ];
 
   const handleFabClick = async () => {
@@ -130,7 +130,7 @@ const BottomNavbar = ({ onVoiceEntry, onTextEntry, onQuickMood }) => {
       <motion.nav
         className="
           fixed bottom-0 left-0 right-0 z-50
-          bg-white/20 backdrop-blur-lg
+          bg-hearth-50/40 backdrop-blur-lg
           px-2 py-2
           pb-[calc(env(safe-area-inset-bottom)+8px)]
           flex items-center justify-around
@@ -149,7 +149,7 @@ const BottomNavbar = ({ onVoiceEntry, onTextEntry, onQuickMood }) => {
                 className={`
                   w-14 h-14 -mt-6
                   rounded-full
-                  ${fabExpanded ? 'bg-warm-600' : 'bg-gradient-to-br from-primary-500 to-primary-600'}
+                  ${fabExpanded ? 'bg-hearth-600' : 'bg-gradient-to-br from-honey-400 to-honey-600'}
                   text-white
                   shadow-glass-lg
                   flex items-center justify-center
@@ -173,7 +173,7 @@ const BottomNavbar = ({ onVoiceEntry, onTextEntry, onQuickMood }) => {
               className={`
                 flex flex-col items-center gap-1 p-2
                 transition-colors duration-200
-                ${isActive ? 'text-primary-600' : 'text-warm-500'}
+                ${isActive ? 'text-honey-600' : 'text-hearth-500'}
               `}
               whileHover={{ scale: 1.05 }}
               whileTap={{ scale: 0.95 }}

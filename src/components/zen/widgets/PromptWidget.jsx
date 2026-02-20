@@ -179,37 +179,37 @@ const PromptWidget = ({
         return {
           icon: Moon,
           label: isHighPriority ? 'Check In' : 'Context',
-          colorClass: 'text-indigo-600',
-          bgClass: isHighPriority ? 'bg-gradient-to-br from-indigo-50/70 to-purple-50/70' : undefined
+          colorClass: 'text-lavender-600',
+          bgClass: isHighPriority ? 'bg-gradient-to-br from-lavender-50/70 to-lavender-100/70' : undefined
         };
       }
       if (type.includes('sun') || type.includes('light') || type.includes('environment')) {
         return {
           icon: Sun,
           label: isHighPriority ? 'Today' : 'Context',
-          colorClass: 'text-amber-600',
-          bgClass: isHighPriority ? 'bg-gradient-to-br from-amber-50/70 to-orange-50/70' : undefined
+          colorClass: 'text-honey-600',
+          bgClass: isHighPriority ? 'bg-gradient-to-br from-honey-50/70 to-terra-50/70' : undefined
         };
       }
       if (type.includes('energy') || type.includes('strain')) {
         return {
           icon: Zap,
           label: 'Energy',
-          colorClass: 'text-green-600',
-          bgClass: isHighPriority ? 'bg-gradient-to-br from-green-50/70 to-emerald-50/70' : undefined
+          colorClass: 'text-sage-600',
+          bgClass: isHighPriority ? 'bg-gradient-to-br from-sage-50/70 to-sage-100/70' : undefined
         };
       }
       return {
         icon: AlertCircle,
         label: isHighPriority ? 'Check In' : 'Context',
-        colorClass: 'text-blue-600',
-        bgClass: isHighPriority ? 'bg-gradient-to-br from-blue-50/70 to-cyan-50/70' : undefined
+        colorClass: 'text-honey-600',
+        bgClass: isHighPriority ? 'bg-gradient-to-br from-honey-50/70 to-hearth-100/70' : undefined
       };
     }
     if (isPersonalized) {
-      return { icon: Sparkles, label: 'Reflect', colorClass: 'text-secondary-600' };
+      return { icon: Sparkles, label: 'Reflect', colorClass: 'text-lavender-600' };
     }
-    return { icon: MessageCircle, label: 'Prompt', colorClass: 'text-secondary-600' };
+    return { icon: MessageCircle, label: 'Prompt', colorClass: 'text-honey-600' };
   };
 
   const promptDisplay = getPromptDisplay();
@@ -220,7 +220,7 @@ const PromptWidget = ({
       size={size}
       isEditing={isEditing}
       onDelete={onDelete}
-      className={promptDisplay.bgClass || "bg-gradient-to-br from-secondary-50/50 to-primary-50/50"}
+      className={promptDisplay.bgClass || "bg-gradient-to-br from-honey-50/50 to-hearth-50/50"}
     >
       <div className="h-full flex flex-col">
         {/* Header */}
@@ -309,7 +309,7 @@ const PromptWidget = ({
             <motion.button
               onClick={() => onWritePrompt?.(currentQuestion?.question)}
               disabled={isEditing}
-              className="py-1.5 px-3 bg-white/50 hover:bg-white/70 text-warm-600 text-xs font-medium rounded-xl flex items-center gap-1 disabled:opacity-50"
+              className="py-1.5 px-3 bg-white/50 hover:bg-white/70 text-hearth-600 text-xs font-medium rounded-xl flex items-center gap-1 disabled:opacity-50"
               whileHover={{ scale: 1.02 }}
               whileTap={{ scale: 0.98 }}
             >
@@ -319,7 +319,7 @@ const PromptWidget = ({
             <motion.button
               onClick={() => onVoicePrompt?.(currentQuestion?.question)}
               disabled={isEditing}
-              className="py-1.5 px-3 bg-primary-600 hover:bg-primary-700 text-white text-xs font-medium rounded-xl flex items-center gap-1 shadow-sm disabled:opacity-50"
+              className="py-1.5 px-3 bg-terra-500 hover:bg-terra-600 text-white text-xs font-medium rounded-xl flex items-center gap-1 shadow-sm disabled:opacity-50"
               whileHover={{ scale: 1.02 }}
               whileTap={{ scale: 0.98 }}
             >

@@ -98,15 +98,15 @@ const InsightsPanel = ({ entries, userId, category, onClose }) => {
       case 'avoidance_contradiction': return <Clock size={16} className="text-indigo-500" />;
       // Other
       case 'recovery_pattern': return <Heart size={16} className="text-pink-500" />;
-      case 'monthly_summary': return <Calendar size={16} className="text-primary-500" />;
-      default: return <Sparkles size={16} className="text-secondary-500" />;
+      case 'monthly_summary': return <Calendar size={16} className="text-lavender-500" />;
+      default: return <Sparkles size={16} className="text-lavender-500" />;
     }
   };
 
   const getPatternColor = (type) => {
     switch (type) {
       // Temporal
-      case 'weekly_low': return 'bg-accent-light border-accent';
+      case 'weekly_low': return 'bg-lavender-50 border-lavender-400';
       case 'weekly_high': return 'bg-green-50 border-green-200';
       case 'best_day': return 'bg-amber-50 border-amber-200';
       case 'worst_day': return 'bg-blue-50 border-blue-200';
@@ -128,8 +128,8 @@ const InsightsPanel = ({ entries, userId, category, onClose }) => {
       case 'avoidance_contradiction': return 'bg-indigo-50 border-indigo-200';
       // Other
       case 'recovery_pattern': return 'bg-pink-50 border-pink-200';
-      case 'monthly_summary': return 'bg-primary-50 border-primary-200';
-      default: return 'bg-secondary-50 border-secondary-200';
+      case 'monthly_summary': return 'bg-lavender-50 border-lavender-200';
+      default: return 'bg-lavender-50 border-lavender-200';
     }
   };
 
@@ -294,7 +294,7 @@ const InsightsPanel = ({ entries, userId, category, onClose }) => {
         transition={{ type: "spring", duration: 0.3 }}
         className="bg-white rounded-3xl max-w-lg w-full max-h-[90vh] overflow-hidden flex flex-col shadow-soft-lg"
       >
-        <div className="p-6 border-b border-primary-100 bg-gradient-to-r from-primary-500 to-primary-600 text-white">
+        <div className="p-6 border-b border-honey-100 bg-gradient-to-r from-honey-500 to-honey-600 text-white">
           <div className="flex justify-between items-center">
             <div>
               <h2 className="text-xl font-display font-bold flex items-center gap-2"><BarChart3 size={20} /> Your Patterns</h2>
@@ -330,7 +330,7 @@ const InsightsPanel = ({ entries, userId, category, onClose }) => {
               {/* Summary insights (top-level) */}
               {hasSummary && (
                 <>
-                  <SectionHeader icon={Sparkles} title="Key Insights" color="text-secondary-600" />
+                  <SectionHeader icon={Sparkles} title="Key Insights" color="text-lavender-600" />
                   <AnimatePresence mode="popLayout">
                     <div className="space-y-2">
                       {cachedPatterns.summary.map((insight, i) => (

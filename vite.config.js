@@ -36,7 +36,8 @@ export default defineConfig(({ mode }) => {
           'capacitor-google-fit',
           '@nickmjones/capacitor-healthkit',
           '@capgo/capacitor-social-login',
-          '@capacitor-firebase/crashlytics'
+          '@capacitor-firebase/crashlytics',
+          '@capacitor/push-notifications'
         ],
         output: {
           // Manual chunk splitting for better caching
@@ -73,7 +74,8 @@ export default defineConfig(({ mode }) => {
         'capacitor-google-fit',
         '@nickmjones/capacitor-healthkit',
         '@capgo/capacitor-social-login',
-        '@capacitor-firebase/crashlytics'
+        '@capacitor-firebase/crashlytics',
+        '@capacitor/push-notifications'
       ]
     },
 

@@ -77,7 +77,7 @@ export const FABTooltip = ({ onDismiss }) => {
 
           {/* Pulse ring around FAB position */}
           <motion.div
-            className="absolute -bottom-16 left-1/2 -translate-x-1/2 w-16 h-16 rounded-full border-2 border-primary-400"
+            className="absolute -bottom-16 left-1/2 -translate-x-1/2 w-16 h-16 rounded-full border-2 border-honey-400"
             animate={{
               scale: [1, 1.3, 1.3],
               opacity: [0.8, 0, 0.8],
@@ -148,7 +148,7 @@ export const CustomizeTooltip = ({ widgetCount = 2, onDismiss }) => {
           animate={{ opacity: 1, y: 0 }}
           exit={{ opacity: 0, y: 20 }}
         >
-          <div className="bg-white/90 backdrop-blur-sm border border-primary-200 px-4 py-3 rounded-2xl shadow-lg max-w-sm relative">
+          <div className="bg-white/90 backdrop-blur-sm border border-honey-200 px-4 py-3 rounded-2xl shadow-lg max-w-sm relative">
             <button
               onClick={handleDismiss}
               className="absolute -top-2 -right-2 w-6 h-6 bg-warm-200 rounded-full flex items-center justify-center hover:bg-warm-300 text-warm-600"

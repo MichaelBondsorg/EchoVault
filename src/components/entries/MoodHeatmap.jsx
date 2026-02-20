@@ -130,7 +130,7 @@ const MoodHeatmap = ({ entries, onDayClick, userId }) => {
       className="bg-white p-4 rounded-2xl border border-warm-100 shadow-soft mb-6 relative"
     >
       <div className="flex items-center gap-2 mb-3 text-warm-700 font-display font-semibold text-xs uppercase tracking-wide">
-        <Activity size={14} className="text-primary-500" /> Mood (30 Days)
+        <Activity size={14} className="text-honey-500" /> Mood (30 Days)
       </div>
       <div className="flex justify-between items-end gap-1">
         {days.map((d, i) => {
@@ -161,7 +161,7 @@ const MoodHeatmap = ({ entries, onDayClick, userId }) => {
               )}
               {/* Signal indicator (only for days with signals but no entries) */}
               {hasSignals && !hasEntries && (
-                <div className="absolute -top-1 left-1/2 -translate-x-1/2 w-1.5 h-1.5 rounded-full bg-primary-400 border border-white" />
+                <div className="absolute -top-1 left-1/2 -translate-x-1/2 w-1.5 h-1.5 rounded-full bg-honey-400 border border-white" />
               )}
             </motion.button>
           );
@@ -203,13 +203,13 @@ const MoodHeatmap = ({ entries, onDayClick, userId }) => {
 
               {/* Score source indicator */}
               {hoveredDay.data.scoreSource === 'blended' && (
-                <div className="flex items-center gap-1 text-primary-300 text-[10px] mb-1">
+                <div className="flex items-center gap-1 text-honey-300 text-[10px] mb-1">
                   <Sparkles size={10} />
                   <span>Entry + Signal blend</span>
                 </div>
               )}
               {hoveredDay.data.scoreSource === 'signals_only' && (
-                <div className="flex items-center gap-1 text-primary-300 text-[10px] mb-1">
+                <div className="flex items-center gap-1 text-honey-300 text-[10px] mb-1">
                   <Sparkles size={10} />
                   <span>From signals</span>
                 </div>
@@ -235,7 +235,7 @@ const MoodHeatmap = ({ entries, onDayClick, userId }) => {
               {hoveredDay.data.hasEntries && (
                 <div className="flex items-center gap-2 mt-1.5 pt-1.5 border-t border-warm-700">
                   {hoveredDay.data.typeCounts.reflection > 0 && (
-                    <div className="flex items-center gap-1 text-primary-300">
+                    <div className="flex items-center gap-1 text-honey-300">
                       <BookOpen size={10} />
                       <span>{hoveredDay.data.typeCounts.reflection}</span>
                     </div>

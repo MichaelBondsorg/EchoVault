@@ -32,17 +32,17 @@ const GlassCard = ({
 
   const baseClasses = `
     relative
-    bg-white/30
+    bg-white/60
     backdrop-blur-xl
-    border border-white/20
-    shadow-glass-md
+    border border-hearth-200/40
+    shadow-soft
     rounded-3xl
     overflow-hidden
     transition-all duration-300
   `;
 
   const interactiveClasses = interactive
-    ? 'hover:bg-white/40 hover:shadow-glass-lg hover:scale-[1.02] active:scale-[0.98] cursor-pointer'
+    ? 'hover:bg-white/75 hover:shadow-soft-md hover:scale-[1.02] active:scale-[0.98] cursor-pointer'
     : '';
 
   const editingClasses = isEditing ? 'animate-shake' : '';

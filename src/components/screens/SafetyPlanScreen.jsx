@@ -36,14 +36,14 @@ const SafetyPlanScreen = ({ plan, onUpdate, onClose }) => {
     >
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2">
-          <Icon size={18} className="text-primary-600" />
+          <Icon size={18} className="text-honey-600" />
           <h3 className="font-display font-semibold text-warm-800">{title}</h3>
         </div>
         <motion.button
           onClick={() => setEditingSection(editingSection === section ? null : section)}
           whileHover={{ scale: 1.1 }}
           whileTap={{ scale: 0.9 }}
-          className="text-primary-600 hover:text-primary-700"
+          className="text-honey-600 hover:text-honey-700"
         >
           <Plus size={18} />
         </motion.button>
@@ -82,14 +82,14 @@ const SafetyPlanScreen = ({ plan, onUpdate, onClose }) => {
               value={newItem}
               onChange={(e) => setNewItem(e.target.value)}
               placeholder="Add new item..."
-              className="flex-1 px-3 py-2 border border-warm-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 font-body"
+              className="flex-1 px-3 py-2 border border-warm-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-honey-500 font-body"
               autoFocus
             />
             <motion.button
               onClick={() => addItem(section)}
               whileHover={{ scale: 1.02 }}
               whileTap={{ scale: 0.98 }}
-              className="px-3 py-2 bg-primary-600 text-white rounded-xl text-sm font-display font-medium"
+              className="px-3 py-2 bg-honey-600 text-white rounded-xl text-sm font-display font-medium"
             >
               Add
             </motion.button>
@@ -107,7 +107,7 @@ const SafetyPlanScreen = ({ plan, onUpdate, onClose }) => {
     >
       <div className="sticky top-0 bg-white border-b border-warm-100 p-4 flex items-center justify-between z-10 shadow-soft">
         <div className="flex items-center gap-3">
-          <Shield className="text-primary-600" size={24} />
+          <Shield className="text-honey-600" size={24} />
           <h1 className="text-lg font-display font-bold text-warm-900">My Safety Plan</h1>
         </div>
         <motion.button
@@ -124,9 +124,9 @@ const SafetyPlanScreen = ({ plan, onUpdate, onClose }) => {
         <motion.div
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
-          className="bg-primary-50 rounded-2xl p-4 border border-primary-100"
+          className="bg-honey-50 rounded-2xl p-4 border border-honey-100"
         >
-          <p className="text-sm text-primary-800 font-body">
+          <p className="text-sm text-honey-800 font-body">
             Your safety plan is here for difficult moments. Customize it during calm times so it's ready when you need it.
           </p>
         </motion.div>

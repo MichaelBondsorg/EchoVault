@@ -244,7 +244,7 @@ const EntityManagementPage = ({ userId, onBack }) => {
 
   return (
     <motion.div
-      className="min-h-screen bg-gradient-to-b from-primary-50 to-accent-50"
+      className="min-h-screen bg-gradient-to-b from-honey-50 to-lavender-50"
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
@@ -272,7 +272,7 @@ const EntityManagementPage = ({ userId, onBack }) => {
               onClick={() => setViewMode('list')}
               className={`p-1.5 rounded-lg transition-colors ${
                 viewMode === 'list'
-                  ? 'bg-white text-primary-600 shadow-sm'
+                  ? 'bg-white text-honey-600 shadow-sm'
                   : 'text-warm-500 hover:text-warm-700'
               }`}
               title="List view"
@@ -283,7 +283,7 @@ const EntityManagementPage = ({ userId, onBack }) => {
               onClick={() => setViewMode('graph')}
               className={`p-1.5 rounded-lg transition-colors ${
                 viewMode === 'graph'
-                  ? 'bg-white text-primary-600 shadow-sm'
+                  ? 'bg-white text-honey-600 shadow-sm'
                   : 'text-warm-500 hover:text-warm-700'
               }`}
               title="Graph view"
@@ -302,9 +302,9 @@ const EntityManagementPage = ({ userId, onBack }) => {
           )}
           <button
             onClick={() => setShowCreateModal(true)}
-            className="p-2 rounded-xl bg-primary-100 hover:bg-primary-200 transition-colors"
+            className="p-2 rounded-xl bg-honey-100 hover:bg-honey-200 transition-colors"
           >
-            <Plus size={20} className="text-primary-600" />
+            <Plus size={20} className="text-honey-600" />
           </button>
         </div>
 
@@ -319,7 +319,7 @@ const EntityManagementPage = ({ userId, onBack }) => {
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 className="w-full pl-10 pr-4 py-2.5 bg-white/50 border border-white/30 rounded-xl
-                  text-warm-700 placeholder-warm-400 focus:outline-none focus:ring-2 focus:ring-primary-300"
+                  text-warm-700 placeholder-warm-400 focus:outline-none focus:ring-2 focus:ring-honey-300"
               />
             </div>
           </div>
@@ -333,7 +333,7 @@ const EntityManagementPage = ({ userId, onBack }) => {
                 type="checkbox"
                 checked={showArchived}
                 onChange={(e) => setShowArchived(e.target.checked)}
-                className="rounded border-warm-300 text-primary-600 focus:ring-primary-500"
+                className="rounded border-warm-300 text-honey-600 focus:ring-honey-500"
               />
               Show archived
             </label>
@@ -350,10 +350,10 @@ const EntityManagementPage = ({ userId, onBack }) => {
             exit={{ opacity: 0, height: 0 }}
             className="mx-4 mb-4"
           >
-            <div className="bg-gradient-to-r from-primary-50 to-accent-50 rounded-2xl border border-primary-200 p-4">
+            <div className="bg-gradient-to-r from-honey-50 to-lavender-50 rounded-2xl border border-honey-200 p-4">
               <div className="flex items-start gap-3">
-                <div className="w-8 h-8 rounded-full bg-primary-100 flex items-center justify-center flex-shrink-0">
-                  <Sparkles size={16} className="text-primary-600" />
+                <div className="w-8 h-8 rounded-full bg-honey-100 flex items-center justify-center flex-shrink-0">
+                  <Sparkles size={16} className="text-honey-600" />
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center justify-between gap-2 mb-2">
@@ -367,15 +367,15 @@ const EntityManagementPage = ({ userId, onBack }) => {
                   </div>
                   <div className="space-y-2 text-sm text-warm-600">
                     <div className="flex items-start gap-2">
-                      <Edit3 size={14} className="text-primary-500 mt-0.5 flex-shrink-0" />
+                      <Edit3 size={14} className="text-honey-500 mt-0.5 flex-shrink-0" />
                       <span><strong>Edit entities</strong> to fix names, change types (person/pet/place), and add notes</span>
                     </div>
                     <div className="flex items-start gap-2">
-                      <Link2 size={14} className="text-primary-500 mt-0.5 flex-shrink-0" />
+                      <Link2 size={14} className="text-honey-500 mt-0.5 flex-shrink-0" />
                       <span><strong>Connect entities</strong> to show relationships (e.g., Luna is Spencer's pet)</span>
                     </div>
                     <div className="flex items-start gap-2">
-                      <GitBranch size={14} className="text-primary-500 mt-0.5 flex-shrink-0" />
+                      <GitBranch size={14} className="text-honey-500 mt-0.5 flex-shrink-0" />
                       <span><strong>Graph view</strong> visualizes how your people, pets, and places are connected</span>
                     </div>
                   </div>
@@ -390,7 +390,7 @@ const EntityManagementPage = ({ userId, onBack }) => {
       <div className="px-4 py-4 space-y-4">
         {loading ? (
           <div className="flex items-center justify-center py-12">
-            <div className="w-8 h-8 border-4 border-primary-200 border-t-primary-600 rounded-full animate-spin" />
+            <div className="w-8 h-8 border-4 border-honey-200 border-t-honey-600 rounded-full animate-spin" />
           </div>
         ) : viewMode === 'graph' ? (
           /* Graph View */
@@ -465,7 +465,7 @@ const EntityManagementPage = ({ userId, onBack }) => {
                                     {entity.name}
                                   </span>
                                   {entity.userCorrected && (
-                                    <span className="px-1.5 py-0.5 bg-primary-100 text-primary-600 text-[10px] font-bold rounded">
+                                    <span className="px-1.5 py-0.5 bg-honey-100 text-honey-600 text-[10px] font-bold rounded">
                                       Edited
                                     </span>
                                   )}
@@ -543,7 +543,7 @@ const EntityManagementPage = ({ userId, onBack }) => {
               <button
                 onClick={handleMigrateEntities}
                 disabled={migrationStatus === 'loading'}
-                className="px-4 py-2 bg-primary-600 text-white rounded-xl hover:bg-primary-700
+                className="px-4 py-2 bg-honey-600 text-white rounded-xl hover:bg-honey-700
                   transition-colors flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {migrationStatus === 'loading' ? (

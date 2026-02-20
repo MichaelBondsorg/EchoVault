@@ -349,7 +349,7 @@ export const BreathingExerciseSelector = ({ onSelect, selected }) => (
           }
         `}
       >
-        <Wind className={`text-${exercise.color}-400`} size={24} />
+        <Wind className={exercise.color === 'blue' ? 'text-blue-400' : exercise.color === 'purple' ? 'text-purple-400' : 'text-teal-400'} size={24} />
         <div>
           <div className="text-white font-medium">{exercise.name}</div>
           <div className="text-white/60 text-sm">{exercise.description}</div>

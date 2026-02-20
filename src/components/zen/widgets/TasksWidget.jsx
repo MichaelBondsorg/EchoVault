@@ -74,13 +74,13 @@ const TasksWidget = ({
                     disabled={isEditing}
                     className="
                       mt-0.5 w-4 h-4 rounded
-                      border border-warm-300
+                      border border-hearth-300
                       flex items-center justify-center
-                      hover:border-primary-400 hover:bg-primary-50
+                      hover:border-honey-400 hover:bg-honey-50
                       transition-colors
                     "
                   >
-                    {task.completed && <Check size={10} className="text-primary-600" />}
+                    {task.completed && <Check size={10} className="text-sage-600" />}
                   </button>
                   <span className="text-xs text-warm-600 line-clamp-2 flex-1">
                     {task.text}

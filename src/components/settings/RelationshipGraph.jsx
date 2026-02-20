@@ -243,14 +243,14 @@ const RelationshipGraph = ({
                     px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all
                     flex items-center gap-1
                     ${isActive
-                      ? 'bg-primary-100 text-primary-700'
+                      ? 'bg-honey-100 text-honey-700'
                       : 'text-warm-600 hover:bg-warm-100'
                     }
                   `}
                 >
                   {Icon && <Icon size={12} />}
                   {label}
-                  <span className={`ml-0.5 ${isActive ? 'text-primary-500' : 'text-warm-400'}`}>
+                  <span className={`ml-0.5 ${isActive ? 'text-honey-500' : 'text-warm-400'}`}>
                     ({count})
                   </span>
                 </button>

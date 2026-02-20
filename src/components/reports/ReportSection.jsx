@@ -24,7 +24,7 @@ export default function ReportSection({ section }) {
           {section.entryRefs.map((ref, i) => (
             <span
               key={ref || i}
-              className="text-xs text-primary-600 bg-primary-50 px-2 py-1 rounded-full cursor-pointer hover:bg-primary-100 transition-colors"
+              className="text-xs text-honey-600 bg-honey-50 px-2 py-1 rounded-full cursor-pointer hover:bg-honey-100 transition-colors"
             >
               Entry #{i + 1}
             </span>

@@ -30,6 +30,15 @@ import {
 } from 'lucide-react';
 import { LEADERSHIP_VALUES, detectLeadershipDistortions } from '../../services/leadership';
 
+const STEP_COLORS = {
+  blue: { border: 'border-blue-100', gradient: 'bg-gradient-to-r from-blue-500 to-blue-600' },
+  rose: { border: 'border-rose-100', gradient: 'bg-gradient-to-r from-rose-500 to-rose-600' },
+  purple: { border: 'border-purple-100', gradient: 'bg-gradient-to-r from-purple-500 to-purple-600' },
+  amber: { border: 'border-amber-100', gradient: 'bg-gradient-to-r from-amber-500 to-amber-600' },
+  green: { border: 'border-green-100', gradient: 'bg-gradient-to-r from-green-500 to-green-600' },
+  teal: { border: 'border-teal-100', gradient: 'bg-gradient-to-r from-teal-500 to-teal-600' },
+};
+
 const STEPS = [
   { id: 'summary', title: 'What Happened', icon: FileText, color: 'blue' },
   { id: 'feelings', title: 'How I Felt', icon: Heart, color: 'rose' },
@@ -335,7 +344,7 @@ const PostMortem = ({
         className="bg-white rounded-3xl max-w-lg w-full max-h-[90vh] overflow-hidden flex flex-col shadow-soft-lg"
       >
         {/* Header */}
-        <div className={`p-6 border-b border-${step.color}-100 bg-gradient-to-r from-${step.color}-500 to-${step.color}-600 text-white`}>
+        <div className={`p-6 border-b ${STEP_COLORS[step.color].border} ${STEP_COLORS[step.color].gradient} text-white`}>
           <div className="flex justify-between items-center">
             <div className="flex items-center gap-3">
               <step.icon size={24} />
@@ -398,7 +407,7 @@ const PostMortem = ({
             className={`flex items-center gap-2 px-6 py-2 rounded-xl font-medium text-white transition-all ${
               isLastStep
                 ? 'bg-teal-500 hover:bg-teal-600'
-                : 'bg-primary-500 hover:bg-primary-600'
+                : 'bg-honey-500 hover:bg-honey-600'
             }`}
           >
             {isLastStep ? (

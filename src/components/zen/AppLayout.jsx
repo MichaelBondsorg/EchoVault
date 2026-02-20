@@ -419,12 +419,12 @@ const AppLayout = ({
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: 50 }}
             >
-              <div className="bg-white/95 backdrop-blur-xl rounded-3xl shadow-glass-lg overflow-hidden">
+              <div className="bg-hearth-50/95 backdrop-blur-xl rounded-3xl shadow-soft-lg overflow-hidden">
                 {/* Reflection Prompts - shown when in fresh entry mode */}
                 {isFreshEntry && reflectionQuestions.length > 0 && (
                   <div className="px-4 pt-4 pb-2 border-b border-warm-100">
                     <div className="flex items-center justify-between mb-2">
-                      <div className="flex items-center gap-1.5 text-secondary-600">
+                      <div className="flex items-center gap-1.5 text-lavender-600">
                         <MessageCircle size={14} />
                         <span className="text-xs font-semibold uppercase tracking-wide">Reflect</span>
                       </div>

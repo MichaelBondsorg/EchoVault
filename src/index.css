@@ -6,8 +6,8 @@
    Engram — Hearthside Design System
    "Like sitting by a fireplace — warm, safe, enveloping"
 
-   NOTE: Dark mode is handled via Tailwind's dark: prefix
-   in JSX components, NOT via .dark selectors in CSS.
+   Dark mode uses html.dark ancestor selectors for raw CSS
+   and Tailwind dark: prefix in JSX components.
    ============================================ */
 
 @layer base {
@@ -53,6 +53,43 @@
     background: #6E4512;
     color: #FFF8EB;
   }
+
+  /* Warm scrollbar styling (webkit) */
+  ::-webkit-scrollbar { width: 8px; height: 8px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb {
+    background: rgba(180, 164, 142, 0.4);
+    border-radius: 4px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: rgba(180, 164, 142, 0.6);
+  }
+  html.dark ::-webkit-scrollbar-thumb {
+    background: rgba(74, 61, 50, 0.5);
+  }
+  html.dark ::-webkit-scrollbar-thumb:hover {
+    background: rgba(74, 61, 50, 0.7);
+  }
+
+  /* Firefox scrollbar */
+  * { scrollbar-color: rgba(180, 164, 142, 0.4) transparent; scrollbar-width: thin; }
+  html.dark * { scrollbar-color: rgba(74, 61, 50, 0.5) transparent; }
+
+  /* Chrome autofill override */
+  input:-webkit-autofill,
+  input:-webkit-autofill:hover,
+  input:-webkit-autofill:focus {
+    -webkit-box-shadow: 0 0 0 1000px #FAF5EF inset;
+    -webkit-text-fill-color: #3D3229;
+    transition: background-color 5000s ease-in-out 0s;
+  }
+  html.dark input:-webkit-autofill,
+  html.dark input:-webkit-autofill:hover,
+  html.dark input:-webkit-autofill:focus {
+    -webkit-box-shadow: 0 0 0 1000px #231D1B inset;
+    -webkit-text-fill-color: #F5EDE3;
+    transition: background-color 5000s ease-in-out 0s;
+  }
 }
 
 @layer components {
@@ -76,6 +113,13 @@
   .btn-primary:hover {
     box-shadow: 0 0 20px rgba(232, 168, 76, 0.3);
   }
+  html.dark .btn-primary {
+    background: linear-gradient(135deg, #E8A84C, #D4922E);
+    color: #1C1916;
+  }
+  html.dark .btn-primary:hover {
+    box-shadow: 0 0 20px rgba(232, 168, 76, 0.4);
+  }
 
   .btn-secondary {
     @apply btn px-6 py-3 backdrop-blur-sm active:scale-[0.98];
@@ -87,6 +131,15 @@
     background: rgba(232, 221, 208, 0.85);
     border-color: rgba(212, 196, 176, 0.7);
   }
+  html.dark .btn-secondary {
+    background: rgba(74, 61, 50, 0.3);
+    color: #F5EDE3;
+    border: 1px solid rgba(74, 61, 50, 0.4);
+  }
+  html.dark .btn-secondary:hover {
+    background: rgba(74, 61, 50, 0.5);
+    border-color: rgba(74, 61, 50, 0.6);
+  }
 
   .btn-ghost {
     @apply btn px-4 py-2 rounded-xl;
@@ -96,11 +149,33 @@
     color: #2A2420;
     background: rgba(232, 221, 208, 0.5);
   }
+  html.dark .btn-ghost {
+    color: #B8A48E;
+  }
+  html.dark .btn-ghost:hover {
+    color: #F5EDE3;
+    background: rgba(74, 61, 50, 0.3);
+  }
 
   .btn-danger {
     @apply btn px-6 py-3 shadow-soft text-white
            hover:scale-[1.02] active:scale-[0.98];
     background: linear-gradient(135deg, #C4725A, #9E5040);
+  }
+
+  .btn-success {
+    @apply btn px-6 py-3 shadow-soft text-white
+           hover:scale-[1.02] active:scale-[0.98];
+    background: linear-gradient(135deg, #7A9E7E, #5A7E5E);
+  }
+  .btn-success:hover {
+    box-shadow: 0 0 20px rgba(122, 158, 126, 0.3);
+  }
+  html.dark .btn-success {
+    background: linear-gradient(135deg, rgba(122, 158, 126, 0.9), rgba(90, 126, 94, 0.9));
+  }
+  html.dark .btn-success:hover {
+    box-shadow: 0 0 20px rgba(122, 158, 126, 0.4);
   }
 
   /* ============================================
@@ -113,6 +188,10 @@
     background: rgba(255, 255, 255, 0.95);
     border: 1px solid rgba(232, 221, 208, 0.6);
   }
+  html.dark .card {
+    background: rgba(35, 29, 27, 0.95);
+    border: 1px solid rgba(74, 61, 50, 0.4);
+  }
 
   .card-interactive {
     @apply card cursor-pointer active:scale-[0.99];
@@ -121,17 +200,61 @@
     @apply shadow-soft-lg;
     transform: translateY(-2px);
   }
+  html.dark .card-interactive {
+    background: rgba(35, 29, 27, 0.95);
+    border: 1px solid rgba(74, 61, 50, 0.4);
+  }
+  html.dark .card-interactive:hover {
+    border-color: rgba(74, 61, 50, 0.6);
+  }
 
   .card-glass {
     @apply backdrop-blur-md rounded-3xl p-6 shadow-soft;
     background: rgba(250, 245, 239, 0.3);
     border: 1px solid rgba(232, 221, 208, 0.3);
   }
+  html.dark .card-glass {
+    background: rgba(28, 25, 22, 0.3);
+    border: 1px solid rgba(74, 61, 50, 0.2);
+  }
 
   /* Warm accent card — for prompts, nudges */
   .card-warm {
     @apply card relative overflow-hidden;
     background: linear-gradient(135deg, rgba(255, 248, 235, 0.8), rgba(253, 242, 239, 0.4));
+  }
+  html.dark .card-warm {
+    background: linear-gradient(135deg, rgba(74, 69, 18, 0.15), rgba(94, 45, 36, 0.1));
+    border: 1px solid rgba(74, 61, 50, 0.3);
+  }
+
+  /* Elevated card — hover lift effect */
+  .card-elevated {
+    @apply card cursor-pointer;
+    transition: all 0.3s ease;
+  }
+  .card-elevated:hover {
+    @apply shadow-soft-lg;
+    transform: translateY(-2px);
+  }
+  html.dark .card-elevated {
+    background: rgba(35, 29, 27, 0.95);
+    border: 1px solid rgba(74, 61, 50, 0.4);
+  }
+  html.dark .card-elevated:hover {
+    border-color: rgba(74, 61, 50, 0.6);
+  }
+
+  /* Featured card — gradient accent background */
+  .card-featured {
+    @apply backdrop-blur-sm rounded-3xl p-6 shadow-soft
+           transition-all duration-300;
+    background: linear-gradient(135deg, rgba(252, 196, 79, 0.2), rgba(196, 114, 90, 0.15));
+    border: 1px solid rgba(232, 221, 208, 0.6);
+  }
+  html.dark .card-featured {
+    background: linear-gradient(135deg, rgba(110, 69, 18, 0.25), rgba(94, 45, 36, 0.2));
+    border: 1px solid rgba(74, 61, 50, 0.4);
   }
 
   /* ============================================
@@ -146,6 +269,10 @@
   .modal-content {
     @apply rounded-3xl shadow-soft-xl max-w-md w-full mx-4 animate-scale-in;
     background: #FAF5EF;
+  }
+  html.dark .modal-content {
+    background: #231D1B;
+    border: 1px solid rgba(74, 61, 50, 0.3);
   }
 
   /* ============================================
@@ -164,6 +291,17 @@
     border-color: rgba(232, 168, 76, 0.6);
     background: white;
     box-shadow: 0 2px 15px -3px rgba(42, 36, 32, 0.08);
+  }
+  html.dark .input {
+    background: rgba(28, 25, 22, 0.6);
+    border: 2px solid rgba(74, 61, 50, 0.5);
+    color: #F5EDE3;
+  }
+  html.dark .input::placeholder { color: #8E7A66; }
+  html.dark .input:focus {
+    border-color: rgba(232, 168, 76, 0.5);
+    background: rgba(42, 36, 32, 0.8);
+    box-shadow: 0 2px 15px -3px rgba(0, 0, 0, 0.2);
   }
 
   .input-lg {
@@ -189,8 +327,16 @@
   .badge-accent    { @apply badge bg-honey-100 text-honey-700; }
   .badge-terra     { @apply badge bg-terra-100 text-terra-700; }
 
+  html.dark .badge-primary   { background: rgba(26, 36, 27, 0.3); color: #9DC0A3; }
+  html.dark .badge-secondary { background: rgba(34, 30, 48, 0.3); color: #B5A7D4; }
+  html.dark .badge-accent    { background: rgba(74, 46, 13, 0.3); color: #FCC44F; }
+  html.dark .badge-terra     { background: rgba(63, 30, 24, 0.3); color: #D4917E; }
+
   .badge-mood-great { @apply badge bg-sage-100 text-sage-700; }
   .badge-mood-low   { @apply badge bg-lavender-100 text-lavender-700; }
+
+  html.dark .badge-mood-great { background: rgba(26, 36, 27, 0.3); color: #9DC0A3; }
+  html.dark .badge-mood-low   { background: rgba(34, 30, 48, 0.3); color: #B5A7D4; }
 
   /* ============================================
      Mood Indicators
@@ -222,6 +368,9 @@
   .shimmer {
     @apply bg-gradient-to-r from-hearth-200 via-hearth-100 to-hearth-200
            bg-[length:200%_100%] animate-shimmer;
+  }
+  html.dark .shimmer {
+    @apply bg-gradient-to-r from-hearth-800 via-hearth-700 to-hearth-800;
   }
 
   /* ============================================
@@ -259,6 +408,10 @@
 
   .entry-card {
     @apply card relative overflow-hidden;
+  }
+  html.dark .entry-card {
+    background: rgba(35, 29, 27, 0.95);
+    border: 1px solid rgba(74, 61, 50, 0.4);
   }
 
   .entry-card::before {
@@ -306,6 +459,10 @@
 
   .prompt-card {
     @apply card-warm relative;
+  }
+  html.dark .prompt-card {
+    background: linear-gradient(135deg, rgba(74, 69, 18, 0.15), rgba(94, 45, 36, 0.1));
+    border: 1px solid rgba(74, 61, 50, 0.3);
   }
   .prompt-card::before {
     content: '';
@@ -438,6 +595,17 @@
   border-color: #5A7E5E;
   background: #5A7E5E;
 }
+html.dark .action-checkbox {
+  border-color: #4A3D32;
+}
+html.dark .action-checkbox:hover {
+  border-color: #E8A84C;
+  background: #2A2420;
+}
+html.dark .action-checkbox.checked {
+  border-color: #5A7E5E;
+  background: #5A7E5E;
+}
 
 .badge-recurring {
   display: inline-flex;
@@ -449,4 +617,8 @@
   font-weight: 600;
   background: #E8E3F2;
   color: #635887;
+}
+html.dark .badge-recurring {
+  background: rgba(34, 30, 48, 0.3);
+  color: #B5A7D4;
 }

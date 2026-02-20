@@ -16,8 +16,8 @@ const CrisisSoftBlockModal = ({ onResponse, onClose }) => {
         className="bg-white rounded-3xl max-w-md w-full p-6 shadow-soft-lg"
       >
         <div className="flex items-center gap-3 mb-4">
-          <div className="h-12 w-12 bg-primary-100 rounded-full flex items-center justify-center">
-            <Heart className="text-primary-600" size={24} />
+          <div className="h-12 w-12 bg-honey-100 rounded-full flex items-center justify-center">
+            <Heart className="text-honey-600" size={24} />
           </div>
           <div>
             <h2 className="text-lg font-display font-bold text-warm-900">Just checking in</h2>
@@ -32,7 +32,7 @@ const CrisisSoftBlockModal = ({ onResponse, onClose }) => {
             onClick={() => onResponse('okay')}
             whileHover={{ scale: 1.01 }}
             whileTap={{ scale: 0.99 }}
-            className="w-full p-4 text-left rounded-2xl border-2 border-warm-200 hover:border-primary-300 hover:bg-primary-50 transition-all"
+            className="w-full p-4 text-left rounded-2xl border-2 border-warm-200 hover:border-honey-300 hover:bg-honey-50 transition-all"
           >
             <div className="font-display font-semibold text-warm-800">I'm okay, just venting</div>
             <div className="text-sm text-warm-500 font-body">Continue saving my entry</div>
@@ -42,7 +42,7 @@ const CrisisSoftBlockModal = ({ onResponse, onClose }) => {
             onClick={() => onResponse('support')}
             whileHover={{ scale: 1.01 }}
             whileTap={{ scale: 0.99 }}
-            className="w-full p-4 text-left rounded-2xl border-2 border-warm-200 hover:border-secondary-300 hover:bg-secondary-50 transition-all"
+            className="w-full p-4 text-left rounded-2xl border-2 border-warm-200 hover:border-lavender-300 hover:bg-lavender-50 transition-all"
           >
             <div className="font-display font-semibold text-warm-800">I could use some support</div>
             <div className="text-sm text-warm-500 font-body">Show me helpful resources</div>

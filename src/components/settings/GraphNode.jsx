@@ -40,7 +40,7 @@ const GraphNode = ({ data, selected }) => {
         className={`
           px-3 py-2 rounded-xl shadow-md cursor-pointer
           transition-all duration-200 min-w-[100px]
-          ${selected ? 'ring-2 ring-primary-500 ring-offset-2' : ''}
+          ${selected ? 'ring-2 ring-honey-500 ring-offset-2' : ''}
         `}
         style={{
           backgroundColor: colors.bg,

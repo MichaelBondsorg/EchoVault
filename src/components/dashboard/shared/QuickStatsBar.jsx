@@ -172,7 +172,7 @@ const QuickStatsBar = ({ entries, category }) => {
         {/* Entry Distribution Pills */}
         <div className="flex items-center gap-1">
           {stats.distribution.reflection > 0 && (
-            <div className="flex items-center gap-1 px-2 py-1 rounded-full bg-primary-50 text-primary-600">
+            <div className="flex items-center gap-1 px-2 py-1 rounded-full bg-honey-50 text-honey-600">
               <BookOpen size={10} />
               <span className="text-[10px] font-medium">{stats.distribution.reflection}</span>
             </div>

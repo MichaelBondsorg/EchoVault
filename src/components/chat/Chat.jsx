@@ -245,7 +245,7 @@ Remember: You're having a real conversation. Reference what they've shared, ask 
       animate={{ opacity: 1, y: 0 }}
       className="fixed inset-0 bg-white z-50 flex flex-col pt-[env(safe-area-inset-top)]"
     >
-      <div className="p-4 border-b border-primary-100 flex justify-between items-center bg-gradient-to-r from-primary-500 to-primary-600 text-white shadow-soft">
+      <div className="p-4 border-b border-honey-100 flex justify-between items-center bg-gradient-to-r from-honey-500 to-honey-600 text-white shadow-soft">
         <div className="flex gap-2 items-center">
           <motion.button
             onClick={() => {
@@ -288,7 +288,7 @@ Remember: You're having a real conversation. Reference what they've shared, ask 
             transition={{ delay: i * 0.05 }}
             className={`flex flex-col ${m.role === 'user' ? 'items-end' : 'items-start'}`}
           >
-            <div className={`max-w-[85%] p-4 rounded-2xl text-sm shadow-soft ${m.role === 'user' ? 'bg-primary-600 text-white rounded-br-none' : 'bg-white text-warm-800 border border-warm-200 rounded-bl-none'}`}>
+            <div className={`max-w-[85%] p-4 rounded-2xl text-sm shadow-soft ${m.role === 'user' ? 'bg-honey-600 text-white rounded-br-none' : 'bg-white text-warm-800 border border-warm-200 rounded-bl-none'}`}>
               <MarkdownLite text={m.text} variant={m.role === 'user' ? 'light' : 'default'} />
               {m.role === 'ai' && m.sources && (
                 <div className="mt-2 pt-2 border-t border-warm-200 text-xs text-warm-500 flex items-center gap-1">
@@ -297,7 +297,7 @@ Remember: You're having a real conversation. Reference what they've shared, ask 
               )}
             </div>
             {m.role === 'ai' && (
-              <button onClick={() => speak(m.text)} className="mt-1 text-warm-400 hover:text-primary-600 p-1">
+              <button onClick={() => speak(m.text)} className="mt-1 text-warm-400 hover:text-honey-600 p-1">
                 {isSpeaking ? <StopCircle size={16} /> : <Volume2 size={16} />}
               </button>
             )}
@@ -320,15 +320,15 @@ Remember: You're having a real conversation. Reference what they've shared, ask 
       )}
 
       <div className="p-4 bg-white border-t border-warm-200 pb-[max(2rem,env(safe-area-inset-bottom))]">
-        <div className="flex gap-2 items-center bg-warm-50 p-1 rounded-full border border-warm-200 focus-within:ring-2 focus-within:ring-primary-500">
-          <button onClick={() => setVoiceInput(true)} className="p-2 text-primary-600 hover:bg-primary-50 rounded-full"><Mic size={20}/></button>
+        <div className="flex gap-2 items-center bg-warm-50 p-1 rounded-full border border-warm-200 focus-within:ring-2 focus-within:ring-honey-500">
+          <button onClick={() => setVoiceInput(true)} className="p-2 text-terra-600 hover:bg-terra-50 rounded-full"><Mic size={20}/></button>
           <input value={txt} onChange={e => setTxt(e.target.value)} onKeyDown={e => e.key === 'Enter' && send()} className="flex-1 bg-transparent border-none p-2 focus:ring-0 text-sm outline-none font-body text-warm-800" placeholder="Say something..." />
           <motion.button
             onClick={() => send()}
             disabled={loading}
             whileHover={{ scale: 1.05 }}
             whileTap={{ scale: 0.95 }}
-            className="bg-primary-600 text-white p-2 rounded-full hover:bg-primary-700 disabled:bg-warm-300 transition-colors"
+            className="bg-honey-600 text-white p-2 rounded-full hover:bg-honey-700 disabled:bg-warm-300 transition-colors"
           >
             <Send size={18}/>
           </motion.button>

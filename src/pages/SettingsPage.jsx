@@ -207,11 +207,11 @@ const SettingsPage = ({
                   whileTap={item.onClick && !isLoading ? { scale: 0.99 } : {}}
                 >
                   {/* INT-002: Show loading spinner when item is being opened */}
-                  <div className="w-10 h-10 rounded-xl bg-primary-100 flex items-center justify-center">
+                  <div className="w-10 h-10 rounded-xl bg-honey-100 flex items-center justify-center">
                     {isLoading ? (
-                      <Loader2 size={20} className="text-primary-600 animate-spin" />
+                      <Loader2 size={20} className="text-honey-600 animate-spin" />
                     ) : (
-                      <item.icon size={20} className="text-primary-600" />
+                      <item.icon size={20} className="text-honey-600" />
                     )}
                   </div>
                   <div className="flex-1 min-w-0">
@@ -229,7 +229,7 @@ const SettingsPage = ({
                     <ChevronRight size={20} className="text-warm-400" />
                   )}
                   {isLoading && (
-                    <span className="text-xs text-primary-500 font-medium">Loading...</span>
+                    <span className="text-xs text-honey-500 font-medium">Loading...</span>
                   )}
                 </motion.button>
               );

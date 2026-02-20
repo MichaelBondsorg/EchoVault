@@ -10,7 +10,7 @@ const NewEntryButton = ({ onClick }) => {
           onClick={onClick}
           whileHover={{ scale: 1.02 }}
           whileTap={{ scale: 0.98 }}
-          className="bg-gradient-to-r from-primary-500 to-primary-600 text-white px-8 py-4 rounded-full shadow-soft-lg hover:shadow-xl transition-all flex items-center gap-3 font-display font-bold text-lg"
+          className="bg-gradient-to-r from-honey-500 to-honey-600 text-white px-8 py-4 rounded-full shadow-soft-lg hover:shadow-xl transition-all flex items-center gap-3 font-display font-bold text-lg"
         >
           <Mic size={24} className="opacity-90"/>
           New Entry

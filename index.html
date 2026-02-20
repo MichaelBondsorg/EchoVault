@@ -7,28 +7,29 @@
     <meta name="mobile-web-app-capable" content="yes" />
     <!-- Apple-specific PWA meta tags (for Safari compatibility) -->
     <meta name="apple-mobile-web-app-capable" content="yes" />
-    <!-- RES-001: Use default status bar style for light app aesthetic -->
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
-    <!-- RES-001: Theme color matches app's warm/light palette -->
-    <meta name="theme-color" content="#faf9f7" media="(prefers-color-scheme: light)" />
-    <meta name="theme-color" content="#1c1917" media="(prefers-color-scheme: dark)" />
+    <!-- Theme colors — Hearthside palette -->
+    <meta name="theme-color" content="#FAF5EF" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#1C1916" media="(prefers-color-scheme: dark)" />
     <title>Engram</title>
     <link rel="manifest" href="/manifest.json" />
 
-    <!-- Google Fonts - Nunito (display) + Inter (body) -->
+    <!-- Google Fonts — Hearthside Typography -->
+    <!-- Fraunces: Warm optical serif for display/headings -->
+    <!-- DM Sans: Clean geometric sans for body text -->
+    <!-- Caveat: Handwritten feel for personal touches -->
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Nunito:wght@600;700;800&display=swap" rel="stylesheet" />
+    <link href="https://fonts.googleapis.com/css2?family=Caveat:wght@400;500;600&family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,500;0,9..144,600;0,9..144,700;1,9..144,400&display=swap" rel="stylesheet" />
 
     <style>
       * { box-sizing: border-box; margin: 0; padding: 0; }
       body {
-        font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-        /* RES-001: Light warm background matching theme-color */
-        background: #faf9f7;
+        font-family: 'DM Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        background: #FAF5EF;
+        color: #2A2118;
         min-height: 100vh;
         min-height: 100dvh;
-        /* RES-001: Safe area insets for notched devices */
         padding-top: env(safe-area-inset-top);
         padding-bottom: env(safe-area-inset-bottom);
         padding-left: env(safe-area-inset-left);
@@ -37,12 +38,17 @@
         -moz-osx-font-smoothing: grayscale;
       }
 
-      /* Smooth scrolling */
+      /* Dark mode body */
+      html.dark body {
+        background: #1C1916;
+        color: #F2E8DA;
+      }
+
       html {
         scroll-behavior: smooth;
       }
 
-      /* Custom scrollbar */
+      /* Custom scrollbar — warm tones */
       ::-webkit-scrollbar {
         width: 6px;
         height: 6px;
@@ -51,11 +57,19 @@
         background: transparent;
       }
       ::-webkit-scrollbar-thumb {
-        background: rgba(255, 255, 255, 0.2);
+        background: rgba(142, 122, 102, 0.3);
         border-radius: 3px;
       }
       ::-webkit-scrollbar-thumb:hover {
-        background: rgba(255, 255, 255, 0.3);
+        background: rgba(142, 122, 102, 0.5);
+      }
+
+      /* Dark mode scrollbar */
+      html.dark ::-webkit-scrollbar-thumb {
+        background: rgba(212, 196, 176, 0.2);
+      }
+      html.dark ::-webkit-scrollbar-thumb:hover {
+        background: rgba(212, 196, 176, 0.35);
       }
 
       /* Reduced motion preference */

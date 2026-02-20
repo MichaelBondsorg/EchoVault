@@ -72,14 +72,14 @@ const HeroWidget = ({
         {/* Left: Greeting */}
         <div className="flex-1">
           <motion.p
-            className="text-warm-500 text-sm font-medium"
+            className="text-hearth-500 text-sm font-medium"
             initial={{ opacity: 0, y: -5 }}
             animate={{ opacity: 1, y: 0 }}
           >
             {greeting}{firstName ? `, ${firstName}` : ''}
           </motion.p>
           <motion.h2
-            className="text-warm-800 text-lg font-display font-bold mt-1"
+            className="text-hearth-800 text-lg font-display font-bold mt-1"
             initial={{ opacity: 0, y: 5 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.1 }}
@@ -89,7 +89,7 @@ const HeroWidget = ({
           {/* TXT-004: Improved text visibility with better contrast */}
           {todayCount > 0 && (
             <motion.p
-              className="text-warm-500 text-xs mt-2"
+              className="text-hearth-500 text-xs mt-2"
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               transition={{ delay: 0.2 }}
@@ -104,10 +104,10 @@ const HeroWidget = ({
           className={`
             w-12 h-12 rounded-2xl
             flex items-center justify-center
-            ${timeOfDay === 'morning' ? 'bg-amber-100 text-amber-600' :
-              timeOfDay === 'afternoon' ? 'bg-blue-100 text-blue-600' :
-              timeOfDay === 'evening' ? 'bg-orange-100 text-orange-600' :
-              'bg-indigo-100 text-indigo-600'}
+            ${timeOfDay === 'morning' ? 'bg-honey-100 text-honey-600' :
+              timeOfDay === 'afternoon' ? 'bg-sage-100 text-sage-600' :
+              timeOfDay === 'evening' ? 'bg-terra-100 text-terra-600' :
+              'bg-lavender-100 text-lavender-600'}
           `}
           initial={{ scale: 0, rotate: -20 }}
           animate={{ scale: 1, rotate: 0 }}

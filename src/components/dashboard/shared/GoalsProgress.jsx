@@ -157,17 +157,17 @@ const GoalsProgress = ({ entries, category, userId }) => {
   const getStatusIcon = (status) => {
     switch (status) {
       case 'achieved': return <Check size={12} className="text-mood-great" />;
-      case 'progress': return <TrendingUp size={12} className="text-primary-500" />;
+      case 'progress': return <TrendingUp size={12} className="text-honey-500" />;
       case 'struggling': return <AlertTriangle size={12} className="text-amber-500" />;
       case 'abandoned': return <Pause size={12} className="text-warm-400" />;
-      default: return <Target size={12} className="text-primary-400" />;
+      default: return <Target size={12} className="text-honey-400" />;
     }
   };
 
   const getStatusColor = (status) => {
     switch (status) {
       case 'achieved': return 'bg-green-50 border-green-200 text-green-700';
-      case 'progress': return 'bg-primary-50 border-primary-200 text-primary-700';
+      case 'progress': return 'bg-honey-50 border-honey-200 text-honey-700';
       case 'struggling': return 'bg-amber-50 border-amber-200 text-amber-700';
       case 'abandoned': return 'bg-warm-100 border-warm-200 text-warm-500';
       default: return 'bg-white border-warm-200 text-warm-700';

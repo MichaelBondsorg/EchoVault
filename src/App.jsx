@@ -1987,9 +1987,9 @@ export default function App() {
     const isIOS = Capacitor.getPlatform() === 'ios';
 
     return (
-      <div className="min-h-screen flex flex-col items-center justify-center p-4 bg-gradient-to-br from-warm-50 to-primary-50">
+      <div className="min-h-screen flex flex-col items-center justify-center p-4 bg-gradient-to-br from-warm-50 to-honey-50">
         <motion.div
-          className="h-16 w-16 bg-gradient-to-br from-primary-600 to-primary-700 rounded-3xl flex items-center justify-center mb-4 shadow-soft-lg rotate-3"
+          className="h-16 w-16 bg-gradient-to-br from-honey-600 to-honey-700 rounded-3xl flex items-center justify-center mb-4 shadow-soft-lg rotate-3"
           initial={{ scale: 0, rotate: -10 }}
           animate={{ scale: 1, rotate: 3 }}
           transition={{ type: "spring", damping: 15 }}
@@ -2042,7 +2042,7 @@ export default function App() {
                     <div className="w-full border-t border-warm-200"></div>
                   </div>
                   <div className="relative flex justify-center text-sm">
-                    <span className="px-2 bg-gradient-to-br from-warm-50 to-primary-50 text-warm-500">or</span>
+                    <span className="px-2 bg-gradient-to-br from-warm-50 to-honey-50 text-warm-500">or</span>
                   </div>
                 </div>
 
@@ -2069,8 +2069,8 @@ export default function App() {
                   /* MFA Verification Form */
                   <form onSubmit={handleMfaVerify} className="space-y-3">
                     <div className="flex justify-center mb-2">
-                      <div className="h-12 w-12 bg-primary-100 rounded-full flex items-center justify-center">
-                        <Shield className="text-primary-600" size={24}/>
+                      <div className="h-12 w-12 bg-honey-100 rounded-full flex items-center justify-center">
+                        <Shield className="text-honey-600" size={24}/>
                       </div>
                     </div>
                     <h2 className="text-lg font-semibold text-center text-warm-800">
@@ -2089,7 +2089,7 @@ export default function App() {
                       onChange={(e) => setMfaCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
                       required
                       autoFocus
-                      className="w-full px-4 py-3 rounded-lg border border-warm-200 focus:border-primary-500 focus:ring-2 focus:ring-primary-200 outline-none transition-all text-center text-2xl tracking-widest font-mono"
+                      className="w-full px-4 py-3 rounded-lg border border-warm-200 focus:border-honey-500 focus:ring-2 focus:ring-honey-200 outline-none transition-all text-center text-2xl tracking-widest font-mono"
                     />
 
                     {authError && (
@@ -2133,7 +2133,7 @@ export default function App() {
                         placeholder="Name (optional)"
                         value={displayName}
                         onChange={(e) => setDisplayName(e.target.value)}
-                        className="w-full px-4 py-2 rounded-lg border border-warm-200 focus:border-primary-500 focus:ring-2 focus:ring-primary-200 outline-none transition-all"
+                        className="w-full px-4 py-2 rounded-lg border border-warm-200 focus:border-honey-500 focus:ring-2 focus:ring-honey-200 outline-none transition-all"
                       />
                     )}
 
@@ -2143,7 +2143,7 @@ export default function App() {
                       value={email}
                       onChange={(e) => setEmail(e.target.value)}
                       required
-                      className="w-full px-4 py-2 rounded-lg border border-warm-200 focus:border-primary-500 focus:ring-2 focus:ring-primary-200 outline-none transition-all"
+                      className="w-full px-4 py-2 rounded-lg border border-warm-200 focus:border-honey-500 focus:ring-2 focus:ring-honey-200 outline-none transition-all"
                     />
 
                     {authMode !== 'reset' && (
@@ -2155,7 +2155,7 @@ export default function App() {
                           onChange={(e) => setPassword(e.target.value)}
                           required
                           minLength={6}
-                          className="w-full px-4 py-2 pr-10 rounded-lg border border-warm-200 focus:border-primary-500 focus:ring-2 focus:ring-primary-200 outline-none transition-all"
+                          className="w-full px-4 py-2 pr-10 rounded-lg border border-warm-200 focus:border-honey-500 focus:ring-2 focus:ring-honey-200 outline-none transition-all"
                         />
                         <button
                           type="button"
@@ -2188,7 +2188,7 @@ export default function App() {
                         <button
                           type="button"
                           onClick={() => { setAuthMode('signup'); setAuthError(''); }}
-                          className="text-primary-600 hover:underline"
+                          className="text-honey-600 hover:underline"
                         >
                           Need an account? Sign up
                         </button>
@@ -2206,7 +2206,7 @@ export default function App() {
                       <button
                         type="button"
                         onClick={() => { setAuthMode('signin'); setAuthError(''); }}
-                        className="text-primary-600 hover:underline"
+                        className="text-honey-600 hover:underline"
                       >
                         Already have an account? Sign in
                       </button>
@@ -2215,7 +2215,7 @@ export default function App() {
                       <button
                         type="button"
                         onClick={() => { setAuthMode('signin'); setAuthError(''); }}
-                        className="text-primary-600 hover:underline"
+                        className="text-honey-600 hover:underline"
                       >
                         Back to sign in
                       </button>

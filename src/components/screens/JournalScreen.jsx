@@ -135,7 +135,7 @@ const JournalScreen = ({
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder="Search entries..."
-            className="w-full pl-10 pr-4 py-2.5 bg-warm-100 rounded-xl text-sm font-body text-warm-800 placeholder-warm-400 focus:outline-none focus:ring-2 focus:ring-primary-500"
+            className="w-full pl-10 pr-4 py-2.5 bg-warm-100 rounded-xl text-sm font-body text-warm-800 placeholder-warm-400 focus:outline-none focus:ring-2 focus:ring-honey-500"
           />
         </div>
 
@@ -184,7 +184,7 @@ const JournalScreen = ({
             >
               <button
                 onClick={() => { setSelectedDate(null); setShowDatePicker(false); }}
-                className={`px-3 py-1 text-xs rounded-full ${!selectedDate ? 'bg-primary-600 text-white' : 'bg-warm-100 text-warm-600 hover:bg-warm-200'}`}
+                className={`px-3 py-1 text-xs rounded-full ${!selectedDate ? 'bg-honey-600 text-white' : 'bg-warm-100 text-warm-600 hover:bg-warm-200'}`}
               >
                 All
               </button>
@@ -234,17 +234,17 @@ const JournalScreen = ({
         {(searchQuery || selectedDate) && (
           <div className="mt-3 flex gap-2 flex-wrap">
             {searchQuery && (
-              <span className="inline-flex items-center gap-1 px-2 py-1 bg-primary-100 text-primary-700 rounded-full text-xs">
+              <span className="inline-flex items-center gap-1 px-2 py-1 bg-honey-100 text-honey-700 rounded-full text-xs">
                 Search: "{searchQuery}"
-                <button onClick={() => setSearchQuery('')} className="hover:text-primary-900">
+                <button onClick={() => setSearchQuery('')} className="hover:text-honey-900">
                   <X size={12} />
                 </button>
               </span>
             )}
             {selectedDate && (
-              <span className="inline-flex items-center gap-1 px-2 py-1 bg-primary-100 text-primary-700 rounded-full text-xs">
+              <span className="inline-flex items-center gap-1 px-2 py-1 bg-honey-100 text-honey-700 rounded-full text-xs">
                 {selectedDate.toLocaleDateString()}
-                <button onClick={() => setSelectedDate(null)} className="hover:text-primary-900">
+                <button onClick={() => setSelectedDate(null)} className="hover:text-honey-900">
                   <X size={12} />
                 </button>
               </span>

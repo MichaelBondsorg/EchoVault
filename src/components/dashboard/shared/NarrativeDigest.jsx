@@ -103,9 +103,9 @@ const NarrativeDigest = ({ userId, category, onDismiss }) => {
       <motion.div
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
-        className="bg-gradient-to-br from-primary-50 to-secondary-50 rounded-2xl p-6 border border-primary-100"
+        className="bg-gradient-to-br from-honey-50 to-lavender-50 rounded-2xl p-6 border border-honey-100"
       >
-        <div className="flex items-center gap-2 text-primary-400">
+        <div className="flex items-center gap-2 text-honey-400">
           <RefreshCw size={16} className="animate-spin" />
           <span className="text-sm font-body">Loading your weekly narrative...</span>
         </div>
@@ -122,16 +122,16 @@ const NarrativeDigest = ({ userId, category, onDismiss }) => {
       initial={{ opacity: 0, y: -10 }}
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: -10 }}
-      className="bg-gradient-to-br from-primary-50 via-white to-secondary-50 rounded-2xl border border-primary-100 overflow-hidden mb-4 shadow-soft"
+      className="bg-gradient-to-br from-honey-50 via-white to-lavender-50 rounded-2xl border border-honey-100 overflow-hidden mb-4 shadow-soft"
     >
       {/* Header */}
-      <div className="flex items-center justify-between p-4 border-b border-primary-100/50">
+      <div className="flex items-center justify-between p-4 border-b border-honey-100/50">
         <button
           onClick={() => setIsExpanded(!isExpanded)}
           className="flex items-center gap-3 flex-1"
         >
-          <div className="p-2 rounded-xl bg-gradient-to-br from-primary-100 to-secondary-100">
-            <BookOpen size={18} className="text-primary-600" />
+          <div className="p-2 rounded-xl bg-gradient-to-br from-honey-100 to-lavender-100">
+            <BookOpen size={18} className="text-honey-600" />
           </div>
           <div className="text-left">
             <h3 className="text-sm font-display font-semibold text-warm-800">
@@ -185,9 +185,9 @@ const NarrativeDigest = ({ userId, category, onDismiss }) => {
 
               {/* Key patterns mentioned (optional) */}
               {digest.highlightedPatterns?.length > 0 && (
-                <div className="mt-4 pt-4 border-t border-primary-100/50">
+                <div className="mt-4 pt-4 border-t border-honey-100/50">
                   <div className="flex items-center gap-2 mb-2">
-                    <Sparkles size={12} className="text-secondary-500" />
+                    <Sparkles size={12} className="text-lavender-500" />
                     <span className="text-xs font-medium text-warm-500">Key patterns this week</span>
                   </div>
                   <div className="flex flex-wrap gap-2">
@@ -205,7 +205,7 @@ const NarrativeDigest = ({ userId, category, onDismiss }) => {
 
               {/* Forward-looking note (optional) */}
               {digest.lookAhead && (
-                <div className="mt-4 p-3 bg-gradient-to-r from-secondary-50 to-primary-50 rounded-xl">
+                <div className="mt-4 p-3 bg-gradient-to-r from-lavender-50 to-honey-50 rounded-xl">
                   <p className="text-sm text-warm-600 font-body italic">
                     {digest.lookAhead}
                   </p>

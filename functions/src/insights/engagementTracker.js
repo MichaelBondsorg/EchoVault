@@ -14,7 +14,8 @@ import { onCall, HttpsError } from 'firebase-functions/v2/https';
 import { getFirestore, FieldValue, Timestamp } from 'firebase-admin/firestore';
 import { APP_COLLECTION_ID, DEFAULT_REGION, MEMORY, TIMEOUTS } from '../shared/constants.js';
 
-const db = getFirestore();
+/** @returns {FirebaseFirestore.Firestore} */
+function getDb() { return getFirestore(); }
 
 const VALID_RESPONSES = ['explored', 'dismissed', 'deferred'];
 const VALID_TIMINGS = ['session_start', 'natural_pause', 'session_end'];
@@ -155,6 +156,7 @@ export async function processEngagement(payload) {
 
   for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
     try {
+      const db = getDb();
       const batch = db.batch();
       const optimizerUpdates = [];
 

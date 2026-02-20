@@ -409,7 +409,7 @@ const HealthSettingsScreen = ({ onClose }) => {
         <div className="sticky top-0 bg-white border-b border-warm-100 px-4 py-4 flex items-center justify-between z-10">
           <div className="flex items-center gap-3">
             {/* Fixed header icon color (CLR-001) - changed from pink to teal to match app palette */}
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-primary-400 to-teal-500 flex items-center justify-center">
+            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-honey-400 to-teal-500 flex items-center justify-center">
               <Heart className="w-5 h-5 text-white" />
             </div>
           <div>
@@ -448,7 +448,7 @@ const HealthSettingsScreen = ({ onClose }) => {
                 {anySourceConnected && (
                   <button
                     onClick={handleRefresh}
-                    className="text-sm text-primary-500 flex items-center gap-1"
+                    className="text-sm text-honey-500 flex items-center gap-1"
                   >
                     <RefreshCw size={14} /> Refresh
                   </button>
@@ -963,18 +963,18 @@ const HealthSettingsScreen = ({ onClose }) => {
         {/* Why We Use Health Data */}
         {!loading && (
           <motion.div
-            className="bg-gradient-to-br from-primary-50 to-blue-50 rounded-2xl border border-primary-100 p-4"
+            className="bg-gradient-to-br from-honey-50 to-blue-50 rounded-2xl border border-honey-100 p-4"
             initial={{ y: 20, opacity: 0 }}
             animate={{ y: 0, opacity: 1 }}
             transition={{ delay: 0.2 }}
           >
             <div className="flex items-start gap-3">
-              <div className="w-10 h-10 rounded-xl bg-primary-100 flex items-center justify-center flex-shrink-0">
-                <Zap className="w-5 h-5 text-primary-600" />
+              <div className="w-10 h-10 rounded-xl bg-honey-100 flex items-center justify-center flex-shrink-0">
+                <Zap className="w-5 h-5 text-honey-600" />
               </div>
               <div>
-                <h3 className="font-semibold text-primary-800">Why connect?</h3>
-                <p className="text-sm text-primary-700 mt-1">
+                <h3 className="font-semibold text-honey-800">Why connect?</h3>
+                <p className="text-sm text-honey-700 mt-1">
                   Engram can show you patterns like "You tend to feel better on days you sleep 7+ hours"
                   or "Exercise days often lead to more positive entries."
                 </p>

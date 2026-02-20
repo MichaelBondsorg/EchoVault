@@ -214,8 +214,8 @@ const EntityEditModal = ({
       >
         {/* Header */}
         <div className="px-6 py-4 border-b border-warm-100 flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-primary-100 flex items-center justify-center">
-            <TypeIcon size={20} className="text-primary-600" />
+          <div className="w-10 h-10 rounded-xl bg-honey-100 flex items-center justify-center">
+            <TypeIcon size={20} className="text-honey-600" />
           </div>
           <div className="flex-1">
             <h2 className="font-display font-bold text-lg text-warm-800">
@@ -248,7 +248,7 @@ const EntityEditModal = ({
               onChange={(e) => setName(e.target.value)}
               placeholder="Enter name..."
               className="w-full px-4 py-2.5 bg-warm-50 border border-warm-200 rounded-xl
-                text-warm-800 placeholder-warm-400 focus:outline-none focus:ring-2 focus:ring-primary-300"
+                text-warm-800 placeholder-warm-400 focus:outline-none focus:ring-2 focus:ring-honey-300"
             />
           </div>
 
@@ -281,12 +281,12 @@ const EntityEditModal = ({
                 onKeyDown={(e) => e.key === 'Enter' && handleAddAlias()}
                 placeholder="Add alias..."
                 className="flex-1 px-4 py-2 bg-warm-50 border border-warm-200 rounded-xl
-                  text-warm-800 placeholder-warm-400 focus:outline-none focus:ring-2 focus:ring-primary-300"
+                  text-warm-800 placeholder-warm-400 focus:outline-none focus:ring-2 focus:ring-honey-300"
               />
               <button
                 onClick={handleAddAlias}
                 disabled={!newAlias.trim()}
-                className="px-3 py-2 bg-primary-100 text-primary-600 rounded-xl hover:bg-primary-200
+                className="px-3 py-2 bg-honey-100 text-honey-600 rounded-xl hover:bg-honey-200
                   disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
               >
                 <Plus size={18} />
@@ -310,13 +310,13 @@ const EntityEditModal = ({
                     className={`
                       flex flex-col items-center gap-1 p-3 rounded-xl border-2 transition-all
                       ${isSelected
-                        ? 'border-primary-500 bg-primary-50'
+                        ? 'border-honey-500 bg-honey-50'
                         : 'border-warm-200 bg-warm-50 hover:border-warm-300'
                       }
                     `}
                   >
-                    <Icon size={20} className={isSelected ? 'text-primary-600' : 'text-warm-500'} />
-                    <span className={`text-xs ${isSelected ? 'text-primary-700 font-medium' : 'text-warm-600'}`}>
+                    <Icon size={20} className={isSelected ? 'text-honey-600' : 'text-warm-500'} />
+                    <span className={`text-xs ${isSelected ? 'text-honey-700 font-medium' : 'text-warm-600'}`}>
                       {formatLabel(type)}
                     </span>
                   </button>
@@ -334,7 +334,7 @@ const EntityEditModal = ({
               value={relationship}
               onChange={(e) => setRelationship(e.target.value)}
               className="w-full px-4 py-2.5 bg-warm-50 border border-warm-200 rounded-xl
-                text-warm-800 focus:outline-none focus:ring-2 focus:ring-primary-300"
+                text-warm-800 focus:outline-none focus:ring-2 focus:ring-honey-300"
             >
               {availableRelationships.map((rel) => (
                 <option key={rel} value={rel}>
@@ -355,7 +355,7 @@ const EntityEditModal = ({
               placeholder="Any additional context..."
               rows={3}
               className="w-full px-4 py-2.5 bg-warm-50 border border-warm-200 rounded-xl
-                text-warm-800 placeholder-warm-400 focus:outline-none focus:ring-2 focus:ring-primary-300 resize-none"
+                text-warm-800 placeholder-warm-400 focus:outline-none focus:ring-2 focus:ring-honey-300 resize-none"
             />
           </div>
 
@@ -409,7 +409,7 @@ const EntityEditModal = ({
                 <button
                   onClick={() => setShowRelationshipPicker(true)}
                   className="w-full py-2.5 px-4 border-2 border-dashed border-warm-200 text-warm-500
-                    rounded-xl hover:border-primary-300 hover:text-primary-600 transition-colors
+                    rounded-xl hover:border-honey-300 hover:text-honey-600 transition-colors
                     flex items-center justify-center gap-2"
                 >
                   <Plus size={18} />
@@ -419,18 +419,18 @@ const EntityEditModal = ({
                 <motion.div
                   initial={{ opacity: 0, height: 0 }}
                   animate={{ opacity: 1, height: 'auto' }}
-                  className="p-4 bg-primary-50 rounded-xl border border-primary-200 space-y-3"
+                  className="p-4 bg-honey-50 rounded-xl border border-honey-200 space-y-3"
                 >
                   {/* Target entity picker */}
                   <div>
-                    <label className="block text-xs text-primary-700 mb-1">
+                    <label className="block text-xs text-honey-700 mb-1">
                       Connect to
                     </label>
                     <select
                       value={selectedTargetEntity}
                       onChange={(e) => setSelectedTargetEntity(e.target.value)}
-                      className="w-full px-3 py-2 bg-white border border-primary-200 rounded-lg
-                        text-warm-800 focus:outline-none focus:ring-2 focus:ring-primary-300 text-sm"
+                      className="w-full px-3 py-2 bg-white border border-honey-200 rounded-lg
+                        text-warm-800 focus:outline-none focus:ring-2 focus:ring-honey-300 text-sm"
                     >
                       <option value="">Select an entity...</option>
                       {availableTargetEntities.map((e) => {
@@ -446,14 +446,14 @@ const EntityEditModal = ({
 
                   {/* Relationship type picker */}
                   <div>
-                    <label className="block text-xs text-primary-700 mb-1">
+                    <label className="block text-xs text-honey-700 mb-1">
                       Relationship type
                     </label>
                     <select
                       value={selectedLinkType}
                       onChange={(e) => setSelectedLinkType(e.target.value)}
-                      className="w-full px-3 py-2 bg-white border border-primary-200 rounded-lg
-                        text-warm-800 focus:outline-none focus:ring-2 focus:ring-primary-300 text-sm"
+                      className="w-full px-3 py-2 bg-white border border-honey-200 rounded-lg
+                        text-warm-800 focus:outline-none focus:ring-2 focus:ring-honey-300 text-sm"
                     >
                       <option value="">Select relationship...</option>
                       {validLinkTypes.map((lt) => (
@@ -476,8 +476,8 @@ const EntityEditModal = ({
                     <button
                       onClick={handleAddRelationship}
                       disabled={!selectedTargetEntity || !selectedLinkType || addingRelationship}
-                      className="flex-1 py-2 px-3 bg-primary-600 text-white rounded-lg
-                        hover:bg-primary-700 transition-colors text-sm disabled:opacity-50
+                      className="flex-1 py-2 px-3 bg-honey-600 text-white rounded-lg
+                        hover:bg-honey-700 transition-colors text-sm disabled:opacity-50
                         flex items-center justify-center gap-1"
                     >
                       {addingRelationship ? (
@@ -510,8 +510,8 @@ const EntityEditModal = ({
             <button
               onClick={handleSave}
               disabled={saving || !name.trim()}
-              className="flex-1 py-2.5 px-4 bg-primary-600 text-white rounded-xl
-                hover:bg-primary-700 transition-colors font-medium disabled:opacity-50
+              className="flex-1 py-2.5 px-4 bg-honey-600 text-white rounded-xl
+                hover:bg-honey-700 transition-colors font-medium disabled:opacity-50
                 flex items-center justify-center gap-2"
             >
               {saving ? (

@@ -265,7 +265,7 @@ const TherapistExportScreen = ({ entries, onClose }) => {
         transition={{ type: "spring", duration: 0.3 }}
         className="bg-white rounded-3xl max-w-2xl w-full max-h-[90vh] overflow-hidden flex flex-col shadow-soft-lg"
       >
-        <div className="p-6 border-b border-primary-100 bg-gradient-to-r from-primary-500 to-primary-600 text-white">
+        <div className="p-6 border-b border-honey-100 bg-gradient-to-r from-honey-500 to-honey-600 text-white">
           <div className="flex justify-between items-center">
             <div>
               <h2 className="text-xl font-display font-bold flex items-center gap-2"><FileText size={20} /> Export for Therapist</h2>
@@ -290,7 +290,7 @@ const TherapistExportScreen = ({ entries, onClose }) => {
                 type="date"
                 value={dateRange.start}
                 onChange={e => setDateRange(prev => ({ ...prev, start: e.target.value }))}
-                className="border border-warm-200 rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-primary-500 outline-none"
+                className="border border-warm-200 rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-honey-500 outline-none"
               />
             </div>
             <div>
@@ -299,7 +299,7 @@ const TherapistExportScreen = ({ entries, onClose }) => {
                 type="date"
                 value={dateRange.end}
                 onChange={e => setDateRange(prev => ({ ...prev, end: e.target.value }))}
-                className="border border-warm-200 rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-primary-500 outline-none"
+                className="border border-warm-200 rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-honey-500 outline-none"
               />
             </div>
             <div>
@@ -307,14 +307,14 @@ const TherapistExportScreen = ({ entries, onClose }) => {
               <select
                 value={exportFormat}
                 onChange={e => setExportFormat(e.target.value)}
-                className="border border-warm-200 rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-primary-500 outline-none"
+                className="border border-warm-200 rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-honey-500 outline-none"
               >
                 <option value="pdf">PDF</option>
                 <option value="json">JSON</option>
               </select>
             </div>
             <div className="flex gap-2">
-              <button onClick={selectAll} className="text-xs text-primary-600 hover:underline">Select All</button>
+              <button onClick={selectAll} className="text-xs text-honey-600 hover:underline">Select All</button>
               <button onClick={selectNone} className="text-xs text-warm-500 hover:underline">Clear</button>
             </div>
           </div>
@@ -332,13 +332,13 @@ const TherapistExportScreen = ({ entries, onClose }) => {
                 onClick={() => toggleEntry(entry.id)}
                 className={`p-3 rounded-2xl border cursor-pointer transition-all ${
                   selectedEntries.has(entry.id)
-                    ? 'border-primary-500 bg-primary-50'
+                    ? 'border-honey-500 bg-honey-50'
                     : 'border-warm-200 hover:border-warm-300'
                 }`}
               >
                 <div className="flex items-start gap-3">
                   <div className={`w-5 h-5 rounded-lg border-2 flex items-center justify-center mt-0.5 ${
-                    selectedEntries.has(entry.id) ? 'bg-primary-600 border-primary-600' : 'border-warm-300'
+                    selectedEntries.has(entry.id) ? 'bg-honey-600 border-honey-600' : 'border-warm-300'
                   }`}>
                     {selectedEntries.has(entry.id) && <Check size={14} className="text-white" />}
                   </div>
@@ -364,7 +364,7 @@ const TherapistExportScreen = ({ entries, onClose }) => {
             disabled={exporting || selectedEntries.size === 0}
             whileHover={{ scale: 1.01 }}
             whileTap={{ scale: 0.99 }}
-            className="w-full bg-primary-600 text-white py-3 rounded-2xl font-display font-semibold flex items-center justify-center gap-2 hover:bg-primary-700 disabled:bg-warm-300 disabled:cursor-not-allowed"
+            className="w-full bg-honey-600 text-white py-3 rounded-2xl font-display font-semibold flex items-center justify-center gap-2 hover:bg-honey-700 disabled:bg-warm-300 disabled:cursor-not-allowed"
           >
             {exporting ? (
               <><Loader2 size={18} className="animate-spin" /> Generating...</>

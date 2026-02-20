@@ -15,24 +15,24 @@ import { useMoodBackground } from './MoodBackgroundProvider';
 const TopBar = ({ greeting, onMoodOrbClick, latestMoodScore = 0.5 }) => {
   const { moodCategory } = useMoodBackground();
 
-  // Map mood category to orb color
+  // Map mood category to orb color — Hearthside palette
   const orbColors = {
-    warm: 'bg-gradient-to-br from-amber-300 to-teal-300',
-    balanced: 'bg-gradient-to-br from-slate-300 to-blue-300',
-    calm: 'bg-gradient-to-br from-blue-300 to-purple-300',
+    warm: 'bg-gradient-to-br from-honey-300 to-sage-400',
+    balanced: 'bg-gradient-to-br from-hearth-300 to-honey-400',
+    calm: 'bg-gradient-to-br from-lavender-300 to-lavender-400',
   };
 
   const orbGlowColors = {
-    warm: 'shadow-[0_0_20px_rgba(251,191,36,0.5)]',
-    balanced: 'shadow-[0_0_20px_rgba(148,163,184,0.5)]',
-    calm: 'shadow-[0_0_20px_rgba(147,197,253,0.5)]',
+    warm: 'shadow-[0_0_20px_rgba(232,168,76,0.5)]',
+    balanced: 'shadow-[0_0_20px_rgba(212,196,176,0.5)]',
+    calm: 'shadow-[0_0_20px_rgba(155,142,196,0.4)]',
   };
 
   return (
     <motion.header
       className="
         fixed top-0 left-0 right-0 z-50
-        bg-white/10 backdrop-blur-md
+        bg-hearth-50/30 backdrop-blur-md
         px-4 py-3
         pt-[calc(env(safe-area-inset-top)+12px)]
         flex items-center justify-between
@@ -43,7 +43,7 @@ const TopBar = ({ greeting, onMoodOrbClick, latestMoodScore = 0.5 }) => {
     >
       {/* Left: Brand (LAY-004: Always show brand, not greeting) */}
       <motion.h1
-        className="font-display font-bold text-lg text-warm-800"
+        className="font-display font-bold text-lg text-hearth-800"
         initial={{ opacity: 0, x: -10 }}
         animate={{ opacity: 1, x: 0 }}
         transition={{ delay: 0.1 }}

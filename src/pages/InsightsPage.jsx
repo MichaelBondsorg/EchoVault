@@ -256,7 +256,7 @@ const InsightsPage = ({
         <div className="space-y-3">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <Sparkles size={16} className="text-purple-500" />
+              <Sparkles size={16} className="text-honey-500" />
               <h3 className="text-xs font-bold text-warm-500 uppercase tracking-wider">
                 AI Insights
               </h3>
@@ -345,7 +345,7 @@ const GenerationStatus = ({
         animate={{ opacity: 1 }}
       >
         <div className="flex items-center gap-3">
-          <Loader2 size={20} className="text-purple-500 animate-spin" />
+          <Loader2 size={20} className="text-honey-500 animate-spin" />
           <div>
             <p className="font-medium text-warm-700">Loading insights...</p>
             <p className="text-xs text-warm-500">Fetching your personalized analysis</p>
@@ -359,19 +359,19 @@ const GenerationStatus = ({
   if (isCalibrating) {
     return (
       <motion.div
-        className="bg-gradient-to-r from-purple-500/10 to-blue-500/10 border border-purple-200/30 rounded-2xl p-4"
+        className="bg-gradient-to-r from-honey-500/10 to-lavender-500/10 border border-honey-200/30 rounded-2xl p-4"
         initial={{ opacity: 0, y: -10 }}
         animate={{ opacity: 1, y: 0 }}
       >
         <div className="flex items-center gap-3">
-          <div className="p-2 bg-purple-500/20 rounded-xl animate-pulse">
-            <Brain size={20} className="text-purple-600" />
+          <div className="p-2 bg-honey-500/20 rounded-xl animate-pulse">
+            <Brain size={20} className="text-honey-600" />
           </div>
           <div className="flex-1">
             <p className="font-medium text-warm-700">Nexus is learning your patterns</p>
             <div className="mt-2 h-2 bg-warm-200 rounded-full overflow-hidden">
               <motion.div
-                className="h-full bg-gradient-to-r from-purple-500 to-blue-500"
+                className="h-full bg-gradient-to-r from-honey-500 to-honey-600"
                 initial={{ width: 0 }}
                 animate={{ width: `${calibrationProgress}%` }}
                 transition={{ duration: 0.5 }}
@@ -440,7 +440,7 @@ const GenerationStatus = ({
         )}
       </div>
       {refreshing && (
-        <div className="mt-2 flex items-center gap-2 text-xs text-purple-600">
+        <div className="mt-2 flex items-center gap-2 text-xs text-honey-600">
           <Loader2 size={12} className="animate-spin" />
           <span>Refreshing insights...</span>
         </div>
@@ -641,7 +641,7 @@ const CorrelationsSection = ({ correlations, isExpanded, onToggle }) => {
         onClick={onToggle}
       >
         <div className="flex items-center gap-3">
-          <div className="p-2 bg-gradient-to-br from-red-400/20 to-blue-400/20 rounded-xl">
+          <div className="p-2 bg-gradient-to-br from-terra-400/20 to-lavender-400/20 rounded-xl">
             <TrendingUp size={18} className="text-warm-600" />
           </div>
           <div>
@@ -945,12 +945,12 @@ const RecommendationsSection = ({ recommendations }) => {
 
   return (
     <motion.div
-      className="bg-gradient-to-r from-blue-50/50 to-indigo-50/50 border border-blue-200/30 rounded-2xl p-4"
+      className="bg-gradient-to-r from-honey-50/50 to-sage-50/50 border border-honey-200/30 rounded-2xl p-4"
       initial={{ opacity: 0, y: -10 }}
       animate={{ opacity: 1, y: 0 }}
     >
       <div className="flex items-center gap-2 mb-3">
-        <Lightbulb size={16} className="text-blue-600" />
+        <Lightbulb size={16} className="text-honey-600" />
         <h3 className="font-semibold text-warm-800">Today's Recommendations</h3>
       </div>
 
@@ -1600,57 +1600,57 @@ const NexusInsightCard = ({ insight, isExpanded, onToggleExpand, onDismiss }) =>
       case 'contradiction':
         return {
           icon: AlertTriangle,
-          gradient: 'from-amber-500/10 to-orange-500/10',
-          border: 'border-amber-200/30',
-          iconBg: 'bg-amber-500/20',
-          iconColor: 'text-amber-600',
+          gradient: 'from-terra-500/10 to-terra-400/10',
+          border: 'border-terra-200/30',
+          iconBg: 'bg-terra-500/20',
+          iconColor: 'text-terra-600',
           label: 'Belief Pattern'
         };
       case 'narrative_arc':
       case 'growth':
         return {
           icon: TrendingUp,
-          gradient: 'from-green-500/10 to-emerald-500/10',
-          border: 'border-green-200/30',
-          iconBg: 'bg-green-500/20',
-          iconColor: 'text-green-600',
+          gradient: 'from-sage-500/10 to-sage-400/10',
+          border: 'border-sage-200/30',
+          iconBg: 'bg-sage-500/20',
+          iconColor: 'text-sage-600',
           label: 'Growth Pattern'
         };
       case 'recommendation':
       case 'intervention':
         return {
           icon: Lightbulb,
-          gradient: 'from-blue-500/10 to-cyan-500/10',
-          border: 'border-blue-200/30',
-          iconBg: 'bg-blue-500/20',
-          iconColor: 'text-blue-600',
+          gradient: 'from-honey-500/10 to-honey-400/10',
+          border: 'border-honey-200/30',
+          iconBg: 'bg-honey-500/20',
+          iconColor: 'text-honey-600',
           label: 'Recommendation'
         };
       case 'counterfactual':
         return {
           icon: Sparkles,
-          gradient: 'from-purple-500/10 to-pink-500/10',
-          border: 'border-purple-200/30',
-          iconBg: 'bg-purple-500/20',
-          iconColor: 'text-purple-600',
+          gradient: 'from-lavender-500/10 to-lavender-400/10',
+          border: 'border-lavender-200/30',
+          iconBg: 'bg-lavender-500/20',
+          iconColor: 'text-lavender-600',
           label: 'What If'
         };
       case 'causal_synthesis':
         return {
           icon: Brain,
-          gradient: 'from-indigo-500/10 to-purple-500/10',
-          border: 'border-indigo-200/30',
-          iconBg: 'bg-indigo-500/20',
-          iconColor: 'text-indigo-600',
+          gradient: 'from-lavender-500/10 to-sage-500/10',
+          border: 'border-lavender-200/30',
+          iconBg: 'bg-lavender-500/20',
+          iconColor: 'text-lavender-600',
           label: 'Deep Insight'
         };
       default:
         return {
           icon: Brain,
-          gradient: 'from-purple-500/10 to-blue-500/10',
-          border: 'border-purple-200/30',
-          iconBg: 'bg-purple-500/20',
-          iconColor: 'text-purple-600',
+          gradient: 'from-honey-500/10 to-lavender-500/10',
+          border: 'border-honey-200/30',
+          iconBg: 'bg-honey-500/20',
+          iconColor: 'text-honey-600',
           label: 'Pattern'
         };
     }
@@ -1827,8 +1827,8 @@ const NexusInsightCard = ({ insight, isExpanded, onToggleExpand, onDismiss }) =>
 
                 {/* Recommendation Details */}
                 {(insight.recommendation?.action || insight.recommendation?.reasoning) && (
-                  <div className="bg-blue-50/50 rounded-xl p-3">
-                    <h4 className="text-xs font-bold text-blue-600 uppercase tracking-wider mb-2 flex items-center gap-1">
+                  <div className="bg-honey-50/50 rounded-xl p-3">
+                    <h4 className="text-xs font-bold text-honey-600 uppercase tracking-wider mb-2 flex items-center gap-1">
                       <Target size={12} />
                       Recommended Action
                     </h4>
@@ -1843,7 +1843,7 @@ const NexusInsightCard = ({ insight, isExpanded, onToggleExpand, onDismiss }) =>
                       </p>
                     )}
                     {getStringContent(insight.recommendation.expectedOutcome) && (
-                      <p className="text-xs text-blue-600 mt-2">
+                      <p className="text-xs text-honey-600 mt-2">
                         Expected outcome: {insight.recommendation.expectedOutcome}
                       </p>
                     )}

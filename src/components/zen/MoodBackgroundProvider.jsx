@@ -28,19 +28,19 @@ const getMoodCategory = (score) => {
 const getGradientColors = (category) => {
   const gradients = {
     warm: {
-      from: '#fcd9a1',    // Warm amber
-      via: '#99f6e0',     // Soft teal
-      to: '#d1fae5',      // Emerald tint
+      from: '#FDDB8C',    // Honey gold
+      via: '#C1D9C5',     // Sage mist
+      to: '#F2F7F3',      // Sage tint
     },
     balanced: {
-      from: '#e2e8f0',    // Slate gray
-      via: '#dbeafe',     // Light blue
-      to: '#f1f5f9',      // Gray tint
+      from: '#F5EDE3',    // Warm parchment
+      via: '#FEECC8',     // Honey cream
+      to: '#FAF5EF',      // Linen cream
     },
     calm: {
-      from: '#bfdbfe',    // Blue
-      via: '#c7d2fe',     // Indigo
-      to: '#ddd6fe',      // Purple tint
+      from: '#D1C8E5',    // Dusty lavender
+      via: '#E8E3F2',     // Light lavender
+      to: '#F5EDE3',      // Warm parchment base
     },
   };
   return gradients[category] || gradients.balanced;

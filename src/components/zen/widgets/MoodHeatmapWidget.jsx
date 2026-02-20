@@ -156,8 +156,8 @@ const MoodHeatmapWidget = ({
               className={`
                 aspect-square rounded-sm
                 ${getMoodColor(day.mood)}
-                ${day.count > 0 ? 'cursor-pointer hover:ring-2 hover:ring-primary-400' : 'cursor-default'}
-                ${day.date.toDateString() === new Date().toDateString() ? 'ring-2 ring-primary-500' : ''}
+                ${day.count > 0 ? 'cursor-pointer hover:ring-2 hover:ring-honey-400' : 'cursor-default'}
+                ${day.date.toDateString() === new Date().toDateString() ? 'ring-2 ring-honey-500' : ''}
                 transition-all
               `}
               style={{
@@ -204,7 +204,7 @@ const MoodHeatmapWidget = ({
                   </div>
                 )}
                 {hoveredDay.count > 0 && (
-                  <div className="text-primary-300 mt-1 text-[10px]">
+                  <div className="text-honey-300 mt-1 text-[10px]">
                     Click to view details
                   </div>
                 )}

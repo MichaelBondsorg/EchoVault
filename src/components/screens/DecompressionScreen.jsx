@@ -24,7 +24,7 @@ const DecompressionScreen = ({ onClose }) => {
     <motion.div
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
-      className="fixed inset-0 bg-gradient-to-b from-primary-800 to-primary-900 z-50 flex flex-col items-center justify-center text-white"
+      className="fixed inset-0 bg-gradient-to-b from-warm-800 to-warm-900 z-50 flex flex-col items-center justify-center text-white"
     >
       <div className="relative mb-8">
         <motion.div
@@ -33,7 +33,7 @@ const DecompressionScreen = ({ onClose }) => {
             opacity: 0.3
           }}
           transition={{ duration: 3, ease: "easeInOut" }}
-          className="absolute inset-0 bg-primary-400 rounded-full blur-xl"
+          className="absolute inset-0 bg-sage-400 rounded-full blur-xl"
         />
         <motion.div
           animate={{
@@ -55,7 +55,7 @@ const DecompressionScreen = ({ onClose }) => {
         {step === 3 && "Hold..."}
         {step === 4 && "Let it go..."}
       </motion.h2>
-      <p className="text-primary-300 font-body">Processing your feelings...</p>
+      <p className="text-warm-300 font-body">Processing your feelings...</p>
 
       {/* Breathing indicator */}
       <div className="mt-8 flex gap-2">
@@ -67,7 +67,7 @@ const DecompressionScreen = ({ onClose }) => {
               opacity: step >= dot ? 1 : 0.3
             }}
             transition={{ duration: 0.3 }}
-            className="w-2 h-2 rounded-full bg-primary-400"
+            className="w-2 h-2 rounded-full bg-sage-400"
           />
         ))}
       </div>

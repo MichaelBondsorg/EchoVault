@@ -155,7 +155,7 @@ const VoiceRecorder = ({ onSave, onSwitch, loading, minimal }) => {
         whileTap={{ scale: 0.95 }}
         animate={rec ? { scale: [1, 1.1, 1] } : {}}
         transition={rec ? { duration: 1.5, repeat: Infinity } : {}}
-        className={`h-16 w-16 rounded-full flex items-center justify-center shadow-soft-lg transition-all ${rec ? 'bg-red-500' : 'bg-primary-600 hover:bg-primary-700'}`}
+        className={`h-16 w-16 rounded-full flex items-center justify-center shadow-soft-lg transition-all ${rec ? 'bg-red-500' : 'bg-terra-500 hover:bg-terra-600'}`}
       >
         {rec ? <Square className="text-white fill-current"/> : <Mic className="text-white" size={32}/>}
       </motion.button>
@@ -164,7 +164,7 @@ const VoiceRecorder = ({ onSave, onSwitch, loading, minimal }) => {
 
   return (
     <div className="fixed bottom-0 w-full bg-white/80 backdrop-blur-sm border-t border-warm-200 p-4 z-20 pb-[max(2rem,env(safe-area-inset-bottom))] shadow-soft-lg">
-      {loading && <div className="absolute inset-0 bg-white/90 flex justify-center items-center z-30 text-primary-600 font-medium"><Loader2 className="animate-spin mr-2"/> Processing...</div>}
+      {loading && <div className="absolute inset-0 bg-white/90 flex justify-center items-center z-30 text-honey-600 font-medium"><Loader2 className="animate-spin mr-2"/> Processing...</div>}
       <div className="flex justify-between items-center max-w-md mx-auto">
         <button onClick={onSwitch} disabled={rec} className="p-3 rounded-full text-warm-400 hover:bg-warm-100"><Keyboard size={24}/></button>
         <motion.button
@@ -173,7 +173,7 @@ const VoiceRecorder = ({ onSave, onSwitch, loading, minimal }) => {
           whileTap={{ scale: 0.95 }}
           animate={rec ? { scale: [1, 1.1, 1] } : {}}
           transition={rec ? { duration: 1.5, repeat: Infinity } : {}}
-          className={`h-16 w-16 rounded-full flex items-center justify-center shadow-soft-lg transition-all ${rec ? 'bg-red-500' : 'bg-primary-600 hover:bg-primary-700'}`}
+          className={`h-16 w-16 rounded-full flex items-center justify-center shadow-soft-lg transition-all ${rec ? 'bg-red-500' : 'bg-terra-500 hover:bg-terra-600'}`}
         >
           {rec ? <Square className="text-white fill-current"/> : <Mic className="text-white" size={32}/>}
         </motion.button>

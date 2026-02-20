@@ -22,12 +22,12 @@ const SanctuaryWalkthrough = ({ isOpen, onComplete, onSkip }) => {
         <div className="relative w-48 h-48 mx-auto">
           {/* Zen-style animated circles */}
           <motion.div
-            className="absolute inset-0 rounded-full bg-gradient-to-br from-primary-200 to-secondary-200 opacity-30"
+            className="absolute inset-0 rounded-full bg-gradient-to-br from-honey-200 to-lavender-200 opacity-30"
             animate={{ scale: [1, 1.1, 1] }}
             transition={{ duration: 4, repeat: Infinity, ease: 'easeInOut' }}
           />
           <motion.div
-            className="absolute inset-4 rounded-full bg-gradient-to-br from-primary-100 to-secondary-100 opacity-50"
+            className="absolute inset-4 rounded-full bg-gradient-to-br from-honey-100 to-lavender-100 opacity-50"
             animate={{ scale: [1, 1.05, 1] }}
             transition={{ duration: 3, repeat: Infinity, ease: 'easeInOut', delay: 0.5 }}
           />
@@ -37,7 +37,7 @@ const SanctuaryWalkthrough = ({ isOpen, onComplete, onSkip }) => {
             animate={{ scale: 1 }}
             transition={{ delay: 0.3, type: 'spring' }}
           >
-            <Sparkles size={48} className="text-primary-500" />
+            <Sparkles size={48} className="text-honey-500" />
           </motion.div>
         </div>
       ),
@@ -56,16 +56,16 @@ const SanctuaryWalkthrough = ({ isOpen, onComplete, onSkip }) => {
           ].map((item, i) => (
             <motion.div
               key={item.label}
-              className={`flex items-center gap-3 p-3 rounded-xl ${item.active ? 'bg-primary-100 border border-primary-200' : 'bg-white/50'}`}
+              className={`flex items-center gap-3 p-3 rounded-xl ${item.active ? 'bg-honey-100 border border-honey-200' : 'bg-white/50'}`}
               initial={{ opacity: 0, x: -20 }}
               animate={{ opacity: 1, x: 0 }}
               transition={{ delay: 0.2 + i * 0.1 }}
             >
-              <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${item.active ? 'bg-primary-500 text-white' : 'bg-warm-100 text-warm-500'}`}>
+              <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${item.active ? 'bg-honey-500 text-white' : 'bg-warm-100 text-warm-500'}`}>
                 <item.icon size={20} />
               </div>
               <div>
-                <p className={`font-medium text-sm ${item.active ? 'text-primary-700' : 'text-warm-700'}`}>{item.label}</p>
+                <p className={`font-medium text-sm ${item.active ? 'text-honey-700' : 'text-warm-700'}`}>{item.label}</p>
                 <p className="text-xs text-warm-400">{item.desc}</p>
               </div>
             </motion.div>
@@ -99,7 +99,7 @@ const SanctuaryWalkthrough = ({ isOpen, onComplete, onSkip }) => {
 
           {/* Add widget animation */}
           <motion.div
-            className="mt-3 p-2 rounded-xl border-2 border-dashed border-primary-300 bg-primary-50/50 flex items-center justify-center gap-2 text-primary-600"
+            className="mt-3 p-2 rounded-xl border-2 border-dashed border-honey-300 bg-honey-50/50 flex items-center justify-center gap-2 text-honey-600"
             initial={{ opacity: 0 }}
             animate={{ opacity: [0, 1, 1, 0.5, 1] }}
             transition={{ delay: 0.8, duration: 2, repeat: Infinity }}
@@ -141,7 +141,7 @@ const SanctuaryWalkthrough = ({ isOpen, onComplete, onSkip }) => {
       >
         {/* Backdrop */}
         <motion.div
-          className="absolute inset-0 bg-gradient-to-br from-primary-900/80 to-secondary-900/80 backdrop-blur-md"
+          className="absolute inset-0 bg-gradient-to-br from-warm-900/80 to-warm-800/80 backdrop-blur-md"
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
         />
@@ -158,7 +158,7 @@ const SanctuaryWalkthrough = ({ isOpen, onComplete, onSkip }) => {
             {screens.map((_, i) => (
               <motion.div
                 key={i}
-                className={`w-2 h-2 rounded-full transition-colors ${i === currentScreen ? 'bg-primary-500' : 'bg-warm-200'}`}
+                className={`w-2 h-2 rounded-full transition-colors ${i === currentScreen ? 'bg-honey-500' : 'bg-warm-200'}`}
                 animate={{ scale: i === currentScreen ? 1.2 : 1 }}
               />
             ))}
@@ -210,7 +210,7 @@ const SanctuaryWalkthrough = ({ isOpen, onComplete, onSkip }) => {
             )}
             <motion.button
               onClick={handleNext}
-              className="flex-1 py-3 px-4 bg-primary-500 hover:bg-primary-600 text-white font-medium rounded-xl flex items-center justify-center gap-2 transition-colors"
+              className="flex-1 py-3 px-4 bg-honey-500 hover:bg-honey-600 text-white font-medium rounded-xl flex items-center justify-center gap-2 transition-colors"
               whileHover={{ scale: 1.02 }}
               whileTap={{ scale: 0.98 }}
             >

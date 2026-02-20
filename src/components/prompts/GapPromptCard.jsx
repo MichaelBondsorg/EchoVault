@@ -129,9 +129,9 @@ export function GapPromptCard({ prompt, userId, onAccept, onDismiss, onSnooze })
               onClick={handleAccept}
               className="
                 flex-1 flex items-center justify-center gap-1.5
-                bg-primary-500/10 hover:bg-primary-500/20
-                dark:bg-primary-400/10 dark:hover:bg-primary-400/20
-                text-primary-600 dark:text-primary-400
+                bg-honey-500/10 hover:bg-honey-500/20
+                dark:bg-honey-400/10 dark:hover:bg-honey-400/20
+                text-honey-600 dark:text-honey-400
                 text-sm font-medium
                 rounded-xl py-2 px-3
                 transition-colors

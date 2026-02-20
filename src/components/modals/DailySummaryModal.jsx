@@ -71,28 +71,28 @@ const DailySummaryModal = ({ date, dayData, onClose, onDelete, onUpdate }) => {
 
         <div className="flex-1 overflow-y-auto p-6 space-y-4">
           {loadingSynthesis ? (
-            <div className="bg-primary-50 p-4 rounded-2xl border border-primary-100 flex items-center gap-3">
-              <Loader2 size={18} className="animate-spin text-primary-500" />
-              <span className="text-sm text-primary-700 font-body">Generating daily summary...</span>
+            <div className="bg-lavender-50 p-4 rounded-2xl border border-lavender-100 flex items-center gap-3">
+              <Loader2 size={18} className="animate-spin text-lavender-500" />
+              <span className="text-sm text-lavender-700 font-body">Generating daily summary...</span>
             </div>
           ) : synthesis && (
             <motion.div
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
-              className="bg-primary-50 p-4 rounded-2xl border border-primary-100"
+              className="bg-lavender-50 p-4 rounded-2xl border border-lavender-100"
             >
-              <div className="flex items-center gap-2 text-primary-700 font-display font-semibold text-xs uppercase mb-2">
+              <div className="flex items-center gap-2 text-lavender-700 font-display font-semibold text-xs uppercase mb-2">
                 <Sparkles size={14} /> Daily Summary
               </div>
-              <p className="text-sm text-primary-900 leading-relaxed font-body">
+              <p className="text-sm text-lavender-900 leading-relaxed font-body">
                 {typeof synthesis === 'string' ? synthesis : synthesis.summary}
               </p>
               {synthesis.bullets && synthesis.bullets.length > 0 && (
-                <div className="mt-3 pt-3 border-t border-primary-200">
-                  <p className="text-xs font-display font-semibold text-primary-800 mb-2 uppercase tracking-wide">
+                <div className="mt-3 pt-3 border-t border-lavender-200">
+                  <p className="text-xs font-display font-semibold text-lavender-800 mb-2 uppercase tracking-wide">
                     Key mood drivers
                   </p>
-                  <ul className="list-disc list-inside space-y-1 text-sm text-primary-900/90 font-body">
+                  <ul className="list-disc list-inside space-y-1 text-sm text-lavender-900/90 font-body">
                     {synthesis.bullets.map((bullet, idx) => (
                       <li key={idx}>{typeof bullet === 'string' ? bullet : bullet.text || JSON.stringify(bullet)}</li>
                     ))}

@@ -138,11 +138,11 @@ const GroundingExercise = ({
 
   const getColorClasses = (color) => {
     const colors = {
-      blue: { bg: 'bg-blue-500', text: 'text-blue-400', ring: 'ring-blue-500' },
-      green: { bg: 'bg-green-500', text: 'text-green-400', ring: 'ring-green-500' },
-      purple: { bg: 'bg-purple-500', text: 'text-purple-400', ring: 'ring-purple-500' },
-      amber: { bg: 'bg-amber-500', text: 'text-amber-400', ring: 'ring-amber-500' },
-      rose: { bg: 'bg-rose-500', text: 'text-rose-400', ring: 'ring-rose-500' }
+      blue: { bg: 'bg-blue-500', text: 'text-blue-400', ring: 'ring-blue-500', focusBorder: 'focus:border-blue-500' },
+      green: { bg: 'bg-green-500', text: 'text-green-400', ring: 'ring-green-500', focusBorder: 'focus:border-green-500' },
+      purple: { bg: 'bg-purple-500', text: 'text-purple-400', ring: 'ring-purple-500', focusBorder: 'focus:border-purple-500' },
+      amber: { bg: 'bg-amber-500', text: 'text-amber-400', ring: 'ring-amber-500', focusBorder: 'focus:border-amber-500' },
+      rose: { bg: 'bg-rose-500', text: 'text-rose-400', ring: 'ring-rose-500', focusBorder: 'focus:border-rose-500' }
     };
     return colors[color] || colors.blue;
   };
@@ -276,7 +276,7 @@ const GroundingExercise = ({
                   className={`
                     flex-1 px-4 py-3 bg-white/10 border-2 border-white/20
                     rounded-xl text-white placeholder-white/40
-                    focus:outline-none focus:border-${currentStep.color}-500
+                    focus:outline-none ${getColorClasses(currentStep.color).focusBorder || 'focus:border-blue-500'}
                     transition-colors
                   `}
                   autoFocus

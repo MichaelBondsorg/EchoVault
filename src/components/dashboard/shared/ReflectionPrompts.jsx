@@ -137,11 +137,11 @@ const ReflectionPrompts = ({ entries, category, onWritePrompt, onVoicePrompt }) 
     <motion.div
       initial={{ opacity: 0, y: -10 }}
       animate={{ opacity: 1, y: 0 }}
-      className="bg-gradient-to-br from-secondary-50 to-primary-50 rounded-2xl border border-secondary-100 p-4 mb-4 relative"
+      className="bg-gradient-to-br from-lavender-50 to-honey-50 rounded-2xl border border-lavender-100 p-4 mb-4 relative"
     >
       {/* Header */}
       <div className="flex items-center justify-between mb-3">
-        <div className="flex items-center gap-2 text-secondary-600">
+        <div className="flex items-center gap-2 text-lavender-600">
           <MessageCircle size={16} />
           <span className="text-xs font-semibold uppercase tracking-wide">Reflect</span>
         </div>
@@ -227,7 +227,7 @@ const ReflectionPrompts = ({ entries, category, onWritePrompt, onVoicePrompt }) 
           {/* Voice button (primary) */}
           <motion.button
             onClick={handleVoice}
-            className="flex items-center gap-2 px-4 py-2 bg-primary-600 hover:bg-primary-700 rounded-xl text-sm font-medium text-white transition-colors shadow-sm"
+            className="flex items-center gap-2 px-4 py-2 bg-terra-500 hover:bg-terra-600 rounded-xl text-sm font-medium text-white transition-colors shadow-sm"
             whileHover={{ scale: 1.02 }}
             whileTap={{ scale: 0.98 }}
           >
