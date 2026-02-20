@@ -98,17 +98,17 @@ const CurrentConditions = ({ compact = false }) => {
     // Compact version for tight spaces
     return (
       <div className="flex items-center gap-2 text-xs">
-        <span className="flex items-center gap-1 bg-blue-50 text-blue-700 px-2 py-1 rounded-full">
+        <span className="flex items-center gap-1 bg-lavender-50 dark:bg-lavender-900/30 text-lavender-700 dark:text-lavender-300 px-2 py-1 rounded-full">
           <WeatherIcon size={12} />
           {weather?.temperature !== undefined && (
             <span className="font-medium">{Math.round(weather.temperature)}°</span>
           )}
           {weather?.conditionLabel && (
-            <span className="text-blue-600">{weather.conditionLabel}</span>
+            <span className="text-lavender-600 dark:text-lavender-400">{weather.conditionLabel}</span>
           )}
         </span>
         {context.daylightRemaining !== null && context.daylightRemaining > 0 && context.daylightRemaining < 3 && (
-          <span className="flex items-center gap-1 text-amber-600">
+          <span className="flex items-center gap-1 text-honey-600 dark:text-honey-400">
             <Sunset size={12} />
             {context.daylightRemaining.toFixed(1)}h left
           </span>
@@ -122,39 +122,39 @@ const CurrentConditions = ({ compact = false }) => {
     <motion.div
       initial={{ opacity: 0, y: -10 }}
       animate={{ opacity: 1, y: 0 }}
-      className="bg-gradient-to-r from-blue-50 to-sky-50 rounded-xl p-3 border border-blue-100"
+      className="bg-gradient-to-r from-lavender-50 to-sage-50 dark:from-lavender-900/30 dark:to-sage-900/30 rounded-xl p-3 border border-lavender-100 dark:border-lavender-800"
     >
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
           {/* Weather Icon & Temp */}
           <div className="flex items-center gap-2">
-            <div className="w-10 h-10 rounded-full bg-white/60 flex items-center justify-center">
-              <WeatherIcon size={22} className="text-blue-600" />
+            <div className="w-10 h-10 rounded-full bg-white/60 dark:bg-hearth-800/60 flex items-center justify-center">
+              <WeatherIcon size={22} className="text-lavender-600 dark:text-lavender-400" />
             </div>
             <div>
               {weather?.temperature !== undefined && (
-                <div className="text-xl font-bold text-blue-800">
+                <div className="text-xl font-bold text-lavender-800 dark:text-lavender-200">
                   {Math.round(weather.temperature)}°
                 </div>
               )}
               {weather?.conditionLabel && (
-                <div className="text-xs text-blue-600">{weather.conditionLabel}</div>
+                <div className="text-xs text-lavender-600 dark:text-lavender-400">{weather.conditionLabel}</div>
               )}
             </div>
           </div>
 
           {/* Sun Times */}
           {sunTimes && (
-            <div className="hidden sm:flex items-center gap-3 text-xs text-warm-500 border-l border-blue-200 pl-3 ml-1">
+            <div className="hidden sm:flex items-center gap-3 text-xs text-warm-500 dark:text-warm-400 border-l border-lavender-200 dark:border-lavender-700 pl-3 ml-1">
               {sunTimes.sunriseLocal && (
                 <span className="flex items-center gap-1">
-                  <Sun size={12} className="text-amber-500" />
+                  <Sun size={12} className="text-honey-500 dark:text-honey-400" />
                   {sunTimes.sunriseLocal}
                 </span>
               )}
               {sunTimes.sunsetLocal && (
                 <span className="flex items-center gap-1">
-                  <Sunset size={12} className="text-orange-500" />
+                  <Sunset size={12} className="text-terra-500 dark:text-terra-400" />
                   {sunTimes.sunsetLocal}
                 </span>
               )}
@@ -164,7 +164,7 @@ const CurrentConditions = ({ compact = false }) => {
 
         {/* Daylight remaining warning */}
         {context.daylightRemaining !== null && context.daylightRemaining > 0 && context.daylightRemaining < 2 && (
-          <div className="text-xs text-amber-600 bg-amber-50 px-2 py-1 rounded-full flex items-center gap-1">
+          <div className="text-xs text-honey-600 dark:text-honey-400 bg-honey-50 dark:bg-honey-900/30 px-2 py-1 rounded-full flex items-center gap-1">
             <Sunset size={12} />
             {context.daylightRemaining.toFixed(1)}h of daylight left
           </div>
@@ -173,7 +173,7 @@ const CurrentConditions = ({ compact = false }) => {
         {/* Refresh button */}
         <button
           onClick={fetchConditions}
-          className="text-blue-400 hover:text-blue-600 transition-colors p-1"
+          className="text-lavender-400 hover:text-lavender-600 dark:text-lavender-500 dark:hover:text-lavender-300 transition-colors p-1"
           title="Refresh conditions"
         >
           <RefreshCw size={14} />

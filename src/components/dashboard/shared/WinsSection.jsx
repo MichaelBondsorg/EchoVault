@@ -89,21 +89,21 @@ const WinsSection = ({ wins = [], daySummary, timeRange = 'week' }) => {
             initial={{ opacity: 0, x: -10 }}
             animate={{ opacity: 1, x: 0 }}
             transition={{ delay: index * 0.05 }}
-            className="p-3 rounded-xl bg-white/60 border border-amber-100"
+            className="p-3 rounded-xl bg-white/60 dark:bg-hearth-800/60 border border-honey-100 dark:border-honey-800"
           >
             <div className="flex items-start gap-2">
-              <Star size={14} className="text-amber-500 mt-0.5 flex-shrink-0" />
+              <Star size={14} className="text-honey-500 dark:text-honey-400 mt-0.5 flex-shrink-0" />
               <div className="flex-1 min-w-0">
-                <p className="text-sm text-amber-800">
+                <p className="text-sm text-honey-800 dark:text-honey-200">
                   {win.text}
                 </p>
                 <div className="flex items-center gap-2 mt-1">
-                  <span className="text-xs text-amber-600 flex items-center gap-1">
+                  <span className="text-xs text-honey-600 dark:text-honey-400 flex items-center gap-1">
                     <Calendar size={10} />
                     {formatDate(win.date)}
                   </span>
                   {win.relatedGoal && (
-                    <span className="text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full">
+                    <span className="text-xs bg-honey-100 dark:bg-honey-900/40 text-honey-700 dark:text-honey-300 px-2 py-0.5 rounded-full">
                       {win.relatedGoal}
                     </span>
                   )}

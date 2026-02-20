@@ -60,7 +60,7 @@ const TasksSection = ({
 
         {/* Show remaining count if truncated */}
         {totalCount > maxDisplay && (
-          <div className="text-xs text-blue-500 text-center pt-2">
+          <div className="text-xs text-lavender-500 dark:text-lavender-400 text-center pt-2">
             +{totalCount - maxDisplay} more task{totalCount - maxDisplay !== 1 ? 's' : ''}
           </div>
         )}

@@ -123,19 +123,19 @@ const PeopleSection = ({ entries, category, shadowFriction = [], onEditPerson })
 
   const getSentimentIcon = (sentiment) => {
     switch (sentiment) {
-      case 'positive': return <TrendingUp size={12} className="text-green-500" />;
-      case 'negative': return <TrendingDown size={12} className="text-red-400" />;
-      case 'mixed': return <AlertTriangle size={12} className="text-amber-500" />;
+      case 'positive': return <TrendingUp size={12} className="text-sage-500 dark:text-sage-400" />;
+      case 'negative': return <TrendingDown size={12} className="text-terra-400 dark:text-terra-300" />;
+      case 'mixed': return <AlertTriangle size={12} className="text-honey-500 dark:text-honey-400" />;
       default: return <Minus size={12} className="text-warm-400" />;
     }
   };
 
   const getSentimentColor = (sentiment) => {
     switch (sentiment) {
-      case 'positive': return 'bg-green-50 border-green-200';
-      case 'negative': return 'bg-red-50 border-red-200';
-      case 'mixed': return 'bg-amber-50 border-amber-200';
-      default: return 'bg-white border-warm-200';
+      case 'positive': return 'bg-sage-50 dark:bg-sage-900/30 border-sage-200 dark:border-sage-800';
+      case 'negative': return 'bg-terra-50 dark:bg-terra-900/30 border-terra-200 dark:border-terra-800';
+      case 'mixed': return 'bg-honey-50 dark:bg-honey-900/30 border-honey-200 dark:border-honey-800';
+      default: return 'bg-white dark:bg-hearth-900 border-warm-200 dark:border-warm-700';
     }
   };
 
@@ -169,10 +169,10 @@ const PeopleSection = ({ entries, category, shadowFriction = [], onEditPerson })
               <div className="flex items-start gap-2 flex-1 min-w-0">
                 {getSentimentIcon(person.overallSentiment)}
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-violet-800 truncate capitalize">
+                  <p className="text-sm font-medium text-lavender-800 dark:text-lavender-200 truncate capitalize">
                     {person.name}
                   </p>
-                  <div className="flex items-center gap-2 text-xs text-violet-600 mt-0.5">
+                  <div className="flex items-center gap-2 text-xs text-lavender-600 dark:text-lavender-400 mt-0.5">
                     <span>{person.mentionCount} mentions</span>
                     <span>·</span>
                     <span>last {formatDate(person.lastMentioned)}</span>
@@ -185,8 +185,8 @@ const PeopleSection = ({ entries, category, shadowFriction = [], onEditPerson })
                 {person.moodDeltaPercent !== null && Math.abs(person.moodDeltaPercent) > 5 && (
                   <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
                     person.moodDeltaPercent > 0
-                      ? 'bg-green-100 text-green-700'
-                      : 'bg-red-100 text-red-700'
+                      ? 'bg-sage-100 dark:bg-sage-900/40 text-sage-700 dark:text-sage-300'
+                      : 'bg-terra-100 dark:bg-terra-900/40 text-terra-700 dark:text-terra-300'
                   }`}>
                     {person.moodDeltaPercent > 0 ? '+' : ''}{person.moodDeltaPercent}%
                   </span>
@@ -199,10 +199,10 @@ const PeopleSection = ({ entries, category, shadowFriction = [], onEditPerson })
                       e.stopPropagation();
                       onEditPerson(person);
                     }}
-                    className="p-1.5 rounded-lg hover:bg-violet-100 transition-colors"
+                    className="p-1.5 rounded-lg hover:bg-lavender-100 dark:hover:bg-lavender-900/40 transition-colors"
                     title="Edit"
                   >
-                    <Pencil size={14} className="text-violet-500" />
+                    <Pencil size={14} className="text-lavender-500 dark:text-lavender-400" />
                   </button>
                 )}
               </div>
@@ -210,8 +210,8 @@ const PeopleSection = ({ entries, category, shadowFriction = [], onEditPerson })
 
             {/* Shadow friction warning */}
             {person.hasFriction && person.frictionPatterns.length > 0 && (
-              <div className="mt-2 pt-2 border-t border-violet-100">
-                <p className="text-xs text-amber-600 flex items-center gap-1">
+              <div className="mt-2 pt-2 border-t border-lavender-100 dark:border-lavender-800">
+                <p className="text-xs text-honey-600 dark:text-honey-400 flex items-center gap-1">
                   <AlertTriangle size={10} />
                   {person.frictionPatterns[0].message || person.frictionPatterns[0].insight}
                 </p>

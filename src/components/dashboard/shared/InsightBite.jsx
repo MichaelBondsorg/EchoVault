@@ -17,35 +17,35 @@ import { Lightbulb, X, TrendingUp, AlertCircle, Star } from 'lucide-react';
 const typeConfig = {
   pattern: {
     icon: TrendingUp,
-    bg: 'bg-purple-50',
-    border: 'border-purple-100',
-    iconBg: 'bg-purple-100',
-    iconColor: 'text-purple-500',
-    textColor: 'text-purple-800'
+    bg: 'bg-lavender-50 dark:bg-lavender-900/30',
+    border: 'border-lavender-100 dark:border-lavender-800',
+    iconBg: 'bg-lavender-100 dark:bg-lavender-900/40',
+    iconColor: 'text-lavender-500 dark:text-lavender-400',
+    textColor: 'text-lavender-800 dark:text-lavender-200'
   },
   warning: {
     icon: AlertCircle,
-    bg: 'bg-amber-50',
-    border: 'border-amber-100',
-    iconBg: 'bg-amber-100',
-    iconColor: 'text-amber-500',
-    textColor: 'text-amber-800'
+    bg: 'bg-honey-50 dark:bg-honey-900/30',
+    border: 'border-honey-100 dark:border-honey-800',
+    iconBg: 'bg-honey-100 dark:bg-honey-900/40',
+    iconColor: 'text-honey-500 dark:text-honey-400',
+    textColor: 'text-honey-800 dark:text-honey-200'
   },
   encouragement: {
     icon: Star,
-    bg: 'bg-green-50',
-    border: 'border-green-100',
-    iconBg: 'bg-green-100',
-    iconColor: 'text-green-500',
-    textColor: 'text-green-800'
+    bg: 'bg-sage-50 dark:bg-sage-900/30',
+    border: 'border-sage-100 dark:border-sage-800',
+    iconBg: 'bg-sage-100 dark:bg-sage-900/40',
+    iconColor: 'text-sage-500 dark:text-sage-400',
+    textColor: 'text-sage-800 dark:text-sage-200'
   },
   default: {
     icon: Lightbulb,
-    bg: 'bg-blue-50',
-    border: 'border-blue-100',
-    iconBg: 'bg-blue-100',
-    iconColor: 'text-blue-500',
-    textColor: 'text-blue-800'
+    bg: 'bg-lavender-50 dark:bg-lavender-900/30',
+    border: 'border-lavender-100 dark:border-lavender-800',
+    iconBg: 'bg-lavender-100 dark:bg-lavender-900/40',
+    iconColor: 'text-lavender-500 dark:text-lavender-400',
+    textColor: 'text-lavender-800 dark:text-lavender-200'
   }
 };
 
@@ -73,7 +73,7 @@ const InsightBite = ({
         {onDismiss && (
           <button
             onClick={onDismiss}
-            className="absolute top-2 right-2 p-1.5 rounded-full hover:bg-white/50 transition-colors text-gray-400 hover:text-gray-600"
+            className="absolute top-2 right-2 p-1.5 rounded-full hover:bg-white/50 dark:hover:bg-hearth-800/50 transition-colors text-warm-400 hover:text-warm-600 dark:text-warm-500 dark:hover:text-warm-300"
             aria-label="Dismiss insight"
           >
             <X size={14} />
@@ -94,7 +94,7 @@ const InsightBite = ({
 
             {/* Entity tag if available */}
             {insight.entity && (
-              <span className="inline-block mt-2 px-2 py-0.5 text-xs rounded-full bg-white/60 text-gray-600">
+              <span className="inline-block mt-2 px-2 py-0.5 text-xs rounded-full bg-white/60 dark:bg-hearth-800/60 text-warm-600 dark:text-warm-400">
                 {insight.entity}
               </span>
             )}
@@ -105,7 +105,7 @@ const InsightBite = ({
         {onShowMore && (
           <button
             onClick={onShowMore}
-            className="mt-3 text-xs font-medium text-gray-500 hover:text-gray-700 transition-colors flex items-center gap-1"
+            className="mt-3 text-xs font-medium text-warm-500 hover:text-warm-700 dark:text-warm-400 dark:hover:text-warm-200 transition-colors flex items-center gap-1"
           >
             <TrendingUp size={12} />
             View all patterns

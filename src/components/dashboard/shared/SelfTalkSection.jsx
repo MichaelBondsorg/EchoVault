@@ -74,21 +74,21 @@ const SelfTalkSection = ({ linguisticShifts = [] }) => {
 
     if (shift.sentiment === 'positive' || isPositive) {
       return {
-        bg: 'bg-green-50 border-green-200',
-        text: 'text-green-800',
-        badge: 'bg-green-100 text-green-700'
+        bg: 'bg-sage-50 dark:bg-sage-900/30 border-sage-200 dark:border-sage-800',
+        text: 'text-sage-800 dark:text-sage-200',
+        badge: 'bg-sage-100 dark:bg-sage-900/40 text-sage-700 dark:text-sage-300'
       };
     } else if (shift.sentiment === 'concerning') {
       return {
-        bg: 'bg-amber-50 border-amber-200',
-        text: 'text-amber-800',
-        badge: 'bg-amber-100 text-amber-700'
+        bg: 'bg-honey-50 dark:bg-honey-900/30 border-honey-200 dark:border-honey-800',
+        text: 'text-honey-800 dark:text-honey-200',
+        badge: 'bg-honey-100 dark:bg-honey-900/40 text-honey-700 dark:text-honey-300'
       };
     }
     return {
-      bg: 'bg-indigo-50 border-indigo-200',
-      text: 'text-indigo-800',
-      badge: 'bg-indigo-100 text-indigo-700'
+      bg: 'bg-lavender-50 dark:bg-lavender-900/30 border-lavender-200 dark:border-lavender-800',
+      text: 'text-lavender-800 dark:text-lavender-200',
+      badge: 'bg-lavender-100 dark:bg-lavender-900/40 text-lavender-700 dark:text-lavender-300'
     };
   };
 
@@ -146,7 +146,7 @@ const SelfTalkSection = ({ linguisticShifts = [] }) => {
         })}
 
         {/* Summary */}
-        <div className="text-xs text-indigo-600 pt-2 border-t border-indigo-100 flex items-center gap-1">
+        <div className="text-xs text-lavender-600 dark:text-lavender-400 pt-2 border-t border-lavender-100 dark:border-lavender-800 flex items-center gap-1">
           <ArrowRight size={10} />
           Based on your last 14 days vs. previous 14 days
         </div>

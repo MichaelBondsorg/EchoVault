@@ -137,11 +137,11 @@ const ReflectionPrompts = ({ entries, category, onWritePrompt, onVoicePrompt }) 
     <motion.div
       initial={{ opacity: 0, y: -10 }}
       animate={{ opacity: 1, y: 0 }}
-      className="bg-gradient-to-br from-lavender-50 to-honey-50 rounded-2xl border border-lavender-100 p-4 mb-4 relative"
+      className="bg-gradient-to-br from-lavender-50 to-honey-50 dark:from-lavender-900/30 dark:to-honey-900/30 rounded-2xl border border-lavender-100 dark:border-lavender-800 p-4 mb-4 relative"
     >
       {/* Header */}
       <div className="flex items-center justify-between mb-3">
-        <div className="flex items-center gap-2 text-lavender-600">
+        <div className="flex items-center gap-2 text-lavender-600 dark:text-lavender-400">
           <MessageCircle size={16} />
           <span className="text-xs font-semibold uppercase tracking-wide">Reflect</span>
         </div>
@@ -157,7 +157,7 @@ const ReflectionPrompts = ({ entries, category, onWritePrompt, onVoicePrompt }) 
           {/* Dismiss button */}
           <button
             onClick={() => dismissQuestion(currentQuestion.question)}
-            className="p-1.5 rounded-full hover:bg-white/50 transition-colors text-warm-400 hover:text-warm-600"
+            className="p-1.5 rounded-full hover:bg-white/50 dark:hover:bg-hearth-800/50 transition-colors text-warm-400 hover:text-warm-600 dark:hover:text-warm-300"
             title="Dismiss this question"
           >
             <X size={14} />
@@ -175,12 +175,12 @@ const ReflectionPrompts = ({ entries, category, onWritePrompt, onVoicePrompt }) 
           transition={{ duration: 0.2 }}
           className="min-h-[60px]"
         >
-          <p className="text-base text-warm-800 font-body leading-relaxed mb-3">
+          <p className="text-base text-warm-800 dark:text-warm-200 font-body leading-relaxed mb-3">
             {currentQuestion.question}
           </p>
 
           {/* Source context */}
-          <p className="text-xs text-warm-400 mb-3">
+          <p className="text-xs text-warm-400 dark:text-warm-500 mb-3">
             From your entry on {currentQuestion.entryDate.toLocaleDateString('en-US', {
               month: 'short',
               day: 'numeric'
@@ -196,13 +196,13 @@ const ReflectionPrompts = ({ entries, category, onWritePrompt, onVoicePrompt }) 
           <div className="flex items-center gap-1">
             <button
               onClick={goPrev}
-              className="p-1.5 rounded-full hover:bg-white/50 transition-colors text-warm-400 hover:text-warm-600"
+              className="p-1.5 rounded-full hover:bg-white/50 dark:hover:bg-hearth-800/50 transition-colors text-warm-400 hover:text-warm-600 dark:hover:text-warm-300"
             >
               <ChevronLeft size={18} />
             </button>
             <button
               onClick={goNext}
-              className="p-1.5 rounded-full hover:bg-white/50 transition-colors text-warm-400 hover:text-warm-600"
+              className="p-1.5 rounded-full hover:bg-white/50 dark:hover:bg-hearth-800/50 transition-colors text-warm-400 hover:text-warm-600 dark:hover:text-warm-300"
             >
               <ChevronRight size={18} />
             </button>
@@ -216,7 +216,7 @@ const ReflectionPrompts = ({ entries, category, onWritePrompt, onVoicePrompt }) 
           {/* Write button (secondary) */}
           <motion.button
             onClick={handleWrite}
-            className="flex items-center gap-1.5 px-3 py-2 bg-white/50 hover:bg-white/70 rounded-xl text-xs font-medium text-warm-500 transition-colors"
+            className="flex items-center gap-1.5 px-3 py-2 bg-white/50 dark:bg-hearth-800/50 hover:bg-white/70 dark:hover:bg-hearth-800/70 rounded-xl text-xs font-medium text-warm-500 dark:text-warm-400 transition-colors"
             whileHover={{ scale: 1.02 }}
             whileTap={{ scale: 0.98 }}
           >
@@ -227,7 +227,7 @@ const ReflectionPrompts = ({ entries, category, onWritePrompt, onVoicePrompt }) 
           {/* Voice button (primary) */}
           <motion.button
             onClick={handleVoice}
-            className="flex items-center gap-2 px-4 py-2 bg-terra-500 hover:bg-terra-600 rounded-xl text-sm font-medium text-white transition-colors shadow-sm"
+            className="flex items-center gap-2 px-4 py-2 bg-terra-500 dark:bg-terra-600 hover:bg-terra-600 dark:hover:bg-terra-700 rounded-xl text-sm font-medium text-white transition-colors shadow-sm"
             whileHover={{ scale: 1.02 }}
             whileTap={{ scale: 0.98 }}
           >

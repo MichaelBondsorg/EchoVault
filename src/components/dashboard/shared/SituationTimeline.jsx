@@ -224,7 +224,7 @@ const SituationTimeline = ({ entries, category, onEntryClick, userId, onResolveS
             initial={{ opacity: 0, x: -10 }}
             animate={{ opacity: 1, x: 0 }}
             transition={{ delay: index * 0.05 }}
-            className="bg-white/60 rounded-xl border border-indigo-100 overflow-hidden"
+            className="bg-white/60 dark:bg-hearth-800/60 rounded-xl border border-lavender-100 dark:border-lavender-800 overflow-hidden"
           >
             {/* Situation Header */}
             <div className="flex items-center">
@@ -237,10 +237,10 @@ const SituationTimeline = ({ entries, category, onEntryClick, userId, onResolveS
                 <div className="flex items-center gap-2 flex-1 min-w-0">
                   <div className={`w-2 h-2 rounded-full ${getMoodColor(situation.avgMood)}`} />
                   <div className="text-left flex-1 min-w-0">
-                    <p className="text-sm font-medium text-indigo-800 truncate">
+                    <p className="text-sm font-medium text-lavender-800 dark:text-lavender-200 truncate">
                       {situation.displayName}
                     </p>
-                    <div className="flex items-center gap-2 text-xs text-indigo-600">
+                    <div className="flex items-center gap-2 text-xs text-lavender-600 dark:text-lavender-400">
                       <span className="flex items-center gap-1">
                         <MessageSquare size={10} />
                         {situation.entries.length} entr{situation.entries.length === 1 ? 'y' : 'ies'}
@@ -256,7 +256,7 @@ const SituationTimeline = ({ entries, category, onEntryClick, userId, onResolveS
                   animate={{ rotate: expandedSituation === situation.normalizedKey ? 90 : 0 }}
                   transition={{ duration: 0.2 }}
                 >
-                  <ChevronRight size={16} className="text-indigo-400" />
+                  <ChevronRight size={16} className="text-lavender-400 dark:text-lavender-500" />
                 </motion.div>
               </button>
 
@@ -265,7 +265,7 @@ const SituationTimeline = ({ entries, category, onEntryClick, userId, onResolveS
                 onClick={() => setResolvingStory(
                   resolvingStory === situation.normalizedKey ? null : situation.normalizedKey
                 )}
-                className="p-2 mr-2 rounded-lg hover:bg-indigo-100 text-indigo-400 hover:text-indigo-600 transition-colors"
+                className="p-2 mr-2 rounded-lg hover:bg-lavender-100 dark:hover:bg-lavender-900/40 text-lavender-400 dark:text-lavender-500 hover:text-lavender-600 dark:hover:text-lavender-300 transition-colors"
                 title="Mark as resolved"
               >
                 <Check size={14} />
@@ -281,24 +281,24 @@ const SituationTimeline = ({ entries, category, onEntryClick, userId, onResolveS
                   exit={{ height: 0, opacity: 0 }}
                   className="overflow-hidden"
                 >
-                  <div className="px-3 pb-3 pt-1 border-t border-indigo-100 bg-indigo-50/50">
-                    <p className="text-xs text-indigo-700 mb-2">Mark "{situation.displayName}" as resolved?</p>
+                  <div className="px-3 pb-3 pt-1 border-t border-lavender-100 dark:border-lavender-800 bg-lavender-50/50 dark:bg-lavender-900/20">
+                    <p className="text-xs text-lavender-700 dark:text-lavender-300 mb-2">Mark "{situation.displayName}" as resolved?</p>
                     <div className="flex gap-2">
                       <button
                         onClick={() => handleResolve(situation.normalizedKey, false)}
-                        className="px-3 py-1.5 text-xs bg-indigo-100 hover:bg-indigo-200 text-indigo-700 rounded-lg transition-colors"
+                        className="px-3 py-1.5 text-xs bg-lavender-100 dark:bg-lavender-900/40 hover:bg-lavender-200 dark:hover:bg-lavender-800/50 text-lavender-700 dark:text-lavender-300 rounded-lg transition-colors"
                       >
                         Hide for now
                       </button>
                       <button
                         onClick={() => handleResolve(situation.normalizedKey, true)}
-                        className="px-3 py-1.5 text-xs bg-green-100 hover:bg-green-200 text-green-700 rounded-lg transition-colors"
+                        className="px-3 py-1.5 text-xs bg-sage-100 dark:bg-sage-900/40 hover:bg-sage-200 dark:hover:bg-sage-800/50 text-sage-700 dark:text-sage-300 rounded-lg transition-colors"
                       >
                         Resolved
                       </button>
                       <button
                         onClick={() => setResolvingStory(null)}
-                        className="px-3 py-1.5 text-xs text-indigo-500 hover:text-indigo-700 transition-colors"
+                        className="px-3 py-1.5 text-xs text-lavender-500 dark:text-lavender-400 hover:text-lavender-700 dark:hover:text-lavender-300 transition-colors"
                       >
                         Cancel
                       </button>
@@ -318,7 +318,7 @@ const SituationTimeline = ({ entries, category, onEntryClick, userId, onResolveS
                   className="overflow-hidden"
                 >
                   <div className="px-3 pb-3">
-                    <div className="relative pl-4 border-l-2 border-indigo-200 space-y-2">
+                    <div className="relative pl-4 border-l-2 border-lavender-200 dark:border-lavender-700 space-y-2">
                       {situation.entries.map((entry, i) => (
                         <motion.div
                           key={entry.id}
@@ -326,18 +326,18 @@ const SituationTimeline = ({ entries, category, onEntryClick, userId, onResolveS
                           animate={{ opacity: 1, x: 0 }}
                           transition={{ delay: i * 0.03 }}
                           onClick={() => onEntryClick?.(entry.id)}
-                          className="relative cursor-pointer hover:bg-indigo-50 rounded-lg p-2 -ml-4 pl-4 transition-colors"
+                          className="relative cursor-pointer hover:bg-lavender-50 dark:hover:bg-lavender-900/20 rounded-lg p-2 -ml-4 pl-4 transition-colors"
                         >
                           {/* Timeline dot */}
-                          <div className={`absolute left-[-5px] top-3 w-2 h-2 rounded-full ${getMoodColor(entry.mood)} border-2 border-white`} />
+                          <div className={`absolute left-[-5px] top-3 w-2 h-2 rounded-full ${getMoodColor(entry.mood)} border-2 border-white dark:border-hearth-900`} />
 
-                          <p className="text-xs text-indigo-500 mb-0.5">
+                          <p className="text-xs text-lavender-500 dark:text-lavender-400 mb-0.5">
                             {formatDate(entry.date)}
                           </p>
-                          <p className="text-sm text-indigo-800 font-medium line-clamp-1">
+                          <p className="text-sm text-lavender-800 dark:text-lavender-200 font-medium line-clamp-1">
                             {entry.title}
                           </p>
-                          <p className="text-xs text-indigo-600 line-clamp-2 mt-0.5">
+                          <p className="text-xs text-lavender-600 dark:text-lavender-400 line-clamp-2 mt-0.5">
                             {entry.text}
                           </p>
                         </motion.div>
@@ -354,7 +354,7 @@ const SituationTimeline = ({ entries, category, onEntryClick, userId, onResolveS
         {resolvedStories.size > 0 && (
           <button
             onClick={handleClearAllResolved}
-            className="w-full text-xs text-indigo-500 hover:text-indigo-700 py-2 text-center transition-colors"
+            className="w-full text-xs text-lavender-500 dark:text-lavender-400 hover:text-lavender-700 dark:hover:text-lavender-300 py-2 text-center transition-colors"
           >
             {resolvedStories.size} resolved stor{resolvedStories.size === 1 ? 'y' : 'ies'} hidden · Click to restore
           </button>

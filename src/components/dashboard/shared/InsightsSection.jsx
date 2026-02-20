@@ -131,21 +131,21 @@ const InsightsSection = ({ patterns, onShowMore }) => {
   if (sortedInsights.length === 0) return null;
 
   const colorClasses = {
-    amber: 'bg-amber-50 border-amber-200 text-amber-800',
-    green: 'bg-green-50 border-green-200 text-green-800',
-    indigo: 'bg-indigo-50 border-indigo-200 text-indigo-800',
-    violet: 'bg-violet-50 border-violet-200 text-violet-800',
-    rose: 'bg-rose-50 border-rose-200 text-rose-800',
-    blue: 'bg-blue-50 border-blue-200 text-blue-800'
+    amber: 'bg-honey-50 dark:bg-honey-900/30 border-honey-200 dark:border-honey-800 text-honey-800 dark:text-honey-200',
+    green: 'bg-sage-50 dark:bg-sage-900/30 border-sage-200 dark:border-sage-800 text-sage-800 dark:text-sage-200',
+    indigo: 'bg-lavender-50 dark:bg-lavender-900/30 border-lavender-200 dark:border-lavender-800 text-lavender-800 dark:text-lavender-200',
+    violet: 'bg-lavender-50 dark:bg-lavender-900/30 border-lavender-200 dark:border-lavender-800 text-lavender-800 dark:text-lavender-200',
+    rose: 'bg-terra-50 dark:bg-terra-900/30 border-terra-200 dark:border-terra-800 text-terra-800 dark:text-terra-200',
+    blue: 'bg-lavender-50 dark:bg-lavender-900/30 border-lavender-200 dark:border-lavender-800 text-lavender-800 dark:text-lavender-200'
   };
 
   const iconColorClasses = {
-    amber: 'text-amber-500 bg-amber-100',
-    green: 'text-green-500 bg-green-100',
-    indigo: 'text-indigo-500 bg-indigo-100',
-    violet: 'text-violet-500 bg-violet-100',
-    rose: 'text-rose-500 bg-rose-100',
-    blue: 'text-blue-500 bg-blue-100'
+    amber: 'text-honey-500 dark:text-honey-400 bg-honey-100 dark:bg-honey-900/40',
+    green: 'text-sage-500 dark:text-sage-400 bg-sage-100 dark:bg-sage-900/40',
+    indigo: 'text-lavender-500 dark:text-lavender-400 bg-lavender-100 dark:bg-lavender-900/40',
+    violet: 'text-lavender-500 dark:text-lavender-400 bg-lavender-100 dark:bg-lavender-900/40',
+    rose: 'text-terra-500 dark:text-terra-400 bg-terra-100 dark:bg-terra-900/40',
+    blue: 'text-lavender-500 dark:text-lavender-400 bg-lavender-100 dark:bg-lavender-900/40'
   };
 
   return (
@@ -182,7 +182,7 @@ const InsightsSection = ({ patterns, onShowMore }) => {
         {onShowMore && (
           <button
             onClick={onShowMore}
-            className="w-full text-xs text-violet-600 hover:text-violet-800 py-2 text-center transition-colors flex items-center justify-center gap-1"
+            className="w-full text-xs text-lavender-600 dark:text-lavender-400 hover:text-lavender-800 dark:hover:text-lavender-200 py-2 text-center transition-colors flex items-center justify-center gap-1"
           >
             <Sparkles size={12} />
             View all patterns

@@ -142,7 +142,7 @@ const QuickStatsBar = ({ entries, category }) => {
     <motion.div
       initial={{ opacity: 0, y: -10 }}
       animate={{ opacity: 1, y: 0 }}
-      className="bg-white/80 backdrop-blur-sm rounded-2xl p-3 border border-warm-100 shadow-soft mb-4"
+      className="bg-white/80 dark:bg-hearth-900/80 backdrop-blur-sm rounded-2xl p-3 border border-warm-100 dark:border-warm-800 shadow-soft mb-4"
     >
       <div className="flex items-center justify-between gap-4">
         {/* Mood Trend */}
@@ -159,11 +159,11 @@ const QuickStatsBar = ({ entries, category }) => {
         {/* Journaling Streak */}
         {stats.streak > 0 && (
           <div className="flex items-center gap-2">
-            <div className="p-1.5 rounded-lg bg-amber-50">
-              <Flame size={14} className="text-amber-500" />
+            <div className="p-1.5 rounded-lg bg-honey-50 dark:bg-honey-900/30">
+              <Flame size={14} className="text-honey-500 dark:text-honey-400" />
             </div>
             <div>
-              <p className="text-xs font-semibold text-amber-600">{stats.streak} day{stats.streak !== 1 ? 's' : ''}</p>
+              <p className="text-xs font-semibold text-honey-600 dark:text-honey-400">{stats.streak} day{stats.streak !== 1 ? 's' : ''}</p>
               <p className="text-[10px] text-warm-400">streak</p>
             </div>
           </div>
@@ -178,13 +178,13 @@ const QuickStatsBar = ({ entries, category }) => {
             </div>
           )}
           {stats.distribution.vent > 0 && (
-            <div className="flex items-center gap-1 px-2 py-1 rounded-full bg-rose-50 text-rose-600">
+            <div className="flex items-center gap-1 px-2 py-1 rounded-full bg-terra-50 dark:bg-terra-900/30 text-terra-600 dark:text-terra-400">
               <Wind size={10} />
               <span className="text-[10px] font-medium">{stats.distribution.vent}</span>
             </div>
           )}
           {stats.distribution.mixed > 0 && (
-            <div className="flex items-center gap-1 px-2 py-1 rounded-full bg-teal-50 text-teal-600">
+            <div className="flex items-center gap-1 px-2 py-1 rounded-full bg-sage-50 dark:bg-sage-900/30 text-sage-600 dark:text-sage-400">
               <CheckSquare size={10} />
               <span className="text-[10px] font-medium">{stats.distribution.mixed}</span>
             </div>

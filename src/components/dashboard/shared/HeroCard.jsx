@@ -16,36 +16,36 @@ import { Sun, Moon, Cloud, Heart, Mic, Sparkles } from 'lucide-react';
 
 const modeStyles = {
   morning: {
-    gradient: 'from-amber-50 via-orange-50 to-yellow-50',
-    border: 'border-amber-200',
+    gradient: 'from-honey-50 via-honey-100 to-honey-50 dark:from-honey-900/30 dark:via-honey-900/20 dark:to-honey-900/30',
+    border: 'border-honey-200 dark:border-honey-800',
     icon: Sun,
-    iconColor: 'text-amber-500',
-    titleColor: 'text-amber-900',
-    subtitleColor: 'text-amber-700'
+    iconColor: 'text-honey-500 dark:text-honey-400',
+    titleColor: 'text-honey-900 dark:text-honey-100',
+    subtitleColor: 'text-honey-700 dark:text-honey-300'
   },
   midday: {
-    gradient: 'from-sky-50 via-blue-50 to-indigo-50',
-    border: 'border-blue-200',
+    gradient: 'from-sage-50 via-lavender-50 to-sage-50 dark:from-sage-900/30 dark:via-lavender-900/20 dark:to-sage-900/30',
+    border: 'border-sage-200 dark:border-sage-800',
     icon: Cloud,
-    iconColor: 'text-blue-500',
-    titleColor: 'text-blue-900',
-    subtitleColor: 'text-blue-700'
+    iconColor: 'text-sage-500 dark:text-sage-400',
+    titleColor: 'text-sage-900 dark:text-sage-100',
+    subtitleColor: 'text-sage-700 dark:text-sage-300'
   },
   evening: {
-    gradient: 'from-violet-50 via-purple-50 to-indigo-50',
-    border: 'border-violet-200',
+    gradient: 'from-lavender-50 via-lavender-100 to-lavender-50 dark:from-lavender-900/30 dark:via-lavender-900/20 dark:to-lavender-900/30',
+    border: 'border-lavender-200 dark:border-lavender-800',
     icon: Moon,
-    iconColor: 'text-violet-500',
-    titleColor: 'text-violet-900',
-    subtitleColor: 'text-violet-700'
+    iconColor: 'text-lavender-500 dark:text-lavender-400',
+    titleColor: 'text-lavender-900 dark:text-lavender-100',
+    subtitleColor: 'text-lavender-700 dark:text-lavender-300'
   },
   shelter: {
-    gradient: 'from-rose-50 via-pink-50 to-warm-50',
-    border: 'border-rose-200',
+    gradient: 'from-terra-50 via-warm-50 to-terra-50 dark:from-terra-900/30 dark:via-hearth-900/50 dark:to-terra-900/30',
+    border: 'border-terra-200 dark:border-terra-800',
     icon: Heart,
-    iconColor: 'text-rose-400',
-    titleColor: 'text-rose-800',
-    subtitleColor: 'text-rose-600'
+    iconColor: 'text-terra-400 dark:text-terra-300',
+    titleColor: 'text-terra-800 dark:text-terra-200',
+    subtitleColor: 'text-terra-600 dark:text-terra-400'
   }
 };
 
@@ -70,7 +70,7 @@ const HeroCard = ({
     >
       {/* Header with icon */}
       <div className="flex items-start gap-3 mb-3">
-        <div className={`p-2 rounded-full bg-white/60 ${style.iconColor}`}>
+        <div className={`p-2 rounded-full bg-white/60 dark:bg-hearth-800/60 ${style.iconColor}`}>
           <Icon size={20} />
         </div>
         <div className="flex-1">
@@ -103,7 +103,7 @@ const HeroCard = ({
         <motion.button
           onClick={onAction}
           className={`mt-4 w-full flex items-center justify-center gap-2 py-3 px-4 rounded-xl
-            bg-white/70 hover:bg-white/90 ${style.titleColor} font-medium text-sm
+            bg-white/70 hover:bg-white/90 dark:bg-hearth-800/70 dark:hover:bg-hearth-800/90 ${style.titleColor} font-medium text-sm
             border ${style.border} transition-all shadow-sm hover:shadow-md`}
           whileHover={{ scale: 1.01 }}
           whileTap={{ scale: 0.99 }}

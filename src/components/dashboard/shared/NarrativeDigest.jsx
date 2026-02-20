@@ -103,7 +103,7 @@ const NarrativeDigest = ({ userId, category, onDismiss }) => {
       <motion.div
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
-        className="bg-gradient-to-br from-honey-50 to-lavender-50 rounded-2xl p-6 border border-honey-100"
+        className="bg-gradient-to-br from-honey-50 to-lavender-50 dark:from-honey-900/30 dark:to-lavender-900/30 rounded-2xl p-6 border border-honey-100 dark:border-honey-800"
       >
         <div className="flex items-center gap-2 text-honey-400">
           <RefreshCw size={16} className="animate-spin" />
@@ -122,22 +122,22 @@ const NarrativeDigest = ({ userId, category, onDismiss }) => {
       initial={{ opacity: 0, y: -10 }}
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: -10 }}
-      className="bg-gradient-to-br from-honey-50 via-white to-lavender-50 rounded-2xl border border-honey-100 overflow-hidden mb-4 shadow-soft"
+      className="bg-gradient-to-br from-honey-50 via-white to-lavender-50 dark:from-honey-900/30 dark:via-hearth-900 dark:to-lavender-900/30 rounded-2xl border border-honey-100 dark:border-honey-800 overflow-hidden mb-4 shadow-soft"
     >
       {/* Header */}
-      <div className="flex items-center justify-between p-4 border-b border-honey-100/50">
+      <div className="flex items-center justify-between p-4 border-b border-honey-100/50 dark:border-honey-800/50">
         <button
           onClick={() => setIsExpanded(!isExpanded)}
           className="flex items-center gap-3 flex-1"
         >
-          <div className="p-2 rounded-xl bg-gradient-to-br from-honey-100 to-lavender-100">
+          <div className="p-2 rounded-xl bg-gradient-to-br from-honey-100 to-lavender-100 dark:from-honey-900/40 dark:to-lavender-900/40">
             <BookOpen size={18} className="text-honey-600" />
           </div>
           <div className="text-left">
-            <h3 className="text-sm font-display font-semibold text-warm-800">
+            <h3 className="text-sm font-display font-semibold text-warm-800 dark:text-warm-200">
               Your Week
             </h3>
-            <p className="text-xs text-warm-500">
+            <p className="text-xs text-warm-500 dark:text-warm-400">
               {digest.mood?.arc || 'Weekly narrative'}
               {digest.generatedAt && ` · ${formatRelativeTime(digest.generatedAt)}`}
             </p>
@@ -148,14 +148,14 @@ const NarrativeDigest = ({ userId, category, onDismiss }) => {
           <motion.button
             onClick={() => setIsExpanded(!isExpanded)}
             animate={{ rotate: isExpanded ? 180 : 0 }}
-            className="p-1.5 hover:bg-white/60 rounded-lg transition-colors"
+            className="p-1.5 hover:bg-white/60 dark:hover:bg-hearth-800/60 rounded-lg transition-colors"
           >
             <ChevronDown size={18} className="text-warm-400" />
           </motion.button>
           {onDismiss && (
             <button
               onClick={onDismiss}
-              className="p-1.5 hover:bg-white/60 rounded-lg transition-colors"
+              className="p-1.5 hover:bg-white/60 dark:hover:bg-hearth-800/60 rounded-lg transition-colors"
             >
               <X size={16} className="text-warm-400" />
             </button>
@@ -177,7 +177,7 @@ const NarrativeDigest = ({ userId, category, onDismiss }) => {
               {/* Main narrative */}
               <div className="prose prose-warm prose-sm max-w-none">
                 {digest.narrative?.split('\n\n').map((paragraph, i) => (
-                  <p key={i} className="text-warm-700 font-body leading-relaxed mb-3 last:mb-0">
+                  <p key={i} className="text-warm-700 dark:text-warm-300 font-body leading-relaxed mb-3 last:mb-0">
                     {paragraph}
                   </p>
                 ))}
@@ -185,16 +185,16 @@ const NarrativeDigest = ({ userId, category, onDismiss }) => {
 
               {/* Key patterns mentioned (optional) */}
               {digest.highlightedPatterns?.length > 0 && (
-                <div className="mt-4 pt-4 border-t border-honey-100/50">
+                <div className="mt-4 pt-4 border-t border-honey-100/50 dark:border-honey-800/50">
                   <div className="flex items-center gap-2 mb-2">
                     <Sparkles size={12} className="text-lavender-500" />
-                    <span className="text-xs font-medium text-warm-500">Key patterns this week</span>
+                    <span className="text-xs font-medium text-warm-500 dark:text-warm-400">Key patterns this week</span>
                   </div>
                   <div className="flex flex-wrap gap-2">
                     {digest.highlightedPatterns.slice(0, 4).map((pattern, i) => (
                       <span
                         key={i}
-                        className="px-2.5 py-1 text-xs bg-white/70 rounded-full text-warm-600 border border-warm-100"
+                        className="px-2.5 py-1 text-xs bg-white/70 dark:bg-hearth-800/70 rounded-full text-warm-600 dark:text-warm-400 border border-warm-100 dark:border-warm-700"
                       >
                         {pattern}
                       </span>
@@ -205,8 +205,8 @@ const NarrativeDigest = ({ userId, category, onDismiss }) => {
 
               {/* Forward-looking note (optional) */}
               {digest.lookAhead && (
-                <div className="mt-4 p-3 bg-gradient-to-r from-lavender-50 to-honey-50 rounded-xl">
-                  <p className="text-sm text-warm-600 font-body italic">
+                <div className="mt-4 p-3 bg-gradient-to-r from-lavender-50 to-honey-50 dark:from-lavender-900/30 dark:to-honey-900/30 rounded-xl">
+                  <p className="text-sm text-warm-600 dark:text-warm-400 font-body italic">
                     {digest.lookAhead}
                   </p>
                 </div>
@@ -214,8 +214,8 @@ const NarrativeDigest = ({ userId, category, onDismiss }) => {
             </div>
 
             {/* Footer */}
-            <div className="px-5 py-3 bg-warm-50/50 border-t border-warm-100/50">
-              <p className="text-xs text-warm-400 text-center font-body">
+            <div className="px-5 py-3 bg-warm-50/50 dark:bg-hearth-900/50 border-t border-warm-100/50 dark:border-warm-800/50">
+              <p className="text-xs text-warm-400 dark:text-warm-500 text-center font-body">
                 {digest.entryCount} entries analyzed · Week of {formatWeekOf(digest.weekOf)}
               </p>
             </div>

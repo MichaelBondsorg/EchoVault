@@ -158,7 +158,7 @@ const GoalsProgress = ({ entries, category, userId }) => {
     switch (status) {
       case 'achieved': return <Check size={12} className="text-mood-great" />;
       case 'progress': return <TrendingUp size={12} className="text-honey-500" />;
-      case 'struggling': return <AlertTriangle size={12} className="text-amber-500" />;
+      case 'struggling': return <AlertTriangle size={12} className="text-honey-500 dark:text-honey-400" />;
       case 'abandoned': return <Pause size={12} className="text-warm-400" />;
       default: return <Target size={12} className="text-honey-400" />;
     }
@@ -166,11 +166,11 @@ const GoalsProgress = ({ entries, category, userId }) => {
 
   const getStatusColor = (status) => {
     switch (status) {
-      case 'achieved': return 'bg-green-50 border-green-200 text-green-700';
-      case 'progress': return 'bg-honey-50 border-honey-200 text-honey-700';
-      case 'struggling': return 'bg-amber-50 border-amber-200 text-amber-700';
-      case 'abandoned': return 'bg-warm-100 border-warm-200 text-warm-500';
-      default: return 'bg-white border-warm-200 text-warm-700';
+      case 'achieved': return 'bg-sage-50 dark:bg-sage-900/30 border-sage-200 dark:border-sage-800 text-sage-700 dark:text-sage-300';
+      case 'progress': return 'bg-honey-50 dark:bg-honey-900/30 border-honey-200 dark:border-honey-800 text-honey-700 dark:text-honey-300';
+      case 'struggling': return 'bg-honey-50 dark:bg-honey-900/30 border-honey-200 dark:border-honey-800 text-honey-700 dark:text-honey-300';
+      case 'abandoned': return 'bg-warm-100 dark:bg-warm-800 border-warm-200 dark:border-warm-700 text-warm-500 dark:text-warm-400';
+      default: return 'bg-white dark:bg-hearth-900 border-warm-200 dark:border-warm-700 text-warm-700 dark:text-warm-300';
     }
   };
 
@@ -252,7 +252,7 @@ const GoalsProgress = ({ entries, category, userId }) => {
         ))}
 
         {/* Summary footer */}
-        <div className="text-xs text-blue-600 pt-2 border-t border-blue-100">
+        <div className="text-xs text-lavender-600 dark:text-lavender-400 pt-2 border-t border-lavender-100 dark:border-lavender-800">
           {activeGoals.length} active{completedGoals.length > 0 ? ` · ${completedGoals.length} achieved` : ''}
         </div>
       </div>

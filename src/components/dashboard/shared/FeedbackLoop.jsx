@@ -80,8 +80,8 @@ const FeedbackLoop = ({
       <motion.div
         className={`flex items-start gap-3 p-3 rounded-xl transition-all ${
           isCompleting
-            ? 'bg-green-50 border border-green-100'
-            : 'bg-white border border-gray-100 hover:border-blue-200 hover:shadow-sm'
+            ? 'bg-sage-50 dark:bg-sage-900/30 border border-sage-100 dark:border-sage-800'
+            : 'bg-white dark:bg-hearth-900 border border-warm-100 dark:border-warm-700 hover:border-lavender-200 dark:hover:border-lavender-700 hover:shadow-sm'
         }`}
         animate={isCompleting ? { opacity: 0.7 } : { opacity: 1 }}
         transition={{ duration: 0.3 }}
@@ -93,8 +93,8 @@ const FeedbackLoop = ({
           disabled={isCompleting || disabled}
           className={`mt-0.5 flex-shrink-0 w-5 h-5 rounded-full border-2 flex items-center justify-center transition-all ${
             isCompleting
-              ? 'bg-green-500 border-green-500'
-              : 'border-blue-300 hover:border-blue-500 hover:bg-blue-50'
+              ? 'bg-sage-500 dark:bg-sage-600 border-sage-500 dark:border-sage-600'
+              : 'border-lavender-300 dark:border-lavender-600 hover:border-lavender-500 hover:bg-lavender-50 dark:hover:bg-lavender-900/30'
           }`}
         >
           <AnimatePresence>
@@ -113,7 +113,7 @@ const FeedbackLoop = ({
         {/* Task content */}
         <div className="flex-1 min-w-0 relative">
           <span className={`text-sm font-body block ${
-            isCompleting ? 'text-gray-400' : 'text-gray-700'
+            isCompleting ? 'text-warm-400 dark:text-warm-500' : 'text-warm-700 dark:text-warm-300'
           }`}>
             {taskText}
           </span>
@@ -122,7 +122,7 @@ const FeedbackLoop = ({
           <AnimatePresence>
             {isCompleting && (
               <motion.div
-                className="absolute left-0 top-1/2 h-0.5 bg-green-400 rounded"
+                className="absolute left-0 top-1/2 h-0.5 bg-sage-400 dark:bg-sage-500 rounded"
                 initial={{ width: 0 }}
                 animate={{ width: '100%' }}
                 transition={{ duration: 0.4, ease: 'easeOut' }}
@@ -133,12 +133,12 @@ const FeedbackLoop = ({
           {/* Badges */}
           <div className="flex items-center gap-2 mt-1">
             {isCarriedForward && (
-              <span className="text-xs text-blue-500 bg-blue-50 px-2 py-0.5 rounded-full">
+              <span className="text-xs text-lavender-500 dark:text-lavender-400 bg-lavender-50 dark:bg-lavender-900/30 px-2 py-0.5 rounded-full">
                 from yesterday
               </span>
             )}
             {recurrence && (
-              <span className="text-xs text-purple-500 bg-purple-50 px-2 py-0.5 rounded-full flex items-center gap-1">
+              <span className="text-xs text-lavender-500 dark:text-lavender-400 bg-lavender-50 dark:bg-lavender-900/30 px-2 py-0.5 rounded-full flex items-center gap-1">
                 <RefreshCw size={10} />
                 {recurrence.description || recurrence.pattern || recurrence}
               </span>
@@ -151,7 +151,7 @@ const FeedbackLoop = ({
       <AnimatePresence>
         {showToast && (
           <motion.div
-            className="absolute -top-12 left-1/2 transform -translate-x-1/2 bg-green-600 text-white text-sm px-4 py-2 rounded-full shadow-lg flex items-center gap-2 whitespace-nowrap z-10"
+            className="absolute -top-12 left-1/2 transform -translate-x-1/2 bg-sage-600 dark:bg-sage-700 text-white text-sm px-4 py-2 rounded-full shadow-lg flex items-center gap-2 whitespace-nowrap z-10"
             initial={{ opacity: 0, y: 10, scale: 0.9 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: -10, scale: 0.9 }}

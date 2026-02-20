@@ -172,7 +172,7 @@ const WeeklyDigest = ({ entries, category, userId }) => {
       case 'upward': return <TrendingUp size={14} className="text-mood-great" />;
       case 'downward': return <TrendingDown size={14} className="text-accent" />;
       case 'positive': return <Sparkles size={14} className="text-mood-great" />;
-      case 'challenging': return <Zap size={14} className="text-amber-500" />;
+      case 'challenging': return <Zap size={14} className="text-honey-500 dark:text-honey-400" />;
       default: return <Minus size={14} className="text-warm-400" />;
     }
   };
@@ -191,12 +191,12 @@ const WeeklyDigest = ({ entries, category, userId }) => {
     switch (weekData.moodArc) {
       case 'upward':
       case 'positive':
-        return 'from-green-50 to-emerald-50 border-green-200';
+        return 'from-sage-50 to-sage-100 dark:from-sage-900/30 dark:to-sage-800/30 border-sage-200 dark:border-sage-800';
       case 'downward':
       case 'challenging':
-        return 'from-amber-50 to-orange-50 border-amber-200';
+        return 'from-honey-50 to-terra-50 dark:from-honey-900/30 dark:to-terra-900/30 border-honey-200 dark:border-honey-800';
       default:
-        return 'from-honey-50 to-lavender-50 border-honey-200';
+        return 'from-honey-50 to-lavender-50 dark:from-honey-900/30 dark:to-lavender-900/30 border-honey-200 dark:border-honey-800';
     }
   };
 
@@ -213,14 +213,14 @@ const WeeklyDigest = ({ entries, category, userId }) => {
           onClick={() => setIsExpanded(!isExpanded)}
           className="flex items-center gap-2 flex-1"
         >
-          <div className="p-1.5 rounded-lg bg-white/60">
+          <div className="p-1.5 rounded-lg bg-white/60 dark:bg-hearth-800/60">
             <Calendar size={14} className="text-honey-600" />
           </div>
           <div className="text-left">
-            <h3 className="text-sm font-display font-semibold text-warm-800">
+            <h3 className="text-sm font-display font-semibold text-warm-800 dark:text-warm-200">
               Your Week in Review
             </h3>
-            <div className="flex items-center gap-1 text-xs text-warm-600">
+            <div className="flex items-center gap-1 text-xs text-warm-600 dark:text-warm-400">
               {getMoodArcIcon()}
               <span>{getMoodArcLabel()}</span>
               <span className="text-warm-400">·</span>
@@ -265,7 +265,7 @@ const WeeklyDigest = ({ entries, category, userId }) => {
                     {weekData.topThemes.map((theme, i) => (
                       <span
                         key={i}
-                        className="px-2 py-1 text-xs bg-white/60 rounded-full text-warm-700 capitalize"
+                        className="px-2 py-1 text-xs bg-white/60 dark:bg-hearth-800/60 rounded-full text-warm-700 dark:text-warm-300 capitalize"
                       >
                         {theme}
                       </span>
@@ -276,7 +276,7 @@ const WeeklyDigest = ({ entries, category, userId }) => {
 
               {/* Goals Progress */}
               {weekData.goalsProgressed.length > 0 && (
-                <div className="flex items-start gap-2 p-2 bg-white/40 rounded-xl">
+                <div className="flex items-start gap-2 p-2 bg-white/40 dark:bg-hearth-800/40 rounded-xl">
                   <Target size={14} className="text-honey-500 mt-0.5" />
                   <div>
                     <p className="text-xs font-medium text-warm-700">Progress made</p>
@@ -288,7 +288,7 @@ const WeeklyDigest = ({ entries, category, userId }) => {
               )}
 
               {/* Insight */}
-              <div className="p-3 bg-white/60 rounded-xl">
+              <div className="p-3 bg-white/60 dark:bg-hearth-800/60 rounded-xl">
                 <div className="flex items-start gap-2">
                   <Sparkles size={14} className="text-lavender-500 mt-0.5 shrink-0" />
                   <p className="text-sm text-warm-700 font-body leading-relaxed">
