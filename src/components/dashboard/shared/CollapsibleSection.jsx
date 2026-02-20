@@ -32,74 +32,74 @@ const CollapsibleSection = ({
   // Color schemes
   const colors = {
     indigo: {
-      bg: 'from-indigo-50 to-violet-50',
-      border: 'border-indigo-100',
-      iconBg: 'bg-indigo-100',
-      iconText: 'text-indigo-600',
-      title: 'text-indigo-800',
-      subtitle: 'text-indigo-600',
-      chevron: 'text-indigo-400',
-      content: 'border-indigo-100'
+      bg: 'from-lavender-50 to-lavender-100 dark:from-lavender-900/40 dark:to-lavender-800/40',
+      border: 'border-lavender-100 dark:border-lavender-800',
+      iconBg: 'bg-lavender-100 dark:bg-lavender-800/50',
+      iconText: 'text-lavender-600 dark:text-lavender-300',
+      title: 'text-lavender-800 dark:text-lavender-200',
+      subtitle: 'text-lavender-600 dark:text-lavender-400',
+      chevron: 'text-lavender-400 dark:text-lavender-500',
+      content: 'border-lavender-100 dark:border-lavender-800'
     },
     green: {
-      bg: 'from-green-50 to-emerald-50',
-      border: 'border-green-100',
-      iconBg: 'bg-green-100',
-      iconText: 'text-green-600',
-      title: 'text-green-800',
-      subtitle: 'text-green-600',
-      chevron: 'text-green-400',
-      content: 'border-green-100'
+      bg: 'from-sage-50 to-sage-100 dark:from-sage-900/40 dark:to-sage-800/40',
+      border: 'border-sage-100 dark:border-sage-800',
+      iconBg: 'bg-sage-100 dark:bg-sage-800/50',
+      iconText: 'text-sage-600 dark:text-sage-300',
+      title: 'text-sage-800 dark:text-sage-200',
+      subtitle: 'text-sage-600 dark:text-sage-400',
+      chevron: 'text-sage-400 dark:text-sage-500',
+      content: 'border-sage-100 dark:border-sage-800'
     },
     amber: {
-      bg: 'from-amber-50 to-orange-50',
-      border: 'border-amber-100',
-      iconBg: 'bg-amber-100',
-      iconText: 'text-amber-600',
-      title: 'text-amber-800',
-      subtitle: 'text-amber-600',
-      chevron: 'text-amber-400',
-      content: 'border-amber-100'
+      bg: 'from-honey-50 to-honey-100 dark:from-honey-900/40 dark:to-honey-800/40',
+      border: 'border-honey-100 dark:border-honey-800',
+      iconBg: 'bg-honey-100 dark:bg-honey-800/50',
+      iconText: 'text-honey-600 dark:text-honey-300',
+      title: 'text-honey-800 dark:text-honey-200',
+      subtitle: 'text-honey-600 dark:text-honey-400',
+      chevron: 'text-honey-400 dark:text-honey-500',
+      content: 'border-honey-100 dark:border-honey-800'
     },
     violet: {
-      bg: 'from-violet-50 to-purple-50',
-      border: 'border-violet-100',
-      iconBg: 'bg-violet-100',
-      iconText: 'text-violet-600',
-      title: 'text-violet-800',
-      subtitle: 'text-violet-600',
-      chevron: 'text-violet-400',
-      content: 'border-violet-100'
+      bg: 'from-lavender-100 to-lavender-50 dark:from-lavender-900/50 dark:to-lavender-800/50',
+      border: 'border-lavender-200 dark:border-lavender-700',
+      iconBg: 'bg-lavender-200 dark:bg-lavender-700/50',
+      iconText: 'text-lavender-500 dark:text-lavender-300',
+      title: 'text-lavender-700 dark:text-lavender-200',
+      subtitle: 'text-lavender-500 dark:text-lavender-400',
+      chevron: 'text-lavender-300 dark:text-lavender-500',
+      content: 'border-lavender-200 dark:border-lavender-700'
     },
     rose: {
-      bg: 'from-rose-50 to-pink-50',
-      border: 'border-rose-100',
-      iconBg: 'bg-rose-100',
-      iconText: 'text-rose-600',
-      title: 'text-rose-800',
-      subtitle: 'text-rose-600',
-      chevron: 'text-rose-400',
-      content: 'border-rose-100'
+      bg: 'from-terra-50 to-terra-100 dark:from-terra-900/40 dark:to-terra-800/40',
+      border: 'border-terra-100 dark:border-terra-800',
+      iconBg: 'bg-terra-100 dark:bg-terra-800/50',
+      iconText: 'text-terra-600 dark:text-terra-300',
+      title: 'text-terra-800 dark:text-terra-200',
+      subtitle: 'text-terra-600 dark:text-terra-400',
+      chevron: 'text-terra-400 dark:text-terra-500',
+      content: 'border-terra-100 dark:border-terra-800'
     },
     blue: {
-      bg: 'from-blue-50 to-cyan-50',
-      border: 'border-blue-100',
-      iconBg: 'bg-blue-100',
-      iconText: 'text-blue-600',
-      title: 'text-blue-800',
-      subtitle: 'text-blue-600',
-      chevron: 'text-blue-400',
-      content: 'border-blue-100'
+      bg: 'from-sage-50 to-sage-100 dark:from-sage-900/40 dark:to-sage-800/40',
+      border: 'border-sage-200 dark:border-sage-700',
+      iconBg: 'bg-sage-200 dark:bg-sage-700/50',
+      iconText: 'text-sage-600 dark:text-sage-300',
+      title: 'text-sage-700 dark:text-sage-200',
+      subtitle: 'text-sage-600 dark:text-sage-400',
+      chevron: 'text-sage-400 dark:text-sage-500',
+      content: 'border-sage-200 dark:border-sage-700'
     },
     warm: {
-      bg: 'from-warm-50 to-warm-100',
-      border: 'border-warm-200',
-      iconBg: 'bg-warm-100',
-      iconText: 'text-warm-600',
-      title: 'text-warm-800',
-      subtitle: 'text-warm-600',
-      chevron: 'text-warm-400',
-      content: 'border-warm-200'
+      bg: 'from-warm-50 to-warm-100 dark:from-hearth-900/40 dark:to-hearth-850/40',
+      border: 'border-warm-200 dark:border-hearth-700',
+      iconBg: 'bg-warm-100 dark:bg-hearth-800/50',
+      iconText: 'text-warm-600 dark:text-warm-400',
+      title: 'text-warm-800 dark:text-hearth-200',
+      subtitle: 'text-warm-600 dark:text-warm-400',
+      chevron: 'text-warm-400 dark:text-warm-500',
+      content: 'border-warm-200 dark:border-hearth-700'
     }
   };
 
@@ -114,7 +114,7 @@ const CollapsibleSection = ({
       {/* Header */}
       <button
         onClick={() => setIsExpanded(!isExpanded)}
-        className="w-full flex items-center justify-between p-4 hover:bg-white/30 transition-colors"
+        className="w-full flex items-center justify-between p-4 hover:bg-white/30 dark:hover:bg-white/5 transition-colors"
       >
         <div className="flex items-center gap-2">
           {Icon && (

@@ -8,7 +8,7 @@ export default {
   // Safelist for colorMap.js dynamic class references
   safelist: [
     {
-      pattern: /^(bg|text|border)-(honey|terra|sage|lavender|hearth|accent)-(50|100|200|300|400|500|600|700|800|850|900|950)/,
+      pattern: /^(bg|text|border|from|to)-(honey|terra|sage|lavender|hearth|accent)-(50|100|200|300|400|500|600|700|800|850|900|950)/,
       variants: ['dark'],
     },
   ],
