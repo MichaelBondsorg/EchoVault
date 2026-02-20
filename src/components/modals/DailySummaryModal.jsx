@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { X, Loader2, Sparkles, Trash2 } from 'lucide-react';
 import { generateDailySynthesis } from '../../utils/synthesis';
+import { getEntryTypeColors } from '../../utils/colorMap';
 
 const DailySummaryModal = ({ date, dayData, onClose, onDelete, onUpdate }) => {
   const [synthesis, setSynthesis] = useState(null);
@@ -50,7 +51,7 @@ const DailySummaryModal = ({ date, dayData, onClose, onDelete, onUpdate }) => {
         initial={{ scale: 0.95, opacity: 0 }}
         animate={{ scale: 1, opacity: 1 }}
         transition={{ type: "spring", duration: 0.3 }}
-        className="bg-white rounded-3xl max-w-2xl w-full max-h-[90vh] overflow-hidden flex flex-col shadow-soft-lg"
+        className="bg-white dark:bg-hearth-900 rounded-3xl max-w-2xl w-full max-h-[90vh] overflow-hidden flex flex-col shadow-soft-lg"
       >
         <div className="p-6 border-b border-warm-100">
           <div className="flex justify-between items-center">
@@ -108,18 +109,17 @@ const DailySummaryModal = ({ date, dayData, onClose, onDelete, onUpdate }) => {
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: index * 0.05 }}
-              className="border border-warm-100 rounded-2xl p-4 hover:shadow-soft transition-shadow"
+              className="border border-warm-100 dark:border-hearth-800 rounded-2xl p-4 hover:shadow-soft transition-shadow"
             >
               <div className="flex justify-between items-start mb-2">
                 <div className="flex items-center gap-2">
                   <span className="text-xs text-warm-400">{entry.createdAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-                  {entry.entry_type && entry.entry_type !== 'reflection' && (
-                    <span className={`text-[10px] font-display font-bold px-2 py-0.5 rounded-full uppercase ${
-                      entry.entry_type === 'task' ? 'bg-yellow-100 text-yellow-700' :
-                      entry.entry_type === 'mixed' ? 'bg-teal-100 text-teal-700' :
-                      entry.entry_type === 'vent' ? 'bg-pink-100 text-pink-700' : 'bg-warm-100 text-warm-600'
-                    }`}>{entry.entry_type}</span>
-                  )}
+                  {entry.entry_type && entry.entry_type !== 'reflection' && (() => {
+                    const typeColors = getEntryTypeColors(entry.entry_type);
+                    return (
+                      <span className={`text-[10px] font-display font-bold px-2 py-0.5 rounded-full uppercase ${typeColors.bg} ${typeColors.text}`}>{entry.entry_type}</span>
+                    );
+                  })()}
                   {typeof entry.analysis?.mood_score === 'number' && (
                     <span className="text-lg">{getMoodEmoji(entry.analysis.mood_score)}</span>
                   )}

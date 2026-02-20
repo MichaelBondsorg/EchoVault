@@ -8,6 +8,15 @@ import {
 } from 'lucide-react';
 import { safeString, formatMentions } from '../../utils/string';
 import { formatDateForInput, getTodayForInput, parseDateInput, getDateString } from '../../utils/date';
+import { getEntryTypeColors, getEntityTypeColors, getTherapeuticColors } from '../../utils/colorMap';
+
+// Entity tag emoji lookup (hoisted for performance - used in tag rendering)
+const ENTITY_EMOJIS = {
+  '@person:': '👤', '@place:': '📍', '@goal:': '🎯',
+  '@situation:': '📌', '@self:': '💭', '@activity:': '🏃',
+  '@media:': '🎬', '@event:': '📅', '@food:': '🍽️', '@topic:': '💬'
+};
+const ENTITY_PREFIXES = Object.keys(ENTITY_EMOJIS);
 
 // Weather icon mapping
 const getWeatherIcon = (condition, isDay = true) => {
@@ -51,9 +60,9 @@ const PrimaryReadinessMetric = ({ healthContext }) => {
 
   // Whoop users (or merged): Recovery is primary
   if (hasWhoop && hasRecovery) {
-    const recoveryColor = recovery >= 67 ? 'bg-green-100 text-green-700 border-green-200' :
-                          recovery >= 34 ? 'bg-yellow-100 text-yellow-700 border-yellow-200' :
-                          'bg-red-100 text-red-700 border-red-200';
+    const recoveryColor = recovery >= 67 ? 'bg-sage-100 text-sage-700 border-sage-200 dark:bg-sage-900/30 dark:text-sage-300 dark:border-sage-700' :
+                          recovery >= 34 ? 'bg-honey-100 text-honey-700 border-honey-200 dark:bg-honey-900/30 dark:text-honey-300 dark:border-honey-700' :
+                          'bg-red-100 text-red-700 border-red-200 dark:bg-red-900/30 dark:text-red-300 dark:border-red-800'; /* @color-safe: health warning */
     return (
       <span className={`flex items-center gap-1 px-2 py-0.5 rounded-full border font-medium ${recoveryColor}`}>
         <Battery size={12} />
@@ -65,9 +74,9 @@ const PrimaryReadinessMetric = ({ healthContext }) => {
 
   // HealthKit-only users: Sleep Score is primary
   if (hasSleepScore) {
-    const sleepColor = sleepScore >= 80 ? 'bg-green-100 text-green-700 border-green-200' :
-                       sleepScore >= 60 ? 'bg-purple-100 text-purple-700 border-purple-200' :
-                       'bg-orange-100 text-orange-700 border-orange-200';
+    const sleepColor = sleepScore >= 80 ? 'bg-sage-100 text-sage-700 border-sage-200 dark:bg-sage-900/30 dark:text-sage-300 dark:border-sage-700' :
+                       sleepScore >= 60 ? 'bg-lavender-100 text-lavender-700 border-lavender-200 dark:bg-lavender-900/30 dark:text-lavender-300 dark:border-lavender-700' :
+                       'bg-terra-100 text-terra-700 border-terra-200 dark:bg-terra-900/30 dark:text-terra-300 dark:border-terra-700';
     return (
       <span className={`flex items-center gap-1 px-2 py-0.5 rounded-full border font-medium ${sleepColor}`}>
         <BedDouble size={12} />
@@ -79,9 +88,9 @@ const PrimaryReadinessMetric = ({ healthContext }) => {
 
   // Fallback: Show sleep hours if available
   if (sleepHours && sleepHours > 0) {
-    const hoursColor = sleepHours >= 7 ? 'bg-green-50 text-green-700' :
-                       sleepHours >= 5 ? 'bg-yellow-50 text-yellow-700' :
-                       'bg-red-50 text-red-700';
+    const hoursColor = sleepHours >= 7 ? 'bg-sage-50 text-sage-700 dark:bg-sage-900/30 dark:text-sage-300' :
+                       sleepHours >= 5 ? 'bg-honey-50 text-honey-700 dark:bg-honey-900/30 dark:text-honey-300' :
+                       'bg-red-50 text-red-700 dark:bg-red-900/30 dark:text-red-300'; /* @color-safe: health warning */
     return (
       <span className={`flex items-center gap-1 px-1.5 py-0.5 rounded-full ${hoursColor}`}>
         <BedDouble size={10} />
@@ -138,8 +147,8 @@ const EntryCard = ({ entry, onDelete, onUpdate }) => {
   };
 
   const cardStyle = isTask
-    ? 'bg-yellow-50 border-yellow-200'
-    : 'bg-white border-warm-100';
+    ? 'bg-honey-50 border-honey-200 dark:bg-honey-900/20 dark:border-honey-800'
+    : 'bg-white border-warm-100 dark:bg-hearth-900 dark:border-hearth-800';
 
   const moodBorderColor = getMoodColor(entry.analysis?.mood_score);
 
@@ -157,10 +166,10 @@ const EntryCard = ({ entry, onDelete, onUpdate }) => {
         const isPositive = ['progress', 'streak', 'absence', 'encouragement'].includes(insightType);
         const isWarning = insightType === 'warning';
         const colorClass = isWarning
-          ? 'bg-red-50 border-red-100 text-red-800'
+          ? 'bg-red-50 border-red-100 text-red-800 dark:bg-red-900/30 dark:border-red-800 dark:text-red-200' /* @color-safe: warning insight */
           : isPositive
-            ? 'bg-green-50 border-green-100 text-green-800'
-            : 'bg-honey-50 border-honey-100 text-honey-800';
+            ? 'bg-sage-50 border-sage-100 text-sage-800 dark:bg-sage-900/30 dark:border-sage-800 dark:text-sage-200'
+            : 'bg-honey-50 border-honey-100 text-honey-800 dark:bg-honey-900/30 dark:border-honey-800 dark:text-honey-200';
         return (
           <motion.div
             initial={{ opacity: 0, x: -10 }}
@@ -197,34 +206,41 @@ const EntryCard = ({ entry, onDelete, onUpdate }) => {
       )}
 
       {/* Celebration Display */}
-      {framework === 'celebration' && celebration && (
+      {framework === 'celebration' && celebration && (() => {
+        const celebColors = getTherapeuticColors('celebration');
+        return (
         <div className="mb-4 space-y-3">
           {celebration.affirmation && (
-            <div className="bg-gradient-to-r from-green-50 to-emerald-50 p-3 rounded-xl border border-green-100">
-              <div className="flex items-center gap-2 text-green-700 font-display font-semibold text-xs uppercase mb-2">
+            <div className={`bg-gradient-to-r from-sage-50 to-sage-100 p-3 rounded-xl border ${celebColors.border} dark:from-sage-900/30 dark:to-sage-800/20`}>
+              <div className={`flex items-center gap-2 ${celebColors.text} font-display font-semibold text-xs uppercase mb-2`}>
                 <Sparkles size={14} /> Nice!
               </div>
-              <p className="text-sm text-green-800 font-body">{celebration.affirmation}</p>
+              <p className={`text-sm font-body ${celebColors.text}`}>{celebration.affirmation}</p>
               {celebration.amplify && (
-                <p className="text-xs text-green-600 mt-2 italic">{celebration.amplify}</p>
+                <p className="text-xs text-sage-600 dark:text-sage-400 mt-2 italic">{celebration.amplify}</p>
               )}
             </div>
           )}
         </div>
-      )}
+        );
+      })()}
 
       {/* ACT (Acceptance & Commitment) Display */}
-      {framework === 'act' && actAnalysis && (
+      {framework === 'act' && actAnalysis && (() => {
+        const actColors = getTherapeuticColors('ACT');
+        const valuesColors = getTherapeuticColors('values');
+        const commitColors = getTherapeuticColors('committed_action');
+        return (
         <div className="mb-4 space-y-3">
-          <div className="bg-teal-50 rounded-xl p-4 border border-teal-100">
+          <div className={`${actColors.bg} rounded-xl p-4 border ${actColors.border}`}>
             {/* Header with technique badge */}
             <div className="flex items-center justify-between mb-3">
               <div className="flex items-center gap-2">
-                <Wind className="text-teal-600" size={16} />
-                <span className="text-xs font-bold text-teal-700 uppercase">Defusion</span>
+                <Wind className="text-sage-600 dark:text-sage-400" size={16} />
+                <span className="text-xs font-bold text-sage-700 dark:text-sage-300 uppercase">Defusion</span>
               </div>
               {actAnalysis.defusion_technique && (
-                <span className="text-[10px] font-semibold text-teal-600 bg-teal-100 px-2 py-0.5 rounded-full">
+                <span className="text-[10px] font-semibold text-sage-600 dark:text-sage-300 bg-sage-200 dark:bg-sage-800/50 px-2 py-0.5 rounded-full">
                   {actAnalysis.defusion_technique.replace('_', ' ')}
                 </span>
               )}
@@ -232,24 +248,24 @@ const EntryCard = ({ entry, onDelete, onUpdate }) => {
 
             {/* Fusion thought (the "hook") */}
             {actAnalysis.fusion_thought && (
-              <div className="text-teal-900 text-sm mb-2">
+              <div className="text-sage-900 dark:text-sage-100 text-sm mb-2">
                 <span className="opacity-75">Instead of: </span>
-                <span className="line-through decoration-teal-300">"{actAnalysis.fusion_thought}"</span>
+                <span className="line-through decoration-sage-300 dark:decoration-sage-600">"{actAnalysis.fusion_thought}"</span>
               </div>
             )}
 
             {/* Defusion phrase */}
             {actAnalysis.defusion_phrase && (
-              <div className="text-teal-800 font-medium text-sm bg-white/50 p-2 rounded-lg">
+              <div className="text-sage-800 dark:text-sage-200 font-medium text-sm bg-white/50 dark:bg-hearth-800/50 p-2 rounded-lg">
                 Try: "{actAnalysis.defusion_phrase}"
               </div>
             )}
 
             {/* Values context */}
             {actAnalysis.values_context && (
-              <div className="mt-3 pt-3 border-t border-teal-100 flex items-center gap-2">
-                <Compass size={14} className="text-amber-600" />
-                <span className="text-xs text-amber-800">
+              <div className={`mt-3 pt-3 border-t ${actColors.border} flex items-center gap-2`}>
+                <Compass size={14} className={valuesColors.text} />
+                <span className={`text-xs ${valuesColors.text}`}>
                   <span className="font-semibold">Value:</span> {actAnalysis.values_context}
                 </span>
               </div>
@@ -258,16 +274,17 @@ const EntryCard = ({ entry, onDelete, onUpdate }) => {
 
           {/* Committed Action */}
           {actAnalysis.committed_action && (
-            <div className="bg-amber-50 p-3 rounded-xl border border-amber-100">
-              <div className="flex items-center gap-2 text-amber-700 font-display font-semibold text-xs uppercase mb-2">
+            <div className={`${commitColors.bg} p-3 rounded-xl border ${commitColors.border}`}>
+              <div className={`flex items-center gap-2 ${commitColors.text} font-display font-semibold text-xs uppercase mb-2`}>
                 <Footprints size={14} /> Committed Action
               </div>
-              <p className="text-sm text-amber-800 font-medium font-body">{actAnalysis.committed_action}</p>
-              <p className="text-xs text-amber-600 mt-1 italic">Do this regardless of how you feel right now.</p>
+              <p className={`text-sm font-medium font-body ${commitColors.text}`}>{actAnalysis.committed_action}</p>
+              <p className="text-xs text-honey-600 dark:text-honey-400 mt-1 italic">Do this regardless of how you feel right now.</p>
             </div>
           )}
         </div>
-      )}
+        );
+      })()}
 
       {/* Task Acknowledgment */}
       {isMixed && taskAcknowledgment && (
@@ -317,8 +334,8 @@ const EntryCard = ({ entry, onDelete, onUpdate }) => {
 
           {!cbt.perspective && (cbt.suggested_reframe || cbt.challenge) && (
             <div className="text-sm font-body">
-              <span className="text-green-700 font-semibold">Try thinking:</span>{' '}
-              <span className="text-green-800">{cbt.suggested_reframe || cbt.challenge}</span>
+              <span className="text-sage-700 dark:text-sage-300 font-semibold">Try thinking:</span>{' '}
+              <span className="text-sage-800 dark:text-sage-200">{cbt.suggested_reframe || cbt.challenge}</span>
             </div>
           )}
 
@@ -342,7 +359,7 @@ const EntryCard = ({ entry, onDelete, onUpdate }) => {
           <div className="flex items-center gap-2 text-sage-700 font-display font-bold text-xs uppercase"><Brain size={12}/> Cognitive Restructuring</div>
           <div className="grid gap-2 font-body">
             <div><span className="font-semibold text-sage-900">Thought:</span> {cbt.automatic_thought}</div>
-            <div className="bg-white p-2 rounded-lg border border-sage-100"><span className="font-semibold text-green-700">Challenge:</span> {cbt.challenge}</div>
+            <div className="bg-white dark:bg-hearth-800 p-2 rounded-lg border border-sage-100 dark:border-sage-800"><span className="font-semibold text-sage-700 dark:text-sage-300">Challenge:</span> {cbt.challenge}</div>
           </div>
         </div>
       )}
@@ -357,16 +374,15 @@ const EntryCard = ({ entry, onDelete, onUpdate }) => {
             {entry.category}
             <RefreshCw size={8} className="opacity-50" />
           </button>
-          {entryType !== 'reflection' && (
-            <span className={`text-[10px] font-display font-bold px-2 py-0.5 rounded-full uppercase tracking-wide flex items-center gap-1 ${
-              isTask ? 'bg-yellow-100 text-yellow-700' :
-              isMixed ? 'bg-teal-100 text-teal-700' :
-              isVent ? 'bg-pink-100 text-pink-700' : 'bg-warm-100 text-warm-600'
-            }`}>
-              {isMixed && <Clipboard size={10} />}
-              {entryType}
-            </span>
-          )}
+          {entryType !== 'reflection' && (() => {
+            const typeColors = getEntryTypeColors(entryType);
+            return (
+              <span className={`text-[10px] font-display font-bold px-2 py-0.5 rounded-full uppercase tracking-wide flex items-center gap-1 ${typeColors.bg} ${typeColors.text}`}>
+                {isMixed && <Clipboard size={10} />}
+                {entryType}
+              </span>
+            );
+          })()}
           {/* LAY-001: Limit visible tags to prevent overflow */}
           {(() => {
             const MAX_VISIBLE_TAGS = 5;
@@ -380,26 +396,12 @@ const EntryCard = ({ entry, onDelete, onUpdate }) => {
                   // Helper to format entity names (replace underscores with spaces, title case)
                   const formatName = (prefix) => tag.replace(prefix, '').replace(/_/g, ' ');
 
-                  if (tag.startsWith('@person:')) {
-                    return <span key={i} className="text-[10px] font-semibold text-sage-600 bg-sage-50 px-2 py-0.5 rounded-full">👤 {formatName('@person:')}</span>;
-                  } else if (tag.startsWith('@place:')) {
-                    return <span key={i} className="text-[10px] font-semibold text-green-600 bg-green-50 px-2 py-0.5 rounded-full">📍 {formatName('@place:')}</span>;
-                  } else if (tag.startsWith('@goal:')) {
-                    return <span key={i} className="text-[10px] font-semibold text-amber-600 bg-amber-50 px-2 py-0.5 rounded-full">🎯 {formatName('@goal:')}</span>;
-                  } else if (tag.startsWith('@situation:')) {
-                    return <span key={i} className="text-[10px] font-semibold text-lavender-600 bg-lavender-50 px-2 py-0.5 rounded-full">📌 {formatName('@situation:')}</span>;
-                  } else if (tag.startsWith('@self:')) {
-                    return <span key={i} className="text-[10px] font-semibold text-rose-600 bg-rose-50 px-2 py-0.5 rounded-full">💭 {formatName('@self:')}</span>;
-                  } else if (tag.startsWith('@activity:')) {
-                    return <span key={i} className="text-[10px] font-semibold text-blue-600 bg-blue-50 px-2 py-0.5 rounded-full">🏃 {formatName('@activity:')}</span>;
-                  } else if (tag.startsWith('@media:')) {
-                    return <span key={i} className="text-[10px] font-semibold text-purple-600 bg-purple-50 px-2 py-0.5 rounded-full">🎬 {formatName('@media:')}</span>;
-                  } else if (tag.startsWith('@event:')) {
-                    return <span key={i} className="text-[10px] font-semibold text-orange-600 bg-orange-50 px-2 py-0.5 rounded-full">📅 {formatName('@event:')}</span>;
-                  } else if (tag.startsWith('@food:')) {
-                    return <span key={i} className="text-[10px] font-semibold text-red-600 bg-red-50 px-2 py-0.5 rounded-full">🍽️ {formatName('@food:')}</span>;
-                  } else if (tag.startsWith('@topic:')) {
-                    return <span key={i} className="text-[10px] font-semibold text-slate-600 bg-slate-50 px-2 py-0.5 rounded-full">💬 {formatName('@topic:')}</span>;
+                  const entityPrefix = ENTITY_PREFIXES.find(p => tag.startsWith(p));
+
+                  if (entityPrefix) {
+                    const entityType = entityPrefix.slice(0, -1); // Remove trailing ':'
+                    const colors = getEntityTypeColors(entityType);
+                    return <span key={i} className={`text-[10px] font-semibold ${colors.text} ${colors.bg} px-2 py-0.5 rounded-full`}>{ENTITY_EMOJIS[entityPrefix]} {formatName(entityPrefix)}</span>;
                   } else if (tag.startsWith('@')) {
                     // Unknown @ tag - show without prefix
                     return <span key={i} className="text-[10px] font-semibold text-warm-600 bg-warm-50 px-2 py-0.5 rounded-full">{tag.split(':')[1]?.replace(/_/g, ' ') || tag}</span>;
@@ -498,7 +500,7 @@ const EntryCard = ({ entry, onDelete, onUpdate }) => {
                   onUpdate(entry.id, updates, options);
                   setEditing(false);
                 }}
-                className="text-green-600 hover:text-green-700"
+                className="text-sage-600 hover:text-sage-700 dark:text-sage-400 dark:hover:text-sage-300"
               >
                 <Check size={18}/>
               </button>
@@ -542,7 +544,7 @@ const EntryCard = ({ entry, onDelete, onUpdate }) => {
 
             return (
               <>
-                <span className="flex items-center gap-1 bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded-full">
+                <span className="flex items-center gap-1 bg-lavender-50 text-lavender-700 dark:bg-lavender-900/30 dark:text-lavender-300 px-1.5 py-0.5 rounded-full">
                   <WeatherIcon size={10} />
                   {env.temperature !== null && (
                     <span>{Math.round(env.temperature)}°</span>
@@ -553,7 +555,7 @@ const EntryCard = ({ entry, onDelete, onUpdate }) => {
                 </span>
                 {/* Day summary if different from point-in-time */}
                 {showDaySummary && (
-                  <span className="flex items-center gap-1 bg-slate-50 text-slate-600 px-1.5 py-0.5 rounded-full">
+                  <span className="flex items-center gap-1 bg-warm-50 text-warm-600 dark:bg-warm-900/30 dark:text-warm-300 px-1.5 py-0.5 rounded-full">
                     {(() => {
                       const DayIcon = getWeatherIcon(dayCondition, true);
                       return <DayIcon size={10} />;
@@ -568,7 +570,7 @@ const EntryCard = ({ entry, onDelete, onUpdate }) => {
                 )}
                 {/* Sunshine percent for low-light days */}
                 {env.daySummary?.isLowSunshine && env.daySummary?.sunshinePercent !== undefined && (
-                  <span className="text-amber-600 hidden sm:inline">
+                  <span className="text-honey-600 dark:text-honey-400 hidden sm:inline">
                     {env.daySummary.sunshinePercent}% sunshine
                   </span>
                 )}
@@ -590,7 +592,7 @@ const EntryCard = ({ entry, onDelete, onUpdate }) => {
                 {/* Secondary metrics shown on larger screens */}
                 {/* Sleep hours (if primary is recovery, show hours as secondary) */}
                 {hasWhoop && health.recovery?.score > 0 && health.sleep?.totalHours > 0 && (
-                  <span className="hidden md:flex items-center gap-1 bg-purple-50 text-purple-700 px-1.5 py-0.5 rounded-full text-[10px]">
+                  <span className="hidden md:flex items-center gap-1 bg-lavender-50 text-lavender-700 dark:bg-lavender-900/30 dark:text-lavender-300 px-1.5 py-0.5 rounded-full text-[10px]">
                     <BedDouble size={10} />
                     {health.sleep.totalHours.toFixed(1)}h
                   </span>
@@ -599,9 +601,9 @@ const EntryCard = ({ entry, onDelete, onUpdate }) => {
                 {/* HRV */}
                 {health.heart?.hrv > 0 && (
                   <span className={`hidden sm:flex items-center gap-1 px-1.5 py-0.5 rounded-full ${
-                    health.heart.hrvTrend === 'improving' ? 'bg-green-50 text-green-700' :
-                    health.heart.hrvTrend === 'declining' ? 'bg-orange-50 text-orange-700' :
-                    'bg-warm-50 text-warm-600'
+                    health.heart.hrvTrend === 'improving' ? 'bg-sage-50 text-sage-700 dark:bg-sage-900/30 dark:text-sage-300' :
+                    health.heart.hrvTrend === 'declining' ? 'bg-terra-50 text-terra-700 dark:bg-terra-900/30 dark:text-terra-300' :
+                    'bg-warm-50 text-warm-600 dark:bg-warm-900/30 dark:text-warm-300'
                   }`}>
                     <Activity size={10} />
                     HRV {health.heart.hrv}ms
@@ -611,9 +613,9 @@ const EntryCard = ({ entry, onDelete, onUpdate }) => {
                 {/* Strain (Whoop only) */}
                 {hasWhoop && health.strain?.score > 0 && (
                   <span className={`hidden md:flex items-center gap-1 px-1.5 py-0.5 rounded-full ${
-                    health.strain.score >= 15 ? 'bg-red-50 text-red-700' :
-                    health.strain.score >= 10 ? 'bg-orange-50 text-orange-700' :
-                    'bg-blue-50 text-blue-700'
+                    health.strain.score >= 15 ? 'bg-red-50 text-red-700 dark:bg-red-900/30 dark:text-red-300' /* @color-safe: high strain warning */ :
+                    health.strain.score >= 10 ? 'bg-terra-50 text-terra-700 dark:bg-terra-900/30 dark:text-terra-300' :
+                    'bg-lavender-50 text-lavender-700 dark:bg-lavender-900/30 dark:text-lavender-300'
                   }`}>
                     <Zap size={10} />
                     {health.strain.score.toFixed(1)} strain
@@ -622,7 +624,7 @@ const EntryCard = ({ entry, onDelete, onUpdate }) => {
 
                 {/* Steps - always show on larger screens */}
                 {health.activity?.stepsToday > 0 && (
-                  <span className="hidden sm:flex items-center gap-1 bg-green-50 text-green-700 px-1.5 py-0.5 rounded-full">
+                  <span className="hidden sm:flex items-center gap-1 bg-sage-50 text-sage-700 dark:bg-sage-900/30 dark:text-sage-300 px-1.5 py-0.5 rounded-full">
                     <Footprints size={10} />
                     {health.activity.stepsToday.toLocaleString()}
                   </span>

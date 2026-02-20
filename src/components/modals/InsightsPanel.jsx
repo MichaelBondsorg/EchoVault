@@ -8,6 +8,7 @@ import {
 import { analyzeLongitudinalPatterns } from '../../services/safety';
 import { getAllPatterns, getRotatedInsights, markInsightShown } from '../../services/nexus/compat';
 import { addToExclusionList, getActiveExclusions } from '../../services/signals/signalLifecycle';
+import { getPatternTypeColors } from '../../utils/colorMap';
 
 const InsightsPanel = ({ entries, userId, category, onClose }) => {
   const [loading, setLoading] = useState(true);
@@ -74,63 +75,42 @@ const InsightsPanel = ({ entries, userId, category, onClose }) => {
   }, [cachedPatterns?.activitySentiment, userId, category]);
 
   const getPatternIcon = (type) => {
+    const colors = getPatternTypeColors(type);
+    const iconClass = colors.text;
     switch (type) {
       // Temporal patterns
       case 'weekly_low': return <TrendingDown size={16} className="text-accent" />;
       case 'weekly_high': return <TrendingUp size={16} className="text-mood-great" />;
-      case 'best_day': return <Sun size={16} className="text-amber-500" />;
-      case 'worst_day': return <Cloud size={16} className="text-blue-500" />;
+      case 'best_day': return <Sun size={16} className={iconClass} />;
+      case 'worst_day': return <Cloud size={16} className={iconClass} />;
       // Activity sentiment
-      case 'positive_activity': return <TrendingUp size={16} className="text-green-500" />;
-      case 'negative_activity': return <TrendingDown size={16} className="text-red-400" />;
+      case 'positive_activity': return <TrendingUp size={16} className={iconClass} />;
+      case 'negative_activity': return <TrendingDown size={16} className={iconClass} />;
       // Shadow friction (entity + context intersections)
-      case 'shadow_friction': return <Users size={16} className="text-violet-500" />;
+      case 'shadow_friction': return <Users size={16} className={iconClass} />;
       // Absence warnings (pre-emptive)
-      case 'absence_warning': return <AlertCircle size={16} className="text-amber-500" />;
+      case 'absence_warning': return <AlertCircle size={16} className={iconClass} />;
       // Linguistic shifts (self-talk)
-      case 'linguistic_shift': return <MessageSquare size={16} className="text-indigo-500" />;
+      case 'linguistic_shift': return <MessageSquare size={16} className={iconClass} />;
       // Trigger patterns
-      case 'trigger_correlation': return <AlertTriangle size={16} className="text-amber-500" />;
-      case 'trigger': return <Zap size={16} className="text-amber-500" />;
+      case 'trigger_correlation': return <AlertTriangle size={16} className={iconClass} />;
+      case 'trigger': return <Zap size={16} className={iconClass} />;
       // Contradiction types
-      case 'goal_abandonment': return <Target size={16} className="text-orange-500" />;
-      case 'sentiment_contradiction': return <AlertOctagon size={16} className="text-purple-500" />;
-      case 'avoidance_contradiction': return <Clock size={16} className="text-indigo-500" />;
+      case 'goal_abandonment': return <Target size={16} className={iconClass} />;
+      case 'sentiment_contradiction': return <AlertOctagon size={16} className={iconClass} />;
+      case 'avoidance_contradiction': return <Clock size={16} className={iconClass} />;
       // Other
-      case 'recovery_pattern': return <Heart size={16} className="text-pink-500" />;
+      case 'recovery_pattern': return <Heart size={16} className={iconClass} />;
       case 'monthly_summary': return <Calendar size={16} className="text-lavender-500" />;
       default: return <Sparkles size={16} className="text-lavender-500" />;
     }
   };
 
   const getPatternColor = (type) => {
-    switch (type) {
-      // Temporal
-      case 'weekly_low': return 'bg-lavender-50 border-lavender-400';
-      case 'weekly_high': return 'bg-green-50 border-green-200';
-      case 'best_day': return 'bg-amber-50 border-amber-200';
-      case 'worst_day': return 'bg-blue-50 border-blue-200';
-      // Activity sentiment
-      case 'positive_activity': return 'bg-green-50 border-green-200';
-      case 'negative_activity': return 'bg-red-50 border-red-200';
-      // Shadow friction
-      case 'shadow_friction': return 'bg-violet-50 border-violet-200';
-      // Absence warnings
-      case 'absence_warning': return 'bg-amber-50 border-amber-200';
-      // Linguistic shifts
-      case 'linguistic_shift': return 'bg-indigo-50 border-indigo-200';
-      // Triggers
-      case 'trigger_correlation': return 'bg-amber-50 border-amber-200';
-      case 'trigger': return 'bg-amber-50 border-amber-200';
-      // Contradictions
-      case 'goal_abandonment': return 'bg-orange-50 border-orange-200';
-      case 'sentiment_contradiction': return 'bg-purple-50 border-purple-200';
-      case 'avoidance_contradiction': return 'bg-indigo-50 border-indigo-200';
-      // Other
-      case 'recovery_pattern': return 'bg-pink-50 border-pink-200';
-      case 'monthly_summary': return 'bg-lavender-50 border-lavender-200';
-      default: return 'bg-lavender-50 border-lavender-200';
-    }
+    // weekly_low has a special border weight
+    if (type === 'weekly_low') return 'bg-lavender-50 border-lavender-400 dark:bg-lavender-900/30 dark:border-lavender-700';
+    const colors = getPatternTypeColors(type);
+    return `${colors.bg} ${colors.border}`;
   };
 
   // Generate a unique key for a pattern (for dismissal tracking)
@@ -292,7 +272,7 @@ const InsightsPanel = ({ entries, userId, category, onClose }) => {
         initial={{ scale: 0.95, opacity: 0 }}
         animate={{ scale: 1, opacity: 1 }}
         transition={{ type: "spring", duration: 0.3 }}
-        className="bg-white rounded-3xl max-w-lg w-full max-h-[90vh] overflow-hidden flex flex-col shadow-soft-lg"
+        className="bg-white dark:bg-hearth-900 rounded-3xl max-w-lg w-full max-h-[90vh] overflow-hidden flex flex-col shadow-soft-lg"
       >
         <div className="p-6 border-b border-honey-100 bg-gradient-to-r from-honey-500 to-honey-600 text-white">
           <div className="flex justify-between items-center">
@@ -319,7 +299,7 @@ const InsightsPanel = ({ entries, userId, category, onClose }) => {
             </div>
           ) : !hasAnyContent ? (
             <div className="text-center py-12">
-              <div className="h-20 w-20 bg-warm-100 rounded-full flex items-center justify-center mx-auto mb-4">
+              <div className="h-20 w-20 bg-warm-100 dark:bg-hearth-800 rounded-full flex items-center justify-center mx-auto mb-4">
                 <BarChart3 size={32} className="text-warm-400" />
               </div>
               <h3 className="text-lg font-display font-medium text-warm-800">Not enough data yet</h3>
@@ -344,7 +324,7 @@ const InsightsPanel = ({ entries, userId, category, onClose }) => {
               {/* Absence Warnings - Pre-emptive alerts */}
               {hasAbsenceWarnings && (
                 <>
-                  <SectionHeader icon={AlertCircle} title="Heads Up" color="text-amber-600" />
+                  <SectionHeader icon={AlertCircle} title="Heads Up" color="text-honey-600 dark:text-honey-400" />
                   <AnimatePresence mode="popLayout">
                     <div className="space-y-2">
                       {cachedPatterns.absenceWarnings.slice(0, 3).map((warning, i) => (
@@ -367,7 +347,7 @@ const InsightsPanel = ({ entries, userId, category, onClose }) => {
               {/* Linguistic Shifts - Self-talk changes */}
               {hasLinguisticShifts && (
                 <>
-                  <SectionHeader icon={MessageSquare} title="Your Self-Talk" color="text-indigo-600" />
+                  <SectionHeader icon={MessageSquare} title="Your Self-Talk" color="text-lavender-600 dark:text-lavender-400" />
                   <AnimatePresence mode="popLayout">
                     <div className="space-y-2">
                       {cachedPatterns.linguisticShifts.slice(0, 3).map((shift, i) => (
@@ -390,7 +370,7 @@ const InsightsPanel = ({ entries, userId, category, onClose }) => {
               {/* Contradictions - shown prominently if present */}
               {hasContradictions && (
                 <>
-                  <SectionHeader icon={AlertOctagon} title="Worth Reflecting On" color="text-purple-600" />
+                  <SectionHeader icon={AlertOctagon} title="Worth Reflecting On" color="text-lavender-600 dark:text-lavender-400" />
                   <AnimatePresence mode="popLayout">
                     <div className="space-y-2">
                       {cachedPatterns.contradictions.map((contradiction, i) => (
@@ -412,7 +392,7 @@ const InsightsPanel = ({ entries, userId, category, onClose }) => {
               {/* Shadow Friction - Entity + Context intersections */}
               {hasShadowFriction && (
                 <>
-                  <SectionHeader icon={Users} title="Relationship Dynamics" color="text-violet-600" />
+                  <SectionHeader icon={Users} title="Relationship Dynamics" color="text-lavender-600 dark:text-lavender-400" />
                   <AnimatePresence mode="popLayout">
                     <div className="space-y-2">
                       {cachedPatterns.shadowFriction.slice(0, 4).map((pattern, i) => (
@@ -435,7 +415,7 @@ const InsightsPanel = ({ entries, userId, category, onClose }) => {
               {/* Activity sentiment patterns - rotated for variety */}
               {hasActivityPatterns && rotatedActivityPatterns.length > 0 && (
                 <>
-                  <SectionHeader icon={TrendingUp} title="Activities & Mood" color="text-green-600" />
+                  <SectionHeader icon={TrendingUp} title="Activities & Mood" color="text-sage-600 dark:text-sage-400" />
                   <AnimatePresence mode="popLayout">
                     <div className="space-y-2">
                       {rotatedActivityPatterns
@@ -460,7 +440,7 @@ const InsightsPanel = ({ entries, userId, category, onClose }) => {
               {/* Temporal patterns */}
               {hasTemporalPatterns && (
                 <>
-                  <SectionHeader icon={Calendar} title="Time Patterns" color="text-blue-600" />
+                  <SectionHeader icon={Calendar} title="Time Patterns" color="text-lavender-600 dark:text-lavender-400" />
                   <AnimatePresence mode="popLayout">
                     <div className="space-y-2">
                       {cachedPatterns.temporal.insights.bestDay && (
@@ -509,7 +489,7 @@ const InsightsPanel = ({ entries, userId, category, onClose }) => {
           )}
         </div>
 
-        <div className="p-4 border-t border-warm-100 bg-warm-50">
+        <div className="p-4 border-t border-warm-100 bg-warm-50 dark:bg-hearth-850 dark:border-hearth-800">
           <p className="text-xs text-warm-500 text-center font-body">
             {source === 'cache' && 'Updated automatically in the background'}
             {source === 'computed' && 'Computed on-demand from your entries'}

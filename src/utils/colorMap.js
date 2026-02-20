@@ -40,7 +40,7 @@
  * dark:bg-hearth-800/30 dark:bg-hearth-800/20
  * dark:bg-terra-900/30 dark:bg-terra-900/40 dark:bg-terra-800/30
  * dark:bg-sage-900/30 dark:bg-sage-800/30
- * dark:bg-lavender-900/30 dark:bg-lavender-800/30
+ * dark:bg-lavender-900/30 dark:bg-lavender-900/40 dark:bg-lavender-800/30
  * dark:bg-accent-dark
  *
  * dark:text-honey-300 dark:text-honey-200
@@ -161,11 +161,46 @@ const PATTERN_TYPE_MAP = freezeMap({
     text: 'text-terra-800 dark:text-terra-200',
   },
 
+  // Shadow friction — lavender dark
+  shadow_friction: {
+    bg: 'bg-lavender-200 dark:bg-lavender-900/40',
+    border: 'border-lavender-200 dark:border-lavender-800',
+    text: 'text-lavender-800 dark:text-lavender-200',
+  },
+
+  // Absence warnings — honey
+  absence_warning: {
+    bg: 'bg-honey-100 dark:bg-honey-900/30',
+    border: 'border-honey-200 dark:border-honey-700',
+    text: 'text-honey-700 dark:text-honey-300',
+  },
+
+  // Linguistic shifts — lavender
+  linguistic_shift: {
+    bg: 'bg-lavender-100 dark:bg-lavender-900/30',
+    border: 'border-lavender-200 dark:border-lavender-700',
+    text: 'text-lavender-700 dark:text-lavender-300',
+  },
+
+  // Trigger — honey
+  trigger: {
+    bg: 'bg-honey-100 dark:bg-honey-900/30',
+    border: 'border-honey-200 dark:border-honey-700',
+    text: 'text-honey-700 dark:text-honey-300',
+  },
+
   // Recovery — honey/accent
   recovery_pattern: {
     bg: 'bg-honey-200 dark:bg-honey-800/30',
     border: 'border-honey-200 dark:border-honey-700',
     text: 'text-honey-800 dark:text-honey-200',
+  },
+
+  // Monthly summary — lavender
+  monthly_summary: {
+    bg: 'bg-lavender-100 dark:bg-lavender-900/30',
+    border: 'border-lavender-200 dark:border-lavender-700',
+    text: 'text-lavender-700 dark:text-lavender-300',
   },
 });
 
@@ -211,6 +246,18 @@ const ENTITY_TYPE_MAP = freezeMap({
   '@media': {
     bg: 'bg-lavender-100 dark:bg-lavender-800/30',
     text: 'text-lavender-700 dark:text-lavender-300',
+  },
+  '@situation': {
+    bg: 'bg-lavender-100 dark:bg-lavender-900/30',
+    text: 'text-lavender-700 dark:text-lavender-300',
+  },
+  '@self': {
+    bg: 'bg-terra-100 dark:bg-terra-900/30',
+    text: 'text-terra-700 dark:text-terra-300',
+  },
+  '@topic': {
+    bg: 'bg-hearth-100 dark:bg-hearth-800/30',
+    text: 'text-hearth-700 dark:text-hearth-300',
   },
 });
 
