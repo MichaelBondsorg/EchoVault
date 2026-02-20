@@ -117,10 +117,10 @@ const LightContextNudge = ({
         transition={{ type: 'spring', damping: 25, stiffness: 300 }}
         className={`fixed bottom-20 left-4 right-4 mx-auto max-w-sm rounded-2xl shadow-soft-lg overflow-hidden ${
           content.priority === 'high'
-            ? 'bg-gradient-to-r from-amber-500 to-orange-500'
+            ? 'bg-gradient-to-r from-honey-500 to-terra-500 dark:from-honey-600 dark:to-terra-600'
             : content.priority === 'medium'
-              ? 'bg-gradient-to-r from-blue-500 to-sky-500'
-              : 'bg-gradient-to-r from-warm-500 to-warm-600'
+              ? 'bg-gradient-to-r from-lavender-500 to-lavender-400 dark:from-lavender-600 dark:to-lavender-500'
+              : 'bg-gradient-to-r from-warm-500 to-warm-600 dark:from-warm-600 dark:to-warm-700'
         }`}
       >
         <div className="p-4">

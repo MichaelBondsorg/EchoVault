@@ -30,44 +30,44 @@ const ICON_MAP = {
 
 const COLOR_MAP = {
   rose: {
-    bg: 'bg-rose-50',
-    border: 'border-rose-200',
-    icon: 'bg-rose-100 text-rose-600',
-    title: 'text-rose-800',
-    text: 'text-rose-700',
-    button: 'bg-rose-500 hover:bg-rose-600 text-white'
+    bg: 'bg-terra-50 dark:bg-terra-900/30',
+    border: 'border-terra-200 dark:border-terra-800',
+    icon: 'bg-terra-100 text-terra-600 dark:bg-terra-800/40 dark:text-terra-400',
+    title: 'text-terra-800 dark:text-terra-200',
+    text: 'text-terra-700 dark:text-terra-300',
+    button: 'bg-terra-500 hover:bg-terra-600 text-white dark:bg-terra-600 dark:hover:bg-terra-500'
   },
   amber: {
-    bg: 'bg-amber-50',
-    border: 'border-amber-200',
-    icon: 'bg-amber-100 text-amber-600',
-    title: 'text-amber-800',
-    text: 'text-amber-700',
-    button: 'bg-amber-500 hover:bg-amber-600 text-white'
+    bg: 'bg-honey-50 dark:bg-honey-900/30',
+    border: 'border-honey-200 dark:border-honey-800',
+    icon: 'bg-honey-100 text-honey-600 dark:bg-honey-800/40 dark:text-honey-400',
+    title: 'text-honey-800 dark:text-honey-200',
+    text: 'text-honey-700 dark:text-honey-300',
+    button: 'bg-honey-500 hover:bg-honey-600 text-white dark:bg-honey-600 dark:hover:bg-honey-500'
   },
   blue: {
-    bg: 'bg-blue-50',
-    border: 'border-blue-200',
-    icon: 'bg-blue-100 text-blue-600',
-    title: 'text-blue-800',
-    text: 'text-blue-700',
-    button: 'bg-blue-500 hover:bg-blue-600 text-white'
+    bg: 'bg-lavender-50 dark:bg-lavender-900/30',
+    border: 'border-lavender-200 dark:border-lavender-800',
+    icon: 'bg-lavender-100 text-lavender-600 dark:bg-lavender-800/40 dark:text-lavender-400',
+    title: 'text-lavender-800 dark:text-lavender-200',
+    text: 'text-lavender-700 dark:text-lavender-300',
+    button: 'bg-lavender-500 hover:bg-lavender-600 text-white dark:bg-lavender-600 dark:hover:bg-lavender-500'
   },
   green: {
-    bg: 'bg-green-50',
-    border: 'border-green-200',
-    icon: 'bg-green-100 text-green-600',
-    title: 'text-green-800',
-    text: 'text-green-700',
-    button: 'bg-green-500 hover:bg-green-600 text-white'
+    bg: 'bg-sage-50 dark:bg-sage-900/30',
+    border: 'border-sage-200 dark:border-sage-800',
+    icon: 'bg-sage-100 text-sage-600 dark:bg-sage-800/40 dark:text-sage-400',
+    title: 'text-sage-800 dark:text-sage-200',
+    text: 'text-sage-700 dark:text-sage-300',
+    button: 'bg-sage-500 hover:bg-sage-600 text-white dark:bg-sage-600 dark:hover:bg-sage-500'
   },
   purple: {
-    bg: 'bg-purple-50',
-    border: 'border-purple-200',
-    icon: 'bg-purple-100 text-purple-600',
-    title: 'text-purple-800',
-    text: 'text-purple-700',
-    button: 'bg-purple-500 hover:bg-purple-600 text-white'
+    bg: 'bg-lavender-100 dark:bg-lavender-900/40',
+    border: 'border-lavender-300 dark:border-lavender-700',
+    icon: 'bg-lavender-200 text-lavender-700 dark:bg-lavender-800/50 dark:text-lavender-300',
+    title: 'text-lavender-900 dark:text-lavender-200',
+    text: 'text-lavender-800 dark:text-lavender-300',
+    button: 'bg-lavender-600 hover:bg-lavender-700 text-white dark:bg-lavender-700 dark:hover:bg-lavender-600'
   }
 };
 
@@ -96,15 +96,15 @@ const SocialResilienceAlert = ({ nudge, onAction, onDismiss }) => {
       <motion.div
         initial={{ opacity: 0, scale: 0.95 }}
         animate={{ opacity: 1, scale: 1 }}
-        className="bg-green-50 rounded-2xl border border-green-200 p-4"
+        className="bg-sage-50 dark:bg-sage-900/30 rounded-2xl border border-sage-200 dark:border-sage-800 p-4"
       >
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-green-100 flex items-center justify-center">
-            <Sparkles className="w-5 h-5 text-green-600" />
+          <div className="w-10 h-10 rounded-xl bg-sage-100 dark:bg-sage-800/40 flex items-center justify-center">
+            <Sparkles className="w-5 h-5 text-sage-600 dark:text-sage-400" />
           </div>
           <div>
-            <p className="text-green-800 font-medium">Nice!</p>
-            <p className="text-green-600 text-sm">
+            <p className="text-sage-800 dark:text-sage-200 font-medium">Nice!</p>
+            <p className="text-sage-600 dark:text-sage-400 text-sm">
               Small moments of connection add up.
             </p>
           </div>
@@ -133,7 +133,7 @@ const SocialResilienceAlert = ({ nudge, onAction, onDismiss }) => {
               {nudge.dismissible && (
                 <button
                   onClick={() => setShowDismissOptions(!showDismissOptions)}
-                  className="text-warm-400 hover:text-warm-600 flex-shrink-0"
+                  className="text-warm-400 hover:text-warm-600 dark:text-warm-500 dark:hover:text-warm-300 flex-shrink-0"
                 >
                   <X size={18} />
                 </button>
@@ -161,7 +161,7 @@ const SocialResilienceAlert = ({ nudge, onAction, onDismiss }) => {
               className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
                 idx === 0
                   ? colors.button
-                  : 'bg-white/50 text-warm-600 hover:bg-white'
+                  : 'bg-white/50 text-warm-600 hover:bg-white dark:bg-white/10 dark:text-warm-300 dark:hover:bg-white/20'
               }`}
             >
               {action.id === 'text' && <MessageCircle size={16} />}
@@ -180,17 +180,17 @@ const SocialResilienceAlert = ({ nudge, onAction, onDismiss }) => {
             initial={{ height: 0, opacity: 0 }}
             animate={{ height: 'auto', opacity: 1 }}
             exit={{ height: 0, opacity: 0 }}
-            className="border-t border-warm-100 bg-white/50"
+            className="border-t border-warm-100 dark:border-warm-800 bg-white/50 dark:bg-hearth-850/50"
           >
             <div className="p-4 space-y-2">
-              <p className="text-xs text-warm-500 mb-2">
+              <p className="text-xs text-warm-500 dark:text-warm-400 mb-2">
                 Why are you dismissing this?
               </p>
               {nudge.dismissOptions.map(option => (
                 <button
                   key={option.id}
                   onClick={() => handleDismiss(option.id)}
-                  className="w-full text-left px-3 py-2 text-sm text-warm-600 hover:bg-warm-100 rounded-lg transition-colors"
+                  className="w-full text-left px-3 py-2 text-sm text-warm-600 dark:text-warm-300 hover:bg-warm-100 dark:hover:bg-warm-800 rounded-lg transition-colors"
                 >
                   {option.label}
                 </button>
@@ -246,25 +246,25 @@ export const NeglectedConnectionsList = ({ connections, onReachOut }) => {
 
   return (
     <div className="space-y-2">
-      <p className="text-xs text-warm-500 font-medium">
+      <p className="text-xs text-warm-500 dark:text-warm-400 font-medium">
         People you haven't mentioned in a while:
       </p>
       {connections.slice(0, 3).map(person => (
         <div
           key={person.name}
-          className="flex items-center justify-between p-3 bg-warm-50 rounded-xl"
+          className="flex items-center justify-between p-3 bg-warm-50 dark:bg-warm-800/30 rounded-xl"
         >
           <div>
-            <p className="text-warm-800 font-medium capitalize">
+            <p className="text-warm-800 dark:text-warm-200 font-medium capitalize">
               {person.name}
             </p>
-            <p className="text-xs text-warm-500">
+            <p className="text-xs text-warm-500 dark:text-warm-400">
               {person.daysSince} days since last mention
             </p>
           </div>
           <button
             onClick={() => onReachOut?.(person)}
-            className="text-sm text-blue-600 hover:text-blue-700 font-medium flex items-center gap-1"
+            className="text-sm text-lavender-600 hover:text-lavender-700 dark:text-lavender-400 dark:hover:text-lavender-300 font-medium flex items-center gap-1"
           >
             <MessageCircle size={14} />
             Reach out

@@ -93,31 +93,31 @@ const RelationshipCorrectionModal = ({
           initial={{ opacity: 0, scale: 0.95, y: 20 }}
           animate={{ opacity: 1, scale: 1, y: 0 }}
           exit={{ opacity: 0, scale: 0.95, y: 20 }}
-          className="bg-white rounded-2xl shadow-xl max-w-md w-full overflow-hidden"
+          className="bg-white dark:bg-hearth-900 rounded-2xl shadow-xl max-w-md w-full overflow-hidden"
           onClick={e => e.stopPropagation()}
         >
           {/* Header */}
-          <div className="p-4 border-b border-warm-100 flex items-center justify-between">
+          <div className="p-4 border-b border-warm-100 dark:border-warm-800 flex items-center justify-between">
             <div>
-              <h2 className="text-lg font-medium text-warm-800">
+              <h2 className="text-lg font-medium text-warm-800 dark:text-warm-200">
                 Correct Categorization
               </h2>
-              <p className="text-sm text-warm-500 mt-0.5">
+              <p className="text-sm text-warm-500 dark:text-warm-400 mt-0.5">
                 How should <span className="font-medium capitalize">{person?.name}</span> be categorized?
               </p>
             </div>
             <button
               onClick={onClose}
-              className="p-2 hover:bg-warm-100 rounded-full transition-colors"
+              className="p-2 hover:bg-warm-100 dark:hover:bg-warm-800 rounded-full transition-colors"
             >
-              <X size={20} className="text-warm-500" />
+              <X size={20} className="text-warm-500 dark:text-warm-400" />
             </button>
           </div>
 
           {/* Current Detection */}
           {currentCategory && currentCategory !== 'ambiguous' && (
-            <div className="px-4 py-3 bg-warm-50 border-b border-warm-100">
-              <div className="flex items-center gap-2 text-sm text-warm-600">
+            <div className="px-4 py-3 bg-warm-50 dark:bg-warm-900/30 border-b border-warm-100 dark:border-warm-800">
+              <div className="flex items-center gap-2 text-sm text-warm-600 dark:text-warm-400">
                 <AlertCircle size={16} />
                 <span>
                   Currently detected as <span className="font-medium">{currentCategory}</span>
@@ -139,38 +139,38 @@ const RelationshipCorrectionModal = ({
                   className={`w-full p-4 rounded-xl border-2 transition-all flex items-start gap-3 text-left ${
                     isSelected
                       ? option.color === 'rose'
-                        ? 'border-rose-300 bg-rose-50'
+                        ? 'border-terra-300 bg-terra-50 dark:border-terra-700 dark:bg-terra-900/30'
                         : option.color === 'blue'
-                          ? 'border-blue-300 bg-blue-50'
-                          : 'border-purple-300 bg-purple-50'
-                      : 'border-warm-200 hover:border-warm-300 bg-white'
+                          ? 'border-lavender-300 bg-lavender-50 dark:border-lavender-700 dark:bg-lavender-900/30'
+                          : 'border-honey-300 bg-honey-50 dark:border-honey-700 dark:bg-honey-900/30'
+                      : 'border-warm-200 hover:border-warm-300 bg-white dark:border-warm-700 dark:hover:border-warm-600 dark:bg-hearth-850'
                   }`}
                 >
                   <div className={`w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0 ${
                     isSelected
                       ? option.color === 'rose'
-                        ? 'bg-rose-200 text-rose-600'
+                        ? 'bg-terra-200 text-terra-600 dark:bg-terra-800/50 dark:text-terra-400'
                         : option.color === 'blue'
-                          ? 'bg-blue-200 text-blue-600'
-                          : 'bg-purple-200 text-purple-600'
-                      : 'bg-warm-100 text-warm-500'
+                          ? 'bg-lavender-200 text-lavender-600 dark:bg-lavender-800/50 dark:text-lavender-400'
+                          : 'bg-honey-200 text-honey-600 dark:bg-honey-800/50 dark:text-honey-400'
+                      : 'bg-warm-100 text-warm-500 dark:bg-warm-800 dark:text-warm-400'
                   }`}>
                     <IconComponent size={20} />
                   </div>
                   <div className="flex-1">
-                    <div className="font-medium text-warm-800 flex items-center gap-2">
+                    <div className="font-medium text-warm-800 dark:text-warm-200 flex items-center gap-2">
                       {option.label}
                       {isSelected && (
                         <Check size={16} className={
                           option.color === 'rose'
-                            ? 'text-rose-500'
+                            ? 'text-terra-500 dark:text-terra-400'
                             : option.color === 'blue'
-                              ? 'text-blue-500'
-                              : 'text-purple-500'
+                              ? 'text-lavender-500 dark:text-lavender-400'
+                              : 'text-honey-500 dark:text-honey-400'
                         } />
                       )}
                     </div>
-                    <p className="text-sm text-warm-500 mt-0.5">
+                    <p className="text-sm text-warm-500 dark:text-warm-400 mt-0.5">
                       {option.description}
                     </p>
                   </div>
@@ -182,7 +182,7 @@ const RelationshipCorrectionModal = ({
           {/* Error State */}
           {error && (
             <div className="px-4 pb-2">
-              <div className="p-3 bg-red-50 rounded-lg text-sm text-red-600 flex items-center gap-2">
+              <div className="p-3 bg-red-50 dark:bg-red-900/30 rounded-lg text-sm text-red-600 dark:text-red-400 flex items-center gap-2">
                 <AlertCircle size={16} />
                 {error}
               </div>
@@ -192,7 +192,7 @@ const RelationshipCorrectionModal = ({
           {/* Success State */}
           {success && (
             <div className="px-4 pb-2">
-              <div className="p-3 bg-green-50 rounded-lg text-sm text-green-600 flex items-center gap-2">
+              <div className="p-3 bg-sage-50 dark:bg-sage-900/30 rounded-lg text-sm text-sage-600 dark:text-sage-400 flex items-center gap-2">
                 <Check size={16} />
                 Preference saved! This will apply to future analyses.
               </div>
@@ -200,10 +200,10 @@ const RelationshipCorrectionModal = ({
           )}
 
           {/* Actions */}
-          <div className="p-4 border-t border-warm-100 flex gap-3">
+          <div className="p-4 border-t border-warm-100 dark:border-warm-800 flex gap-3">
             <button
               onClick={onClose}
-              className="flex-1 py-3 px-4 bg-warm-100 hover:bg-warm-200 text-warm-700 rounded-xl font-medium transition-colors"
+              className="flex-1 py-3 px-4 bg-warm-100 hover:bg-warm-200 text-warm-700 dark:bg-warm-800 dark:hover:bg-warm-700 dark:text-warm-300 rounded-xl font-medium transition-colors"
             >
               Cancel
             </button>
@@ -212,8 +212,8 @@ const RelationshipCorrectionModal = ({
               disabled={saving || success}
               className={`flex-1 py-3 px-4 rounded-xl font-medium transition-colors ${
                 saving || success
-                  ? 'bg-warm-200 text-warm-400 cursor-not-allowed'
-                  : 'bg-blue-500 hover:bg-blue-600 text-white'
+                  ? 'bg-warm-200 text-warm-400 dark:bg-warm-800 dark:text-warm-500 cursor-not-allowed'
+                  : 'bg-lavender-500 hover:bg-lavender-600 text-white dark:bg-lavender-600 dark:hover:bg-lavender-500'
               }`}
             >
               {saving ? 'Saving...' : success ? 'Saved!' : 'Save Preference'}
@@ -238,7 +238,7 @@ export const RelationshipCorrectionButton = ({
   return (
     <button
       onClick={() => onCorrectionClick?.(person)}
-      className="text-xs text-warm-400 hover:text-warm-600 underline"
+      className="text-xs text-warm-400 hover:text-warm-600 dark:text-warm-500 dark:hover:text-warm-300 underline"
       title="Correct categorization"
     >
       Not right?

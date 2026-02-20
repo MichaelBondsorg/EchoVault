@@ -59,8 +59,8 @@ const SADInsightCard = ({
       exit={{ opacity: 0, y: -20 }}
       className={`rounded-2xl border overflow-hidden ${
         isHighPriority
-          ? 'bg-gradient-to-br from-amber-50 to-orange-50 border-amber-200'
-          : 'bg-gradient-to-br from-blue-50 to-sky-50 border-blue-200'
+          ? 'bg-gradient-to-br from-honey-50 to-terra-50 border-honey-200 dark:from-honey-900/30 dark:to-terra-900/30 dark:border-honey-800'
+          : 'bg-gradient-to-br from-lavender-50 to-lavender-100 border-lavender-200 dark:from-lavender-900/30 dark:to-lavender-800/30 dark:border-lavender-800'
       }`}
     >
       {/* Header */}
@@ -68,18 +68,18 @@ const SADInsightCard = ({
         <div className="flex items-start justify-between">
           <div className="flex items-center gap-3">
             <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${
-              isHighPriority ? 'bg-amber-100' : 'bg-blue-100'
+              isHighPriority ? 'bg-honey-100 dark:bg-honey-800/40' : 'bg-lavender-100 dark:bg-lavender-800/40'
             }`}>
-              <Sun size={20} className={isHighPriority ? 'text-amber-600' : 'text-blue-600'} />
+              <Sun size={20} className={isHighPriority ? 'text-honey-600 dark:text-honey-400' : 'text-lavender-600 dark:text-lavender-400'} />
             </div>
             <div>
               <h3 className={`font-medium ${
-                isHighPriority ? 'text-amber-800' : 'text-blue-800'
+                isHighPriority ? 'text-honey-800 dark:text-honey-200' : 'text-lavender-800 dark:text-lavender-200'
               }`}>
                 Light & Mood Patterns
               </h3>
               <p className={`text-xs ${
-                isHighPriority ? 'text-amber-600' : 'text-blue-600'
+                isHighPriority ? 'text-honey-600 dark:text-honey-400' : 'text-lavender-600 dark:text-lavender-400'
               }`}>
                 {daylightTrend?.avgDaylightHours
                   ? `${daylightTrend.avgDaylightHours}h avg daylight recently`
@@ -94,8 +94,8 @@ const SADInsightCard = ({
               onClick={() => setExpanded(!expanded)}
               className={`p-1.5 rounded-lg transition-colors ${
                 isHighPriority
-                  ? 'hover:bg-amber-100 text-amber-600'
-                  : 'hover:bg-blue-100 text-blue-600'
+                  ? 'hover:bg-honey-100 text-honey-600 dark:hover:bg-honey-800/40 dark:text-honey-400'
+                  : 'hover:bg-lavender-100 text-lavender-600 dark:hover:bg-lavender-800/40 dark:text-lavender-400'
               }`}
             >
               {expanded ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
@@ -104,8 +104,8 @@ const SADInsightCard = ({
               onClick={handleDismiss}
               className={`p-1.5 rounded-lg transition-colors ${
                 isHighPriority
-                  ? 'hover:bg-amber-100 text-amber-400 hover:text-amber-600'
-                  : 'hover:bg-blue-100 text-blue-400 hover:text-blue-600'
+                  ? 'hover:bg-honey-100 text-honey-400 hover:text-honey-600 dark:hover:bg-honey-800/40 dark:text-honey-500 dark:hover:text-honey-400'
+                  : 'hover:bg-lavender-100 text-lavender-400 hover:text-lavender-600 dark:hover:bg-lavender-800/40 dark:text-lavender-500 dark:hover:text-lavender-400'
               }`}
             >
               <X size={18} />
@@ -116,7 +116,7 @@ const SADInsightCard = ({
         {/* Quick insight summary */}
         {insights?.[0] && (
           <p className={`mt-3 text-sm ${
-            isHighPriority ? 'text-amber-700' : 'text-blue-700'
+            isHighPriority ? 'text-honey-700 dark:text-honey-300' : 'text-lavender-700 dark:text-lavender-300'
           }`}>
             {insights[0].message}
           </p>
@@ -125,23 +125,23 @@ const SADInsightCard = ({
         {/* Primary intervention */}
         {interventions?.[0] && !expanded && (
           <div className={`mt-3 p-3 rounded-xl ${
-            isHighPriority ? 'bg-amber-100/50' : 'bg-blue-100/50'
+            isHighPriority ? 'bg-honey-100/50 dark:bg-honey-800/30' : 'bg-lavender-100/50 dark:bg-lavender-800/30'
           }`}>
             <div className="flex items-center gap-2">
               {ICON_MAP[interventions[0].icon] && (
                 React.createElement(ICON_MAP[interventions[0].icon], {
                   size: 16,
-                  className: isHighPriority ? 'text-amber-600' : 'text-blue-600'
+                  className: isHighPriority ? 'text-honey-600 dark:text-honey-400' : 'text-lavender-600 dark:text-lavender-400'
                 })
               )}
               <span className={`text-sm font-medium ${
-                isHighPriority ? 'text-amber-800' : 'text-blue-800'
+                isHighPriority ? 'text-honey-800 dark:text-honey-200' : 'text-lavender-800 dark:text-lavender-200'
               }`}>
                 {interventions[0].title}
               </span>
             </div>
             <p className={`text-xs mt-1 ${
-              isHighPriority ? 'text-amber-600' : 'text-blue-600'
+              isHighPriority ? 'text-honey-600 dark:text-honey-400' : 'text-lavender-600 dark:text-lavender-400'
             }`}>
               {interventions[0].message}
             </p>
@@ -159,13 +159,13 @@ const SADInsightCard = ({
             className="overflow-hidden"
           >
             <div className={`px-4 pb-4 border-t ${
-              isHighPriority ? 'border-amber-200' : 'border-blue-200'
+              isHighPriority ? 'border-honey-200 dark:border-honey-800' : 'border-lavender-200 dark:border-lavender-800'
             }`}>
               {/* All insights */}
               {insights?.length > 1 && (
                 <div className="mt-4">
                   <p className={`text-xs font-medium mb-2 ${
-                    isHighPriority ? 'text-amber-600' : 'text-blue-600'
+                    isHighPriority ? 'text-honey-600 dark:text-honey-400' : 'text-lavender-600 dark:text-lavender-400'
                   }`}>
                     What we noticed:
                   </p>
@@ -174,15 +174,15 @@ const SADInsightCard = ({
                       <li
                         key={idx}
                         className={`text-sm flex items-start gap-2 ${
-                          isHighPriority ? 'text-amber-700' : 'text-blue-700'
+                          isHighPriority ? 'text-honey-700 dark:text-honey-300' : 'text-lavender-700 dark:text-lavender-300'
                         }`}
                       >
                         <span className={`w-1.5 h-1.5 rounded-full mt-1.5 flex-shrink-0 ${
                           insight.severity === 'high'
-                            ? 'bg-amber-500'
+                            ? 'bg-honey-500 dark:bg-honey-400'
                             : insight.severity === 'medium'
-                              ? 'bg-amber-400'
-                              : 'bg-amber-300'
+                              ? 'bg-honey-400 dark:bg-honey-500'
+                              : 'bg-honey-300 dark:bg-honey-600'
                         }`} />
                         {insight.message}
                       </li>
@@ -195,7 +195,7 @@ const SADInsightCard = ({
               {interventions?.length > 0 && (
                 <div className="mt-4">
                   <p className={`text-xs font-medium mb-2 ${
-                    isHighPriority ? 'text-amber-600' : 'text-blue-600'
+                    isHighPriority ? 'text-honey-600 dark:text-honey-400' : 'text-lavender-600 dark:text-lavender-400'
                   }`}>
                     Suggestions:
                   </p>
@@ -206,33 +206,33 @@ const SADInsightCard = ({
                         <div
                           key={idx}
                           className={`p-3 rounded-xl ${
-                            isHighPriority ? 'bg-amber-100/50' : 'bg-blue-100/50'
+                            isHighPriority ? 'bg-honey-100/50 dark:bg-honey-800/30' : 'bg-lavender-100/50 dark:bg-lavender-800/30'
                           }`}
                         >
                           <div className="flex items-center gap-2">
                             <IconComponent
                               size={16}
-                              className={isHighPriority ? 'text-amber-600' : 'text-blue-600'}
+                              className={isHighPriority ? 'text-honey-600 dark:text-honey-400' : 'text-lavender-600 dark:text-lavender-400'}
                             />
                             <span className={`text-sm font-medium ${
-                              isHighPriority ? 'text-amber-800' : 'text-blue-800'
+                              isHighPriority ? 'text-honey-800 dark:text-honey-200' : 'text-lavender-800 dark:text-lavender-200'
                             }`}>
                               {intervention.title}
                             </span>
                             {intervention.priority === 'high' && (
-                              <span className="px-1.5 py-0.5 bg-amber-200 text-amber-700 rounded text-xs">
+                              <span className="px-1.5 py-0.5 bg-honey-200 text-honey-700 dark:bg-honey-800 dark:text-honey-300 rounded text-xs">
                                 Priority
                               </span>
                             )}
                           </div>
                           <p className={`text-xs mt-1 ${
-                            isHighPriority ? 'text-amber-600' : 'text-blue-600'
+                            isHighPriority ? 'text-honey-600 dark:text-honey-400' : 'text-lavender-600 dark:text-lavender-400'
                           }`}>
                             {intervention.message}
                           </p>
                           {intervention.reason && (
                             <p className={`text-xs mt-1 italic ${
-                              isHighPriority ? 'text-amber-500' : 'text-blue-500'
+                              isHighPriority ? 'text-honey-500 dark:text-honey-400' : 'text-lavender-500 dark:text-lavender-400'
                             }`}>
                               Why: {intervention.reason}
                             </p>
@@ -249,8 +249,8 @@ const SADInsightCard = ({
                 onClick={onLearnMore}
                 className={`mt-4 flex items-center gap-1 text-xs font-medium transition-colors ${
                   isHighPriority
-                    ? 'text-amber-600 hover:text-amber-700'
-                    : 'text-blue-600 hover:text-blue-700'
+                    ? 'text-honey-600 hover:text-honey-700 dark:text-honey-400 dark:hover:text-honey-300'
+                    : 'text-lavender-600 hover:text-lavender-700 dark:text-lavender-400 dark:hover:text-lavender-300'
                 }`}
               >
                 <ExternalLink size={12} />
