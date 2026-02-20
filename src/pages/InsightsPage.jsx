@@ -184,7 +184,7 @@ const InsightsPage = ({
       {/* Page Header */}
       <div className="pt-2 flex items-start justify-between">
         <div>
-          <h2 className="font-display font-bold text-xl text-warm-800">
+          <h2 className="font-display font-bold text-xl text-warm-800 dark:text-warm-100">
             Insights
           </h2>
           <p className="text-sm text-warm-500 mt-1">
@@ -196,7 +196,7 @@ const InsightsPage = ({
         <button
           onClick={refresh}
           disabled={loading || refreshing}
-          className="p-2 rounded-xl bg-white/50 hover:bg-white/80 transition-colors disabled:opacity-50"
+          className="p-2 rounded-xl bg-white/50 dark:bg-hearth-900/50 hover:bg-white/80 dark:hover:bg-hearth-800/80 transition-colors disabled:opacity-50"
         >
           <RefreshCw
             size={18}
@@ -206,7 +206,7 @@ const InsightsPage = ({
       </div>
 
       {/* Disclaimer Note */}
-      <div className="bg-warm-50/50 border border-warm-200/30 rounded-xl px-4 py-3">
+      <div className="bg-warm-50/50 dark:bg-hearth-900/50 border border-warm-200/30 dark:border-hearth-800/30 rounded-xl px-4 py-3">
         <p className="text-xs text-warm-500 leading-relaxed">
           <span className="font-medium">Note:</span> Insights are only as good as your data. The more consistently you journal, the more accurate and personalized these patterns become.
         </p>
@@ -285,15 +285,15 @@ const InsightsPage = ({
         <motion.div
           className="
             p-8 text-center
-            bg-white/30 backdrop-blur-sm
-            border border-white/20
+            bg-white/30 dark:bg-hearth-900/30 backdrop-blur-sm
+            border border-white/20 dark:border-hearth-800/20
             rounded-3xl
           "
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
         >
           <Brain size={40} className="mx-auto text-warm-300 mb-3" />
-          <p className="text-warm-600 font-medium">
+          <p className="text-warm-600 dark:text-warm-300 font-medium">
             No insights yet
           </p>
           <p className="text-warm-500 text-sm mt-2">
@@ -340,15 +340,15 @@ const GenerationStatus = ({
   if (loading && !refreshing) {
     return (
       <motion.div
-        className="bg-white/50 border border-white/30 rounded-2xl p-4"
+        className="bg-white/50 dark:bg-hearth-900/50 border border-white/30 dark:border-hearth-800/30 rounded-2xl p-4"
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
       >
         <div className="flex items-center gap-3">
           <Loader2 size={20} className="text-honey-500 animate-spin" />
           <div>
-            <p className="font-medium text-warm-700">Loading insights...</p>
-            <p className="text-xs text-warm-500">Fetching your personalized analysis</p>
+            <p className="font-medium text-warm-700 dark:text-warm-200">Loading insights...</p>
+            <p className="text-xs text-warm-500 dark:text-warm-400">Fetching your personalized analysis</p>
           </div>
         </div>
       </motion.div>
@@ -359,7 +359,7 @@ const GenerationStatus = ({
   if (isCalibrating) {
     return (
       <motion.div
-        className="bg-gradient-to-r from-honey-500/10 to-lavender-500/10 border border-honey-200/30 rounded-2xl p-4"
+        className="bg-gradient-to-r from-honey-500/10 to-lavender-500/10 dark:from-honey-900/20 dark:to-lavender-900/20 border border-honey-200/30 dark:border-honey-800/30 rounded-2xl p-4"
         initial={{ opacity: 0, y: -10 }}
         animate={{ opacity: 1, y: 0 }}
       >
@@ -368,8 +368,8 @@ const GenerationStatus = ({
             <Brain size={20} className="text-honey-600" />
           </div>
           <div className="flex-1">
-            <p className="font-medium text-warm-700">Nexus is learning your patterns</p>
-            <div className="mt-2 h-2 bg-warm-200 rounded-full overflow-hidden">
+            <p className="font-medium text-warm-700 dark:text-warm-200">Nexus is learning your patterns</p>
+            <div className="mt-2 h-2 bg-warm-200 dark:bg-warm-800 rounded-full overflow-hidden">
               <motion.div
                 className="h-full bg-gradient-to-r from-honey-500 to-honey-600"
                 initial={{ width: 0 }}
@@ -392,15 +392,15 @@ const GenerationStatus = ({
   if (error) {
     return (
       <motion.div
-        className="bg-red-50 border border-red-200/50 rounded-2xl p-4"
+        className="bg-red-50 dark:bg-red-950/30 border border-red-200/50 dark:border-red-900/50 rounded-2xl p-4"
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
       >
         <div className="flex items-center gap-3">
-          <AlertTriangle size={20} className="text-red-500" />
+          <AlertTriangle size={20} className="text-red-500 dark:text-red-400" />
           <div>
-            <p className="font-medium text-red-700">Generation failed</p>
-            <p className="text-xs text-red-500">{error}</p>
+            <p className="font-medium text-red-700 dark:text-red-300">Generation failed</p>
+            <p className="text-xs text-red-500 dark:text-red-400">{error}</p>
           </div>
         </div>
       </motion.div>
@@ -410,14 +410,14 @@ const GenerationStatus = ({
   // Success/Status state
   return (
     <motion.div
-      className="bg-white/30 border border-white/20 rounded-2xl p-3"
+      className="bg-white/30 dark:bg-hearth-900/30 border border-white/20 dark:border-hearth-800/20 rounded-2xl p-3"
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
     >
       <div className="flex items-center justify-between text-xs">
         <div className="flex items-center gap-4">
           <div className="flex items-center gap-1.5 text-warm-500">
-            <CheckCircle2 size={14} className="text-green-500" />
+            <CheckCircle2 size={14} className="text-sage-500 dark:text-sage-400" />
             <span>{insightCount} insights</span>
           </div>
           {dataStatus?.entries && (
@@ -428,7 +428,7 @@ const GenerationStatus = ({
           )}
           {dataStatus?.whoopConnected && (
             <div className="flex items-center gap-1.5 text-warm-500">
-              <Activity size={14} className="text-teal-500" />
+              <Activity size={14} className="text-sage-500 dark:text-sage-400" />
               <span>Whoop linked</span>
             </div>
           )}
@@ -631,13 +631,13 @@ const CorrelationsSection = ({ correlations, isExpanded, onToggle }) => {
 
   return (
     <motion.div
-      className="bg-white/50 border border-white/30 rounded-2xl overflow-hidden"
+      className="bg-white/50 dark:bg-hearth-900/50 border border-white/30 dark:border-hearth-800/30 rounded-2xl overflow-hidden"
       initial={{ opacity: 0, y: -10 }}
       animate={{ opacity: 1, y: 0 }}
     >
       {/* Header */}
       <div
-        className="p-4 flex items-center justify-between cursor-pointer hover:bg-white/30 transition-colors"
+        className="p-4 flex items-center justify-between cursor-pointer hover:bg-white/30 dark:hover:bg-hearth-800/30 transition-colors"
         onClick={onToggle}
       >
         <div className="flex items-center gap-3">
@@ -645,7 +645,7 @@ const CorrelationsSection = ({ correlations, isExpanded, onToggle }) => {
             <TrendingUp size={18} className="text-warm-600" />
           </div>
           <div>
-            <h3 className="font-semibold text-warm-800">Your Patterns</h3>
+            <h3 className="font-semibold text-warm-800 dark:text-warm-100">Your Patterns</h3>
             <p className="text-xs text-warm-500">
               How health &amp; environment affect your mood
             </p>
@@ -682,9 +682,9 @@ const CorrelationsSection = ({ correlations, isExpanded, onToggle }) => {
                     {correlations.health.topInsights.map((insight, i) => {
                       const Icon = getCorrelationIcon(insight.metric);
                       const strengthColor =
-                        insight.strength === 'strong' ? 'text-green-600 bg-green-50' :
-                        insight.strength === 'moderate' ? 'text-blue-600 bg-blue-50' :
-                        'text-warm-500 bg-warm-50';
+                        insight.strength === 'strong' ? 'text-sage-600 bg-sage-50 dark:text-sage-400 dark:bg-sage-900/30' :
+                        insight.strength === 'moderate' ? 'text-lavender-600 bg-lavender-50 dark:text-lavender-400 dark:bg-lavender-900/30' :
+                        'text-warm-500 bg-warm-50 dark:text-warm-400 dark:bg-warm-900/30';
                       const insightKey = `health-${i}`;
                       const isMethodExpanded = expandedMethodology === insightKey;
                       const methodology = getMethodologyExplanation(insight);
@@ -692,7 +692,7 @@ const CorrelationsSection = ({ correlations, isExpanded, onToggle }) => {
                       return (
                         <motion.div
                           key={i}
-                          className="bg-white/60 rounded-xl overflow-hidden"
+                          className="bg-white/60 dark:bg-hearth-850/60 rounded-xl overflow-hidden"
                           initial={{ opacity: 0, x: -10 }}
                           animate={{ opacity: 1, x: 0 }}
                           transition={{ delay: i * 0.1 }}
@@ -702,7 +702,7 @@ const CorrelationsSection = ({ correlations, isExpanded, onToggle }) => {
                               <Icon size={14} className={strengthColor.split(' ')[0]} />
                             </div>
                             <div className="flex-1">
-                              <p className="text-sm text-warm-700">{insight.insight}</p>
+                              <p className="text-sm text-warm-700 dark:text-warm-200">{insight.insight}</p>
                               <div className="flex items-center gap-2 mt-1 flex-wrap">
                                 <span className={`text-xs px-2 py-0.5 rounded-full ${strengthColor}`}>
                                   {insight.strength}
@@ -717,7 +717,7 @@ const CorrelationsSection = ({ correlations, isExpanded, onToggle }) => {
                                     e.stopPropagation();
                                     setExpandedMethodology(isMethodExpanded ? null : insightKey);
                                   }}
-                                  className="text-xs text-teal-600 hover:text-teal-700 flex items-center gap-1"
+                                  className="text-xs text-sage-600 hover:text-sage-700 dark:text-sage-400 dark:hover:text-sage-300 flex items-center gap-1"
                                 >
                                   How?
                                   {isMethodExpanded ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
@@ -734,22 +734,22 @@ const CorrelationsSection = ({ correlations, isExpanded, onToggle }) => {
                                 animate={{ height: 'auto', opacity: 1 }}
                                 exit={{ height: 0, opacity: 0 }}
                                 transition={{ duration: 0.15 }}
-                                className="border-t border-warm-200/50 bg-teal-50/30"
+                                className="border-t border-warm-200/50 bg-sage-50/30 dark:bg-sage-900/20"
                               >
                                 <div className="p-3 space-y-2">
                                   <div className="flex items-center gap-2">
-                                    <Brain size={12} className="text-teal-600" />
-                                    <span className="text-xs font-semibold text-teal-700">
+                                    <Brain size={12} className="text-sage-600 dark:text-sage-400" />
+                                    <span className="text-xs font-semibold text-sage-700 dark:text-sage-300">
                                       {methodology.method}
                                     </span>
                                   </div>
-                                  <p className="text-xs text-warm-600">
+                                  <p className="text-xs text-warm-600 dark:text-warm-400">
                                     {methodology.description}
                                   </p>
                                   <ul className="text-xs text-warm-500 space-y-1">
                                     {methodology.details.map((detail, j) => (
                                       <li key={j} className="flex items-center gap-1.5">
-                                        <span className="w-1 h-1 bg-teal-400 rounded-full" />
+                                        <span className="w-1 h-1 bg-sage-400 dark:bg-sage-500 rounded-full" />
                                         {detail}
                                       </li>
                                     ))}
@@ -769,7 +769,7 @@ const CorrelationsSection = ({ correlations, isExpanded, onToggle }) => {
               {hasEnv && (
                 <div className="space-y-2">
                   <div className="flex items-center gap-2">
-                    <Sun size={14} className="text-amber-500" />
+                    <Sun size={14} className="text-honey-500 dark:text-honey-400" />
                     <span className="text-xs font-bold text-warm-500 uppercase tracking-wider">
                       Environment &amp; Mood
                     </span>
@@ -778,9 +778,9 @@ const CorrelationsSection = ({ correlations, isExpanded, onToggle }) => {
                     {correlations.environment.topInsights.map((insight, i) => {
                       const Icon = getCorrelationIcon(insight.metric);
                       const strengthColor =
-                        insight.strength === 'strong' ? 'text-amber-600 bg-amber-50' :
-                        insight.strength === 'moderate' ? 'text-sky-600 bg-sky-50' :
-                        'text-warm-500 bg-warm-50';
+                        insight.strength === 'strong' ? 'text-honey-600 bg-honey-50 dark:text-honey-400 dark:bg-honey-900/30' :
+                        insight.strength === 'moderate' ? 'text-lavender-600 bg-lavender-50 dark:text-lavender-400 dark:bg-lavender-900/30' :
+                        'text-warm-500 bg-warm-50 dark:text-warm-400 dark:bg-warm-900/30';
                       const envInsightKey = `env-${i}`;
                       const isEnvMethodExpanded = expandedMethodology === envInsightKey;
                       const envMethodology = getEnvironmentMethodologyExplanation(insight);
@@ -788,7 +788,7 @@ const CorrelationsSection = ({ correlations, isExpanded, onToggle }) => {
                       return (
                         <motion.div
                           key={i}
-                          className="bg-white/60 rounded-xl overflow-hidden"
+                          className="bg-white/60 dark:bg-hearth-850/60 rounded-xl overflow-hidden"
                           initial={{ opacity: 0, x: -10 }}
                           animate={{ opacity: 1, x: 0 }}
                           transition={{ delay: i * 0.1 }}
@@ -798,7 +798,7 @@ const CorrelationsSection = ({ correlations, isExpanded, onToggle }) => {
                               <Icon size={14} className={strengthColor.split(' ')[0]} />
                             </div>
                             <div className="flex-1">
-                              <p className="text-sm text-warm-700">{insight.insight}</p>
+                              <p className="text-sm text-warm-700 dark:text-warm-200">{insight.insight}</p>
                               <div className="flex items-center gap-2 mt-1 flex-wrap">
                                 <span className={`text-xs px-2 py-0.5 rounded-full ${strengthColor}`}>
                                   {insight.strength}
@@ -813,7 +813,7 @@ const CorrelationsSection = ({ correlations, isExpanded, onToggle }) => {
                                     e.stopPropagation();
                                     setExpandedMethodology(isEnvMethodExpanded ? null : envInsightKey);
                                   }}
-                                  className="text-xs text-amber-600 hover:text-amber-700 flex items-center gap-1"
+                                  className="text-xs text-honey-600 hover:text-honey-700 dark:text-honey-400 dark:hover:text-honey-300 flex items-center gap-1"
                                 >
                                   How?
                                   {isEnvMethodExpanded ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
@@ -830,22 +830,22 @@ const CorrelationsSection = ({ correlations, isExpanded, onToggle }) => {
                                 animate={{ height: 'auto', opacity: 1 }}
                                 exit={{ height: 0, opacity: 0 }}
                                 transition={{ duration: 0.15 }}
-                                className="border-t border-warm-200/50 bg-amber-50/30"
+                                className="border-t border-warm-200/50 bg-honey-50/30 dark:bg-honey-900/20"
                               >
                                 <div className="p-3 space-y-2">
                                   <div className="flex items-center gap-2">
-                                    <Brain size={12} className="text-amber-600" />
-                                    <span className="text-xs font-semibold text-amber-700">
+                                    <Brain size={12} className="text-honey-600 dark:text-honey-400" />
+                                    <span className="text-xs font-semibold text-honey-700 dark:text-honey-300">
                                       {envMethodology.method}
                                     </span>
                                   </div>
-                                  <p className="text-xs text-warm-600">
+                                  <p className="text-xs text-warm-600 dark:text-warm-400">
                                     {envMethodology.description}
                                   </p>
                                   <ul className="text-xs text-warm-500 space-y-1">
                                     {envMethodology.details.map((detail, j) => (
                                       <li key={j} className="flex items-center gap-1.5">
-                                        <span className="w-1 h-1 bg-amber-400 rounded-full" />
+                                        <span className="w-1 h-1 bg-honey-400 dark:bg-honey-500 rounded-full" />
                                         {detail}
                                       </li>
                                     ))}
@@ -862,18 +862,18 @@ const CorrelationsSection = ({ correlations, isExpanded, onToggle }) => {
                   {/* SAD Warning */}
                   {correlations.environment.lowSunshineWarning && (
                     <motion.div
-                      className="bg-amber-50 border border-amber-200/50 rounded-xl p-3"
+                      className="bg-honey-50 dark:bg-honey-950/30 border border-honey-200/50 dark:border-honey-800/50 rounded-xl p-3"
                       initial={{ opacity: 0 }}
                       animate={{ opacity: 1 }}
                     >
                       <div className="flex items-start gap-2">
-                        <AlertTriangle size={16} className="text-amber-600 flex-shrink-0 mt-0.5" />
+                        <AlertTriangle size={16} className="text-honey-600 dark:text-honey-400 flex-shrink-0 mt-0.5" />
                         <div>
-                          <p className="text-sm text-amber-800 font-medium">
+                          <p className="text-sm text-honey-800 dark:text-honey-200 font-medium">
                             {correlations.environment.lowSunshineWarning.insight}
                           </p>
                           {correlations.environment.lowSunshineWarning.recommendation && (
-                            <p className="text-xs text-amber-600 mt-1">
+                            <p className="text-xs text-honey-600 dark:text-honey-400 mt-1">
                               {correlations.environment.lowSunshineWarning.recommendation}
                             </p>
                           )}
@@ -911,24 +911,24 @@ const RecommendationsSection = ({ recommendations }) => {
     switch (priority) {
       case 'high':
         return {
-          bg: 'bg-red-50',
-          border: 'border-red-200/50',
-          icon: 'text-red-500',
-          text: 'text-red-800'
+          bg: 'bg-red-50 dark:bg-red-950/30',
+          border: 'border-red-200/50 dark:border-red-900/50',
+          icon: 'text-red-500 dark:text-red-400',
+          text: 'text-red-800 dark:text-red-300'
         };
       case 'medium':
         return {
-          bg: 'bg-amber-50',
-          border: 'border-amber-200/50',
-          icon: 'text-amber-500',
-          text: 'text-amber-800'
+          bg: 'bg-honey-50 dark:bg-honey-950/30',
+          border: 'border-honey-200/50 dark:border-honey-800/50',
+          icon: 'text-honey-500 dark:text-honey-400',
+          text: 'text-honey-800 dark:text-honey-200'
         };
       default:
         return {
-          bg: 'bg-green-50',
-          border: 'border-green-200/50',
-          icon: 'text-green-500',
-          text: 'text-green-800'
+          bg: 'bg-sage-50 dark:bg-sage-950/30',
+          border: 'border-sage-200/50 dark:border-sage-800/50',
+          icon: 'text-sage-500 dark:text-sage-400',
+          text: 'text-sage-800 dark:text-sage-200'
         };
     }
   };
@@ -945,13 +945,13 @@ const RecommendationsSection = ({ recommendations }) => {
 
   return (
     <motion.div
-      className="bg-gradient-to-r from-honey-50/50 to-sage-50/50 border border-honey-200/30 rounded-2xl p-4"
+      className="bg-gradient-to-r from-honey-50/50 to-sage-50/50 dark:from-honey-900/20 dark:to-sage-900/20 border border-honey-200/30 dark:border-honey-800/30 rounded-2xl p-4"
       initial={{ opacity: 0, y: -10 }}
       animate={{ opacity: 1, y: 0 }}
     >
       <div className="flex items-center gap-2 mb-3">
         <Lightbulb size={16} className="text-honey-600" />
-        <h3 className="font-semibold text-warm-800">Today's Recommendations</h3>
+        <h3 className="font-semibold text-warm-800 dark:text-warm-100">Today's Recommendations</h3>
       </div>
 
       <div className="space-y-2">
@@ -1152,12 +1152,12 @@ const QuickInsightsSection = ({
   if (!hasEnoughData && entriesNeeded === 0 && (!insights || insights.length === 0)) {
     return (
       <motion.div
-        className="bg-white/30 border border-white/20 rounded-2xl p-4"
+        className="bg-white/30 dark:bg-hearth-900/30 border border-white/20 dark:border-hearth-800/20 rounded-2xl p-4"
         initial={{ opacity: 0, y: -10 }}
         animate={{ opacity: 1, y: 0 }}
       >
         <div className="flex items-center gap-3">
-          <div className="p-2 bg-warm-100/50 rounded-xl">
+          <div className="p-2 bg-warm-100/50 dark:bg-warm-900/50 rounded-xl">
             <Loader2 size={18} className="text-warm-400 animate-spin" />
           </div>
           <div>
@@ -1175,12 +1175,12 @@ const QuickInsightsSection = ({
   if (!hasEnoughData && entriesNeeded > 0) {
     return (
       <motion.div
-        className="bg-white/30 border border-white/20 rounded-2xl p-4"
+        className="bg-white/30 dark:bg-hearth-900/30 border border-white/20 dark:border-hearth-800/20 rounded-2xl p-4"
         initial={{ opacity: 0, y: -10 }}
         animate={{ opacity: 1, y: 0 }}
       >
         <div className="flex items-center gap-3">
-          <div className="p-2 bg-warm-100/50 rounded-xl">
+          <div className="p-2 bg-warm-100/50 dark:bg-warm-900/50 rounded-xl">
             <Zap size={18} className="text-warm-400" />
           </div>
           <div>
@@ -1200,16 +1200,16 @@ const QuickInsightsSection = ({
     if (generating) {
       return (
         <motion.div
-          className="bg-gradient-to-r from-emerald-50/50 to-teal-50/50 border border-emerald-200/30 rounded-2xl p-4"
+          className="bg-gradient-to-r from-sage-50/50 to-sage-100/50 dark:from-sage-950/30 dark:to-sage-900/30 border border-sage-200/30 dark:border-sage-800/30 rounded-2xl p-4"
           initial={{ opacity: 0, y: -10 }}
           animate={{ opacity: 1, y: 0 }}
         >
           <div className="flex items-center gap-3">
-            <div className="p-2 bg-gradient-to-br from-emerald-400/20 to-teal-400/20 rounded-xl">
-              <Loader2 size={18} className="text-emerald-600 animate-spin" />
+            <div className="p-2 bg-gradient-to-br from-sage-400/20 to-sage-300/20 dark:from-sage-600/20 dark:to-sage-500/20 rounded-xl">
+              <Loader2 size={18} className="text-sage-600 dark:text-sage-400 animate-spin" />
             </div>
             <div>
-              <h3 className="font-semibold text-warm-800">Quick Insights</h3>
+              <h3 className="font-semibold text-warm-800 dark:text-warm-100">Quick Insights</h3>
               <p className="text-xs text-warm-500">
                 Analyzing your patterns...
               </p>
@@ -1222,17 +1222,17 @@ const QuickInsightsSection = ({
     if (hasEnoughData) {
       return (
         <motion.div
-          className="bg-gradient-to-r from-emerald-50/50 to-teal-50/50 border border-emerald-200/30 rounded-2xl p-4"
+          className="bg-gradient-to-r from-sage-50/50 to-sage-100/50 dark:from-sage-950/30 dark:to-sage-900/30 border border-sage-200/30 dark:border-sage-800/30 rounded-2xl p-4"
           initial={{ opacity: 0, y: -10 }}
           animate={{ opacity: 1, y: 0 }}
         >
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
-              <div className="p-2 bg-gradient-to-br from-emerald-400/20 to-teal-400/20 rounded-xl">
-                <Zap size={18} className="text-emerald-600" />
+              <div className="p-2 bg-gradient-to-br from-sage-400/20 to-sage-300/20 dark:from-sage-600/20 dark:to-sage-500/20 rounded-xl">
+                <Zap size={18} className="text-sage-600 dark:text-sage-400" />
               </div>
               <div>
-                <h3 className="font-semibold text-warm-800">Quick Insights</h3>
+                <h3 className="font-semibold text-warm-800 dark:text-warm-100">Quick Insights</h3>
                 <p className="text-xs text-warm-500">
                   Tap refresh to generate pattern insights
                 </p>
@@ -1241,7 +1241,7 @@ const QuickInsightsSection = ({
             {onRefresh && (
               <button
                 onClick={onRefresh}
-                className="px-3 py-1.5 bg-emerald-500 text-white text-sm font-medium rounded-lg hover:bg-emerald-600 transition-colors"
+                className="px-3 py-1.5 bg-sage-500 text-white text-sm font-medium rounded-lg hover:bg-sage-600 dark:bg-sage-600 dark:hover:bg-sage-500 transition-colors"
               >
                 Generate
               </button>
@@ -1257,34 +1257,34 @@ const QuickInsightsSection = ({
   const getCategoryStyle = (category) => {
     switch (category) {
       case 'activity':
-        return { icon: Activity, color: 'text-green-600', bg: 'bg-green-50' };
+        return { icon: Activity, color: 'text-sage-600 dark:text-sage-400', bg: 'bg-sage-50 dark:bg-sage-900/30' };
       case 'people':
-        return { icon: Heart, color: 'text-pink-600', bg: 'bg-pink-50' };
+        return { icon: Heart, color: 'text-terra-600 dark:text-terra-400', bg: 'bg-terra-50 dark:bg-terra-900/30' };
       case 'health':
-        return { icon: Heart, color: 'text-red-600', bg: 'bg-red-50' };
+        return { icon: Heart, color: 'text-red-600 dark:text-red-400', bg: 'bg-red-50 dark:bg-red-950/30' };
       case 'environment':
-        return { icon: Sun, color: 'text-amber-600', bg: 'bg-amber-50' };
+        return { icon: Sun, color: 'text-honey-600 dark:text-honey-400', bg: 'bg-honey-50 dark:bg-honey-900/30' };
       case 'time':
-        return { icon: Moon, color: 'text-indigo-600', bg: 'bg-indigo-50' };
+        return { icon: Moon, color: 'text-lavender-600 dark:text-lavender-400', bg: 'bg-lavender-50 dark:bg-lavender-900/30' };
       default:
-        return { icon: Zap, color: 'text-purple-600', bg: 'bg-purple-50' };
+        return { icon: Zap, color: 'text-honey-600 dark:text-honey-400', bg: 'bg-honey-50 dark:bg-honey-900/30' };
     }
   };
 
   return (
     <motion.div
-      className="bg-gradient-to-r from-emerald-50/50 to-teal-50/50 border border-emerald-200/30 rounded-2xl overflow-hidden"
+      className="bg-gradient-to-r from-sage-50/50 to-sage-100/50 dark:from-sage-950/30 dark:to-sage-900/30 border border-sage-200/30 dark:border-sage-800/30 rounded-2xl overflow-hidden"
       initial={{ opacity: 0, y: -10 }}
       animate={{ opacity: 1, y: 0 }}
     >
       {/* Header */}
       <div className="p-4 flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <div className="p-2 bg-gradient-to-br from-emerald-400/20 to-teal-400/20 rounded-xl">
-            <Zap size={18} className="text-emerald-600" />
+          <div className="p-2 bg-gradient-to-br from-sage-400/20 to-sage-300/20 dark:from-sage-600/20 dark:to-sage-500/20 rounded-xl">
+            <Zap size={18} className="text-sage-600 dark:text-sage-400" />
           </div>
           <div>
-            <h3 className="font-semibold text-warm-800">Quick Insights</h3>
+            <h3 className="font-semibold text-warm-800 dark:text-warm-100">Quick Insights</h3>
             <p className="text-xs text-warm-500">
               Based on your patterns
               {lastGenerated && ` • ${lastGenerated}`}
@@ -1295,7 +1295,7 @@ const QuickInsightsSection = ({
           <button
             onClick={onRefresh}
             disabled={generating}
-            className="p-2 rounded-xl hover:bg-white/50 transition-colors disabled:opacity-50"
+            className="p-2 rounded-xl hover:bg-white/50 dark:hover:bg-hearth-800/50 transition-colors disabled:opacity-50"
           >
             <RefreshCw
               size={14}
@@ -1321,7 +1321,7 @@ const QuickInsightsSection = ({
           return (
             <motion.div
               key={insight.id || index}
-              className="bg-white/60 rounded-xl overflow-hidden"
+              className="bg-white/60 dark:bg-hearth-850/60 rounded-xl overflow-hidden"
               initial={{ opacity: 0, x: -10 }}
               animate={{ opacity: 1, x: 0 }}
               transition={{ delay: index * 0.05 }}
@@ -1331,24 +1331,24 @@ const QuickInsightsSection = ({
                   <Icon size={14} className={style.color} />
                 </div>
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm text-warm-700 leading-relaxed">
+                  <p className="text-sm text-warm-700 dark:text-warm-200 leading-relaxed">
                     {insight.insight}
                   </p>
                   <div className="flex items-center gap-2 mt-1.5 flex-wrap">
                     <span className={`text-xs px-2 py-0.5 rounded-full ${
                       insight.strength === 'strong'
-                        ? 'bg-green-100 text-green-700'
-                        : 'bg-blue-100 text-blue-700'
+                        ? 'bg-sage-100 text-sage-700 dark:bg-sage-900/40 dark:text-sage-300'
+                        : 'bg-lavender-100 text-lavender-700 dark:bg-lavender-900/40 dark:text-lavender-300'
                     }`}>
                       {insight.strength}
                     </span>
-                    <span className={`text-xs ${isPositive ? 'text-green-600' : 'text-amber-600'}`}>
+                    <span className={`text-xs ${isPositive ? 'text-sage-600 dark:text-sage-400' : 'text-terra-600 dark:text-terra-400'}`}>
                       {isPositive ? '+' : ''}{insight.moodDelta}% mood
                     </span>
                     {insight.sampleSize && hasEntryIds && (
                       <button
                         onClick={() => setExpandedInsight(isExpanded ? null : insightKey)}
-                        className="text-xs text-warm-500 hover:text-warm-700 flex items-center gap-1 transition-colors"
+                        className="text-xs text-warm-500 hover:text-warm-700 dark:hover:text-warm-300 flex items-center gap-1 transition-colors"
                       >
                         {insight.sampleSize} entries
                         {isExpanded ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
@@ -1376,39 +1376,39 @@ const QuickInsightsSection = ({
                     animate={{ height: 'auto', opacity: 1 }}
                     exit={{ height: 0, opacity: 0 }}
                     transition={{ duration: 0.2 }}
-                    className="border-t border-warm-200/50 bg-warm-50/50"
+                    className="border-t border-warm-200/50 dark:border-hearth-800/50 bg-warm-50/50 dark:bg-hearth-900/50"
                   >
                     <div className="p-3 space-y-2">
                       {/* Feedback & Export Row */}
-                      <div className="flex items-center justify-between pb-2 border-b border-warm-200/30">
+                      <div className="flex items-center justify-between pb-2 border-b border-warm-200/30 dark:border-hearth-800/30">
                         <div className="flex items-center gap-1">
                           <span className="text-xs text-warm-500 mr-2">Is this accurate?</span>
                           {feedbackSubmitted.has(insight.id) ? (
-                            <span className="text-xs text-green-600 flex items-center gap-1">
+                            <span className="text-xs text-sage-600 dark:text-sage-400 flex items-center gap-1">
                               <CheckCircle2 size={12} /> Thanks!
                             </span>
                           ) : (
                             <>
                               <button
                                 onClick={(e) => { e.stopPropagation(); handleFeedback(insight, true); }}
-                                className="p-1.5 hover:bg-green-100 rounded-lg transition-colors"
+                                className="p-1.5 hover:bg-sage-100 dark:hover:bg-sage-900/30 rounded-lg transition-colors"
                                 title="Yes, accurate"
                               >
-                                <ThumbsUp size={14} className="text-green-600" />
+                                <ThumbsUp size={14} className="text-sage-600 dark:text-sage-400" />
                               </button>
                               <button
                                 onClick={(e) => { e.stopPropagation(); handleFeedback(insight, false); }}
-                                className="p-1.5 hover:bg-red-100 rounded-lg transition-colors"
+                                className="p-1.5 hover:bg-red-100 dark:hover:bg-red-950/30 rounded-lg transition-colors"
                                 title="No, inaccurate"
                               >
-                                <ThumbsDown size={14} className="text-red-500" />
+                                <ThumbsDown size={14} className="text-red-500 dark:text-red-400" />
                               </button>
                             </>
                           )}
                         </div>
                         <button
                           onClick={(e) => { e.stopPropagation(); handleExportInsight(insight); }}
-                          className="flex items-center gap-1 text-xs text-warm-500 hover:text-warm-700 px-2 py-1 hover:bg-warm-100 rounded-lg transition-colors"
+                          className="flex items-center gap-1 text-xs text-warm-500 hover:text-warm-700 dark:hover:text-warm-300 px-2 py-1 hover:bg-warm-100 dark:hover:bg-hearth-800 rounded-lg transition-colors"
                           title="Export for debugging"
                         >
                           <Download size={12} />
@@ -1423,7 +1423,7 @@ const QuickInsightsSection = ({
                         <button
                           key={entry.id || i}
                           onClick={() => setSelectedEntry(entry)}
-                          className="w-full text-left bg-white/80 hover:bg-white rounded-lg p-2 text-xs transition-colors cursor-pointer"
+                          className="w-full text-left bg-white/80 dark:bg-hearth-850/80 hover:bg-white dark:hover:bg-hearth-800 rounded-lg p-2 text-xs transition-colors cursor-pointer"
                         >
                           <div className="flex items-center justify-between mb-1">
                             <span className="text-warm-500">
@@ -1434,9 +1434,9 @@ const QuickInsightsSection = ({
                             <div className="flex items-center gap-2">
                               {typeof entry.analysis?.mood_score === 'number' && (
                                 <span className={`font-medium ${
-                                  entry.analysis.mood_score >= 0.6 ? 'text-green-600' :
-                                  entry.analysis.mood_score >= 0.4 ? 'text-amber-600' :
-                                  'text-red-600'
+                                  entry.analysis.mood_score >= 0.6 ? 'text-sage-600 dark:text-sage-400' :
+                                  entry.analysis.mood_score >= 0.4 ? 'text-honey-600 dark:text-honey-400' :
+                                  'text-red-600 dark:text-red-400'
                                 }`}>
                                   {Math.round(entry.analysis.mood_score * 100)}%
                                 </span>
@@ -1444,7 +1444,7 @@ const QuickInsightsSection = ({
                               <ChevronDown size={12} className="text-warm-400 -rotate-90" />
                             </div>
                           </div>
-                          <p className="text-warm-700 line-clamp-2">
+                          <p className="text-warm-700 dark:text-warm-200 line-clamp-2">
                             {(entry.content || entry.text || '').slice(0, 150)}
                             {(entry.content || entry.text || '').length > 150 ? '...' : ''}
                           </p>
@@ -1453,7 +1453,7 @@ const QuickInsightsSection = ({
                       {hiddenCount > 0 && !isShowingAll && (
                         <button
                           onClick={() => toggleShowAll(insightKey)}
-                          className="w-full text-xs text-emerald-600 hover:text-emerald-700 text-center py-1 hover:bg-emerald-50 rounded-lg transition-colors"
+                          className="w-full text-xs text-sage-600 hover:text-sage-700 dark:text-sage-400 dark:hover:text-sage-300 text-center py-1 hover:bg-sage-50 dark:hover:bg-sage-900/30 rounded-lg transition-colors"
                         >
                           +{hiddenCount} more entries — tap to show all
                         </button>
@@ -1461,7 +1461,7 @@ const QuickInsightsSection = ({
                       {isShowingAll && hiddenCount > 0 && (
                         <button
                           onClick={() => toggleShowAll(insightKey)}
-                          className="w-full text-xs text-warm-500 hover:text-warm-700 text-center py-1 hover:bg-warm-100 rounded-lg transition-colors"
+                          className="w-full text-xs text-warm-500 hover:text-warm-700 dark:hover:text-warm-300 text-center py-1 hover:bg-warm-100 dark:hover:bg-hearth-800 rounded-lg transition-colors"
                         >
                           Show fewer entries
                         </button>
@@ -1490,11 +1490,11 @@ const QuickInsightsSection = ({
               animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0.95, opacity: 0 }}
               transition={{ duration: 0.2 }}
-              className="bg-white rounded-2xl max-w-lg w-full max-h-[80vh] overflow-hidden shadow-xl"
+              className="bg-white dark:bg-hearth-900 rounded-2xl max-w-lg w-full max-h-[80vh] overflow-hidden shadow-xl"
               onClick={(e) => e.stopPropagation()}
             >
               {/* Modal Header */}
-              <div className="p-4 border-b border-warm-200 flex items-center justify-between">
+              <div className="p-4 border-b border-warm-200 dark:border-hearth-800 flex items-center justify-between">
                 <div>
                   <p className="text-sm text-warm-500">
                     {selectedEntry.createdAt?.toDate
@@ -1515,9 +1515,9 @@ const QuickInsightsSection = ({
                     <div className="flex items-center gap-2 mt-1">
                       <span className="text-xs text-warm-500">Mood:</span>
                       <span className={`text-sm font-semibold ${
-                        selectedEntry.analysis.mood_score >= 0.6 ? 'text-green-600' :
-                        selectedEntry.analysis.mood_score >= 0.4 ? 'text-amber-600' :
-                        'text-red-600'
+                        selectedEntry.analysis.mood_score >= 0.6 ? 'text-sage-600 dark:text-sage-400' :
+                        selectedEntry.analysis.mood_score >= 0.4 ? 'text-honey-600 dark:text-honey-400' :
+                        'text-red-600 dark:text-red-400'
                       }`}>
                         {Math.round(selectedEntry.analysis.mood_score * 100)}%
                       </span>
@@ -1526,7 +1526,7 @@ const QuickInsightsSection = ({
                 </div>
                 <button
                   onClick={() => setSelectedEntry(null)}
-                  className="p-2 hover:bg-warm-100 rounded-xl transition-colors"
+                  className="p-2 hover:bg-warm-100 dark:hover:bg-hearth-800 rounded-xl transition-colors"
                 >
                   <X size={20} className="text-warm-500" />
                 </button>
@@ -1534,13 +1534,13 @@ const QuickInsightsSection = ({
 
               {/* Modal Content */}
               <div className="p-4 overflow-y-auto max-h-[60vh]">
-                <p className="text-warm-700 whitespace-pre-wrap leading-relaxed">
+                <p className="text-warm-700 dark:text-warm-200 whitespace-pre-wrap leading-relaxed">
                   {selectedEntry.content || selectedEntry.text || 'No content available'}
                 </p>
 
                 {/* Tags if available */}
                 {selectedEntry.analysis?.tags && selectedEntry.analysis.tags.length > 0 && (
-                  <div className="mt-4 pt-4 border-t border-warm-200">
+                  <div className="mt-4 pt-4 border-t border-warm-200 dark:border-hearth-800">
                     <p className="text-xs font-medium text-warm-500 uppercase tracking-wider mb-2">
                       Tags
                     </p>
@@ -1548,7 +1548,7 @@ const QuickInsightsSection = ({
                       {selectedEntry.analysis.tags.map((tag, i) => (
                         <span
                           key={i}
-                          className="text-xs px-2 py-1 bg-warm-100 text-warm-600 rounded-full"
+                          className="text-xs px-2 py-1 bg-warm-100 dark:bg-hearth-800 text-warm-600 dark:text-warm-400 rounded-full"
                         >
                           {tag}
                         </span>
@@ -1559,11 +1559,11 @@ const QuickInsightsSection = ({
 
                 {/* Summary if available */}
                 {selectedEntry.analysis?.summary && (
-                  <div className="mt-4 pt-4 border-t border-warm-200">
+                  <div className="mt-4 pt-4 border-t border-warm-200 dark:border-hearth-800">
                     <p className="text-xs font-medium text-warm-500 uppercase tracking-wider mb-2">
                       Summary
                     </p>
-                    <p className="text-sm text-warm-600 italic">
+                    <p className="text-sm text-warm-600 dark:text-warm-400 italic">
                       {selectedEntry.analysis.summary}
                     </p>
                   </div>
@@ -1600,57 +1600,57 @@ const NexusInsightCard = ({ insight, isExpanded, onToggleExpand, onDismiss }) =>
       case 'contradiction':
         return {
           icon: AlertTriangle,
-          gradient: 'from-terra-500/10 to-terra-400/10',
-          border: 'border-terra-200/30',
+          gradient: 'from-terra-500/10 to-terra-400/10 dark:from-terra-500/20 dark:to-terra-400/20',
+          border: 'border-terra-200/30 dark:border-terra-800/30',
           iconBg: 'bg-terra-500/20',
-          iconColor: 'text-terra-600',
+          iconColor: 'text-terra-600 dark:text-terra-400',
           label: 'Belief Pattern'
         };
       case 'narrative_arc':
       case 'growth':
         return {
           icon: TrendingUp,
-          gradient: 'from-sage-500/10 to-sage-400/10',
-          border: 'border-sage-200/30',
+          gradient: 'from-sage-500/10 to-sage-400/10 dark:from-sage-500/20 dark:to-sage-400/20',
+          border: 'border-sage-200/30 dark:border-sage-800/30',
           iconBg: 'bg-sage-500/20',
-          iconColor: 'text-sage-600',
+          iconColor: 'text-sage-600 dark:text-sage-400',
           label: 'Growth Pattern'
         };
       case 'recommendation':
       case 'intervention':
         return {
           icon: Lightbulb,
-          gradient: 'from-honey-500/10 to-honey-400/10',
-          border: 'border-honey-200/30',
+          gradient: 'from-honey-500/10 to-honey-400/10 dark:from-honey-500/20 dark:to-honey-400/20',
+          border: 'border-honey-200/30 dark:border-honey-800/30',
           iconBg: 'bg-honey-500/20',
-          iconColor: 'text-honey-600',
+          iconColor: 'text-honey-600 dark:text-honey-400',
           label: 'Recommendation'
         };
       case 'counterfactual':
         return {
           icon: Sparkles,
-          gradient: 'from-lavender-500/10 to-lavender-400/10',
-          border: 'border-lavender-200/30',
+          gradient: 'from-lavender-500/10 to-lavender-400/10 dark:from-lavender-500/20 dark:to-lavender-400/20',
+          border: 'border-lavender-200/30 dark:border-lavender-800/30',
           iconBg: 'bg-lavender-500/20',
-          iconColor: 'text-lavender-600',
+          iconColor: 'text-lavender-600 dark:text-lavender-400',
           label: 'What If'
         };
       case 'causal_synthesis':
         return {
           icon: Brain,
-          gradient: 'from-lavender-500/10 to-sage-500/10',
-          border: 'border-lavender-200/30',
+          gradient: 'from-lavender-500/10 to-sage-500/10 dark:from-lavender-500/20 dark:to-sage-500/20',
+          border: 'border-lavender-200/30 dark:border-lavender-800/30',
           iconBg: 'bg-lavender-500/20',
-          iconColor: 'text-lavender-600',
+          iconColor: 'text-lavender-600 dark:text-lavender-400',
           label: 'Deep Insight'
         };
       default:
         return {
           icon: Brain,
-          gradient: 'from-honey-500/10 to-lavender-500/10',
-          border: 'border-honey-200/30',
+          gradient: 'from-honey-500/10 to-lavender-500/10 dark:from-honey-500/20 dark:to-lavender-500/20',
+          border: 'border-honey-200/30 dark:border-honey-800/30',
           iconBg: 'bg-honey-500/20',
-          iconColor: 'text-honey-600',
+          iconColor: 'text-honey-600 dark:text-honey-400',
           label: 'Pattern'
         };
     }
@@ -1718,13 +1718,13 @@ const NexusInsightCard = ({ insight, isExpanded, onToggleExpand, onDismiss }) =>
 
             {/* Title - RES-002: Added break-words for text reflow */}
             {getStringContent(insight.title, insight.intervention) && (
-              <p className="font-medium text-warm-800 mt-1 break-words">
+              <p className="font-medium text-warm-800 dark:text-warm-100 mt-1 break-words">
                 {getStringContent(insight.title) || `Try: ${insight.intervention}`}
               </p>
             )}
 
             {/* Summary - RES-002: Added break-words for text reflow */}
-            <p className="text-sm text-warm-700 mt-1 leading-relaxed break-words">
+            <p className="text-sm text-warm-700 dark:text-warm-200 mt-1 leading-relaxed break-words">
               {getStringContent(
                 insight.summary,
                 insight.reasoning,
@@ -1776,7 +1776,7 @@ const NexusInsightCard = ({ insight, isExpanded, onToggleExpand, onDismiss }) =>
             transition={{ duration: 0.2 }}
             className="overflow-hidden"
           >
-            <div className="px-4 pb-4 pt-0 border-t border-warm-200/30 mt-0">
+            <div className="px-4 pb-4 pt-0 border-t border-warm-200/30 dark:border-hearth-800/30 mt-0">
               <div className="pt-4 space-y-4">
 
                 {/* Full Body Text */}
@@ -1785,7 +1785,7 @@ const NexusInsightCard = ({ insight, isExpanded, onToggleExpand, onDismiss }) =>
                     <h4 className="text-xs font-bold text-warm-500 uppercase tracking-wider mb-2">
                       Analysis
                     </h4>
-                    <p className="text-sm text-warm-700 leading-relaxed whitespace-pre-line">
+                    <p className="text-sm text-warm-700 dark:text-warm-200 leading-relaxed whitespace-pre-line">
                       {insight.body}
                     </p>
                   </div>
@@ -1793,11 +1793,11 @@ const NexusInsightCard = ({ insight, isExpanded, onToggleExpand, onDismiss }) =>
 
                 {/* Mechanism */}
                 {getStringContent(insight.mechanism) && (
-                  <div className="bg-white/40 rounded-xl p-3">
+                  <div className="bg-white/40 dark:bg-hearth-850/40 rounded-xl p-3">
                     <h4 className="text-xs font-bold text-warm-500 uppercase tracking-wider mb-1">
                       Why This Happens
                     </h4>
-                    <p className="text-sm text-warm-700">
+                    <p className="text-sm text-warm-700 dark:text-warm-200">
                       {insight.mechanism}
                     </p>
                   </div>
@@ -1811,12 +1811,12 @@ const NexusInsightCard = ({ insight, isExpanded, onToggleExpand, onDismiss }) =>
                     </h4>
                     <div className="space-y-2">
                       {insight.evidence?.narrative?.map((item, i) => (
-                        <div key={i} className="bg-white/40 rounded-lg p-2 text-sm text-warm-600 italic">
+                        <div key={i} className="bg-white/40 dark:bg-hearth-850/40 rounded-lg p-2 text-sm text-warm-600 dark:text-warm-400 italic">
                           "{typeof item === 'string' ? item : JSON.stringify(item)}"
                         </div>
                       ))}
                       {insight.evidence?.biometric?.map((item, i) => (
-                        <div key={i} className="bg-teal-50/50 rounded-lg p-2 text-sm text-teal-700 flex items-center gap-2">
+                        <div key={i} className="bg-sage-50/50 dark:bg-sage-900/30 rounded-lg p-2 text-sm text-sage-700 dark:text-sage-300 flex items-center gap-2">
                           <Activity size={14} />
                           {typeof item === 'string' ? item : JSON.stringify(item)}
                         </div>
@@ -1827,23 +1827,23 @@ const NexusInsightCard = ({ insight, isExpanded, onToggleExpand, onDismiss }) =>
 
                 {/* Recommendation Details */}
                 {(insight.recommendation?.action || insight.recommendation?.reasoning) && (
-                  <div className="bg-honey-50/50 rounded-xl p-3">
-                    <h4 className="text-xs font-bold text-honey-600 uppercase tracking-wider mb-2 flex items-center gap-1">
+                  <div className="bg-honey-50/50 dark:bg-honey-950/30 rounded-xl p-3">
+                    <h4 className="text-xs font-bold text-honey-600 dark:text-honey-400 uppercase tracking-wider mb-2 flex items-center gap-1">
                       <Target size={12} />
                       Recommended Action
                     </h4>
                     {getStringContent(insight.recommendation.action) && (
-                      <p className="text-sm text-warm-800 font-medium">
+                      <p className="text-sm text-warm-800 dark:text-warm-200 font-medium">
                         {insight.recommendation.action}
                       </p>
                     )}
                     {getStringContent(insight.recommendation.reasoning) && (
-                      <p className="text-sm text-warm-600 mt-1">
+                      <p className="text-sm text-warm-600 dark:text-warm-400 mt-1">
                         {insight.recommendation.reasoning}
                       </p>
                     )}
                     {getStringContent(insight.recommendation.expectedOutcome) && (
-                      <p className="text-xs text-honey-600 mt-2">
+                      <p className="text-xs text-honey-600 dark:text-honey-400 mt-2">
                         Expected outcome: {insight.recommendation.expectedOutcome}
                       </p>
                     )}
