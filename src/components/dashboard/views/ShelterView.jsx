@@ -77,19 +77,19 @@ const DropAnchorExercise = ({ onComplete, onBack }) => {
             exit={{ opacity: 0, y: -10 }}
             className="text-center space-y-4"
           >
-            <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-teal-100 mb-2">
-              <Anchor size={32} className="text-teal-600" />
+            <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-sage-100 dark:bg-sage-900/30 mb-2">
+              <Anchor size={32} className="text-sage-600 dark:text-sage-400" />
             </div>
-            <h3 className="text-xl font-display font-bold text-teal-800">
+            <h3 className="text-xl font-display font-bold text-sage-800 dark:text-sage-200">
               Drop Anchor
             </h3>
-            <p className="text-sm font-body text-teal-600 leading-relaxed max-w-xs mx-auto">
+            <p className="text-sm font-body text-sage-600 dark:text-sage-400 leading-relaxed max-w-xs mx-auto">
               A quick grounding exercise to help you stay present when emotions feel overwhelming.
             </p>
-            <p className="text-xs text-teal-500 italic">Takes about 1-2 minutes</p>
+            <p className="text-xs text-sage-500 dark:text-sage-400 italic">Takes about 1-2 minutes</p>
             <motion.button
               onClick={() => setStep(1)}
-              className="mt-4 bg-teal-500 hover:bg-teal-600 text-white font-semibold px-6 py-3 rounded-xl transition-colors"
+              className="mt-4 bg-sage-500 hover:bg-sage-600 dark:bg-sage-600 dark:hover:bg-sage-700 text-white font-semibold px-6 py-3 rounded-xl transition-colors"
               whileHover={{ scale: 1.02 }}
               whileTap={{ scale: 0.98 }}
             >
@@ -108,12 +108,12 @@ const DropAnchorExercise = ({ onComplete, onBack }) => {
             className="space-y-4"
           >
             <div className="text-center">
-              <span className="text-xs font-bold text-teal-600 uppercase tracking-wider">Step 1 of 3</span>
-              <h3 className="text-lg font-display font-bold text-teal-800 mt-1">
+              <span className="text-xs font-bold text-sage-600 dark:text-sage-400 uppercase tracking-wider">Step 1 of 3</span>
+              <h3 className="text-lg font-display font-bold text-sage-800 dark:text-sage-200 mt-1">
                 Acknowledge
               </h3>
             </div>
-            <p className="text-sm font-body text-teal-700 text-center">
+            <p className="text-sm font-body text-sage-700 dark:text-sage-300 text-center">
               What's the hardest feeling showing up right now? Just name it - no need to fix it.
             </p>
             <input
@@ -121,7 +121,7 @@ const DropAnchorExercise = ({ onComplete, onBack }) => {
               value={feeling}
               onChange={(e) => setFeeling(e.target.value)}
               placeholder="e.g., anxiety, sadness, frustration..."
-              className="w-full p-3 rounded-xl border border-teal-200 focus:border-teal-400 focus:ring-2 focus:ring-teal-100 outline-none text-sm font-body"
+              className="w-full p-3 rounded-xl border border-sage-200 dark:border-sage-700 focus:border-sage-400 dark:focus:border-sage-600 focus:ring-2 focus:ring-sage-100 dark:focus:ring-sage-900/30 outline-none text-sm font-body dark:bg-hearth-800 dark:text-warm-200 dark:placeholder-warm-500"
               autoFocus
             />
             <motion.button
@@ -129,8 +129,8 @@ const DropAnchorExercise = ({ onComplete, onBack }) => {
               disabled={!feeling.trim()}
               className={`w-full py-3 rounded-xl font-semibold transition-all ${
                 feeling.trim()
-                  ? 'bg-teal-500 hover:bg-teal-600 text-white'
-                  : 'bg-teal-100 text-teal-400 cursor-not-allowed'
+                  ? 'bg-sage-500 hover:bg-sage-600 dark:bg-sage-600 dark:hover:bg-sage-700 text-white'
+                  : 'bg-sage-100 dark:bg-sage-800 text-sage-400 dark:text-sage-500 cursor-not-allowed'
               }`}
               whileHover={feeling.trim() ? { scale: 1.01 } : {}}
               whileTap={feeling.trim() ? { scale: 0.99 } : {}}
@@ -150,19 +150,19 @@ const DropAnchorExercise = ({ onComplete, onBack }) => {
             className="space-y-4 text-center"
           >
             <div>
-              <span className="text-xs font-bold text-teal-600 uppercase tracking-wider">Step 2 of 3</span>
-              <h3 className="text-lg font-display font-bold text-teal-800 mt-1">
+              <span className="text-xs font-bold text-sage-600 dark:text-sage-400 uppercase tracking-wider">Step 2 of 3</span>
+              <h3 className="text-lg font-display font-bold text-sage-800 dark:text-sage-200 mt-1">
                 Connect
               </h3>
             </div>
-            <p className="text-sm font-body text-teal-700">
+            <p className="text-sm font-body text-sage-700 dark:text-sage-300">
               Press your feet firmly into the floor. Feel the ground beneath you.
             </p>
 
             {/* Breathing animation */}
             <div className="flex justify-center py-6">
               <motion.div
-                className="w-24 h-24 rounded-full bg-gradient-to-br from-teal-200 to-teal-400 flex items-center justify-center"
+                className="w-24 h-24 rounded-full bg-gradient-to-br from-sage-200 to-sage-400 dark:from-sage-700 dark:to-sage-500 flex items-center justify-center"
                 animate={{
                   scale: [1, 1.3, 1],
                 }}
@@ -178,7 +178,7 @@ const DropAnchorExercise = ({ onComplete, onBack }) => {
               </motion.div>
             </div>
 
-            <p className="text-xs text-teal-500">
+            <p className="text-xs text-sage-500 dark:text-sage-400">
               {breathCount < 3
                 ? `Breath ${breathCount + 1} of 3...`
                 : 'Great job staying present.'}
@@ -189,7 +189,7 @@ const DropAnchorExercise = ({ onComplete, onBack }) => {
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 onClick={() => setStep(3)}
-                className="bg-teal-500 hover:bg-teal-600 text-white font-semibold px-6 py-3 rounded-xl transition-colors"
+                className="bg-sage-500 hover:bg-sage-600 dark:bg-sage-600 dark:hover:bg-sage-700 text-white font-semibold px-6 py-3 rounded-xl transition-colors"
                 whileHover={{ scale: 1.02 }}
                 whileTap={{ scale: 0.98 }}
               >
@@ -209,31 +209,31 @@ const DropAnchorExercise = ({ onComplete, onBack }) => {
             className="space-y-4 text-center"
           >
             <div>
-              <span className="text-xs font-bold text-teal-600 uppercase tracking-wider">Step 3 of 3</span>
-              <h3 className="text-lg font-display font-bold text-teal-800 mt-1">
+              <span className="text-xs font-bold text-sage-600 dark:text-sage-400 uppercase tracking-wider">Step 3 of 3</span>
+              <h3 className="text-lg font-display font-bold text-sage-800 dark:text-sage-200 mt-1">
                 Engage
               </h3>
             </div>
-            <p className="text-sm font-body text-teal-700">
+            <p className="text-sm font-body text-sage-700 dark:text-sage-300">
               Look around the room. Name 3 things you can see right now.
             </p>
 
-            <div className="bg-teal-50 rounded-xl p-4 text-left space-y-2">
-              <p className="text-xs text-teal-600 font-semibold uppercase">Look for:</p>
-              <ul className="text-sm text-teal-700 space-y-1 font-body">
+            <div className="bg-sage-50 dark:bg-sage-950/20 rounded-xl p-4 text-left space-y-2">
+              <p className="text-xs text-sage-600 dark:text-sage-400 font-semibold uppercase">Look for:</p>
+              <ul className="text-sm text-sage-700 dark:text-sage-300 space-y-1 font-body">
                 <li>• Something with an interesting texture</li>
                 <li>• Something that has a color you like</li>
                 <li>• Something that's been there a while</li>
               </ul>
             </div>
 
-            <p className="text-xs text-teal-500 italic">
+            <p className="text-xs text-sage-500 dark:text-sage-400 italic">
               Take your time. There's no rush.
             </p>
 
             <motion.button
               onClick={onComplete}
-              className="bg-teal-500 hover:bg-teal-600 text-white font-semibold px-6 py-3 rounded-xl transition-colors flex items-center justify-center gap-2 w-full"
+              className="bg-sage-500 hover:bg-sage-600 dark:bg-sage-600 dark:hover:bg-sage-700 text-white font-semibold px-6 py-3 rounded-xl transition-colors flex items-center justify-center gap-2 w-full"
               whileHover={{ scale: 1.01 }}
               whileTap={{ scale: 0.99 }}
             >
@@ -258,14 +258,14 @@ const DropAnchorExercise = ({ onComplete, onBack }) => {
       {/* Back button */}
       <button
         onClick={onBack}
-        className="flex items-center gap-1.5 text-xs text-teal-500 hover:text-teal-700 transition-colors"
+        className="flex items-center gap-1.5 text-xs text-sage-500 hover:text-sage-700 dark:text-sage-400 dark:hover:text-sage-300 transition-colors"
       >
         <ArrowLeft size={14} />
         <span>Back to menu</span>
       </button>
 
       {/* Exercise container */}
-      <div className="bg-gradient-to-br from-teal-50 via-cyan-50 to-teal-50 rounded-3xl p-6 border border-teal-100 shadow-soft">
+      <div className="bg-gradient-to-br from-sage-50 via-sage-100 to-sage-50 dark:from-sage-950/20 dark:via-sage-900/20 dark:to-sage-950/20 rounded-3xl p-6 border border-sage-100 dark:border-sage-800 shadow-soft">
         <AnimatePresence mode="wait">
           {renderStep()}
         </AnimatePresence>
@@ -278,7 +278,7 @@ const DropAnchorExercise = ({ onComplete, onBack }) => {
             <div
               key={s}
               className={`w-2 h-2 rounded-full transition-colors ${
-                s <= step ? 'bg-teal-500' : 'bg-teal-200'
+                s <= step ? 'bg-sage-500 dark:bg-sage-400' : 'bg-sage-200 dark:bg-sage-700'
               }`}
             />
           ))}
@@ -348,12 +348,12 @@ const ShelterView = ({
       >
         <button
           onClick={() => setMode('menu')}
-          className="flex items-center gap-1.5 text-xs text-blue-500 hover:text-blue-700 transition-colors"
+          className="flex items-center gap-1.5 text-xs text-lavender-500 hover:text-lavender-700 dark:text-lavender-400 dark:hover:text-lavender-300 transition-colors"
         >
           <ArrowLeft size={14} />
           <span>Back to menu</span>
         </button>
-        <div className="bg-gradient-to-br from-blue-900/50 to-indigo-900/50 rounded-3xl border border-blue-500/30">
+        <div className="bg-gradient-to-br from-lavender-900/50 to-lavender-950/50 dark:from-lavender-950/50 dark:to-hearth-950/50 rounded-3xl border border-lavender-500/30 dark:border-lavender-600/30">
           <BreathingExercise
             exerciseType={selectedBreathingType}
             onComplete={handleBreathingComplete}
@@ -373,12 +373,12 @@ const ShelterView = ({
       >
         <button
           onClick={() => setMode('menu')}
-          className="flex items-center gap-1.5 text-xs text-purple-500 hover:text-purple-700 transition-colors"
+          className="flex items-center gap-1.5 text-xs text-lavender-600 hover:text-lavender-800 dark:text-lavender-400 dark:hover:text-lavender-300 transition-colors"
         >
           <ArrowLeft size={14} />
           <span>Back to menu</span>
         </button>
-        <div className="bg-gradient-to-br from-purple-900/50 to-blue-900/50 rounded-3xl border border-purple-500/30">
+        <div className="bg-gradient-to-br from-lavender-800/50 to-lavender-950/50 dark:from-lavender-900/50 dark:to-hearth-950/50 rounded-3xl border border-lavender-500/30 dark:border-lavender-600/30">
           <GroundingExercise
             onComplete={handleGroundingComplete}
             onSkip={() => setMode('menu')}
@@ -397,12 +397,12 @@ const ShelterView = ({
       >
         <button
           onClick={() => setMode('menu')}
-          className="flex items-center gap-1.5 text-xs text-blue-500 hover:text-blue-700 transition-colors"
+          className="flex items-center gap-1.5 text-xs text-lavender-500 hover:text-lavender-700 dark:text-lavender-400 dark:hover:text-lavender-300 transition-colors"
         >
           <ArrowLeft size={14} />
           <span>Back to menu</span>
         </button>
-        <div className="bg-gradient-to-br from-gray-800/80 to-gray-900/80 rounded-3xl border border-white/10">
+        <div className="bg-gradient-to-br from-hearth-800/80 to-hearth-900/80 dark:from-hearth-900/80 dark:to-hearth-950/80 rounded-3xl border border-white/10">
           <DecompressionTimer
             riskLevel={riskLevel}
             onComplete={handleTimerComplete}
@@ -425,12 +425,12 @@ const ShelterView = ({
       >
         <button
           onClick={() => setMode('menu')}
-          className="flex items-center gap-1.5 text-xs text-blue-500 hover:text-blue-700 transition-colors"
+          className="flex items-center gap-1.5 text-xs text-lavender-500 hover:text-lavender-700 dark:text-lavender-400 dark:hover:text-lavender-300 transition-colors"
         >
           <ArrowLeft size={14} />
           <span>Back to menu</span>
         </button>
-        <div className="bg-gradient-to-br from-blue-900/30 to-indigo-900/30 rounded-3xl p-6 border border-blue-500/20">
+        <div className="bg-gradient-to-br from-lavender-900/30 to-lavender-950/30 dark:from-lavender-950/30 dark:to-hearth-950/30 rounded-3xl p-6 border border-lavender-500/20 dark:border-lavender-600/20">
           <h3 className="text-lg font-semibold text-white mb-4">Choose a Breathing Exercise</h3>
           <BreathingExerciseSelector
             selected={selectedBreathingType}
@@ -456,7 +456,7 @@ const ShelterView = ({
       <div className="flex justify-between items-center">
         {/* Activity progress */}
         {isBurnoutTrigger && completedActivities.length > 0 && (
-          <div className="flex items-center gap-1.5 text-xs text-green-400">
+          <div className="flex items-center gap-1.5 text-xs text-sage-400 dark:text-sage-300">
             <Check size={12} />
             <span>{completedActivities.length} activity completed</span>
           </div>
@@ -467,8 +467,8 @@ const ShelterView = ({
           disabled={!canExit}
           className={`flex items-center gap-1.5 text-xs px-2 py-1 rounded-full transition-colors ${
             canExit
-              ? 'text-warm-400 hover:text-warm-600 hover:bg-warm-100'
-              : 'text-warm-300 cursor-not-allowed'
+              ? 'text-warm-400 hover:text-warm-600 hover:bg-warm-100 dark:text-warm-500 dark:hover:text-warm-300 dark:hover:bg-hearth-800'
+              : 'text-warm-300 dark:text-warm-600 cursor-not-allowed'
           }`}
           whileHover={canExit ? { scale: 1.02 } : {}}
           whileTap={canExit ? { scale: 0.98 } : {}}
@@ -481,26 +481,26 @@ const ShelterView = ({
       {/* Burnout Context - Show if burnout-triggered */}
       {isBurnoutTrigger && burnoutRisk && (
         <motion.div
-          className="bg-gradient-to-br from-amber-900/30 to-red-900/30 rounded-2xl p-4 border border-amber-500/30"
+          className="bg-gradient-to-br from-honey-900/30 to-red-900/30 rounded-2xl p-4 border border-honey-500/30"
           initial={{ opacity: 0, y: -10 }}
           animate={{ opacity: 1, y: 0 }}
         >
           <div className="flex items-center gap-2 mb-2">
-            <AlertTriangle size={18} className="text-amber-400" />
-            <span className="text-sm font-semibold text-amber-200">Burnout Signals Detected</span>
+            <AlertTriangle size={18} className="text-honey-400" />
+            <span className="text-sm font-semibold text-honey-200">Burnout Signals Detected</span>
           </div>
           <div className="flex flex-wrap gap-2">
             {burnoutRisk.signals?.slice(0, 4).map((signal, idx) => (
               <span
                 key={idx}
-                className="px-2 py-1 bg-black/30 rounded-full text-xs text-amber-100"
+                className="px-2 py-1 bg-black/30 rounded-full text-xs text-honey-100"
               >
                 {signal.replace(/_/g, ' ')}
               </span>
             ))}
           </div>
           {!canExit && (
-            <p className="text-xs text-amber-200/70 mt-3">
+            <p className="text-xs text-honey-200/70 mt-3">
               Please complete at least one decompression activity before exiting.
             </p>
           )}
@@ -511,25 +511,25 @@ const ShelterView = ({
       <motion.div
         className={`rounded-3xl p-6 border shadow-soft text-center ${
           isBurnoutTrigger
-            ? 'bg-gradient-to-br from-amber-50 via-orange-50 to-warm-50 border-amber-200'
-            : 'bg-gradient-to-br from-rose-50 via-pink-50 to-warm-50 border-rose-100'
+            ? 'bg-gradient-to-br from-honey-50 via-honey-100 to-warm-50 dark:from-honey-900/20 dark:via-honey-950/20 dark:to-hearth-900 border-honey-200 dark:border-honey-700'
+            : 'bg-gradient-to-br from-terra-50 via-terra-100 to-warm-50 dark:from-terra-900/20 dark:via-terra-950/20 dark:to-hearth-900 border-terra-100 dark:border-terra-800'
         }`}
         initial={{ opacity: 0, y: -10 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.1 }}
       >
         <div className={`inline-flex items-center justify-center w-12 h-12 rounded-full mb-4 ${
-          isBurnoutTrigger ? 'bg-amber-100' : 'bg-rose-100'
+          isBurnoutTrigger ? 'bg-honey-100 dark:bg-honey-900/30' : 'bg-terra-100 dark:bg-terra-900/30'
         }`}>
           {isBurnoutTrigger ? (
-            <Shield size={24} className="text-amber-500" />
+            <Shield size={24} className="text-honey-500 dark:text-honey-400" />
           ) : (
-            <Heart size={24} className="text-rose-400" />
+            <Heart size={24} className="text-terra-400 dark:text-terra-500" />
           )}
         </div>
 
         <h2 className={`text-xl font-display font-bold mb-2 ${
-          isBurnoutTrigger ? 'text-amber-800' : 'text-rose-800'
+          isBurnoutTrigger ? 'text-honey-800 dark:text-honey-200' : 'text-terra-800 dark:text-terra-200'
         }`}>
           {isBurnoutTrigger
             ? "Time to decompress."
@@ -538,7 +538,7 @@ const ShelterView = ({
         </h2>
 
         <p className={`text-sm font-body leading-relaxed max-w-xs mx-auto ${
-          isBurnoutTrigger ? 'text-amber-700' : 'text-rose-600'
+          isBurnoutTrigger ? 'text-honey-700 dark:text-honey-300' : 'text-terra-600 dark:text-terra-400'
         }`}>
           {isBurnoutTrigger
             ? "Your mind and body are sending signals. Let's take a moment to reset."
@@ -550,7 +550,7 @@ const ShelterView = ({
       {/* Primary Action - Vent (Voice) */}
       <motion.button
         onClick={onVent}
-        className="w-full bg-rose-500 hover:bg-rose-600 text-white rounded-2xl p-5 flex items-center justify-center gap-3 shadow-lg hover:shadow-xl transition-all"
+        className="w-full bg-terra-500 hover:bg-terra-600 dark:bg-terra-600 dark:hover:bg-terra-700 text-white rounded-2xl p-5 flex items-center justify-center gap-3 shadow-lg hover:shadow-xl transition-all"
         initial={{ opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.2 }}
@@ -562,7 +562,7 @@ const ShelterView = ({
         </div>
         <div className="text-left">
           <span className="font-display font-semibold text-lg block">Vent</span>
-          <span className="text-rose-100 text-sm font-body">Let it all out</span>
+          <span className="text-terra-100 dark:text-terra-200 text-sm font-body">Let it all out</span>
         </div>
       </motion.button>
 
@@ -571,7 +571,7 @@ const ShelterView = ({
         {/* Text Entry */}
         <motion.button
           onClick={onTextEntry}
-          className="bg-warm-100 hover:bg-warm-200 text-warm-700 rounded-2xl p-4 flex flex-col items-center justify-center gap-2 transition-all"
+          className="bg-warm-100 hover:bg-warm-200 dark:bg-hearth-800 dark:hover:bg-hearth-700 text-warm-700 dark:text-warm-300 rounded-2xl p-4 flex flex-col items-center justify-center gap-2 transition-all"
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.25 }}
@@ -585,7 +585,7 @@ const ShelterView = ({
         {/* Breathing Exercise */}
         <motion.button
           onClick={() => setMode('breathing-select')}
-          className="bg-blue-100 hover:bg-blue-200 text-blue-700 rounded-2xl p-4 flex flex-col items-center justify-center gap-2 transition-all"
+          className="bg-lavender-100 hover:bg-lavender-200 text-lavender-700 dark:bg-lavender-900/30 dark:hover:bg-lavender-800/40 dark:text-lavender-300 rounded-2xl p-4 flex flex-col items-center justify-center gap-2 transition-all"
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.3 }}
@@ -599,7 +599,7 @@ const ShelterView = ({
         {/* 5-4-3-2-1 Grounding */}
         <motion.button
           onClick={() => setMode('grounding')}
-          className="bg-purple-100 hover:bg-purple-200 text-purple-700 rounded-2xl p-4 flex flex-col items-center justify-center gap-2 transition-all"
+          className="bg-lavender-200 hover:bg-lavender-300 text-lavender-800 dark:bg-lavender-800/30 dark:hover:bg-lavender-700/40 dark:text-lavender-300 rounded-2xl p-4 flex flex-col items-center justify-center gap-2 transition-all"
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.35 }}
@@ -613,7 +613,7 @@ const ShelterView = ({
         {/* Decompression Timer */}
         <motion.button
           onClick={() => setMode('timer')}
-          className="bg-teal-100 hover:bg-teal-200 text-teal-700 rounded-2xl p-4 flex flex-col items-center justify-center gap-2 transition-all"
+          className="bg-sage-100 hover:bg-sage-200 text-sage-700 dark:bg-sage-900/30 dark:hover:bg-sage-800/40 dark:text-sage-300 rounded-2xl p-4 flex flex-col items-center justify-center gap-2 transition-all"
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.4 }}
@@ -628,7 +628,7 @@ const ShelterView = ({
       {/* Drop Anchor - Classic ACT */}
       <motion.button
         onClick={() => setMode('anchor')}
-        className="w-full bg-teal-500 hover:bg-teal-600 text-white rounded-2xl p-4 flex items-center justify-center gap-3 transition-all"
+        className="w-full bg-sage-500 hover:bg-sage-600 dark:bg-sage-600 dark:hover:bg-sage-700 text-white rounded-2xl p-4 flex items-center justify-center gap-3 transition-all"
         initial={{ opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.45 }}
@@ -642,18 +642,18 @@ const ShelterView = ({
       {/* CBT Reframe - If available */}
       {cbtReframe && (
         <motion.div
-          className="bg-white rounded-2xl p-5 border border-warm-100 shadow-sm"
+          className="bg-white dark:bg-hearth-850 rounded-2xl p-5 border border-warm-100 dark:border-hearth-700 shadow-sm"
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.5 }}
         >
           <div className="flex items-center gap-2 mb-3">
-            <Leaf size={16} className="text-green-500" />
-            <span className="text-xs font-semibold text-warm-600 uppercase tracking-wide">
+            <Leaf size={16} className="text-sage-500 dark:text-sage-400" />
+            <span className="text-xs font-semibold text-warm-600 dark:text-warm-400 uppercase tracking-wide">
               A different perspective
             </span>
           </div>
-          <p className="text-sm font-body text-warm-700 leading-relaxed italic">
+          <p className="text-sm font-body text-warm-700 dark:text-warm-300 leading-relaxed italic">
             "{cbtReframe}"
           </p>
         </motion.div>
@@ -661,7 +661,7 @@ const ShelterView = ({
 
       {/* Gentle reminder */}
       <motion.p
-        className="text-center text-xs text-warm-400 font-body px-4"
+        className="text-center text-xs text-warm-400 dark:text-warm-500 font-body px-4"
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         transition={{ delay: 0.55 }}

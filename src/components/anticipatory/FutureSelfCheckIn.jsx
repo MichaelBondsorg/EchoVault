@@ -117,26 +117,26 @@ const FutureSelfCheckIn = ({ event, userId, onComplete, onSkip }) => {
         return (
           <div className="space-y-6">
             <div className="text-center">
-              <div className="w-16 h-16 mx-auto rounded-full bg-amber-100 flex items-center justify-center mb-4">
-                <Sun className="w-8 h-8 text-amber-500" />
+              <div className="w-16 h-16 mx-auto rounded-full bg-honey-100 dark:bg-honey-900/30 flex items-center justify-center mb-4">
+                <Sun className="w-8 h-8 text-honey-500 dark:text-honey-400" />
               </div>
-              <h2 className="text-xl font-semibold text-warm-900 mb-2">
+              <h2 className="text-xl font-semibold text-warm-900 dark:text-warm-100 mb-2">
                 Good morning
               </h2>
-              <p className="text-warm-600">
-                You have <span className="font-medium text-warm-800">{event.content || event.eventDescription}</span> today.
+              <p className="text-warm-600 dark:text-warm-300">
+                You have <span className="font-medium text-warm-800 dark:text-warm-200">{event.content || event.eventDescription}</span> today.
               </p>
-              <p className="text-warm-500 text-sm mt-2">
+              <p className="text-warm-500 dark:text-warm-400 text-sm mt-2">
                 It's completely normal to feel some anxiety about this.
               </p>
             </div>
 
             <div className="space-y-4">
-              <label className="block text-sm text-warm-600">
+              <label className="block text-sm text-warm-600 dark:text-warm-300">
                 On a scale of 1-10, how anxious do you feel right now?
               </label>
               <div className="flex items-center gap-4">
-                <span className="text-sm text-warm-400">Calm</span>
+                <span className="text-sm text-warm-400 dark:text-warm-500">Calm</span>
                 <input
                   type="range"
                   min="1"
@@ -145,23 +145,23 @@ const FutureSelfCheckIn = ({ event, userId, onComplete, onSkip }) => {
                   onChange={(e) => setAnxietyLevel(parseInt(e.target.value))}
                   className="flex-1"
                 />
-                <span className="text-sm text-warm-400">Very anxious</span>
+                <span className="text-sm text-warm-400 dark:text-warm-500">Very anxious</span>
               </div>
               <div className="text-center">
-                <span className="text-2xl font-bold text-warm-800">{anxietyLevel}</span>
-                <span className="text-warm-500">/10</span>
+                <span className="text-2xl font-bold text-warm-800 dark:text-warm-200">{anxietyLevel}</span>
+                <span className="text-warm-500 dark:text-warm-400">/10</span>
               </div>
             </div>
 
             <div className="space-y-2">
-              <label className="block text-sm text-warm-600">
+              <label className="block text-sm text-warm-600 dark:text-warm-300">
                 What's the worst-case scenario playing in your mind? (optional)
               </label>
               <textarea
                 value={worstCaseThought}
                 onChange={(e) => setWorstCaseThought(e.target.value)}
                 placeholder="I'm worried that..."
-                className="w-full p-3 rounded-xl border border-warm-200 text-warm-800 placeholder-warm-400 focus:ring-2 focus:ring-warm-300 focus:border-transparent"
+                className="w-full p-3 rounded-xl border border-warm-200 dark:border-hearth-700 text-warm-800 dark:text-warm-200 placeholder-warm-400 dark:placeholder-warm-500 focus:ring-2 focus:ring-warm-300 dark:focus:ring-warm-600 focus:border-transparent dark:bg-hearth-800"
                 rows={3}
               />
             </div>
@@ -172,13 +172,13 @@ const FutureSelfCheckIn = ({ event, userId, onComplete, onSkip }) => {
         return (
           <div className="space-y-6">
             <div className="text-center">
-              <div className="w-16 h-16 mx-auto rounded-full bg-rose-100 flex items-center justify-center mb-4">
-                <Heart className="w-8 h-8 text-rose-500" />
+              <div className="w-16 h-16 mx-auto rounded-full bg-terra-100 dark:bg-terra-900/30 flex items-center justify-center mb-4">
+                <Heart className="w-8 h-8 text-terra-500 dark:text-terra-400" />
               </div>
-              <h2 className="text-xl font-semibold text-warm-900 mb-2">
+              <h2 className="text-xl font-semibold text-warm-900 dark:text-warm-100 mb-2">
                 Body Check
               </h2>
-              <p className="text-warm-600">
+              <p className="text-warm-600 dark:text-warm-300">
                 Where do you feel the anxiety in your body?
               </p>
             </div>
@@ -190,8 +190,8 @@ const FutureSelfCheckIn = ({ event, userId, onComplete, onSkip }) => {
                   onClick={() => setBodyLocation(location.id)}
                   className={`p-4 rounded-xl text-left transition-all ${
                     bodyLocation === location.id
-                      ? 'bg-rose-500 text-white'
-                      : 'bg-warm-100 text-warm-700 hover:bg-warm-200'
+                      ? 'bg-terra-500 dark:bg-terra-600 text-white'
+                      : 'bg-warm-100 dark:bg-hearth-800 text-warm-700 dark:text-warm-300 hover:bg-warm-200 dark:hover:bg-hearth-700'
                   }`}
                 >
                   {location.label}
@@ -203,7 +203,7 @@ const FutureSelfCheckIn = ({ event, userId, onComplete, onSkip }) => {
               <motion.p
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
-                className="text-sm text-warm-500 text-center"
+                className="text-sm text-warm-500 dark:text-warm-400 text-center"
               >
                 Acknowledging where you feel it helps your body start to release it.
               </motion.p>
@@ -215,13 +215,13 @@ const FutureSelfCheckIn = ({ event, userId, onComplete, onSkip }) => {
         return (
           <div className="space-y-6">
             <div className="text-center">
-              <div className="w-16 h-16 mx-auto rounded-full bg-blue-100 flex items-center justify-center mb-4">
-                <Wind className="w-8 h-8 text-blue-500" />
+              <div className="w-16 h-16 mx-auto rounded-full bg-lavender-100 dark:bg-lavender-900/30 flex items-center justify-center mb-4">
+                <Wind className="w-8 h-8 text-lavender-500 dark:text-lavender-400" />
               </div>
-              <h2 className="text-xl font-semibold text-warm-900 mb-2">
+              <h2 className="text-xl font-semibold text-warm-900 dark:text-warm-100 mb-2">
                 Grounding Exercise
               </h2>
-              <p className="text-warm-600">
+              <p className="text-warm-600 dark:text-warm-300">
                 Take a moment to calm your nervous system.
               </p>
             </div>
@@ -236,11 +236,11 @@ const FutureSelfCheckIn = ({ event, userId, onComplete, onSkip }) => {
               <motion.div
                 initial={{ opacity: 0, scale: 0.95 }}
                 animate={{ opacity: 1, scale: 1 }}
-                className="bg-green-50 rounded-2xl p-6 text-center"
+                className="bg-sage-50 dark:bg-sage-900/20 rounded-2xl p-6 text-center"
               >
-                <Check className="w-12 h-12 mx-auto text-green-500 mb-3" />
-                <p className="text-green-800 font-medium">Great job!</p>
-                <p className="text-green-600 text-sm">
+                <Check className="w-12 h-12 mx-auto text-sage-500 dark:text-sage-400 mb-3" />
+                <p className="text-sage-800 dark:text-sage-200 font-medium">Great job!</p>
+                <p className="text-sage-600 dark:text-sage-400 text-sm">
                   You've given your nervous system a reset.
                 </p>
               </motion.div>
@@ -252,31 +252,31 @@ const FutureSelfCheckIn = ({ event, userId, onComplete, onSkip }) => {
         return (
           <div className="space-y-6">
             <div className="text-center">
-              <div className="w-16 h-16 mx-auto rounded-full bg-purple-100 flex items-center justify-center mb-4">
-                <Sparkles className="w-8 h-8 text-purple-500" />
+              <div className="w-16 h-16 mx-auto rounded-full bg-lavender-100 dark:bg-lavender-900/30 flex items-center justify-center mb-4">
+                <Sparkles className="w-8 h-8 text-lavender-500 dark:text-lavender-400" />
               </div>
-              <h2 className="text-xl font-semibold text-warm-900 mb-2">
+              <h2 className="text-xl font-semibold text-warm-900 dark:text-warm-100 mb-2">
                 Reframe
               </h2>
-              <p className="text-warm-600">
+              <p className="text-warm-600 dark:text-warm-300">
                 Let's look at this from a different angle.
               </p>
             </div>
 
             {worstCaseThought && (
-              <div className="bg-warm-100 rounded-xl p-4">
-                <p className="text-xs text-warm-500 mb-1">Your worry:</p>
-                <p className="text-warm-700 italic">"{worstCaseThought}"</p>
+              <div className="bg-warm-100 dark:bg-hearth-800 rounded-xl p-4">
+                <p className="text-xs text-warm-500 dark:text-warm-400 mb-1">Your worry:</p>
+                <p className="text-warm-700 dark:text-warm-300 italic">"{worstCaseThought}"</p>
               </div>
             )}
 
             <div className="space-y-3">
-              <p className="text-sm text-warm-600">
+              <p className="text-sm text-warm-600 dark:text-warm-300">
                 What's a more balanced way to think about this?
               </p>
-              <div className="bg-purple-50 rounded-xl p-4 space-y-2">
-                <p className="text-sm text-purple-700">Try completing one of these:</p>
-                <ul className="text-sm text-purple-600 space-y-1">
+              <div className="bg-lavender-50 dark:bg-lavender-900/20 rounded-xl p-4 space-y-2">
+                <p className="text-sm text-lavender-700 dark:text-lavender-300">Try completing one of these:</p>
+                <ul className="text-sm text-lavender-600 dark:text-lavender-400 space-y-1">
                   <li>• "Even if it's hard, I can handle it because..."</li>
                   <li>• "The most likely outcome is..."</li>
                   <li>• "I've faced similar challenges before and..."</li>
@@ -286,7 +286,7 @@ const FutureSelfCheckIn = ({ event, userId, onComplete, onSkip }) => {
                 value={reframedThought}
                 onChange={(e) => setReframedThought(e.target.value)}
                 placeholder="A more balanced thought..."
-                className="w-full p-3 rounded-xl border border-warm-200 text-warm-800 placeholder-warm-400 focus:ring-2 focus:ring-purple-300 focus:border-transparent"
+                className="w-full p-3 rounded-xl border border-warm-200 dark:border-hearth-700 text-warm-800 dark:text-warm-200 placeholder-warm-400 dark:placeholder-warm-500 focus:ring-2 focus:ring-lavender-300 dark:focus:ring-lavender-700 focus:border-transparent dark:bg-hearth-800"
                 rows={3}
               />
             </div>
@@ -297,13 +297,13 @@ const FutureSelfCheckIn = ({ event, userId, onComplete, onSkip }) => {
         return (
           <div className="space-y-6">
             <div className="text-center">
-              <div className="w-16 h-16 mx-auto rounded-full bg-green-100 flex items-center justify-center mb-4">
-                <Target className="w-8 h-8 text-green-500" />
+              <div className="w-16 h-16 mx-auto rounded-full bg-sage-100 dark:bg-sage-900/30 flex items-center justify-center mb-4">
+                <Target className="w-8 h-8 text-sage-500 dark:text-sage-400" />
               </div>
-              <h2 className="text-xl font-semibold text-warm-900 mb-2">
+              <h2 className="text-xl font-semibold text-warm-900 dark:text-warm-100 mb-2">
                 One Small Thing
               </h2>
-              <p className="text-warm-600">
+              <p className="text-warm-600 dark:text-warm-300">
                 What's one small thing you can do to support yourself?
               </p>
             </div>
@@ -318,8 +318,8 @@ const FutureSelfCheckIn = ({ event, userId, onComplete, onSkip }) => {
                   }}
                   className={`w-full p-3 rounded-xl text-left transition-all ${
                     selectedCommitment === commitment
-                      ? 'bg-green-500 text-white'
-                      : 'bg-warm-100 text-warm-700 hover:bg-warm-200'
+                      ? 'bg-sage-500 dark:bg-sage-600 text-white'
+                      : 'bg-warm-100 dark:bg-hearth-800 text-warm-700 dark:text-warm-300 hover:bg-warm-200 dark:hover:bg-hearth-700'
                   }`}
                 >
                   {commitment}
@@ -328,7 +328,7 @@ const FutureSelfCheckIn = ({ event, userId, onComplete, onSkip }) => {
             </div>
 
             <div className="space-y-2">
-              <p className="text-sm text-warm-500 text-center">Or write your own:</p>
+              <p className="text-sm text-warm-500 dark:text-warm-400 text-center">Or write your own:</p>
               <input
                 type="text"
                 value={customCommitment}
@@ -337,7 +337,7 @@ const FutureSelfCheckIn = ({ event, userId, onComplete, onSkip }) => {
                   setSelectedCommitment('');
                 }}
                 placeholder="I will..."
-                className="w-full p-3 rounded-xl border border-warm-200 text-warm-800 placeholder-warm-400 focus:ring-2 focus:ring-green-300 focus:border-transparent"
+                className="w-full p-3 rounded-xl border border-warm-200 dark:border-hearth-700 text-warm-800 dark:text-warm-200 placeholder-warm-400 dark:placeholder-warm-500 focus:ring-2 focus:ring-sage-300 dark:focus:ring-sage-700 focus:border-transparent dark:bg-hearth-800"
               />
             </div>
 
@@ -345,9 +345,9 @@ const FutureSelfCheckIn = ({ event, userId, onComplete, onSkip }) => {
               <motion.div
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
-                className="bg-green-50 rounded-xl p-4 text-center"
+                className="bg-sage-50 dark:bg-sage-900/20 rounded-xl p-4 text-center"
               >
-                <p className="text-green-700">
+                <p className="text-sage-700 dark:text-sage-300">
                   You've got this. 💪
                 </p>
               </motion.div>
@@ -365,14 +365,14 @@ const FutureSelfCheckIn = ({ event, userId, onComplete, onSkip }) => {
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
-      className="fixed inset-0 bg-gradient-to-b from-warm-50 to-white z-50 overflow-y-auto"
+      className="fixed inset-0 bg-gradient-to-b from-warm-50 to-white dark:from-hearth-950 dark:to-hearth-900 z-50 overflow-y-auto"
     >
       <div className="min-h-full p-6">
         {/* Header */}
         <div className="flex items-center justify-between mb-6">
           <button
             onClick={onSkip}
-            className="p-2 text-warm-400 hover:text-warm-600"
+            className="p-2 text-warm-400 hover:text-warm-600 dark:text-warm-500 dark:hover:text-warm-300"
           >
             <X size={24} />
           </button>
@@ -383,7 +383,7 @@ const FutureSelfCheckIn = ({ event, userId, onComplete, onSkip }) => {
               <div
                 key={s.id}
                 className={`w-8 h-1 rounded-full transition-colors ${
-                  idx <= currentStep ? 'bg-warm-500' : 'bg-warm-200'
+                  idx <= currentStep ? 'bg-warm-500 dark:bg-warm-400' : 'bg-warm-200 dark:bg-hearth-700'
                 }`}
               />
             ))}
@@ -410,7 +410,7 @@ const FutureSelfCheckIn = ({ event, userId, onComplete, onSkip }) => {
           {currentStep > 0 && (
             <button
               onClick={() => setCurrentStep(prev => prev - 1)}
-              className="flex-1 py-4 rounded-xl bg-warm-100 text-warm-700 font-medium"
+              className="flex-1 py-4 rounded-xl bg-warm-100 dark:bg-hearth-800 text-warm-700 dark:text-warm-300 font-medium"
             >
               Back
             </button>
@@ -420,8 +420,8 @@ const FutureSelfCheckIn = ({ event, userId, onComplete, onSkip }) => {
             disabled={!canProceed() || saving}
             className={`flex-1 py-4 rounded-xl font-medium flex items-center justify-center gap-2 ${
               canProceed()
-                ? 'bg-warm-500 text-white hover:bg-warm-600'
-                : 'bg-warm-200 text-warm-400 cursor-not-allowed'
+                ? 'bg-warm-500 dark:bg-warm-600 text-white hover:bg-warm-600 dark:hover:bg-warm-700'
+                : 'bg-warm-200 dark:bg-hearth-700 text-warm-400 dark:text-warm-500 cursor-not-allowed'
             }`}
           >
             {saving ? (

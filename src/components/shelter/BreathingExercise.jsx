@@ -121,9 +121,9 @@ const BreathingExercise = ({
 
   const getCircleColor = () => {
     const colors = {
-      blue: 'from-blue-500 to-blue-700',
-      purple: 'from-purple-500 to-purple-700',
-      teal: 'from-teal-500 to-teal-700'
+      blue: 'from-lavender-500 to-lavender-700 dark:from-lavender-600 dark:to-lavender-800',
+      purple: 'from-lavender-600 to-lavender-800 dark:from-lavender-700 dark:to-lavender-900',
+      teal: 'from-sage-500 to-sage-700 dark:from-sage-600 dark:to-sage-800'
     };
     return colors[exercise.color] || colors.blue;
   };
@@ -225,7 +225,7 @@ const BreathingExercise = ({
             ) : (
               <button
                 onClick={handleStart}
-                className="flex items-center gap-2 px-6 py-3 bg-white hover:bg-white/90 rounded-full text-gray-900 font-medium transition-colors"
+                className="flex items-center gap-2 px-6 py-3 bg-white hover:bg-white/90 rounded-full text-hearth-900 font-medium transition-colors"
               >
                 <Play size={20} />
                 {currentPhaseIndex === 0 && currentCycle === 1 ? 'Start' : 'Resume'}
@@ -244,7 +244,7 @@ const BreathingExercise = ({
         {completed && (
           <button
             onClick={handleReset}
-            className="flex items-center gap-2 px-6 py-3 bg-white hover:bg-white/90 rounded-full text-gray-900 font-medium transition-colors"
+            className="flex items-center gap-2 px-6 py-3 bg-white hover:bg-white/90 rounded-full text-hearth-900 font-medium transition-colors"
           >
             <RotateCcw size={20} />
             Do Another Round
@@ -349,7 +349,7 @@ export const BreathingExerciseSelector = ({ onSelect, selected }) => (
           }
         `}
       >
-        <Wind className={exercise.color === 'blue' ? 'text-blue-400' : exercise.color === 'purple' ? 'text-purple-400' : 'text-teal-400'} size={24} />
+        <Wind className={exercise.color === 'blue' ? 'text-lavender-400' : exercise.color === 'purple' ? 'text-lavender-500' : 'text-sage-400'} size={24} />
         <div>
           <div className="text-white font-medium">{exercise.name}</div>
           <div className="text-white/60 text-sm">{exercise.description}</div>

@@ -68,18 +68,18 @@ const BurnoutNudgeBanner = ({
 
   const getBannerStyles = () => {
     if (isCritical) {
-      return 'bg-gradient-to-r from-red-900/90 to-red-800/90 border-red-500';
+      return 'bg-gradient-to-r from-red-900/90 to-red-800/90 border-red-500 dark:border-red-600';
     }
     if (isHigh) {
-      return 'bg-gradient-to-r from-orange-900/90 to-amber-900/90 border-orange-500';
+      return 'bg-gradient-to-r from-terra-900/90 to-honey-900/90 border-terra-500 dark:border-terra-600';
     }
-    return 'bg-gradient-to-r from-yellow-900/90 to-amber-900/90 border-yellow-500';
+    return 'bg-gradient-to-r from-honey-800/90 to-honey-900/90 border-honey-500 dark:border-honey-600';
   };
 
   const getIconColor = () => {
     if (isCritical) return 'text-red-400';
-    if (isHigh) return 'text-orange-400';
-    return 'text-yellow-400';
+    if (isHigh) return 'text-terra-400';
+    return 'text-honey-400';
   };
 
   const getMessage = () => {
@@ -189,7 +189,7 @@ const BurnoutNudgeBanner = ({
                 type="checkbox"
                 checked={acknowledged}
                 onChange={(e) => setAcknowledged(e.target.checked)}
-                className="mt-1 w-4 h-4 rounded border-white/30 bg-black/30 text-amber-500 focus:ring-amber-500"
+                className="mt-1 w-4 h-4 rounded border-white/30 bg-black/30 text-honey-500 focus:ring-honey-500"
               />
               <span className="text-white/90 text-sm">
                 I understand I may be at risk for burnout and choose to continue journaling
@@ -244,8 +244,8 @@ const BurnoutNudgeBanner = ({
               transition={{ duration: 0.5, ease: 'easeOut' }}
               className={`h-full rounded-full ${
                 isCritical ? 'bg-red-500' :
-                isHigh ? 'bg-orange-500' :
-                'bg-yellow-500'
+                isHigh ? 'bg-terra-500' :
+                'bg-honey-500'
               }`}
             />
           </div>

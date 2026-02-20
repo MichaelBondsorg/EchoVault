@@ -114,7 +114,7 @@ const DecompressionTimer = ({
         animate={{ opacity: 1, scale: 1 }}
         className="flex flex-col items-center p-6 text-center"
       >
-        <div className="w-20 h-20 rounded-full bg-green-500 flex items-center justify-center mb-4">
+        <div className="w-20 h-20 rounded-full bg-sage-500 dark:bg-sage-600 flex items-center justify-center mb-4">
           <CheckCircle size={40} className="text-white" />
         </div>
         <h3 className="text-xl font-semibold text-white mb-2">
@@ -136,7 +136,7 @@ const DecompressionTimer = ({
       {/* Header */}
       <div className="text-center mb-6">
         <h3 className="text-lg font-semibold text-white flex items-center justify-center gap-2">
-          <Clock size={20} className="text-blue-400" />
+          <Clock size={20} className="text-lavender-400 dark:text-lavender-300" />
           Decompression Timer
         </h3>
         <p className="text-white/60 text-sm mt-1">{suggested.description}</p>
@@ -165,7 +165,7 @@ const DecompressionTimer = ({
             strokeLinecap="round"
             strokeDasharray="282.74"
             strokeDashoffset={282.74 * (1 - progress)}
-            className="text-blue-500"
+            className="text-lavender-500 dark:text-lavender-400"
             initial={{ strokeDashoffset: 282.74 }}
             animate={{ strokeDashoffset: 282.74 * (1 - progress) }}
             transition={{ duration: 0.5 }}
@@ -193,10 +193,10 @@ const DecompressionTimer = ({
               className={`
                 px-4 py-2 rounded-full text-sm font-medium transition-all
                 ${selectedDuration === option.minutes
-                  ? 'bg-blue-500 text-white'
+                  ? 'bg-lavender-500 dark:bg-lavender-600 text-white'
                   : 'bg-white/10 text-white/70 hover:bg-white/20'
                 }
-                ${option.minutes === suggested.minutes ? 'ring-2 ring-blue-500/50' : ''}
+                ${option.minutes === suggested.minutes ? 'ring-2 ring-lavender-500/50 dark:ring-lavender-400/50' : ''}
               `}
             >
               {option.label}
@@ -213,7 +213,7 @@ const DecompressionTimer = ({
         {!hasStarted ? (
           <button
             onClick={handleStart}
-            className="flex items-center gap-2 px-8 py-3 bg-blue-500 hover:bg-blue-600 rounded-full text-white font-medium transition-colors"
+            className="flex items-center gap-2 px-8 py-3 bg-lavender-500 hover:bg-lavender-600 dark:bg-lavender-600 dark:hover:bg-lavender-700 rounded-full text-white font-medium transition-colors"
           >
             <Play size={20} />
             Start Break
@@ -251,7 +251,7 @@ const DecompressionTimer = ({
         <motion.div
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
-          className="flex items-center gap-2 mt-4 text-amber-400/80 text-sm"
+          className="flex items-center gap-2 mt-4 text-honey-400/80 dark:text-honey-300/80 text-sm"
         >
           <AlertCircle size={16} />
           <span>
@@ -279,8 +279,8 @@ export const DecompressionTimerCompact = ({ riskLevel, onStart }) => {
       onClick={onStart}
       className="flex items-center gap-3 p-4 bg-white/5 hover:bg-white/10 rounded-xl w-full text-left transition-colors"
     >
-      <div className="w-12 h-12 rounded-full bg-blue-500/20 flex items-center justify-center">
-        <Clock size={24} className="text-blue-400" />
+      <div className="w-12 h-12 rounded-full bg-lavender-500/20 dark:bg-lavender-400/20 flex items-center justify-center">
+        <Clock size={24} className="text-lavender-400 dark:text-lavender-300" />
       </div>
       <div className="flex-1">
         <div className="text-white font-medium">Take a {suggested.label} Break</div>

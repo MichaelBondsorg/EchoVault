@@ -138,11 +138,11 @@ const GroundingExercise = ({
 
   const getColorClasses = (color) => {
     const colors = {
-      blue: { bg: 'bg-blue-500', text: 'text-blue-400', ring: 'ring-blue-500', focusBorder: 'focus:border-blue-500' },
-      green: { bg: 'bg-green-500', text: 'text-green-400', ring: 'ring-green-500', focusBorder: 'focus:border-green-500' },
-      purple: { bg: 'bg-purple-500', text: 'text-purple-400', ring: 'ring-purple-500', focusBorder: 'focus:border-purple-500' },
-      amber: { bg: 'bg-amber-500', text: 'text-amber-400', ring: 'ring-amber-500', focusBorder: 'focus:border-amber-500' },
-      rose: { bg: 'bg-rose-500', text: 'text-rose-400', ring: 'ring-rose-500', focusBorder: 'focus:border-rose-500' }
+      blue: { bg: 'bg-lavender-500 dark:bg-lavender-600', text: 'text-lavender-400 dark:text-lavender-300', ring: 'ring-lavender-500', focusBorder: 'focus:border-lavender-500 dark:focus:border-lavender-400' },
+      green: { bg: 'bg-sage-500 dark:bg-sage-600', text: 'text-sage-400 dark:text-sage-300', ring: 'ring-sage-500', focusBorder: 'focus:border-sage-500 dark:focus:border-sage-400' },
+      purple: { bg: 'bg-lavender-600 dark:bg-lavender-700', text: 'text-lavender-400 dark:text-lavender-300', ring: 'ring-lavender-600', focusBorder: 'focus:border-lavender-600 dark:focus:border-lavender-500' },
+      amber: { bg: 'bg-honey-500 dark:bg-honey-600', text: 'text-honey-400 dark:text-honey-300', ring: 'ring-honey-500', focusBorder: 'focus:border-honey-500 dark:focus:border-honey-400' },
+      rose: { bg: 'bg-terra-500 dark:bg-terra-600', text: 'text-terra-400 dark:text-terra-300', ring: 'ring-terra-500', focusBorder: 'focus:border-terra-500 dark:focus:border-terra-400' }
     };
     return colors[color] || colors.blue;
   };
@@ -157,7 +157,7 @@ const GroundingExercise = ({
         animate={{ opacity: 1 }}
         className="flex flex-col items-center p-6 text-center"
       >
-        <div className="w-20 h-20 rounded-full bg-green-500 flex items-center justify-center mb-4">
+        <div className="w-20 h-20 rounded-full bg-sage-500 flex items-center justify-center mb-4">
           <Check size={40} className="text-white" />
         </div>
         <h3 className="text-xl font-semibold text-white mb-2">
@@ -187,7 +187,7 @@ const GroundingExercise = ({
         <div className="flex gap-3">
           <button
             onClick={handleReset}
-            className="flex items-center gap-2 px-6 py-3 bg-white hover:bg-white/90 rounded-full text-gray-900 font-medium transition-colors"
+            className="flex items-center gap-2 px-6 py-3 bg-white hover:bg-white/90 rounded-full text-hearth-900 font-medium transition-colors"
           >
             <RotateCcw size={18} />
             Do Again
@@ -208,9 +208,9 @@ const GroundingExercise = ({
               w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium
               transition-all duration-300
               ${idx < currentStepIndex
-                ? 'bg-green-500 text-white'
+                ? 'bg-sage-500 text-white'
                 : idx === currentStepIndex
-                ? `${getColorClasses(step.color).bg} text-white ring-2 ${getColorClasses(step.color).ring} ring-offset-2 ring-offset-gray-900`
+                ? `${getColorClasses(step.color).bg} text-white ring-2 ${getColorClasses(step.color).ring} ring-offset-2 ring-offset-hearth-900`
                 : 'bg-white/10 text-white/40'
               }
             `}
@@ -276,7 +276,7 @@ const GroundingExercise = ({
                   className={`
                     flex-1 px-4 py-3 bg-white/10 border-2 border-white/20
                     rounded-xl text-white placeholder-white/40
-                    focus:outline-none ${getColorClasses(currentStep.color).focusBorder || 'focus:border-blue-500'}
+                    focus:outline-none ${getColorClasses(currentStep.color).focusBorder || 'focus:border-lavender-500'}
                     transition-colors
                   `}
                   autoFocus
@@ -332,7 +332,7 @@ export const GroundingExerciseCompact = ({ onStart }) => (
     onClick={onStart}
     className="flex items-center gap-4 p-4 bg-white/5 hover:bg-white/10 rounded-xl w-full text-left transition-colors"
   >
-    <div className="w-12 h-12 rounded-full bg-gradient-to-br from-blue-500 to-purple-500 flex items-center justify-center flex-shrink-0">
+    <div className="w-12 h-12 rounded-full bg-gradient-to-br from-lavender-500 to-lavender-700 flex items-center justify-center flex-shrink-0">
       <Hand size={24} className="text-white" />
     </div>
     <div>

@@ -44,12 +44,12 @@ const BoxBreathing = ({ onComplete, onSkip }) => {
   };
 
   const phaseColors = {
-    ready: 'bg-warm-100',
-    inhale: 'bg-blue-100',
-    hold1: 'bg-purple-100',
-    exhale: 'bg-green-100',
-    hold2: 'bg-amber-100',
-    complete: 'bg-green-100'
+    ready: 'bg-warm-100 dark:bg-hearth-800',
+    inhale: 'bg-lavender-100 dark:bg-lavender-900/30',
+    hold1: 'bg-lavender-200 dark:bg-lavender-800/30',
+    exhale: 'bg-sage-100 dark:bg-sage-900/30',
+    hold2: 'bg-honey-100 dark:bg-honey-900/30',
+    complete: 'bg-sage-100 dark:bg-sage-900/30'
   };
 
   useEffect(() => {
@@ -105,11 +105,11 @@ const BoxBreathing = ({ onComplete, onSkip }) => {
           className={`w-32 h-32 rounded-full ${phaseColors[phase]} flex items-center justify-center`}
         >
           {phase === 'ready' ? (
-            <Wind className="w-12 h-12 text-warm-400" />
+            <Wind className="w-12 h-12 text-warm-400 dark:text-warm-500" />
           ) : phase === 'complete' ? (
             <span className="text-4xl">✨</span>
           ) : (
-            <span className="text-4xl font-bold text-warm-700">{countdown}</span>
+            <span className="text-4xl font-bold text-warm-700 dark:text-warm-300">{countdown}</span>
           )}
         </motion.div>
       </div>
@@ -121,7 +121,7 @@ const BoxBreathing = ({ onComplete, onSkip }) => {
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
           exit={{ opacity: 0, y: -10 }}
-          className="text-xl font-medium text-warm-800"
+          className="text-xl font-medium text-warm-800 dark:text-warm-200"
         >
           {phaseLabels[phase]}
         </motion.p>
@@ -129,7 +129,7 @@ const BoxBreathing = ({ onComplete, onSkip }) => {
 
       {/* Progress */}
       {phase !== 'ready' && phase !== 'complete' && (
-        <p className="text-sm text-warm-500">
+        <p className="text-sm text-warm-500 dark:text-warm-400">
           Cycle {cycleCount + 1} of {totalCycles}
         </p>
       )}
@@ -139,13 +139,13 @@ const BoxBreathing = ({ onComplete, onSkip }) => {
         <div className="space-y-3">
           <button
             onClick={startExercise}
-            className="w-full py-3 rounded-xl bg-blue-500 text-white font-medium hover:bg-blue-600"
+            className="w-full py-3 rounded-xl bg-lavender-500 dark:bg-lavender-600 text-white font-medium hover:bg-lavender-600 dark:hover:bg-lavender-700"
           >
             Start Breathing
           </button>
           <button
             onClick={onSkip}
-            className="text-sm text-warm-400 hover:text-warm-600"
+            className="text-sm text-warm-400 hover:text-warm-600 dark:text-warm-500 dark:hover:text-warm-300"
           >
             Skip for now
           </button>
@@ -186,11 +186,11 @@ const FiveSenses = ({ onComplete, onSkip }) => {
       <motion.div
         initial={{ opacity: 0, scale: 0.95 }}
         animate={{ opacity: 1, scale: 1 }}
-        className="text-center p-6 bg-green-50 rounded-2xl"
+        className="text-center p-6 bg-sage-50 dark:bg-sage-900/20 rounded-2xl"
       >
         <span className="text-4xl mb-4 block">🌟</span>
-        <p className="text-green-800 font-medium">You're grounded!</p>
-        <p className="text-green-600 text-sm mt-1">
+        <p className="text-sage-800 dark:text-sage-200 font-medium">You're grounded!</p>
+        <p className="text-sage-600 dark:text-sage-400 text-sm mt-1">
           You've connected to the present moment.
         </p>
       </motion.div>
@@ -199,11 +199,11 @@ const FiveSenses = ({ onComplete, onSkip }) => {
 
   const IconComponent = sense.icon;
   const colorClasses = {
-    blue: { bg: 'bg-blue-100', text: 'text-blue-600', button: 'bg-blue-500 hover:bg-blue-600' },
-    green: { bg: 'bg-green-100', text: 'text-green-600', button: 'bg-green-500 hover:bg-green-600' },
-    purple: { bg: 'bg-purple-100', text: 'text-purple-600', button: 'bg-purple-500 hover:bg-purple-600' },
-    amber: { bg: 'bg-amber-100', text: 'text-amber-600', button: 'bg-amber-500 hover:bg-amber-600' },
-    rose: { bg: 'bg-rose-100', text: 'text-rose-600', button: 'bg-rose-500 hover:bg-rose-600' }
+    blue: { bg: 'bg-lavender-100 dark:bg-lavender-900/30', text: 'text-lavender-600 dark:text-lavender-400', button: 'bg-lavender-500 hover:bg-lavender-600 dark:bg-lavender-600 dark:hover:bg-lavender-700' },
+    green: { bg: 'bg-sage-100 dark:bg-sage-900/30', text: 'text-sage-600 dark:text-sage-400', button: 'bg-sage-500 hover:bg-sage-600 dark:bg-sage-600 dark:hover:bg-sage-700' },
+    purple: { bg: 'bg-lavender-200 dark:bg-lavender-800/30', text: 'text-lavender-700 dark:text-lavender-300', button: 'bg-lavender-600 hover:bg-lavender-700 dark:bg-lavender-700 dark:hover:bg-lavender-800' },
+    amber: { bg: 'bg-honey-100 dark:bg-honey-900/30', text: 'text-honey-600 dark:text-honey-400', button: 'bg-honey-500 hover:bg-honey-600 dark:bg-honey-600 dark:hover:bg-honey-700' },
+    rose: { bg: 'bg-terra-100 dark:bg-terra-900/30', text: 'text-terra-600 dark:text-terra-400', button: 'bg-terra-500 hover:bg-terra-600 dark:bg-terra-600 dark:hover:bg-terra-700' }
   };
   const colors = colorClasses[sense.color];
 
@@ -216,10 +216,10 @@ const FiveSenses = ({ onComplete, onSkip }) => {
             key={s.id}
             className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium ${
               idx < currentSense
-                ? 'bg-green-500 text-white'
+                ? 'bg-sage-500 dark:bg-sage-600 text-white'
                 : idx === currentSense
                   ? `${colors.bg} ${colors.text}`
-                  : 'bg-warm-100 text-warm-400'
+                  : 'bg-warm-100 dark:bg-hearth-800 text-warm-400 dark:text-warm-500'
             }`}
           >
             {s.count}
@@ -239,10 +239,10 @@ const FiveSenses = ({ onComplete, onSkip }) => {
           <div className={`w-16 h-16 mx-auto rounded-full ${colors.bg} flex items-center justify-center mb-4`}>
             <IconComponent className={`w-8 h-8 ${colors.text}`} />
           </div>
-          <h3 className="text-lg font-medium text-warm-800 mb-2">
+          <h3 className="text-lg font-medium text-warm-800 dark:text-warm-200 mb-2">
             {sense.prompt}
           </h3>
-          <p className="text-sm text-warm-500 mb-4">
+          <p className="text-sm text-warm-500 dark:text-warm-400 mb-4">
             Take your time. Look around you.
           </p>
 
@@ -251,7 +251,7 @@ const FiveSenses = ({ onComplete, onSkip }) => {
             value={inputs[sense.id] || ''}
             onChange={(e) => setInputs(prev => ({ ...prev, [sense.id]: e.target.value }))}
             placeholder={`1. ...\n2. ...\n3. ...`}
-            className="w-full p-3 rounded-xl border border-warm-200 text-warm-800 placeholder-warm-400 focus:ring-2 focus:ring-warm-300"
+            className="w-full p-3 rounded-xl border border-warm-200 dark:border-hearth-700 text-warm-800 dark:text-warm-200 placeholder-warm-400 dark:placeholder-warm-500 focus:ring-2 focus:ring-warm-300 dark:focus:ring-warm-600 dark:bg-hearth-800"
             rows={sense.count <= 2 ? 2 : 4}
           />
         </motion.div>
@@ -261,7 +261,7 @@ const FiveSenses = ({ onComplete, onSkip }) => {
       <div className="flex gap-3">
         <button
           onClick={onSkip}
-          className="flex-1 py-3 rounded-xl bg-warm-100 text-warm-600 font-medium"
+          className="flex-1 py-3 rounded-xl bg-warm-100 dark:bg-hearth-800 text-warm-600 dark:text-warm-300 font-medium"
         >
           Skip
         </button>
@@ -312,14 +312,14 @@ const QuickBodyScan = ({ onComplete, onSkip }) => {
   if (!isScanning && currentArea === 0) {
     return (
       <div className="text-center space-y-6">
-        <div className="w-16 h-16 mx-auto rounded-full bg-purple-100 flex items-center justify-center">
-          <Heart className="w-8 h-8 text-purple-500" />
+        <div className="w-16 h-16 mx-auto rounded-full bg-lavender-100 dark:bg-lavender-900/30 flex items-center justify-center">
+          <Heart className="w-8 h-8 text-lavender-500 dark:text-lavender-400" />
         </div>
         <div>
-          <h3 className="text-lg font-medium text-warm-800 mb-2">
+          <h3 className="text-lg font-medium text-warm-800 dark:text-warm-200 mb-2">
             Quick Body Scan
           </h3>
-          <p className="text-sm text-warm-600">
+          <p className="text-sm text-warm-600 dark:text-warm-300">
             We'll move through 5 body areas, spending a few seconds on each.
             Just notice and release.
           </p>
@@ -327,13 +327,13 @@ const QuickBodyScan = ({ onComplete, onSkip }) => {
         <div className="space-y-3">
           <button
             onClick={() => setIsScanning(true)}
-            className="w-full py-3 rounded-xl bg-purple-500 text-white font-medium hover:bg-purple-600"
+            className="w-full py-3 rounded-xl bg-lavender-500 dark:bg-lavender-600 text-white font-medium hover:bg-lavender-600 dark:hover:bg-lavender-700"
           >
             Start Scan
           </button>
           <button
             onClick={onSkip}
-            className="text-sm text-warm-400 hover:text-warm-600"
+            className="text-sm text-warm-400 hover:text-warm-600 dark:text-warm-500 dark:hover:text-warm-300"
           >
             Skip for now
           </button>
@@ -345,9 +345,9 @@ const QuickBodyScan = ({ onComplete, onSkip }) => {
   return (
     <div className="space-y-6">
       {/* Progress bar */}
-      <div className="h-2 bg-warm-100 rounded-full overflow-hidden">
+      <div className="h-2 bg-warm-100 dark:bg-hearth-800 rounded-full overflow-hidden">
         <motion.div
-          className="h-full bg-purple-500"
+          className="h-full bg-lavender-500 dark:bg-lavender-600"
           initial={{ width: 0 }}
           animate={{ width: `${progress}%` }}
           transition={{ duration: 0.5 }}
@@ -363,10 +363,10 @@ const QuickBodyScan = ({ onComplete, onSkip }) => {
           exit={{ opacity: 0, y: -20 }}
           className="text-center py-8"
         >
-          <h3 className="text-xl font-medium text-purple-800 mb-4">
+          <h3 className="text-xl font-medium text-lavender-800 dark:text-lavender-200 mb-4">
             {area.label}
           </h3>
-          <p className="text-warm-600">
+          <p className="text-warm-600 dark:text-warm-300">
             {area.instruction}
           </p>
         </motion.div>
@@ -376,12 +376,12 @@ const QuickBodyScan = ({ onComplete, onSkip }) => {
       <motion.div
         animate={{ scale: [1, 1.1, 1] }}
         transition={{ duration: 4, repeat: Infinity }}
-        className="w-20 h-20 mx-auto rounded-full bg-purple-100 flex items-center justify-center"
+        className="w-20 h-20 mx-auto rounded-full bg-lavender-100 dark:bg-lavender-900/30 flex items-center justify-center"
       >
         <span className="text-2xl">🫁</span>
       </motion.div>
 
-      <p className="text-center text-sm text-warm-400">
+      <p className="text-center text-sm text-warm-400 dark:text-warm-500">
         {currentArea + 1} of {bodyAreas.length}
       </p>
     </div>
