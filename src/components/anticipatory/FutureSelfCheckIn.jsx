@@ -161,7 +161,7 @@ const FutureSelfCheckIn = ({ event, userId, onComplete, onSkip }) => {
                 value={worstCaseThought}
                 onChange={(e) => setWorstCaseThought(e.target.value)}
                 placeholder="I'm worried that..."
-                className="w-full p-3 rounded-xl border border-warm-200 dark:border-hearth-700 text-warm-800 dark:text-warm-200 placeholder-warm-400 dark:placeholder-warm-500 focus:ring-2 focus:ring-warm-300 dark:focus:ring-warm-600 focus:border-transparent dark:bg-hearth-800"
+                className="w-full p-3 rounded-xl border border-warm-200 dark:border-hearth-700 text-warm-800 dark:text-warm-200 placeholder-warm-400 dark:placeholder-warm-500 focus:ring-2 focus:ring-warm-300 dark:focus:ring-warm-600 focus:border-transparent dark:bg-hearth-850"
                 rows={3}
               />
             </div>
@@ -191,7 +191,7 @@ const FutureSelfCheckIn = ({ event, userId, onComplete, onSkip }) => {
                   className={`p-4 rounded-xl text-left transition-all ${
                     bodyLocation === location.id
                       ? 'bg-terra-500 dark:bg-terra-600 text-white'
-                      : 'bg-warm-100 dark:bg-hearth-800 text-warm-700 dark:text-warm-300 hover:bg-warm-200 dark:hover:bg-hearth-700'
+                      : 'bg-warm-100 dark:bg-hearth-850 text-warm-700 dark:text-warm-300 hover:bg-warm-200 dark:hover:bg-hearth-700'
                   }`}
                 >
                   {location.label}
@@ -264,7 +264,7 @@ const FutureSelfCheckIn = ({ event, userId, onComplete, onSkip }) => {
             </div>
 
             {worstCaseThought && (
-              <div className="bg-warm-100 dark:bg-hearth-800 rounded-xl p-4">
+              <div className="bg-warm-100 dark:bg-hearth-850 rounded-xl p-4">
                 <p className="text-xs text-warm-500 dark:text-warm-400 mb-1">Your worry:</p>
                 <p className="text-warm-700 dark:text-warm-300 italic">"{worstCaseThought}"</p>
               </div>
@@ -286,7 +286,7 @@ const FutureSelfCheckIn = ({ event, userId, onComplete, onSkip }) => {
                 value={reframedThought}
                 onChange={(e) => setReframedThought(e.target.value)}
                 placeholder="A more balanced thought..."
-                className="w-full p-3 rounded-xl border border-warm-200 dark:border-hearth-700 text-warm-800 dark:text-warm-200 placeholder-warm-400 dark:placeholder-warm-500 focus:ring-2 focus:ring-lavender-300 dark:focus:ring-lavender-700 focus:border-transparent dark:bg-hearth-800"
+                className="w-full p-3 rounded-xl border border-warm-200 dark:border-hearth-700 text-warm-800 dark:text-warm-200 placeholder-warm-400 dark:placeholder-warm-500 focus:ring-2 focus:ring-lavender-300 dark:focus:ring-lavender-700 focus:border-transparent dark:bg-hearth-850"
                 rows={3}
               />
             </div>
@@ -319,7 +319,7 @@ const FutureSelfCheckIn = ({ event, userId, onComplete, onSkip }) => {
                   className={`w-full p-3 rounded-xl text-left transition-all ${
                     selectedCommitment === commitment
                       ? 'bg-sage-500 dark:bg-sage-600 text-white'
-                      : 'bg-warm-100 dark:bg-hearth-800 text-warm-700 dark:text-warm-300 hover:bg-warm-200 dark:hover:bg-hearth-700'
+                      : 'bg-warm-100 dark:bg-hearth-850 text-warm-700 dark:text-warm-300 hover:bg-warm-200 dark:hover:bg-hearth-700'
                   }`}
                 >
                   {commitment}
@@ -337,7 +337,7 @@ const FutureSelfCheckIn = ({ event, userId, onComplete, onSkip }) => {
                   setSelectedCommitment('');
                 }}
                 placeholder="I will..."
-                className="w-full p-3 rounded-xl border border-warm-200 dark:border-hearth-700 text-warm-800 dark:text-warm-200 placeholder-warm-400 dark:placeholder-warm-500 focus:ring-2 focus:ring-sage-300 dark:focus:ring-sage-700 focus:border-transparent dark:bg-hearth-800"
+                className="w-full p-3 rounded-xl border border-warm-200 dark:border-hearth-700 text-warm-800 dark:text-warm-200 placeholder-warm-400 dark:placeholder-warm-500 focus:ring-2 focus:ring-sage-300 dark:focus:ring-sage-700 focus:border-transparent dark:bg-hearth-850"
               />
             </div>
 
@@ -410,7 +410,7 @@ const FutureSelfCheckIn = ({ event, userId, onComplete, onSkip }) => {
           {currentStep > 0 && (
             <button
               onClick={() => setCurrentStep(prev => prev - 1)}
-              className="flex-1 py-4 rounded-xl bg-warm-100 dark:bg-hearth-800 text-warm-700 dark:text-warm-300 font-medium"
+              className="flex-1 py-4 rounded-xl bg-warm-100 dark:bg-hearth-850 text-warm-700 dark:text-warm-300 font-medium"
             >
               Back
             </button>

@@ -465,7 +465,7 @@ const HealthSettingsScreen = ({ onClose }) => {
                     className={`flex items-center gap-2 px-3 py-2 rounded-xl border transition-all ${
                       nativeConnected
                         ? 'bg-sage-50 dark:bg-sage-900/30 border-sage-200 dark:border-sage-800'
-                        : 'bg-warm-50 dark:bg-hearth-800 border-warm-200 dark:border-hearth-700 hover:border-warm-300'
+                        : 'bg-warm-50 dark:bg-hearth-850 border-warm-200 dark:border-hearth-700 hover:border-warm-300'
                     }`}
                   >
                     <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${
@@ -496,7 +496,7 @@ const HealthSettingsScreen = ({ onClose }) => {
                   className={`flex items-center gap-2 px-3 py-2 rounded-xl border transition-all ${
                     whoopLinked
                       ? 'bg-sage-50 dark:bg-sage-900/30 border-sage-200 dark:border-sage-800'
-                      : 'bg-warm-50 dark:bg-hearth-800 border-warm-200 dark:border-hearth-700 hover:border-warm-300'
+                      : 'bg-warm-50 dark:bg-hearth-850 border-warm-200 dark:border-hearth-700 hover:border-warm-300'
                   }`}
                 >
                   <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${

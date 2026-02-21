@@ -1,10 +1,11 @@
 import { useState, useEffect } from 'react';
 import { Sun, Moon } from 'lucide-react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion, AnimatePresence, useReducedMotion } from 'framer-motion';
 import { isDarkMode, toggleDarkMode, initDarkMode, cleanupDarkMode } from '../../utils/darkMode';
 
 export default function DarkModeToggle({ className = '' }) {
   const [dark, setDark] = useState(() => isDarkMode());
+  const prefersReducedMotion = useReducedMotion();
 
   useEffect(() => {
     initDarkMode();
@@ -17,12 +18,16 @@ export default function DarkModeToggle({ className = '' }) {
     setDark(newState);
   };
 
+  const iconTransition = prefersReducedMotion
+    ? { duration: 0 }
+    : { duration: 0.2 };
+
   return (
     <motion.button
       className={`p-2 rounded-xl text-hearth-600 dark:text-hearth-300 hover:bg-hearth-100 dark:hover:bg-hearth-800 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-honey-500 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-hearth-850 ${className}`}
       onClick={handleToggle}
-      whileHover={{ scale: 1.1 }}
-      whileTap={{ scale: 0.9 }}
+      whileHover={prefersReducedMotion ? {} : { scale: 1.1 }}
+      whileTap={prefersReducedMotion ? {} : { scale: 0.9 }}
       aria-pressed={dark}
       aria-label="Toggle dark mode"
       type="button"
@@ -30,10 +35,10 @@ export default function DarkModeToggle({ className = '' }) {
       <AnimatePresence mode="wait" initial={false}>
         <motion.div
           key={dark ? 'sun' : 'moon'}
-          initial={{ rotate: -90, scale: 0, opacity: 0 }}
-          animate={{ rotate: 0, scale: 1, opacity: 1 }}
-          exit={{ rotate: 90, scale: 0, opacity: 0 }}
-          transition={{ duration: 0.2 }}
+          initial={prefersReducedMotion ? { opacity: 0 } : { rotate: -90, scale: 0, opacity: 0 }}
+          animate={prefersReducedMotion ? { opacity: 1 } : { rotate: 0, scale: 1, opacity: 1 }}
+          exit={prefersReducedMotion ? { opacity: 0 } : { rotate: 90, scale: 0, opacity: 0 }}
+          transition={iconTransition}
         >
           {dark ? <Sun size={20} /> : <Moon size={20} />}
         </motion.div>

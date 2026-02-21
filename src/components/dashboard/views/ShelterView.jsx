@@ -121,7 +121,7 @@ const DropAnchorExercise = ({ onComplete, onBack }) => {
               value={feeling}
               onChange={(e) => setFeeling(e.target.value)}
               placeholder="e.g., anxiety, sadness, frustration..."
-              className="w-full p-3 rounded-xl border border-sage-200 dark:border-sage-700 focus:border-sage-400 dark:focus:border-sage-600 focus:ring-2 focus:ring-sage-100 dark:focus:ring-sage-900/30 outline-none text-sm font-body dark:bg-hearth-800 dark:text-warm-200 dark:placeholder-warm-500"
+              className="w-full p-3 rounded-xl border border-sage-200 dark:border-sage-700 focus:border-sage-400 dark:focus:border-sage-600 focus:ring-2 focus:ring-sage-100 dark:focus:ring-sage-900/30 outline-none text-sm font-body dark:bg-hearth-850 dark:text-warm-200 dark:placeholder-warm-500"
               autoFocus
             />
             <motion.button
@@ -571,7 +571,7 @@ const ShelterView = ({
         {/* Text Entry */}
         <motion.button
           onClick={onTextEntry}
-          className="bg-warm-100 hover:bg-warm-200 dark:bg-hearth-800 dark:hover:bg-hearth-700 text-warm-700 dark:text-warm-300 rounded-2xl p-4 flex flex-col items-center justify-center gap-2 transition-all"
+          className="bg-warm-100 hover:bg-warm-200 dark:bg-hearth-850 dark:hover:bg-hearth-700 text-warm-700 dark:text-warm-300 rounded-2xl p-4 flex flex-col items-center justify-center gap-2 transition-all"
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.25 }}

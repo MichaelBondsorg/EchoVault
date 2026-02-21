@@ -1,5 +1,6 @@
 import { createContext, useContext, useMemo } from 'react';
 import { motion } from 'framer-motion';
+import { useDarkMode } from '../../hooks/useDarkMode';
 
 // Context for sharing mood state across components
 const MoodBackgroundContext = createContext({
@@ -25,7 +26,29 @@ const getMoodCategory = (score) => {
  * @param {string} category - 'warm' | 'balanced' | 'calm'
  * @returns {Object} - CSS gradient color stops
  */
-const getGradientColors = (category) => {
+const getGradientColors = (category, dark = false) => {
+  if (dark) {
+    // Dark mode: muted, transparent gradients over hearth-950 base
+    const darkGradients = {
+      warm: {
+        from: 'rgba(110, 69, 18, 0.3)',   // Honey dark
+        via: 'rgba(37, 53, 39, 0.2)',      // Sage dark
+        to: 'rgba(28, 25, 22, 0.1)',       // Hearth dark
+      },
+      balanced: {
+        from: 'rgba(42, 36, 32, 0.4)',     // Hearth-800
+        via: 'rgba(35, 29, 27, 0.3)',      // Hearth-850
+        to: 'rgba(28, 25, 22, 0.2)',       // Hearth-900
+      },
+      calm: {
+        from: 'rgba(53, 47, 73, 0.3)',     // Lavender dark
+        via: 'rgba(34, 30, 48, 0.2)',      // Lavender deeper
+        to: 'rgba(28, 25, 22, 0.1)',       // Hearth dark
+      },
+    };
+    return darkGradients[category] || darkGradients.balanced;
+  }
+
   const gradients = {
     warm: {
       from: '#FDDB8C',    // Honey gold
@@ -55,7 +78,8 @@ const getGradientColors = (category) => {
  */
 const MoodBackgroundProvider = ({ children, moodScore = 0.5 }) => {
   const moodCategory = useMemo(() => getMoodCategory(moodScore), [moodScore]);
-  const colors = useMemo(() => getGradientColors(moodCategory), [moodCategory]);
+  const dark = useDarkMode();
+  const colors = useMemo(() => getGradientColors(moodCategory, dark), [moodCategory, dark]);
 
   const contextValue = useMemo(
     () => ({ moodScore, moodCategory }),
@@ -65,7 +89,7 @@ const MoodBackgroundProvider = ({ children, moodScore = 0.5 }) => {
   return (
     <MoodBackgroundContext.Provider value={contextValue}>
       {/* Fixed background layer (z-0) */}
-      <div className="fixed inset-0 z-0 overflow-hidden">
+      <div className="fixed inset-0 z-0 overflow-hidden bg-warm-50 dark:bg-hearth-950">
         {/* Animated gradient background */}
         <motion.div
           className="absolute inset-0"

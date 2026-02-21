@@ -299,7 +299,7 @@ const InsightsPanel = ({ entries, userId, category, onClose }) => {
             </div>
           ) : !hasAnyContent ? (
             <div className="text-center py-12">
-              <div className="h-20 w-20 bg-warm-100 dark:bg-hearth-800 rounded-full flex items-center justify-center mx-auto mb-4">
+              <div className="h-20 w-20 bg-warm-100 dark:bg-hearth-850 rounded-full flex items-center justify-center mx-auto mb-4">
                 <BarChart3 size={32} className="text-warm-400" />
               </div>
               <h3 className="text-lg font-display font-medium text-warm-800">Not enough data yet</h3>

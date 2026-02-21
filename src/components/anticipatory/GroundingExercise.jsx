@@ -44,7 +44,7 @@ const BoxBreathing = ({ onComplete, onSkip }) => {
   };
 
   const phaseColors = {
-    ready: 'bg-warm-100 dark:bg-hearth-800',
+    ready: 'bg-warm-100 dark:bg-hearth-850',
     inhale: 'bg-lavender-100 dark:bg-lavender-900/30',
     hold1: 'bg-lavender-200 dark:bg-lavender-800/30',
     exhale: 'bg-sage-100 dark:bg-sage-900/30',
@@ -219,7 +219,7 @@ const FiveSenses = ({ onComplete, onSkip }) => {
                 ? 'bg-sage-500 dark:bg-sage-600 text-white'
                 : idx === currentSense
                   ? `${colors.bg} ${colors.text}`
-                  : 'bg-warm-100 dark:bg-hearth-800 text-warm-400 dark:text-warm-500'
+                  : 'bg-warm-100 dark:bg-hearth-850 text-warm-400 dark:text-warm-500'
             }`}
           >
             {s.count}
@@ -251,7 +251,7 @@ const FiveSenses = ({ onComplete, onSkip }) => {
             value={inputs[sense.id] || ''}
             onChange={(e) => setInputs(prev => ({ ...prev, [sense.id]: e.target.value }))}
             placeholder={`1. ...\n2. ...\n3. ...`}
-            className="w-full p-3 rounded-xl border border-warm-200 dark:border-hearth-700 text-warm-800 dark:text-warm-200 placeholder-warm-400 dark:placeholder-warm-500 focus:ring-2 focus:ring-warm-300 dark:focus:ring-warm-600 dark:bg-hearth-800"
+            className="w-full p-3 rounded-xl border border-warm-200 dark:border-hearth-700 text-warm-800 dark:text-warm-200 placeholder-warm-400 dark:placeholder-warm-500 focus:ring-2 focus:ring-warm-300 dark:focus:ring-warm-600 dark:bg-hearth-850"
             rows={sense.count <= 2 ? 2 : 4}
           />
         </motion.div>
@@ -261,7 +261,7 @@ const FiveSenses = ({ onComplete, onSkip }) => {
       <div className="flex gap-3">
         <button
           onClick={onSkip}
-          className="flex-1 py-3 rounded-xl bg-warm-100 dark:bg-hearth-800 text-warm-600 dark:text-warm-300 font-medium"
+          className="flex-1 py-3 rounded-xl bg-warm-100 dark:bg-hearth-850 text-warm-600 dark:text-warm-300 font-medium"
         >
           Skip
         </button>
@@ -345,7 +345,7 @@ const QuickBodyScan = ({ onComplete, onSkip }) => {
   return (
     <div className="space-y-6">
       {/* Progress bar */}
-      <div className="h-2 bg-warm-100 dark:bg-hearth-800 rounded-full overflow-hidden">
+      <div className="h-2 bg-warm-100 dark:bg-hearth-850 rounded-full overflow-hidden">
         <motion.div
           className="h-full bg-lavender-500 dark:bg-lavender-600"
           initial={{ width: 0 }}

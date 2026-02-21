@@ -92,7 +92,7 @@ const EventReflectionPrompt = ({ event, userId, onComplete, onSkip }) => {
 
             {/* Before/After comparison */}
             <div className="grid grid-cols-2 gap-4">
-              <div className="bg-warm-100 dark:bg-hearth-800 rounded-xl p-4 text-center">
+              <div className="bg-warm-100 dark:bg-hearth-850 rounded-xl p-4 text-center">
                 <p className="text-xs text-warm-500 dark:text-warm-400 mb-1">Before (this morning)</p>
                 <p className="text-3xl font-bold text-warm-700 dark:text-warm-300">{event.anticipatedAnxiety}</p>
                 <p className="text-xs text-warm-400 dark:text-warm-500">/10</p>
@@ -174,7 +174,7 @@ const EventReflectionPrompt = ({ event, userId, onComplete, onSkip }) => {
                   value={whatHappened}
                   onChange={(e) => setWhatHappened(e.target.value)}
                   placeholder="It went..."
-                  className="w-full p-3 rounded-xl border border-warm-200 dark:border-hearth-700 text-warm-800 dark:text-warm-200 placeholder-warm-400 dark:placeholder-warm-500 dark:bg-hearth-800"
+                  className="w-full p-3 rounded-xl border border-warm-200 dark:border-hearth-700 text-warm-800 dark:text-warm-200 placeholder-warm-400 dark:placeholder-warm-500 dark:bg-hearth-850"
                   rows={3}
                 />
               </div>
@@ -187,7 +187,7 @@ const EventReflectionPrompt = ({ event, userId, onComplete, onSkip }) => {
                   value={surprises}
                   onChange={(e) => setSurprises(e.target.value)}
                   placeholder="I didn't expect..."
-                  className="w-full p-3 rounded-xl border border-warm-200 dark:border-hearth-700 text-warm-800 dark:text-warm-200 placeholder-warm-400 dark:placeholder-warm-500 dark:bg-hearth-800"
+                  className="w-full p-3 rounded-xl border border-warm-200 dark:border-hearth-700 text-warm-800 dark:text-warm-200 placeholder-warm-400 dark:placeholder-warm-500 dark:bg-hearth-850"
                   rows={2}
                 />
               </div>
@@ -205,7 +205,7 @@ const EventReflectionPrompt = ({ event, userId, onComplete, onSkip }) => {
                         className={`flex-1 py-2 rounded-lg text-sm transition-colors ${
                           copingWorked === option
                             ? 'bg-honey-500 dark:bg-honey-600 text-white'
-                            : 'bg-warm-100 dark:bg-hearth-800 text-warm-600 dark:text-warm-300 hover:bg-warm-200 dark:hover:bg-hearth-700'
+                            : 'bg-warm-100 dark:bg-hearth-850 text-warm-600 dark:text-warm-300 hover:bg-warm-200 dark:hover:bg-hearth-700'
                         }`}
                       >
                         {option}

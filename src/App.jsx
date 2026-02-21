@@ -1987,7 +1987,7 @@ export default function App() {
     const isIOS = Capacitor.getPlatform() === 'ios';
 
     return (
-      <div className="min-h-screen flex flex-col items-center justify-center p-4 bg-gradient-to-br from-warm-50 to-honey-50">
+      <div className="min-h-screen flex flex-col items-center justify-center p-4 bg-gradient-to-br from-warm-50 to-honey-50 dark:from-hearth-950 dark:to-hearth-900">
         <motion.div
           className="h-16 w-16 bg-gradient-to-br from-honey-600 to-honey-700 rounded-3xl flex items-center justify-center mb-4 shadow-soft-lg rotate-3"
           initial={{ scale: 0, rotate: -10 }}

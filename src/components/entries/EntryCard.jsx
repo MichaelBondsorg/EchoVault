@@ -256,7 +256,7 @@ const EntryCard = ({ entry, onDelete, onUpdate }) => {
 
             {/* Defusion phrase */}
             {actAnalysis.defusion_phrase && (
-              <div className="text-sage-800 dark:text-sage-200 font-medium text-sm bg-white/50 dark:bg-hearth-800/50 p-2 rounded-lg">
+              <div className="text-sage-800 dark:text-sage-200 font-medium text-sm bg-white/50 dark:bg-hearth-850/50 p-2 rounded-lg">
                 Try: "{actAnalysis.defusion_phrase}"
               </div>
             )}
@@ -359,7 +359,7 @@ const EntryCard = ({ entry, onDelete, onUpdate }) => {
           <div className="flex items-center gap-2 text-sage-700 font-display font-bold text-xs uppercase"><Brain size={12}/> Cognitive Restructuring</div>
           <div className="grid gap-2 font-body">
             <div><span className="font-semibold text-sage-900">Thought:</span> {cbt.automatic_thought}</div>
-            <div className="bg-white dark:bg-hearth-800 p-2 rounded-lg border border-sage-100 dark:border-sage-800"><span className="font-semibold text-sage-700 dark:text-sage-300">Challenge:</span> {cbt.challenge}</div>
+            <div className="bg-white dark:bg-hearth-850 p-2 rounded-lg border border-sage-100 dark:border-sage-800"><span className="font-semibold text-sage-700 dark:text-sage-300">Challenge:</span> {cbt.challenge}</div>
           </div>
         </div>
       )}

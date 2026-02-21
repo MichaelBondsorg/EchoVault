@@ -179,6 +179,18 @@
   }
 
   /* ============================================
+     Dark Mode Surface Hierarchy
+     ============================================
+     hearth-950 (#131110) — Base/deepest: app background, full-page views
+     hearth-900 (#1C1916) — Raised: panels, sections, modals, sidebars
+     hearth-850 (#231D1B) — Cards/elevated: cards, interactive surfaces
+     hearth-800 (#2A2420) — Overlay: dropdowns, tooltips, hover on cards
+
+     Elevation in dark mode is communicated via progressively lighter
+     surfaces and subtle border highlights, NOT shadows.
+     ============================================ */
+
+  /* ============================================
      Cards — Journal-page feel
      ============================================ */
 

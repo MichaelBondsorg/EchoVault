@@ -196,7 +196,7 @@ const ValuesDashboard = ({ entries, userId, onClose }) => {
 
             {/* Stable */}
             <div className="text-center">
-              <div className="w-10 h-10 mx-auto rounded-full bg-warm-100 dark:bg-hearth-800 flex items-center justify-center mb-2">
+              <div className="w-10 h-10 mx-auto rounded-full bg-warm-100 dark:bg-hearth-850 flex items-center justify-center mb-2">
                 <Minus className="w-5 h-5 text-warm-600" />
               </div>
               <p className="text-xs text-warm-600 mb-1">Stable</p>
@@ -296,7 +296,7 @@ const ValuesDashboard = ({ entries, userId, onClose }) => {
                       className={`p-3 rounded-xl text-left transition-all ${
                         selectedPriorities.includes(key)
                           ? 'bg-warm-500 text-white dark:bg-warm-600'
-                          : 'bg-warm-100 text-warm-700 hover:bg-warm-200 dark:bg-hearth-800 dark:text-warm-300 dark:hover:bg-hearth-700'
+                          : 'bg-warm-100 text-warm-700 hover:bg-warm-200 dark:bg-hearth-850 dark:text-warm-300 dark:hover:bg-hearth-700'
                       } ${
                         !selectedPriorities.includes(key) && selectedPriorities.length >= 5
                           ? 'opacity-50 cursor-not-allowed'
@@ -312,7 +312,7 @@ const ValuesDashboard = ({ entries, userId, onClose }) => {
                 <div className="flex gap-3">
                   <button
                     onClick={() => setShowPrioritization(false)}
-                    className="flex-1 py-3 rounded-xl bg-warm-100 text-warm-700 dark:bg-hearth-800 dark:text-warm-300 font-medium"
+                    className="flex-1 py-3 rounded-xl bg-warm-100 text-warm-700 dark:bg-hearth-850 dark:text-warm-300 font-medium"
                   >
                     Cancel
                   </button>

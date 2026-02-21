@@ -299,6 +299,7 @@ const AppLayout = ({
       <main
         className="
           min-h-screen
+          dark:bg-hearth-950
           pt-[calc(env(safe-area-inset-top)+60px)]
           pb-[calc(env(safe-area-inset-bottom)+100px)]
           overflow-y-auto

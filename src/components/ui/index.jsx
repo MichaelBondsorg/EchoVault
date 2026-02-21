@@ -352,7 +352,7 @@ export const Badge = ({
     success: 'bg-sage-100 text-sage-700 dark:bg-sage-900/30 dark:text-sage-300',
     warning: 'bg-honey-100 text-honey-700 dark:bg-honey-900/30 dark:text-honey-300',
     danger: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300',
-    neutral: 'bg-warm-100 text-warm-700 dark:bg-hearth-800 dark:text-hearth-300',
+    neutral: 'bg-warm-100 text-warm-700 dark:bg-hearth-850 dark:text-hearth-300',
   };
 
   const sizes = {

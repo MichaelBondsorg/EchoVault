@@ -1548,7 +1548,7 @@ const QuickInsightsSection = ({
                       {selectedEntry.analysis.tags.map((tag, i) => (
                         <span
                           key={i}
-                          className="text-xs px-2 py-1 bg-warm-100 dark:bg-hearth-800 text-warm-600 dark:text-warm-400 rounded-full"
+                          className="text-xs px-2 py-1 bg-warm-100 dark:bg-hearth-850 text-warm-600 dark:text-warm-400 rounded-full"
                         >
                           {tag}
                         </span>
