@@ -1,6 +1,6 @@
 # Engram Project Status
 
-> **Last Updated:** 2026-01-20 (App.jsx Zustand migration complete)
+> **Last Updated:** 2026-02-20 (Hearthside Visual Overhaul complete)
 > **Updated By:** Claude (via conversation with Michael)
 
 ---
@@ -21,6 +21,7 @@
 | **Multi-Provider Authentication** | ✅ Complete | Google, Apple (iOS only), Email/Password with MFA support |
 | **App Store Readiness** | ✅ Complete | Crashlytics, Fastlane, testing, accessibility, performance optimization |
 | **Architecture: App.jsx → Zustand** | ✅ Complete | All 39 useState calls migrated to 5 Zustand stores. 0% → 100% adoption. |
+| **Hearthside Visual Overhaul** | ✅ Complete | Custom therapeutic palette, dark mode, typography hierarchy (18 sections, 737 tests) |
 | Health & Environment Insights UI | ✅ Complete | Correlation insights, context prompts, recommendations, environment backfill |
 | Entity Management (Milestone 1.5) | ✅ Complete | Entity resolution for voice transcription + migration from older entries |
 | HealthKit Integration (Expanded) | ✅ Complete | Sleep stages, smart merge with Whoop, health backfill feature |
@@ -92,6 +93,10 @@
 | 2026-01-19 | Timeout wrappers for Whoop relay | 10s timeout on relay fetch, 5s on auth token. Returns cached data on timeout rather than failing silently. | Timeouts too aggressive |
 | 2026-01-20 | App.jsx state migration to Zustand | All 39 useState calls migrated to 5 domain stores. Compatibility wrappers added for gradual component updates. | Components can be updated to use store actions directly over time |
 | 2026-01-20 | resetAllStores() on logout | Clears all Zustand state when user logs out. Prevents data leakage between users. | N/A |
+| 2026-02-20 | Hearthside therapeutic palette over generic Tailwind | Custom warm-tinted palette (hearth, honey, sage, terra, lavender) conveys therapeutic calm. Generic blues/greens felt clinical. | If branding direction changes |
+| 2026-02-20 | 3-state dark mode (dark/light/system) | Respects OS preference by default, user can override. FOUC prevention via inline script in index.html. | N/A |
+| 2026-02-20 | 4-tier dark surface hierarchy | hearth-950 (base) → 900 (panels) → 850 (cards) → 800 (overlays). Prevents flat "black box" dark mode. | Users find it too subtle |
+| 2026-02-20 | Fraunces/DM Sans/Caveat font stack | Display font (headings), body font (UI), handwritten accent (sparingly). Caveat loaded with display=optional to prevent FOUT. | Performance issues on low-end devices |
 
 ---
 
@@ -119,9 +124,10 @@ Good ideas we're explicitly NOT doing now. Don't re-suggest these.
 | `functions/index.js` is 4,390 lines | High | Restructuring plan created - shared utilities extracted to `functions/src/shared/`, domain split pending |
 | ~~365 useState across 94 files~~ | ~~Medium~~ | ✅ **App.jsx migrated** - 39 useState → 5 Zustand stores. Other files can adopt stores gradually. |
 | Direct Firestore in 34 files | Medium | Restructuring plan created - repository layer ready in `src/repositories/` |
-| Test coverage improving | Low | 76 tests passing (safety, crash reporting, signal lifecycle). Add more as needed. |
+| Test coverage improving | Low | 737 tests passing across 46 files (safety, crash reporting, signal lifecycle, visual overhaul verification). |
 | Main bundle 631KB | Medium | Above 500KB warning threshold. Code splitting ready - component extraction will enable route-level splitting. |
 | Existing insights files to delete | High | Part of Nexus 2.0 Phase 1 |
+| **30-Day Journey chart empty bars light in dark mode** | Low | MoodBarGraph empty day cells use light backgrounds without `dark:` variants. Functional but visually inconsistent. |
 | **Health context not being captured** | Medium | **Partially addressed** - Added platform tracking and health enrichment service. Web entries now flagged with `needsHealthContext: true` and enriched when opened on mobile. Need to verify Whoop relay is responding correctly. |
 | **Old entries missing location data** | Medium | Environment backfill requires `entry.location` but old entries don't have it. New entries now capture location. |
 | **Analysis not extracting themes/emotions** | Low | Cloud Function `analyzeEntry` prompt doesn't request themes/emotions fields. Would need prompt update. |
@@ -253,6 +259,57 @@ Good ideas we're explicitly NOT doing now. Don't re-suggest these.
 ---
 
 ## Session Notes
+
+### 2026-02-20: Hearthside Visual Overhaul Complete
+
+**Context:** Comprehensive visual redesign replacing generic Tailwind colors with a custom therapeutic palette, adding full dark mode support, and introducing typographic hierarchy. Implemented via `/deep-plan` + `/deep-implement` workflow across 18 sections.
+
+**What Was Built:**
+
+1. **Custom Hearthside Palette** (tailwind.config.js)
+   - `hearth-*`: Warm-tinted dark neutrals (base surfaces)
+   - `warm-*`: Light mode backgrounds
+   - `honey-*`: Accent/energy/tasks
+   - `sage-*`: Growth/positive patterns
+   - `terra-*`: Grounding/negative patterns
+   - `lavender-*`: Calm/reflective insights
+
+2. **Full Dark Mode** (3-state: dark/light/system)
+   - FOUC prevention script in index.html
+   - `useDarkMode()` reactive hook (MutationObserver-based)
+   - `DarkModeToggle` component with reduced-motion support
+   - 4-tier surface hierarchy: hearth-950 → 900 → 850 → 800
+
+3. **Typography Stack**
+   - Fraunces (`font-display`): Headings, titles
+   - DM Sans (`font-body`): Body text, UI elements
+   - Caveat (`font-hand`): Handwritten accents (sparingly)
+
+4. **Centralized Color API** (src/utils/colorMap.js)
+   - `getEntryTypeColors()`, `getPatternTypeColors()`, `getEntityTypeColors()`
+   - `HEX_COLORS` for canvas/chart operations
+   - 5 gradient presets with dark mode variants
+
+5. **Component Sweep** (sections 06-16)
+   - Every component in src/components/ and src/pages/ migrated
+   - Off-palette colors eliminated (verified by automated tests)
+
+6. **Verification Suite** (section 18)
+   - 17 targeted tests validating palette compliance, typography, dark mode infrastructure
+
+**Verification:**
+- Build: Clean production build (no errors)
+- Tests: 737/737 passing across 46 files
+- UAT: Light mode and dark mode visually inspected via browser
+
+**Commits:** 18 section commits (351c878..af63c83), pushed to origin/main
+
+**One Known Issue:**
+- 30-Day Journey (MoodBarGraph) empty day cells show light backgrounds in dark mode
+
+**Reference:** See `planning/hearthside/implementation/usage.md` for full API reference and color palette documentation.
+
+---
 
 ### 2026-01-20: App.jsx Zustand Migration Complete
 
