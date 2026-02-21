@@ -140,7 +140,7 @@ const PromptScreen = ({ prompts, allSmartPrompts = [], mode, onModeChange, onSav
               <h3 className="text-xs font-display font-bold text-warm-500 uppercase tracking-wide flex items-center gap-2">
                 {promptSource === 'smart' ? (
                   <>
-                    <Brain size={12} className="text-purple-500"/> Your Reflections
+                    <Brain size={12} className="text-lavender-500 dark:text-lavender-400"/> Your Reflections
                   </>
                 ) : (
                   <>
@@ -159,11 +159,11 @@ const PromptScreen = ({ prompts, allSmartPrompts = [], mode, onModeChange, onSav
             </div>
             <div className={`rounded-2xl p-4 border shadow-soft transition-opacity ${isRefreshing ? 'opacity-50' : ''} ${
               promptSource === 'smart'
-                ? 'bg-gradient-to-br from-purple-50 to-indigo-50 border-purple-100'
+                ? 'bg-gradient-to-br from-lavender-50 to-lavender-100 dark:from-lavender-900/30 dark:to-lavender-800/20 border-lavender-100 dark:border-lavender-700/30'
                 : 'bg-white border-warm-200'
             }`}>
               {promptSource === 'smart' && (
-                <p className="text-[10px] text-purple-600 font-medium mb-2 uppercase tracking-wider">Based on your recent entries</p>
+                <p className="text-[10px] text-lavender-600 dark:text-lavender-400 font-medium mb-2 uppercase tracking-wider">Based on your recent entries</p>
               )}
               <div className="space-y-2">
                 {displayPrompts.map((prompt, i) => (
@@ -174,7 +174,7 @@ const PromptScreen = ({ prompts, allSmartPrompts = [], mode, onModeChange, onSav
                     transition={{ delay: i * 0.1 }}
                     className="flex items-start gap-2"
                   >
-                    <span className={`text-xs mt-0.5 ${promptSource === 'smart' ? 'text-purple-500' : 'text-honey-500'}`}>•</span>
+                    <span className={`text-xs mt-0.5 ${promptSource === 'smart' ? 'text-lavender-500 dark:text-lavender-400' : 'text-honey-500'}`}>•</span>
                     <p className="text-sm text-warm-700 italic font-body">"{prompt}"</p>
                   </motion.div>
                 ))}

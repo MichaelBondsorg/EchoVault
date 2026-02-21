@@ -157,7 +157,7 @@ const MoodHeatmap = ({ entries, onDayClick, userId }) => {
             >
               {/* Vent indicator dot */}
               {hasVent && (
-                <div className="absolute -top-1 left-1/2 -translate-x-1/2 w-1.5 h-1.5 rounded-full bg-rose-400 border border-white" />
+                <div className="absolute -top-1 left-1/2 -translate-x-1/2 w-1.5 h-1.5 rounded-full bg-terra-400 dark:bg-terra-500 border border-white dark:border-warm-800" />
               )}
               {/* Signal indicator (only for days with signals but no entries) */}
               {hasSignals && !hasEntries && (
@@ -241,13 +241,13 @@ const MoodHeatmap = ({ entries, onDayClick, userId }) => {
                     </div>
                   )}
                   {hoveredDay.data.typeCounts.vent > 0 && (
-                    <div className="flex items-center gap-1 text-rose-300">
+                    <div className="flex items-center gap-1 text-terra-300 dark:text-terra-400">
                       <Wind size={10} />
                       <span>{hoveredDay.data.typeCounts.vent}</span>
                     </div>
                   )}
                   {hoveredDay.data.typeCounts.mixed > 0 && (
-                    <div className="flex items-center gap-1 text-teal-300">
+                    <div className="flex items-center gap-1 text-sage-300 dark:text-sage-400">
                       <Zap size={10} />
                       <span>{hoveredDay.data.typeCounts.mixed}</span>
                     </div>
@@ -264,7 +264,7 @@ const MoodHeatmap = ({ entries, onDayClick, userId }) => {
 
               {/* Volatility indicator */}
               {hoveredDay.data.volatility > 0.3 && (
-                <p className="mt-1 text-amber-300 text-[10px]">
+                <p className="mt-1 text-honey-300 dark:text-honey-400 text-[10px]">
                   High mood variation
                 </p>
               )}

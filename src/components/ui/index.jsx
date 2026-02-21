@@ -5,6 +5,7 @@
 
 import { motion, AnimatePresence } from 'framer-motion';
 import confetti from 'canvas-confetti';
+import { HEX_COLORS } from '../../utils/colorMap.js';
 
 // ============================================
 // Animation Variants
@@ -45,14 +46,14 @@ export const celebrate = {
       particleCount: 100,
       spread: 70,
       origin: { y: 0.6 },
-      colors: ['#14b8a6', '#5eead4', '#a855f7', '#fb923c', '#fcd34d'],
+      colors: [HEX_COLORS.sage, HEX_COLORS.sageLight, HEX_COLORS.lavender, HEX_COLORS.terra, HEX_COLORS.honeyLight],
     });
   },
 
   // Side cannons for bigger celebrations
   cannons: () => {
     const end = Date.now() + 500;
-    const colors = ['#14b8a6', '#5eead4', '#a855f7'];
+    const colors = [HEX_COLORS.sage, HEX_COLORS.sageLight, HEX_COLORS.lavender];
 
     (function frame() {
       confetti({
@@ -82,7 +83,7 @@ export const celebrate = {
       particleCount: 30,
       spread: 50,
       origin: { y: 0.7 },
-      colors: ['#fcd34d', '#fb923c'],
+      colors: [HEX_COLORS.honeyLight, HEX_COLORS.terra],
       scalar: 0.8,
     });
   },
@@ -95,7 +96,7 @@ export const celebrate = {
       gravity: 0,
       decay: 0.94,
       startVelocity: 30,
-      colors: ['#14b8a6', '#5eead4', '#a855f7', '#fb923c'],
+      colors: [HEX_COLORS.sage, HEX_COLORS.sageLight, HEX_COLORS.lavender, HEX_COLORS.terra],
     };
 
     confetti({
@@ -591,7 +592,7 @@ export const EmptyState = ({
         <Icon className="w-10 h-10 text-honey-500" />
       </motion.div>
     )}
-    <h3 className="text-xl font-display font-bold text-warm-700 dark:text-hearth-200 mb-2">{title}</h3>
+    <h3 className="text-xl font-hand font-bold text-warm-700 dark:text-hearth-200 mb-2">{title}</h3>
     <p className="text-warm-500 dark:text-hearth-400 max-w-sm mb-6">{description}</p>
     {action && (
       <Button variant="primary" onClick={action.onClick}>
@@ -612,10 +613,10 @@ export const Toast = ({
   onClose,
 }) => {
   const types = {
-    success: 'bg-sage-500',
-    error: 'bg-red-500',
-    warning: 'bg-honey-500',
-    info: 'bg-lavender-500',
+    success: 'bg-sage-500 dark:bg-sage-600',
+    error: 'bg-red-500', /* @color-safe - error state */
+    warning: 'bg-honey-500 dark:bg-honey-600',
+    info: 'bg-lavender-500 dark:bg-lavender-600',
   };
 
   // Map toast type to ARIA role

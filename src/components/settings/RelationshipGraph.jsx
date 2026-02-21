@@ -28,11 +28,11 @@ import { ENTITY_LINK_TYPES } from '../../services/memory/memoryGraph';
 
 // Entity type colors matching the list view
 const entityColors = {
-  person: { bg: '#DBEAFE', border: '#3B82F6', text: '#1D4ED8' },
-  pet: { bg: '#FEF3C7', border: '#F59E0B', text: '#B45309' },
-  place: { bg: '#D1FAE5', border: '#10B981', text: '#047857' },
-  thing: { bg: '#EDE9FE', border: '#8B5CF6', text: '#6D28D9' },
-  activity: { bg: '#FCE7F3', border: '#EC4899', text: '#BE185D' }
+  person: { bg: '#F5E6D8', border: '#C4725A', text: '#8B4A38' },     /* terra */
+  pet: { bg: '#FEF3D8', border: '#E8A84C', text: '#A67530' },       /* honey */
+  place: { bg: '#E4F0E5', border: '#7A9E7E', text: '#4A6B4E' },     /* sage */
+  thing: { bg: '#EDE6F5', border: '#9B8EC4', text: '#6B5E94' },     /* lavender */
+  activity: { bg: '#F5E0DD', border: '#D4918C', text: '#A0605A' }   /* accent */
 };
 
 // Custom node types
@@ -110,11 +110,11 @@ const entitiesToFlowData = (entities, typeFilter = null) => {
           label: linkConfig?.label || rel.relationshipType,
           type: 'smoothstep',
           animated: false,
-          style: { stroke: '#94A3B8', strokeWidth: 2 },
+          style: { stroke: '#8E7A66', strokeWidth: 2 },   /* hearth */
           labelStyle: {
             fontSize: 11,
             fontWeight: 500,
-            fill: '#64748B'
+            fill: '#6B5A4A'   /* hearth-600 */
           },
           labelBgStyle: {
             fill: 'white',
@@ -124,7 +124,7 @@ const entitiesToFlowData = (entities, typeFilter = null) => {
           labelBgBorderRadius: 4,
           markerEnd: {
             type: MarkerType.ArrowClosed,
-            color: '#94A3B8',
+            color: '#8E7A66',   /* hearth */
             width: 15,
             height: 15
           }
@@ -216,13 +216,13 @@ const RelationshipGraph = ({
           type: 'smoothstep'
         }}
       >
-        <Background color="#E2E8F0" gap={20} />
+        <Background color="#E8DDD0" gap={20} /> {/* warm-200 */}
         <Controls
           showInteractive={false}
           className="bg-white rounded-lg shadow-md border border-warm-200"
         />
         <MiniMap
-          nodeColor={(node) => node.data?.colors?.border || '#94A3B8'}
+          nodeColor={(node) => node.data?.colors?.border || '#8E7A66'} /* hearth fallback */
           maskColor="rgba(255, 255, 255, 0.8)"
           className="bg-white rounded-lg shadow-md border border-warm-200"
         />

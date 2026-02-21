@@ -531,7 +531,7 @@ const EntityEditModal = ({
               {onArchive && entity?.status !== 'archived' && (
                 <button
                   onClick={() => onArchive(entity.id)}
-                  className="flex-1 py-2 px-4 text-amber-600 hover:bg-amber-50 rounded-xl
+                  className="flex-1 py-2 px-4 text-honey-600 dark:text-honey-400 hover:bg-honey-50 dark:hover:bg-honey-900/20 rounded-xl
                     transition-colors text-sm flex items-center justify-center gap-2"
                 >
                   <Archive size={16} />

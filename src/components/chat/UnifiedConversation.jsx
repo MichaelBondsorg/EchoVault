@@ -456,7 +456,7 @@ const UnifiedConversation = ({
 
           <button
             onClick={() => setMode(MODES.CHAT)}
-            className="w-full p-4 bg-gradient-to-br from-blue-500/20 to-purple-500/20 rounded-xl flex items-center gap-4 hover:from-blue-500/30 hover:to-purple-500/30 transition-colors"
+            className="w-full p-4 bg-gradient-to-br from-lavender-500/20 to-lavender-600/20 dark:from-lavender-900/30 dark:to-lavender-800/30 rounded-xl flex items-center gap-4 hover:from-lavender-500/30 hover:to-lavender-600/30 dark:hover:from-lavender-900/40 dark:hover:to-lavender-800/40 transition-colors"
           >
             <div className="w-12 h-12 rounded-lg bg-white/10 flex items-center justify-center">
               <MessageCircle size={24} className="text-white" />
@@ -536,7 +536,7 @@ const UnifiedConversation = ({
               }}
               className="w-full p-4 bg-white/5 rounded-xl flex items-center gap-4 hover:bg-white/10 transition-colors"
             >
-              <div className="w-12 h-12 rounded-lg bg-gradient-to-br from-teal-500/30 to-cyan-500/30 flex items-center justify-center">
+              <div className="w-12 h-12 rounded-lg bg-gradient-to-br from-sage-500/30 to-accent-500/30 dark:from-sage-700/30 dark:to-accent-700/30 flex items-center justify-center">
                 <Wind size={24} className="text-white" />
               </div>
               <div className="flex-1 text-left">
@@ -568,9 +568,9 @@ const UnifiedConversation = ({
             <div
               className={`max-w-[80%] p-3 rounded-2xl ${
                 msg.role === 'user'
-                  ? 'bg-blue-500 text-white'
+                  ? 'bg-lavender-500 dark:bg-lavender-600 text-white'
                   : msg.role === 'system'
-                  ? 'bg-yellow-500/20 text-yellow-200'
+                  ? 'bg-honey-500/20 dark:bg-honey-900/30 text-honey-200 dark:text-honey-300'
                   : 'bg-white/10 text-white'
               }`}
             >
@@ -613,7 +613,7 @@ const UnifiedConversation = ({
           <button
             onClick={() => handleSendMessage()}
             disabled={!inputText.trim() || isLoading}
-            className="p-3 bg-blue-500 rounded-xl hover:bg-blue-600 transition-colors disabled:opacity-50"
+            className="p-3 bg-lavender-500 dark:bg-lavender-600 rounded-xl hover:bg-lavender-600 dark:hover:bg-lavender-500 transition-colors disabled:opacity-50"
           >
             <Send size={20} className="text-white" />
           </button>
@@ -636,10 +636,10 @@ const UnifiedConversation = ({
   const renderVoice = () => {
     const statusColors = {
       disconnected: 'bg-gray-400',
-      connecting: 'bg-yellow-400 animate-pulse',
-      connected: 'bg-green-400',
-      speaking: 'bg-indigo-500 animate-pulse',
-      listening: 'bg-green-500 animate-pulse'
+      connecting: 'bg-honey-400 dark:bg-honey-500 animate-pulse',
+      connected: 'bg-sage-400 dark:bg-sage-500',
+      speaking: 'bg-lavender-500 dark:bg-lavender-600 animate-pulse',
+      listening: 'bg-sage-500 dark:bg-sage-400 animate-pulse'
     };
 
     const statusLabels = {
@@ -709,7 +709,7 @@ const UnifiedConversation = ({
         {/* Main controls */}
         <div className="p-6 pb-[max(2rem,env(safe-area-inset-bottom))] flex flex-col items-center">
           {voiceStatus === 'connecting' ? (
-            <div className="w-24 h-24 rounded-full bg-gradient-to-br from-yellow-500 to-orange-600 shadow-lg flex items-center justify-center animate-pulse">
+            <div className="w-24 h-24 rounded-full bg-gradient-to-br from-honey-500 to-terra-600 dark:from-honey-600 dark:to-terra-700 shadow-lg flex items-center justify-center animate-pulse">
               <div className="w-8 h-8 border-4 border-white/30 border-t-white rounded-full animate-spin" />
             </div>
           ) : voiceStatus !== 'disconnected' ? (
@@ -717,7 +717,7 @@ const UnifiedConversation = ({
               {/* End call button */}
               <button
                 onClick={handleEndVoice}
-                className="w-16 h-16 rounded-full bg-red-500 shadow-lg shadow-red-500/30 flex items-center justify-center hover:scale-105 transition-transform"
+                className="w-16 h-16 rounded-full bg-red-500 shadow-lg shadow-red-500/30 flex items-center justify-center hover:scale-105 transition-transform" /* @color-safe */
               >
                 <Phone size={24} className="text-white rotate-[135deg]" />
               </button>
@@ -743,10 +743,10 @@ const UnifiedConversation = ({
                 style={{ touchAction: 'none', userSelect: 'none', WebkitUserSelect: 'none' }}
                 className={`w-24 h-24 rounded-full shadow-lg flex items-center justify-center transition-all select-none ${
                   voiceIsRecording
-                    ? 'bg-green-500 shadow-green-500/30 scale-110'
+                    ? 'bg-sage-500 dark:bg-sage-600 shadow-sage-500/30 scale-110'
                     : voiceStatus === 'speaking'
                     ? 'bg-gray-500 opacity-50 cursor-not-allowed'
-                    : 'bg-gradient-to-br from-indigo-500 to-purple-600 shadow-purple-500/30 hover:scale-105'
+                    : 'bg-gradient-to-br from-lavender-500 to-lavender-700 dark:from-lavender-600 dark:to-lavender-800 shadow-lavender-500/30 hover:scale-105'
                 }`}
               >
                 {voiceIsRecording ? (
@@ -1065,7 +1065,7 @@ const MultipleChoiceInput = ({ options, multiSelect, onSubmit }) => {
       <button
         onClick={() => onSubmit(selected)}
         disabled={multiSelect ? selected.length === 0 : !selected}
-        className="w-full mt-4 px-6 py-3 bg-blue-500 rounded-xl text-white font-medium hover:bg-blue-600 transition-colors disabled:opacity-50"
+        className="w-full mt-4 px-6 py-3 bg-lavender-500 dark:bg-lavender-600 rounded-xl text-white font-medium hover:bg-lavender-600 dark:hover:bg-lavender-500 transition-colors disabled:opacity-50"
       >
         Continue
       </button>

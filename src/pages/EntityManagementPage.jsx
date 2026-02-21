@@ -62,11 +62,11 @@ const EntityManagementPage = ({ userId, onBack }) => {
 
   // Entity type configuration
   const entityConfig = {
-    person: { icon: User, label: 'People', color: 'bg-blue-100 text-blue-600' },
-    pet: { icon: PawPrint, label: 'Pets', color: 'bg-amber-100 text-amber-600' },
-    place: { icon: MapPin, label: 'Places', color: 'bg-green-100 text-green-600' },
-    thing: { icon: Package, label: 'Things', color: 'bg-purple-100 text-purple-600' },
-    activity: { icon: Activity, label: 'Activities', color: 'bg-pink-100 text-pink-600' }
+    person: { icon: User, label: 'People', color: 'bg-lavender-100 dark:bg-lavender-900/30 text-lavender-600 dark:text-lavender-400' },
+    pet: { icon: PawPrint, label: 'Pets', color: 'bg-honey-100 dark:bg-honey-900/30 text-honey-600 dark:text-honey-400' },
+    place: { icon: MapPin, label: 'Places', color: 'bg-sage-100 dark:bg-sage-900/30 text-sage-600 dark:text-sage-400' },
+    thing: { icon: Package, label: 'Things', color: 'bg-lavender-100 dark:bg-lavender-900/30 text-lavender-600 dark:text-lavender-400' },
+    activity: { icon: Activity, label: 'Activities', color: 'bg-terra-100 dark:bg-terra-900/30 text-terra-600 dark:text-terra-400' }
   };
 
   // Load entities
@@ -515,12 +515,12 @@ const EntityManagementPage = ({ userId, onBack }) => {
 
             {/* Migration status */}
             {migrationStatus === 'success' && migrationResult && (
-              <div className="mb-4 mx-auto max-w-xs p-3 bg-green-50 border border-green-200 rounded-xl text-sm">
-                <div className="flex items-center gap-2 text-green-700 mb-1">
+              <div className="mb-4 mx-auto max-w-xs p-3 bg-sage-50 dark:bg-sage-900/30 border border-sage-200 dark:border-sage-800 rounded-xl text-sm">
+                <div className="flex items-center gap-2 text-sage-700 dark:text-sage-300 mb-1">
                   <CheckCircle size={16} />
                   <span className="font-medium">Migration complete!</span>
                 </div>
-                <p className="text-green-600">
+                <p className="text-sage-600 dark:text-sage-400">
                   Created {migrationResult.entitiesCreated} entities from {migrationResult.entriesProcessed} entries.
                 </p>
               </div>

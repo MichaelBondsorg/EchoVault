@@ -160,15 +160,15 @@ const BackfillPanel = ({ entries = [] }) => {
   const getStageIcon = (stage) => {
     switch (stage) {
       case BACKFILL_STAGES.HEALTH:
-        return <Heart size={16} className="text-red-500" />;
+        return <Heart size={16} className="text-red-500" />; /* @color-safe - health context */
       case BACKFILL_STAGES.ENVIRONMENT:
-        return <Cloud size={16} className="text-blue-500" />;
+        return <Cloud size={16} className="text-lavender-500 dark:text-lavender-400" />;
       case BACKFILL_STAGES.REASSESSMENT:
-        return <Activity size={16} className="text-purple-500" />;
+        return <Activity size={16} className="text-lavender-500 dark:text-lavender-400" />;
       case BACKFILL_STAGES.COMPLETE:
-        return <CheckCircle2 size={16} className="text-green-500" />;
+        return <CheckCircle2 size={16} className="text-sage-500 dark:text-sage-400" />;
       case BACKFILL_STAGES.ERROR:
-        return <XCircle size={16} className="text-red-500" />;
+        return <XCircle size={16} className="text-red-500" />; /* @color-safe - error state */
       default:
         return <Loader2 size={16} className="animate-spin text-warm-500" />;
     }
@@ -233,7 +233,7 @@ const BackfillPanel = ({ entries = [] }) => {
                   </div>
                 </div>
                 <div className="bg-white p-3 rounded-lg border border-warm-100">
-                  <div className="flex items-center gap-2 text-blue-600 mb-1">
+                  <div className="flex items-center gap-2 text-lavender-600 mb-1">
                     <Cloud size={14} />
                     <span className="font-medium">Weather</span>
                   </div>
@@ -250,7 +250,7 @@ const BackfillPanel = ({ entries = [] }) => {
               )}
 
               {summary.canResume && (
-                <div className="flex items-center gap-2 text-amber-600 bg-amber-50 p-2 rounded-lg text-sm">
+                <div className="flex items-center gap-2 text-honey-600 dark:text-honey-400 bg-honey-50 dark:bg-honey-900/30 p-2 rounded-lg text-sm">
                   <AlertCircle size={14} />
                   <span>Previous backfill was interrupted. You can resume where you left off.</span>
                 </div>
@@ -265,7 +265,7 @@ const BackfillPanel = ({ entries = [] }) => {
               </button>
             </>
           ) : (
-            <div className="flex items-center gap-2 text-green-600 bg-green-50 p-3 rounded-lg">
+            <div className="flex items-center gap-2 text-sage-600 dark:text-sage-400 bg-sage-50 dark:bg-sage-900/30 p-3 rounded-lg">
               <CheckCircle2 size={16} />
               <span className="text-sm">All entries are up to date!</span>
             </div>
@@ -280,7 +280,7 @@ const BackfillPanel = ({ entries = [] }) => {
               </p>
               <button
                 onClick={handleClearBackfilled}
-                className="text-sm text-amber-600 hover:text-amber-700 flex items-center gap-1"
+                className="text-sm text-honey-600 dark:text-honey-400 hover:text-honey-700 dark:hover:text-honey-300 flex items-center gap-1"
               >
                 <Trash2 size={14} />
                 Clear backfilled data to re-sync
@@ -298,14 +298,14 @@ const BackfillPanel = ({ entries = [] }) => {
           className="space-y-3"
         >
           <div className="flex items-center gap-2">
-            <Loader2 size={16} className="animate-spin text-amber-500" />
-            <span className="text-sm font-medium text-warm-700">
+            <Loader2 size={16} className="animate-spin text-honey-500 dark:text-honey-400" />
+            <span className="text-sm font-medium text-warm-700 dark:text-warm-300">
               Clearing backfilled data...
             </span>
           </div>
           <div className="h-2 bg-warm-200 rounded-full overflow-hidden">
             <motion.div
-              className="h-full bg-amber-500 rounded-full"
+              className="h-full bg-honey-500 dark:bg-honey-600 rounded-full"
               initial={{ width: 0 }}
               animate={{
                 width: `${Math.round((progress.processed / progress.total) * 100)}%`
@@ -325,11 +325,11 @@ const BackfillPanel = ({ entries = [] }) => {
           animate={{ opacity: 1 }}
           className="space-y-3"
         >
-          <div className="flex items-center gap-2 text-amber-600">
+          <div className="flex items-center gap-2 text-honey-600 dark:text-honey-400">
             <CheckCircle2 size={18} />
             <span className="font-medium">Health Data Cleared</span>
           </div>
-          <p className="text-sm text-warm-600">{clearResults.message}</p>
+          <p className="text-sm text-warm-600 dark:text-warm-400">{clearResults.message}</p>
           <button
             onClick={() => setClearResults(null)}
             className="text-sm text-honey-600 hover:text-honey-700"
@@ -406,7 +406,7 @@ const BackfillPanel = ({ entries = [] }) => {
           animate={{ opacity: 1 }}
           className="space-y-3"
         >
-          <div className="flex items-center gap-2 text-green-600">
+          <div className="flex items-center gap-2 text-sage-600 dark:text-sage-400">
             <CheckCircle2 size={18} />
             <span className="font-medium">Backfill Complete</span>
           </div>

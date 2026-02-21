@@ -72,7 +72,7 @@ const HeroWidget = ({
         {/* Left: Greeting */}
         <div className="flex-1">
           <motion.p
-            className="text-hearth-500 text-sm font-medium"
+            className="text-hearth-500 dark:text-hearth-300 text-lg font-hand font-medium"
             initial={{ opacity: 0, y: -5 }}
             animate={{ opacity: 1, y: 0 }}
           >

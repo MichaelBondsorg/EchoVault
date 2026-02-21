@@ -266,7 +266,7 @@ const DaySummaryModal = ({
                         {moodContributors.positive.map((item, i) => (
                           <span
                             key={i}
-                            className="px-2 py-1 bg-green-100 text-green-700 text-xs rounded-full"
+                            className="px-2 py-1 bg-sage-100 dark:bg-sage-900/30 text-sage-700 dark:text-sage-300 text-xs rounded-full"
                           >
                             + {item}
                           </span>

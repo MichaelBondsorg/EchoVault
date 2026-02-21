@@ -31,12 +31,12 @@ const HamburgerMenu = ({
   }, [isOpen]);
 
   const menuItems = [
-    { icon: Sparkles, label: 'AI Companion', onClick: onOpenCompanion, color: 'text-purple-600', hoverBg: 'hover:bg-purple-50' },
+    { icon: Sparkles, label: 'AI Companion', onClick: onOpenCompanion, color: 'text-lavender-600 dark:text-lavender-400', hoverBg: 'hover:bg-lavender-50 dark:hover:bg-lavender-900/20' },
     { icon: BookOpen, label: 'Journal', onClick: onOpenJournal, color: 'text-honey-600' },
     { icon: BarChart3, label: 'View Patterns', onClick: onShowInsights, color: 'text-warm-600' },
-    { icon: ScrollText, label: 'Life Reports', onClick: onShowReports, color: 'text-indigo-600' },
+    { icon: ScrollText, label: 'Life Reports', onClick: onShowReports, color: 'text-lavender-600 dark:text-lavender-400' },
     { icon: FileText, label: 'Export for Therapist', onClick: onShowExport, color: 'text-warm-600' },
-    { icon: Heart, label: 'Health Settings', onClick: onOpenHealthSettings, color: 'text-pink-500' },
+    { icon: Heart, label: 'Health Settings', onClick: onOpenHealthSettings, color: 'text-terra-500 dark:text-terra-400' },
     { icon: Bell, label: 'Notifications', onClick: onRequestPermission, color: notificationPermission === 'granted' ? 'text-honey-600' : 'text-warm-400' },
     { icon: LogOut, label: 'Sign Out', onClick: onLogout, color: 'text-red-500', hoverBg: 'hover:bg-red-50' },
   ];

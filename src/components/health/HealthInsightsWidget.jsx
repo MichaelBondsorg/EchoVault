@@ -59,15 +59,15 @@ const HealthInsightsWidget = ({ correlations, onRequestPermission, onManualInput
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
-        className="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-2xl border border-blue-200 p-4"
+        className="bg-gradient-to-br from-lavender-50 to-lavender-100 dark:from-lavender-900/20 dark:to-lavender-800/20 rounded-2xl border border-lavender-200 dark:border-lavender-800 p-4"
       >
         <div className="flex items-start gap-3">
-          <div className="w-10 h-10 rounded-xl bg-blue-100 flex items-center justify-center flex-shrink-0">
-            <Heart className="w-5 h-5 text-blue-600" />
+          <div className="w-10 h-10 rounded-xl bg-lavender-100 dark:bg-lavender-900/30 flex items-center justify-center flex-shrink-0">
+            <Heart className="w-5 h-5 text-lavender-600 dark:text-lavender-400" />
           </div>
           <div className="flex-1">
-            <h3 className="font-medium text-blue-800">Connect Health Data</h3>
-            <p className="text-sm text-blue-600 mt-1">
+            <h3 className="font-medium text-lavender-800 dark:text-lavender-300">Connect Health Data</h3>
+            <p className="text-sm text-lavender-600 dark:text-lavender-400 mt-1">
               See how sleep, exercise, and stress affect your mood.
             </p>
             <button
@@ -75,7 +75,7 @@ const HealthInsightsWidget = ({ correlations, onRequestPermission, onManualInput
                 await requestHealthPermissions();
                 loadHealthData();
               }}
-              className="mt-3 px-4 py-2 bg-blue-500 text-white text-sm font-medium rounded-lg hover:bg-blue-600 transition-colors"
+              className="mt-3 px-4 py-2 bg-lavender-500 dark:bg-lavender-600 text-white text-sm font-medium rounded-lg hover:bg-lavender-600 dark:hover:bg-lavender-700 transition-colors"
             >
               Connect {status.platform === 'ios' ? 'Apple Health' : 'Google Fit'}
             </button>
@@ -91,7 +91,7 @@ const HealthInsightsWidget = ({ correlations, onRequestPermission, onManualInput
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
-        className="bg-gradient-to-br from-warm-50 to-rose-50 rounded-2xl border border-warm-200 p-4"
+        className="bg-gradient-to-br from-warm-50 to-terra-50 dark:from-warm-900/30 dark:to-terra-900/30 rounded-2xl border border-warm-200 dark:border-warm-700 p-4"
       >
         <div className="flex items-start gap-3">
           <div className="w-10 h-10 rounded-xl bg-warm-100 flex items-center justify-center flex-shrink-0">
@@ -162,8 +162,8 @@ const HealthInsightsWidget = ({ correlations, onRequestPermission, onManualInput
           <div className="grid grid-cols-4 gap-2">
             {/* Sleep */}
             <div className="text-center">
-              <Moon className="w-4 h-4 mx-auto text-indigo-500 mb-1" />
-              <p className="text-lg font-semibold text-warm-800">
+              <Moon className="w-4 h-4 mx-auto text-lavender-500 dark:text-lavender-400 mb-1" />
+              <p className="text-lg font-semibold text-warm-800 dark:text-warm-200">
                 {todayHealth.sleep?.totalHours || '—'}
               </p>
               <p className="text-xs text-warm-500">hrs sleep</p>
@@ -171,8 +171,8 @@ const HealthInsightsWidget = ({ correlations, onRequestPermission, onManualInput
 
             {/* Steps */}
             <div className="text-center">
-              <Footprints className="w-4 h-4 mx-auto text-green-500 mb-1" />
-              <p className="text-lg font-semibold text-warm-800">
+              <Footprints className="w-4 h-4 mx-auto text-sage-500 dark:text-sage-400 mb-1" />
+              <p className="text-lg font-semibold text-warm-800 dark:text-warm-200">
                 {todayHealth.steps ? (todayHealth.steps / 1000).toFixed(1) + 'k' : '—'}
               </p>
               <p className="text-xs text-warm-500">steps</p>
@@ -180,8 +180,8 @@ const HealthInsightsWidget = ({ correlations, onRequestPermission, onManualInput
 
             {/* Workout */}
             <div className="text-center">
-              <Activity className="w-4 h-4 mx-auto text-orange-500 mb-1" />
-              <p className="text-lg font-semibold text-warm-800">
+              <Activity className="w-4 h-4 mx-auto text-honey-500 dark:text-honey-400 mb-1" />
+              <p className="text-lg font-semibold text-warm-800 dark:text-warm-200">
                 {todayHealth.hasWorkout ? '✓' : '—'}
               </p>
               <p className="text-xs text-warm-500">workout</p>
@@ -189,8 +189,8 @@ const HealthInsightsWidget = ({ correlations, onRequestPermission, onManualInput
 
             {/* Stress */}
             <div className="text-center">
-              <Heart className="w-4 h-4 mx-auto text-red-400 mb-1" />
-              <p className="text-lg font-semibold text-warm-800 capitalize">
+              <Heart className="w-4 h-4 mx-auto text-red-400 mb-1" /> {/* @color-safe - health/heart context */}
+              <p className="text-lg font-semibold text-warm-800 dark:text-warm-200 capitalize">
                 {todayHealth.hrv?.stressIndicator || '—'}
               </p>
               <p className="text-xs text-warm-500">stress</p>
@@ -209,13 +209,13 @@ const HealthInsightsWidget = ({ correlations, onRequestPermission, onManualInput
               return (
                 <div key={idx} className="flex items-start gap-3">
                   <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${
-                    insight.priority === 'high' ? 'bg-green-100' : 'bg-warm-100'
+                    insight.priority === 'high' ? 'bg-sage-100 dark:bg-sage-900/30' : 'bg-warm-100'
                   }`}>
                     <IconComponent size={16} className={
-                      insight.priority === 'high' ? 'text-green-600' : 'text-warm-600'
+                      insight.priority === 'high' ? 'text-sage-600 dark:text-sage-400' : 'text-warm-600'
                     } />
                   </div>
-                  <p className="text-sm text-warm-700">{insight.message}</p>
+                  <p className="text-sm text-warm-700 dark:text-warm-300">{insight.message}</p>
                 </div>
               );
             })}
@@ -225,9 +225,9 @@ const HealthInsightsWidget = ({ correlations, onRequestPermission, onManualInput
 
       {/* Recommendations */}
       {correlations?.available && correlations.recommendations?.length > 0 && (
-        <div className="p-4 bg-green-50 border-t border-green-100">
-          <p className="text-xs text-green-600 font-medium mb-2">Try this:</p>
-          <p className="text-sm text-green-800">
+        <div className="p-4 bg-sage-50 dark:bg-sage-900/30 border-t border-sage-100 dark:border-sage-800">
+          <p className="text-xs text-sage-600 dark:text-sage-400 font-medium mb-2">Try this:</p>
+          <p className="text-sm text-sage-800 dark:text-sage-300">
             {correlations.recommendations[0].action}
           </p>
         </div>
@@ -297,7 +297,7 @@ const ManualHealthInput = ({ show, onClose, onSave }) => {
                 onClick={() => setHadWorkout(true)}
                 className={`flex-1 py-2 rounded-lg transition-colors ${
                   hadWorkout
-                    ? 'bg-green-500 text-white'
+                    ? 'bg-sage-500 dark:bg-sage-600 text-white'
                     : 'bg-warm-100 text-warm-600'
                 }`}
               >
@@ -307,7 +307,7 @@ const ManualHealthInput = ({ show, onClose, onSave }) => {
                 onClick={() => setHadWorkout(false)}
                 className={`flex-1 py-2 rounded-lg transition-colors ${
                   !hadWorkout
-                    ? 'bg-warm-500 text-white'
+                    ? 'bg-warm-500 dark:bg-warm-600 text-white'
                     : 'bg-warm-100 text-warm-600'
                 }`}
               >
@@ -329,10 +329,10 @@ const ManualHealthInput = ({ show, onClose, onSave }) => {
                   className={`flex-1 py-2 rounded-lg capitalize transition-colors ${
                     stressLevel === level
                       ? level === 'low'
-                        ? 'bg-green-500 text-white'
+                        ? 'bg-sage-500 dark:bg-sage-600 text-white'
                         : level === 'moderate'
-                          ? 'bg-amber-500 text-white'
-                          : 'bg-red-500 text-white'
+                          ? 'bg-honey-500 dark:bg-honey-600 text-white'
+                          : 'bg-red-500 text-white' /* @color-safe - health/stress context */
                       : 'bg-warm-100 text-warm-600'
                   }`}
                 >

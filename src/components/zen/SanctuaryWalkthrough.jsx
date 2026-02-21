@@ -82,8 +82,8 @@ const SanctuaryWalkthrough = ({ isOpen, onComplete, onSkip }) => {
           {/* Animated Bento grid preview */}
           <div className="grid grid-cols-2 gap-2">
             {[
-              { label: 'Greeting', size: 'col-span-2', color: 'from-amber-100 to-orange-100' },
-              { label: 'Prompts', size: 'col-span-2', color: 'from-purple-100 to-pink-100' },
+              { label: 'Greeting', size: 'col-span-2', color: 'from-honey-100 to-terra-100 dark:from-honey-900/30 dark:to-terra-900/30' },
+              { label: 'Prompts', size: 'col-span-2', color: 'from-lavender-100 to-terra-100 dark:from-lavender-900/30 dark:to-terra-900/30' },
             ].map((widget, i) => (
               <motion.div
                 key={widget.label}

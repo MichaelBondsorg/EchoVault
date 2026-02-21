@@ -120,7 +120,7 @@ const FutureSelfCheckIn = ({ event, userId, onComplete, onSkip }) => {
               <div className="w-16 h-16 mx-auto rounded-full bg-honey-100 dark:bg-honey-900/30 flex items-center justify-center mb-4">
                 <Sun className="w-8 h-8 text-honey-500 dark:text-honey-400" />
               </div>
-              <h2 className="text-xl font-semibold text-warm-900 dark:text-warm-100 mb-2">
+              <h2 className="text-xl font-hand font-semibold text-warm-900 dark:text-warm-100 mb-2">
                 Good morning
               </h2>
               <p className="text-warm-600 dark:text-warm-300">

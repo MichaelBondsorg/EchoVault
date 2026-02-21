@@ -86,7 +86,7 @@ const QuickLogModal = ({ isOpen, onClose, onSave }) => {
 
   // Get slider track gradient
   const getSliderGradient = () => {
-    return 'linear-gradient(to right, #a5b4fc, #93c5fd, #fcd34d, #6ee7b7, #10b981)';
+    return 'linear-gradient(to right, #9B8EC4, #B5A7D4, #FCC44F, #9DC0A3, #7A9E7E)'; /* lavender → lavenderLight → honeyLight → sageLight → sage */
   };
 
   return (

@@ -218,7 +218,7 @@ const SettingsPage = ({
                     <div className="flex items-center gap-2">
                       <span className="font-medium text-warm-800">{item.label}</span>
                       {item.badge && (
-                        <span className="px-2 py-0.5 bg-amber-100 text-amber-700 text-xs font-bold rounded-full">
+                        <span className="px-2 py-0.5 bg-honey-100 dark:bg-honey-900/30 text-honey-700 dark:text-honey-300 text-xs font-bold rounded-full">
                           {item.badge}
                         </span>
                       )}
@@ -248,8 +248,8 @@ const SettingsPage = ({
         {/* Diagnostic Export */}
         <div className="bg-white/30 backdrop-blur-sm border border-white/20 rounded-2xl overflow-hidden p-4 space-y-3">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-amber-100 flex items-center justify-center">
-              <FileJson size={20} className="text-amber-600" />
+            <div className="w-10 h-10 rounded-xl bg-honey-100 dark:bg-honey-900/30 flex items-center justify-center">
+              <FileJson size={20} className="text-honey-600 dark:text-honey-400" />
             </div>
             <div className="flex-1">
               <span className="font-medium text-warm-800">Diagnostic Export</span>
@@ -260,7 +260,7 @@ const SettingsPage = ({
           <motion.button
             onClick={handleDiagnosticExport}
             disabled={entries.length === 0}
-            className="w-full py-2.5 px-4 bg-amber-500 hover:bg-amber-600 disabled:bg-warm-300 text-white font-medium rounded-xl flex items-center justify-center gap-2 transition-colors"
+            className="w-full py-2.5 px-4 bg-honey-500 dark:bg-honey-600 hover:bg-honey-600 dark:hover:bg-honey-700 disabled:bg-warm-300 text-white font-medium rounded-xl flex items-center justify-center gap-2 transition-colors"
             whileTap={{ scale: 0.98 }}
           >
             <Download size={18} />
@@ -286,7 +286,7 @@ const SettingsPage = ({
                 <span className="font-mono">{diagnosticResult.entriesWithThemes}</span>
               </div>
               {diagnosticResult.warning && (
-                <div className="mt-2 flex items-start gap-2 text-amber-700 bg-amber-50 rounded p-2">
+                <div className="mt-2 flex items-start gap-2 text-honey-700 dark:text-honey-300 bg-honey-50 dark:bg-honey-900/30 rounded p-2">
                   <AlertTriangle size={14} className="flex-shrink-0 mt-0.5" />
                   <span>{diagnosticResult.warning}</span>
                 </div>
@@ -304,8 +304,8 @@ const SettingsPage = ({
         {/* Health Data Migration */}
         <div className="bg-white/30 backdrop-blur-sm border border-white/20 rounded-2xl overflow-hidden p-4 space-y-3">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-emerald-100 flex items-center justify-center">
-              <Heart size={20} className="text-emerald-600" />
+            <div className="w-10 h-10 rounded-xl bg-sage-100 dark:bg-sage-900/30 flex items-center justify-center">
+              <Heart size={20} className="text-sage-600 dark:text-sage-400" />
             </div>
             <div className="flex-1">
               <span className="font-medium text-warm-800">Prepare for Health Enrichment</span>
@@ -325,7 +325,7 @@ const SettingsPage = ({
               <motion.button
                 onClick={handleHealthMigration}
                 disabled={migrationState.running}
-                className="w-full py-2.5 px-4 bg-emerald-500 hover:bg-emerald-600 disabled:bg-warm-300 text-white font-medium rounded-xl flex items-center justify-center gap-2 transition-colors"
+                className="w-full py-2.5 px-4 bg-sage-500 dark:bg-sage-600 hover:bg-sage-600 dark:hover:bg-sage-700 disabled:bg-warm-300 text-white font-medium rounded-xl flex items-center justify-center gap-2 transition-colors"
                 whileTap={{ scale: 0.98 }}
               >
                 {migrationState.running ? (
@@ -342,14 +342,14 @@ const SettingsPage = ({
               </motion.button>
             </>
           ) : (
-            <p className="text-xs text-emerald-600 bg-emerald-50 rounded-lg p-3">
+            <p className="text-xs text-sage-600 dark:text-sage-300 bg-sage-50 dark:bg-sage-900/30 rounded-lg p-3">
               ✓ All entries have platform tracking. Open the mobile app to enrich web entries with health data.
             </p>
           )}
 
           {/* Show result after migration */}
           {migrationState.result && !migrationState.result.error && (
-            <div className="text-xs bg-emerald-50 text-emerald-700 rounded-lg p-3 space-y-1">
+            <div className="text-xs bg-sage-50 dark:bg-sage-900/30 text-sage-700 dark:text-sage-300 rounded-lg p-3 space-y-1">
               <p className="font-medium">Migration Complete!</p>
               <p>{migrationState.result.message}</p>
               <div className="grid grid-cols-2 gap-1 mt-2">

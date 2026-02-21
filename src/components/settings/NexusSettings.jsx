@@ -116,8 +116,8 @@ const NexusSettings = ({ user }) => {
     <div className="p-6 space-y-8">
       {/* Header */}
       <div className="flex items-center gap-3">
-        <div className="p-2 bg-gradient-to-br from-purple-500/20 to-blue-500/20 rounded-xl">
-          <svg className="w-6 h-6 text-purple-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <div className="p-2 bg-gradient-to-br from-lavender-500/20 to-lavender-400/20 dark:from-lavender-900/30 dark:to-lavender-800/30 rounded-xl">
+          <svg className="w-6 h-6 text-lavender-400 dark:text-lavender-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
           </svg>
         </div>
@@ -180,7 +180,7 @@ const NexusSettings = ({ user }) => {
         {/* Mood Gate */}
         <div className="bg-warm-800/50 rounded-xl p-4 border border-warm-700/50">
           <div className="flex items-start gap-3">
-            <svg className="w-5 h-5 text-green-400 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <svg className="w-5 h-5 text-sage-400 dark:text-sage-300 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
             </svg>
             <div className="flex-1">
@@ -200,7 +200,7 @@ const NexusSettings = ({ user }) => {
                 step="5"
                 value={settings?.preferences?.moodGateThreshold || 50}
                 onChange={(e) => updatePreference('moodGateThreshold', parseInt(e.target.value))}
-                className="w-full h-2 bg-warm-700 rounded-lg appearance-none cursor-pointer accent-green-500"
+                className="w-full h-2 bg-warm-700 rounded-lg appearance-none cursor-pointer accent-sage-500"
               />
               <div className="flex justify-between text-xs text-warm-500 mt-1">
                 <span>More insights</span>
@@ -211,14 +211,14 @@ const NexusSettings = ({ user }) => {
         </div>
 
         {/* Info Box */}
-        <div className="bg-blue-500/10 border border-blue-500/20 rounded-xl p-4">
+        <div className="bg-lavender-500/10 dark:bg-lavender-900/20 border border-lavender-500/20 dark:border-lavender-700/30 rounded-xl p-4">
           <div className="flex gap-3">
-            <svg className="w-5 h-5 text-blue-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <svg className="w-5 h-5 text-lavender-400 dark:text-lavender-300 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
-            <div className="text-sm text-blue-200">
+            <div className="text-sm text-lavender-200 dark:text-lavender-300">
               <p className="font-medium mb-1">About Deep Pattern Insights</p>
-              <p className="text-blue-300/80">
+              <p className="text-lavender-300/80 dark:text-lavender-400/80">
                 These insights identify gaps between your stated beliefs and behavioral data.
                 They're framed as invitations to explore, not judgments. You can turn them off
                 anytime if they don't feel helpful.
@@ -244,10 +244,10 @@ const NexusSettings = ({ user }) => {
  */
 const FeatureToggle = ({ title, description, enabled, onToggle, color, badge }) => {
   const colorClasses = {
-    amber: 'bg-amber-500/20 text-amber-400',
-    rose: 'bg-rose-500/20 text-rose-400',
-    purple: 'bg-purple-500/20 text-purple-400',
-    blue: 'bg-blue-500/20 text-blue-400'
+    amber: 'bg-honey-500/20 dark:bg-honey-900/30 text-honey-400 dark:text-honey-300',
+    rose: 'bg-terra-500/20 dark:bg-terra-900/30 text-terra-400 dark:text-terra-300',
+    purple: 'bg-lavender-500/20 dark:bg-lavender-900/30 text-lavender-400 dark:text-lavender-300',
+    blue: 'bg-lavender-500/20 dark:bg-lavender-900/30 text-lavender-400 dark:text-lavender-300'
   };
 
   const iconColor = colorClasses[color] || colorClasses.purple;
@@ -264,7 +264,7 @@ const FeatureToggle = ({ title, description, enabled, onToggle, color, badge }) 
           <div className="flex items-center gap-2">
             <span className="font-medium text-warm-200">{title}</span>
             {badge && (
-              <span className="px-2 py-0.5 text-xs bg-green-500/20 text-green-400 rounded-full">
+              <span className="px-2 py-0.5 text-xs bg-sage-500/20 dark:bg-sage-900/30 text-sage-400 dark:text-sage-300 rounded-full">
                 {badge}
               </span>
             )}
@@ -274,7 +274,7 @@ const FeatureToggle = ({ title, description, enabled, onToggle, color, badge }) 
         <button
           onClick={onToggle}
           className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-            enabled ? 'bg-green-500' : 'bg-warm-600'
+            enabled ? 'bg-sage-500 dark:bg-sage-600' : 'bg-warm-600'
           }`}
         >
           <span
