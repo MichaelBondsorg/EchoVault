@@ -35,10 +35,10 @@ const formatDayLabel = (targetDate, recordedAt) => {
 // Get icon for signal type
 const getSignalIcon = (type) => {
   switch (type) {
-    case 'feeling': return <Heart size={12} className="text-rose-500" />;
-    case 'event': return <Calendar size={12} className="text-blue-500" />;
-    case 'plan': return <Target size={12} className="text-amber-500" />;
-    case 'reflection': return <MessageCircle size={12} className="text-purple-500" />;
+    case 'feeling': return <Heart size={12} className="text-terra-500 dark:text-terra-400" />;
+    case 'event': return <Calendar size={12} className="text-lavender-500 dark:text-lavender-400" />;
+    case 'plan': return <Target size={12} className="text-honey-500 dark:text-honey-400" />;
+    case 'reflection': return <MessageCircle size={12} className="text-lavender-600 dark:text-lavender-400" />;
     default: return <Clock size={12} className="text-warm-500" />;
   }
 };
@@ -46,13 +46,13 @@ const getSignalIcon = (type) => {
 // Get sentiment emoji/indicator
 const getSentimentIndicator = (sentiment) => {
   const indicators = {
-    positive: { emoji: '😊', color: 'text-emerald-500' },
-    excited: { emoji: '🎉', color: 'text-amber-500' },
-    hopeful: { emoji: '🌟', color: 'text-sky-500' },
+    positive: { emoji: '😊', color: 'text-sage-500 dark:text-sage-400' },
+    excited: { emoji: '🎉', color: 'text-honey-500 dark:text-honey-400' },
+    hopeful: { emoji: '🌟', color: 'text-lavender-400 dark:text-lavender-300' },
     neutral: { emoji: '😐', color: 'text-warm-400' },
-    anxious: { emoji: '😰', color: 'text-orange-500' },
-    negative: { emoji: '😔', color: 'text-blue-500' },
-    dreading: { emoji: '😨', color: 'text-purple-500' },
+    anxious: { emoji: '😰', color: 'text-terra-400 dark:text-terra-300' },
+    negative: { emoji: '😔', color: 'text-lavender-600 dark:text-lavender-400' },
+    dreading: { emoji: '😨', color: 'text-lavender-700 dark:text-lavender-500' },
   };
   return indicators[sentiment] || indicators.neutral;
 };
@@ -106,10 +106,10 @@ const DetectedStrip = ({
       animate={{ opacity: 1, y: 0, scale: 1 }}
       exit={{ opacity: 0, y: 20, scale: 0.95 }}
       transition={{ type: 'spring', damping: 25, stiffness: 300 }}
-      className={`bg-white rounded-2xl shadow-xl border border-warm-200 overflow-hidden ${className}`}
+      className={`bg-white dark:bg-hearth-900 rounded-2xl shadow-xl border border-warm-200 dark:border-warm-700 overflow-hidden ${className}`}
     >
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3 bg-gradient-to-r from-honey-50 to-lavender-50/30 border-b border-warm-100">
+      <div className="flex items-center justify-between px-4 py-3 bg-gradient-to-r from-honey-50 to-lavender-50/30 dark:from-honey-900/20 dark:to-lavender-900/20 border-b border-warm-100 dark:border-warm-700">
         <div className="flex items-center gap-2">
           <Sparkles size={16} className="text-honey-500" />
           <span className="text-sm font-medium text-warm-700">
@@ -133,8 +133,8 @@ const DetectedStrip = ({
             <div className="flex items-center gap-1.5">
               <span className={`text-xs font-semibold ${
                 dayLabel === 'Today' ? 'text-warm-500' :
-                dayLabel === 'Tomorrow' || dayLabel.startsWith('In') ? 'text-amber-600' :
-                'text-blue-600'
+                dayLabel === 'Tomorrow' || dayLabel.startsWith('In') ? 'text-honey-600 dark:text-honey-400' :
+                'text-lavender-600 dark:text-lavender-400'
               }`}>
                 {dayLabel}
               </span>
@@ -155,7 +155,7 @@ const DetectedStrip = ({
                     initial={{ opacity: 0, scale: 0.8 }}
                     animate={{ opacity: 1, scale: 1 }}
                     exit={{ opacity: 0, scale: 0.8 }}
-                    className="inline-flex items-center gap-1.5 px-2 py-1 bg-warm-50 rounded-full border border-warm-200 group"
+                    className="inline-flex items-center gap-1.5 px-2 py-1 bg-warm-50 dark:bg-warm-800 rounded-full border border-warm-200 dark:border-warm-700 group"
                   >
                     {getSignalIcon(signal.type)}
                     <span className="text-xs text-warm-700 max-w-[120px] truncate">
@@ -180,7 +180,7 @@ const DetectedStrip = ({
       </div>
 
       {/* Footer Actions */}
-      <div className="flex items-center justify-between px-4 py-3 bg-warm-50 border-t border-warm-100">
+      <div className="flex items-center justify-between px-4 py-3 bg-warm-50 dark:bg-warm-900/50 border-t border-warm-100 dark:border-warm-700">
         <span className="text-xs text-warm-500">
           {hasNonTodaySignals
             ? 'These will appear on your calendar'

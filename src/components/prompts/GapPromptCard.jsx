@@ -88,9 +88,9 @@ export function GapPromptCard({ prompt, userId, onAccept, onDismiss, onSnooze })
         <motion.div
           key="gap-prompt-card"
           className="
-            bg-white/60 dark:bg-gray-800/60
+            bg-white/60 dark:bg-hearth-850/60
             backdrop-blur-md
-            border border-white/30 dark:border-gray-700/30
+            border border-white/30 dark:border-warm-700/30
             rounded-2xl
             shadow-glass-sm
             p-4
@@ -104,22 +104,22 @@ export function GapPromptCard({ prompt, userId, onAccept, onDismiss, onSnooze })
           {/* Header */}
           <div className="flex items-center justify-between mb-2">
             <div className="flex items-center gap-2">
-              <Lightbulb size={16} className="text-amber-500" />
-              <span className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide">
+              <Lightbulb size={16} className="text-honey-500" />
+              <span className="text-xs font-medium text-warm-500 dark:text-warm-400 uppercase tracking-wide">
                 {domainLabel}
               </span>
             </div>
             <button
               onClick={handleDismiss}
-              className="p-1 rounded-full hover:bg-gray-200/50 dark:hover:bg-gray-700/50 transition-colors"
+              className="p-1 rounded-full hover:bg-warm-200/50 dark:hover:bg-warm-700/50 transition-colors"
               aria-label="Dismiss prompt"
             >
-              <X size={14} className="text-gray-400" />
+              <X size={14} className="text-warm-400" />
             </button>
           </div>
 
           {/* Prompt Text */}
-          <p className="text-sm text-gray-700 dark:text-gray-200 leading-relaxed mb-3">
+          <p className="text-sm text-warm-700 dark:text-warm-200 leading-relaxed mb-3">
             {prompt.promptText}
           </p>
 
@@ -144,8 +144,8 @@ export function GapPromptCard({ prompt, userId, onAccept, onDismiss, onSnooze })
               onClick={handleSnooze}
               className="
                 flex items-center gap-1
-                text-xs text-gray-500 dark:text-gray-400
-                hover:text-gray-700 dark:hover:text-gray-300
+                text-xs text-warm-500 dark:text-warm-400
+                hover:text-warm-700 dark:hover:text-warm-300
                 py-2 px-2
                 transition-colors
               "

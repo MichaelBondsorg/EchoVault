@@ -71,7 +71,7 @@ export default function ReportShareSheet({ report, onClose }) {
             {exportProgress === 'exporting' ? (
               <Loader2 size={20} className="animate-spin text-honey-500" />
             ) : exportProgress === 'complete' ? (
-              <CheckCircle size={20} className="text-green-500" />
+              <CheckCircle size={20} className="text-sage-500 dark:text-sage-400" />
             ) : exportProgress === 'error' ? (
               <AlertCircle size={20} className="text-red-500" />
             ) : (
@@ -103,7 +103,7 @@ export default function ReportShareSheet({ report, onClose }) {
             onClick={() => setShowPrivacy(true)}
             className="w-full flex items-center gap-3 p-4 rounded-2xl border border-warm-100 dark:border-warm-700 hover:bg-warm-50 dark:hover:bg-warm-700 transition-colors"
           >
-            <Shield size={20} className="text-indigo-500" />
+            <Shield size={20} className="text-lavender-500 dark:text-lavender-400" />
             <div className="text-left">
               <p className="text-sm font-medium text-warm-800 dark:text-warm-100">Edit Privacy</p>
               <p className="text-xs text-warm-400">Choose what to include in exports</p>

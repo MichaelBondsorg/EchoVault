@@ -22,7 +22,7 @@ const GUIDED_SESSIONS = [
     icon: Sun,
     estimatedMinutes: 5,
     timeOfDay: ['morning'],
-    gradient: 'from-amber-400 to-orange-500',
+    gradient: 'from-honey-400 to-terra-400',
   },
   {
     id: 'evening_reflection',
@@ -31,7 +31,7 @@ const GUIDED_SESSIONS = [
     icon: Moon,
     estimatedMinutes: 8,
     timeOfDay: ['evening', 'night'],
-    gradient: 'from-indigo-400 to-purple-600',
+    gradient: 'from-lavender-400 to-lavender-600',
   },
   {
     id: 'gratitude_practice',
@@ -40,7 +40,7 @@ const GUIDED_SESSIONS = [
     icon: Heart,
     estimatedMinutes: 5,
     timeOfDay: ['morning', 'evening'],
-    gradient: 'from-pink-400 to-rose-500',
+    gradient: 'from-terra-300 to-terra-500',
   },
   {
     id: 'goal_setting',
@@ -49,7 +49,7 @@ const GUIDED_SESSIONS = [
     icon: Target,
     estimatedMinutes: 7,
     timeOfDay: ['morning', 'afternoon'],
-    gradient: 'from-green-400 to-emerald-600',
+    gradient: 'from-sage-400 to-sage-600',
   },
   {
     id: 'emotional_processing',
@@ -57,7 +57,7 @@ const GUIDED_SESSIONS = [
     description: 'Work through difficult feelings safely',
     icon: Brain,
     estimatedMinutes: 10,
-    gradient: 'from-cyan-400 to-blue-600',
+    gradient: 'from-lavender-300 to-lavender-500',
   },
   {
     id: 'stress_release',
@@ -65,7 +65,7 @@ const GUIDED_SESSIONS = [
     description: 'Let go of tension and find calm',
     icon: Wind,
     estimatedMinutes: 8,
-    gradient: 'from-teal-400 to-cyan-600',
+    gradient: 'from-sage-300 to-sage-500',
   },
   {
     id: 'weekly_review',
@@ -75,7 +75,7 @@ const GUIDED_SESSIONS = [
     estimatedMinutes: 10,
     timeOfDay: ['afternoon', 'evening'],
     dayOfWeek: [0, 6], // Sunday, Saturday
-    gradient: 'from-violet-400 to-purple-600',
+    gradient: 'from-honey-300 to-lavender-400',
   },
 ];
 

@@ -18,8 +18,8 @@ const CompanionNudge = ({ onClick, hasNewInsight = false }) => {
       className="
         fixed bottom-24 right-4 z-40
         w-14 h-14
-        bg-white/30 backdrop-blur-xl
-        border border-white/30
+        bg-white/30 dark:bg-warm-800/30 backdrop-blur-xl
+        border border-white/30 dark:border-warm-700/30
         rounded-full
         shadow-glass-md
         flex items-center justify-center
@@ -34,7 +34,7 @@ const CompanionNudge = ({ onClick, hasNewInsight = false }) => {
     >
       {/* Animated sparkle icon */}
       <motion.div
-        className="text-honey-600"
+        className="text-honey-600 dark:text-honey-400"
         animate={{
           scale: [1, 1.1, 1],
           opacity: [0.8, 1, 0.8],
@@ -55,7 +55,7 @@ const CompanionNudge = ({ onClick, hasNewInsight = false }) => {
             absolute top-1 right-1
             w-3 h-3
             bg-accent rounded-full
-            border-2 border-white/50
+            border-2 border-white/50 dark:border-warm-800/50
           "
           initial={{ scale: 0 }}
           animate={{ scale: 1 }}
@@ -68,7 +68,7 @@ const CompanionNudge = ({ onClick, hasNewInsight = false }) => {
         className="
           absolute inset-0
           rounded-full
-          border-2 border-honey-400/30
+          border-2 border-honey-400/30 dark:border-honey-500/20
         "
         animate={{
           scale: [1, 1.3],

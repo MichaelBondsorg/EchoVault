@@ -84,38 +84,38 @@ const EntryInsightsPopup = ({
     const styles = {
       progress: {
         icon: TrendingUp,
-        bg: 'bg-gradient-to-br from-green-50 to-emerald-50',
-        border: 'border-green-200',
-        iconColor: 'text-green-600',
-        textColor: 'text-green-800'
+        bg: 'bg-gradient-to-br from-sage-50 to-sage-100 dark:from-sage-900/30 dark:to-sage-900/20',
+        border: 'border-sage-200 dark:border-sage-800',
+        iconColor: 'text-sage-600 dark:text-sage-400',
+        textColor: 'text-sage-800 dark:text-sage-200'
       },
       streak: {
         icon: RefreshCw,
-        bg: 'bg-gradient-to-br from-amber-50 to-yellow-50',
-        border: 'border-amber-200',
-        iconColor: 'text-amber-600',
-        textColor: 'text-amber-800'
+        bg: 'bg-gradient-to-br from-honey-50 to-honey-100 dark:from-honey-900/30 dark:to-honey-900/20',
+        border: 'border-honey-200 dark:border-honey-800',
+        iconColor: 'text-honey-600 dark:text-honey-400',
+        textColor: 'text-honey-800 dark:text-honey-200'
       },
       absence: {
         icon: Target,
-        bg: 'bg-gradient-to-br from-teal-50 to-cyan-50',
-        border: 'border-teal-200',
-        iconColor: 'text-teal-600',
-        textColor: 'text-teal-800'
+        bg: 'bg-gradient-to-br from-lavender-50 to-lavender-100 dark:from-lavender-900/30 dark:to-lavender-900/20',
+        border: 'border-lavender-200 dark:border-lavender-800',
+        iconColor: 'text-lavender-600 dark:text-lavender-400',
+        textColor: 'text-lavender-800 dark:text-lavender-200'
       },
       warning: {
         icon: AlertTriangle,
-        bg: 'bg-gradient-to-br from-red-50 to-orange-50',
-        border: 'border-red-200',
-        iconColor: 'text-red-600',
-        textColor: 'text-red-800'
+        bg: 'bg-gradient-to-br from-red-50 to-terra-50 dark:from-red-900/30 dark:to-terra-900/20',
+        border: 'border-red-200 dark:border-red-800',
+        iconColor: 'text-red-600 dark:text-red-400',
+        textColor: 'text-red-800 dark:text-red-200'
       },
       cyclical: {
         icon: Calendar,
-        bg: 'bg-gradient-to-br from-blue-50 to-indigo-50',
-        border: 'border-blue-200',
-        iconColor: 'text-blue-600',
-        textColor: 'text-blue-800'
+        bg: 'bg-gradient-to-br from-lavender-100 to-lavender-200 dark:from-lavender-900/40 dark:to-lavender-900/30',
+        border: 'border-lavender-300 dark:border-lavender-700',
+        iconColor: 'text-lavender-700 dark:text-lavender-300',
+        textColor: 'text-lavender-900 dark:text-lavender-100'
       },
       default: {
         icon: Brain,
@@ -147,7 +147,7 @@ const EntryInsightsPopup = ({
 
         {/* Content card */}
         <motion.div
-          className="relative bg-white rounded-3xl shadow-soft-xl w-full max-w-sm overflow-hidden max-h-[75vh] flex flex-col"
+          className="relative bg-white dark:bg-hearth-900 rounded-3xl shadow-soft-xl w-full max-w-sm overflow-hidden max-h-[75vh] flex flex-col"
           initial={{ opacity: 0, y: 50, scale: 0.95 }}
           animate={{ opacity: 1, y: 0, scale: 1 }}
           exit={{ opacity: 0, y: 50, scale: 0.95 }}
@@ -191,14 +191,14 @@ const EntryInsightsPopup = ({
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: validation ? 0.1 : 0 }}
-                className="bg-gradient-to-r from-green-50 to-emerald-50 p-4 rounded-2xl border border-green-100"
+                className="bg-gradient-to-r from-sage-50 to-sage-100 dark:from-sage-900/30 dark:to-sage-900/20 p-4 rounded-2xl border border-sage-100 dark:border-sage-800"
               >
-                <div className="flex items-center gap-2 text-green-700 font-display font-semibold text-xs uppercase mb-2">
+                <div className="flex items-center gap-2 text-sage-700 dark:text-sage-300 font-display font-semibold text-xs uppercase mb-2">
                   <Sparkles size={14} /> Nice!
                 </div>
-                <p className="text-sm text-green-800 font-body">{celebration.affirmation}</p>
+                <p className="text-sm text-sage-800 dark:text-sage-200 font-body">{celebration.affirmation}</p>
                 {celebration.amplify && (
-                  <p className="text-xs text-green-600 mt-2 italic">{celebration.amplify}</p>
+                  <p className="text-xs text-sage-600 dark:text-sage-400 mt-2 italic">{celebration.amplify}</p>
                 )}
               </motion.div>
             )}
@@ -211,9 +211,9 @@ const EntryInsightsPopup = ({
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: 0.15 }}
-                className="bg-gradient-to-r from-blue-50 to-indigo-50 p-4 rounded-2xl border-l-4 border-blue-400"
+                className="bg-gradient-to-r from-lavender-50 to-lavender-100 dark:from-lavender-900/30 dark:to-lavender-900/20 p-4 rounded-2xl border-l-4 border-lavender-400 dark:border-lavender-600"
               >
-                <div className="flex items-center gap-2 text-blue-600 font-display font-semibold text-xs uppercase mb-2">
+                <div className="flex items-center gap-2 text-lavender-600 dark:text-lavender-400 font-display font-semibold text-xs uppercase mb-2">
                   <Brain size={14} /> Another way to see it
                 </div>
                 <p className="text-sm text-warm-700 font-body">{cbt.perspective}</p>
@@ -226,17 +226,17 @@ const EntryInsightsPopup = ({
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: 0.15 }}
-                className="bg-teal-50 rounded-2xl p-4 border border-teal-100"
+                className="bg-sage-50 dark:bg-sage-900/30 rounded-2xl p-4 border border-sage-100 dark:border-sage-800"
               >
                 {actAnalysis.fusion_thought && (
-                  <div className="text-teal-900 text-sm mb-3">
+                  <div className="text-sage-900 dark:text-sage-100 text-sm mb-3">
                     <span className="opacity-75">The thought: </span>
                     <span className="italic">"{actAnalysis.fusion_thought}"</span>
                   </div>
                 )}
 
-                <div className="text-teal-800 font-medium text-sm bg-white/50 p-3 rounded-lg">
-                  <span className="text-teal-600 text-xs uppercase font-semibold block mb-1">Try saying:</span>
+                <div className="text-sage-800 dark:text-sage-200 font-medium text-sm bg-white/50 dark:bg-hearth-850/50 p-3 rounded-lg">
+                  <span className="text-sage-600 dark:text-sage-400 text-xs uppercase font-semibold block mb-1">Try saying:</span>
                   "{actAnalysis.defusion_phrase}"
                 </div>
               </motion.div>
@@ -266,12 +266,12 @@ const EntryInsightsPopup = ({
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: 0.2 }}
-                className="bg-amber-50 p-3 rounded-xl border border-amber-100"
+                className="bg-honey-50 dark:bg-honey-900/30 p-3 rounded-xl border border-honey-100 dark:border-honey-800"
               >
-                <div className="flex items-center gap-2 text-amber-700 font-display font-semibold text-xs uppercase mb-2">
+                <div className="flex items-center gap-2 text-honey-700 dark:text-honey-300 font-display font-semibold text-xs uppercase mb-2">
                   <Footprints size={14} /> A values-aligned step
                 </div>
-                <p className="text-sm text-amber-800 font-medium font-body">{actAnalysis.committed_action}</p>
+                <p className="text-sm text-honey-800 dark:text-honey-200 font-medium font-body">{actAnalysis.committed_action}</p>
               </motion.div>
             )}
 

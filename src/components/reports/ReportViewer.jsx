@@ -39,8 +39,8 @@ export default function ReportViewer({ onBack }) {
         {/* Header */}
         <div className="flex items-center justify-between mb-6">
           <div className="flex items-center gap-3">
-            <button onClick={onBack} className="p-2 rounded-full hover:bg-warm-100 transition-colors">
-              <ArrowLeft size={20} className="text-warm-600" />
+            <button onClick={onBack} className="p-2 rounded-full hover:bg-warm-100 dark:hover:bg-warm-800 transition-colors">
+              <ArrowLeft size={20} className="text-warm-600 dark:text-warm-400" />
             </button>
             <div>
               <h1 className="text-lg font-display font-semibold text-warm-900 dark:text-warm-50">
@@ -55,9 +55,9 @@ export default function ReportViewer({ onBack }) {
           {!isGenerating && !isFailed && (
             <button
               onClick={() => setShowShare(true)}
-              className="p-2 rounded-full hover:bg-warm-100 transition-colors"
+              className="p-2 rounded-full hover:bg-warm-100 dark:hover:bg-warm-800 transition-colors"
             >
-              <Share2 size={18} className="text-warm-600" />
+              <Share2 size={18} className="text-warm-600 dark:text-warm-400" />
             </button>
           )}
         </div>

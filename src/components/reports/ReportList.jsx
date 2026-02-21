@@ -5,10 +5,10 @@ import { useReportsStore } from '../../stores/reportsStore';
 import { useAuthStore } from '../../stores/authStore';
 
 const CADENCE_STYLES = {
-  weekly: { label: 'Weekly', color: 'bg-blue-100 text-blue-700' },
-  monthly: { label: 'Monthly', color: 'bg-indigo-100 text-indigo-700' },
-  quarterly: { label: 'Quarterly', color: 'bg-purple-100 text-purple-700' },
-  annual: { label: 'Annual', color: 'bg-amber-100 text-amber-700' },
+  weekly: { label: 'Weekly', color: 'bg-sage-100 text-sage-700 dark:bg-sage-900/30 dark:text-sage-300' },
+  monthly: { label: 'Monthly', color: 'bg-lavender-100 text-lavender-700 dark:bg-lavender-900/30 dark:text-lavender-300' },
+  quarterly: { label: 'Quarterly', color: 'bg-honey-100 text-honey-700 dark:bg-honey-900/30 dark:text-honey-300' },
+  annual: { label: 'Annual', color: 'bg-terra-100 text-terra-700 dark:bg-terra-900/30 dark:text-terra-300' },
 };
 
 function formatPeriod(report) {
@@ -37,8 +37,8 @@ export default function ReportList({ onSelectReport, onClose }) {
       <div className="max-w-2xl mx-auto px-4 py-6">
         {/* Header */}
         <div className="flex items-center gap-3 mb-6">
-          <button onClick={onClose} className="p-2 rounded-full hover:bg-warm-100 transition-colors">
-            <ArrowLeft size={20} className="text-warm-600" />
+          <button onClick={onClose} className="p-2 rounded-full hover:bg-warm-100 dark:hover:bg-warm-800 transition-colors">
+            <ArrowLeft size={20} className="text-warm-600 dark:text-warm-400" />
           </button>
           <h1 className="text-xl font-display font-semibold text-warm-900 dark:text-warm-50">
             Life Reports
@@ -86,7 +86,7 @@ export default function ReportList({ onSelectReport, onClose }) {
                     className={`
                       w-full flex items-center gap-3 p-4 rounded-2xl border transition-all text-left
                       ${isLocked
-                        ? 'bg-warm-50 border-warm-200 opacity-60 cursor-not-allowed'
+                        ? 'bg-warm-50 dark:bg-warm-900/50 border-warm-200 dark:border-warm-700 opacity-60 cursor-not-allowed'
                         : 'bg-white dark:bg-warm-800 border-warm-100 dark:border-warm-700 hover:border-honey-200 hover:shadow-soft-sm cursor-pointer'
                       }
                     `}

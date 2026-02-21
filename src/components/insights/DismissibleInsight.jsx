@@ -52,66 +52,66 @@ import {
 const typeConfig = {
   pattern: {
     icon: TrendingUp,
-    bg: 'bg-purple-50',
-    border: 'border-purple-200',
-    iconBg: 'bg-purple-100',
-    iconColor: 'text-purple-600',
-    textColor: 'text-purple-900',
-    accentColor: 'text-purple-600'
+    bg: 'bg-lavender-50 dark:bg-lavender-900/30',
+    border: 'border-lavender-200 dark:border-lavender-800',
+    iconBg: 'bg-lavender-100 dark:bg-lavender-900/50',
+    iconColor: 'text-lavender-600 dark:text-lavender-400',
+    textColor: 'text-lavender-900 dark:text-lavender-100',
+    accentColor: 'text-lavender-600 dark:text-lavender-400'
   },
   warning: {
     icon: AlertCircle,
-    bg: 'bg-amber-50',
-    border: 'border-amber-200',
-    iconBg: 'bg-amber-100',
-    iconColor: 'text-amber-600',
-    textColor: 'text-amber-900',
-    accentColor: 'text-amber-600'
+    bg: 'bg-honey-50 dark:bg-honey-900/30',
+    border: 'border-honey-200 dark:border-honey-800',
+    iconBg: 'bg-honey-100 dark:bg-honey-900/50',
+    iconColor: 'text-honey-600 dark:text-honey-400',
+    textColor: 'text-honey-900 dark:text-honey-100',
+    accentColor: 'text-honey-600 dark:text-honey-400'
   },
   encouragement: {
     icon: Star,
-    bg: 'bg-emerald-50',
-    border: 'border-emerald-200',
-    iconBg: 'bg-emerald-100',
-    iconColor: 'text-emerald-600',
-    textColor: 'text-emerald-900',
-    accentColor: 'text-emerald-600'
+    bg: 'bg-sage-50 dark:bg-sage-900/30',
+    border: 'border-sage-200 dark:border-sage-800',
+    iconBg: 'bg-sage-100 dark:bg-sage-900/50',
+    iconColor: 'text-sage-600 dark:text-sage-400',
+    textColor: 'text-sage-900 dark:text-sage-100',
+    accentColor: 'text-sage-600 dark:text-sage-400'
   },
   contradiction: {
     icon: AlertCircle,
-    bg: 'bg-rose-50',
-    border: 'border-rose-200',
-    iconBg: 'bg-rose-100',
-    iconColor: 'text-rose-600',
-    textColor: 'text-rose-900',
-    accentColor: 'text-rose-600'
+    bg: 'bg-terra-50 dark:bg-terra-900/30',
+    border: 'border-terra-200 dark:border-terra-800',
+    iconBg: 'bg-terra-100 dark:bg-terra-900/50',
+    iconColor: 'text-terra-600 dark:text-terra-400',
+    textColor: 'text-terra-900 dark:text-terra-100',
+    accentColor: 'text-terra-600 dark:text-terra-400'
   },
   goal_check: {
     icon: Target,
-    bg: 'bg-blue-50',
-    border: 'border-blue-200',
-    iconBg: 'bg-blue-100',
-    iconColor: 'text-blue-600',
-    textColor: 'text-blue-900',
-    accentColor: 'text-blue-600'
+    bg: 'bg-lavender-100 dark:bg-lavender-900/40',
+    border: 'border-lavender-300 dark:border-lavender-700',
+    iconBg: 'bg-lavender-200 dark:bg-lavender-800/50',
+    iconColor: 'text-lavender-700 dark:text-lavender-300',
+    textColor: 'text-lavender-900 dark:text-lavender-100',
+    accentColor: 'text-lavender-700 dark:text-lavender-300'
   },
   progress: {
     icon: Zap,
-    bg: 'bg-green-50',
-    border: 'border-green-200',
-    iconBg: 'bg-green-100',
-    iconColor: 'text-green-600',
-    textColor: 'text-green-900',
-    accentColor: 'text-green-600'
+    bg: 'bg-sage-50 dark:bg-sage-900/30',
+    border: 'border-sage-200 dark:border-sage-800',
+    iconBg: 'bg-sage-100 dark:bg-sage-900/50',
+    iconColor: 'text-sage-600 dark:text-sage-400',
+    textColor: 'text-sage-900 dark:text-sage-100',
+    accentColor: 'text-sage-600 dark:text-sage-400'
   },
   default: {
     icon: Lightbulb,
-    bg: 'bg-slate-50',
-    border: 'border-slate-200',
-    iconBg: 'bg-slate-100',
-    iconColor: 'text-slate-600',
-    textColor: 'text-slate-900',
-    accentColor: 'text-slate-600'
+    bg: 'bg-warm-50 dark:bg-warm-900/30',
+    border: 'border-warm-200 dark:border-warm-700',
+    iconBg: 'bg-warm-100 dark:bg-warm-800',
+    iconColor: 'text-warm-600 dark:text-warm-400',
+    textColor: 'text-warm-900 dark:text-warm-100',
+    accentColor: 'text-warm-600 dark:text-warm-400'
   }
 };
 
@@ -239,7 +239,7 @@ const DismissibleInsight = ({
 
             {/* Source tag */}
             {insight.source && !compact && (
-              <span className="inline-block mt-2 px-2 py-0.5 text-xs rounded-full bg-white/70 text-gray-500">
+              <span className="inline-block mt-2 px-2 py-0.5 text-xs rounded-full bg-white/70 dark:bg-warm-800/70 text-warm-500 dark:text-warm-400">
                 Based on {insight.source}
               </span>
             )}
@@ -269,7 +269,7 @@ const DismissibleInsight = ({
           {showActions && !showFeedback && (
             <button
               onClick={handleQuickDismiss}
-              className="p-1.5 rounded-full hover:bg-white/50 transition-colors text-gray-400 hover:text-gray-600 flex-shrink-0"
+              className="p-1.5 rounded-full hover:bg-white/50 dark:hover:bg-warm-800/50 transition-colors text-warm-400 hover:text-warm-600 dark:hover:text-warm-300 flex-shrink-0"
               aria-label="Dismiss insight"
             >
               <X size={14} />
@@ -289,15 +289,15 @@ const DismissibleInsight = ({
               <div className="mt-4 pt-4 border-t border-white/50 space-y-3">
                 {/* Causal Analysis */}
                 {hasCausalAnalysis && (
-                  <div className="bg-white/50 rounded-lg p-3">
-                    <h4 className="text-xs font-semibold text-gray-600 uppercase tracking-wider mb-2">
+                  <div className="bg-white/50 dark:bg-warm-800/50 rounded-lg p-3">
+                    <h4 className="text-xs font-semibold text-warm-600 dark:text-warm-400 uppercase tracking-wider mb-2">
                       Connected Patterns
                     </h4>
-                    <p className="text-sm text-gray-700">
+                    <p className="text-sm text-warm-700 dark:text-warm-300">
                       Correlating themes: {insight.causal_analysis.correlating_themes?.join(', ')}
                     </p>
                     {insight.causal_analysis.correlation_strength && (
-                      <p className="text-xs text-gray-500 mt-1">
+                      <p className="text-xs text-warm-500 dark:text-warm-400 mt-1">
                         Confidence: {Math.round(insight.causal_analysis.correlation_strength * 100)}%
                       </p>
                     )}
@@ -306,15 +306,15 @@ const DismissibleInsight = ({
 
                 {/* Therapeutic Reframe */}
                 {hasReframe && (
-                  <div className="bg-white/50 rounded-lg p-3">
-                    <h4 className="text-xs font-semibold text-gray-600 uppercase tracking-wider mb-2">
+                  <div className="bg-white/50 dark:bg-warm-800/50 rounded-lg p-3">
+                    <h4 className="text-xs font-semibold text-warm-600 dark:text-warm-400 uppercase tracking-wider mb-2">
                       A thought to consider
                     </h4>
-                    <p className="text-sm text-gray-700 italic">
+                    <p className="text-sm text-warm-700 dark:text-warm-300 italic">
                       "{insight.therapeutic_reframe.reframe_prompt}"
                     </p>
                     {insight.therapeutic_reframe.framework && (
-                      <span className="inline-block mt-2 px-2 py-0.5 text-xs rounded bg-white text-gray-500">
+                      <span className="inline-block mt-2 px-2 py-0.5 text-xs rounded bg-white dark:bg-warm-800 text-warm-500 dark:text-warm-400">
                         {insight.therapeutic_reframe.framework} approach
                       </span>
                     )}
@@ -331,7 +331,7 @@ const DismissibleInsight = ({
             <button
               onClick={handleVerify}
               disabled={isProcessing}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg bg-white hover:bg-gray-50 border border-gray-200 text-gray-700 transition-colors disabled:opacity-50"
+              className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg bg-white dark:bg-warm-800 hover:bg-warm-50 dark:hover:bg-warm-700 border border-warm-200 dark:border-warm-700 text-warm-700 dark:text-warm-300 transition-colors disabled:opacity-50"
             >
               <Check size={14} />
               This is accurate
@@ -361,7 +361,7 @@ const DismissibleInsight = ({
             className="overflow-hidden"
           >
             <div className="px-4 pb-4 pt-2 border-t border-white/50">
-              <p className="text-sm font-medium text-gray-700 mb-3">
+              <p className="text-sm font-medium text-warm-700 dark:text-warm-300 mb-3">
                 Why isn't this useful?
               </p>
 
@@ -371,8 +371,8 @@ const DismissibleInsight = ({
                     key={reason.value}
                     className={`flex items-center gap-2 p-2 rounded-lg cursor-pointer transition-colors ${
                       selectedReason === reason.value
-                        ? 'bg-white border-2 border-gray-300'
-                        : 'bg-white/50 border border-transparent hover:bg-white'
+                        ? 'bg-white dark:bg-warm-800 border-2 border-warm-300 dark:border-warm-600'
+                        : 'bg-white/50 dark:bg-warm-800/50 border border-transparent hover:bg-white dark:hover:bg-warm-800'
                     }`}
                   >
                     <input
@@ -381,22 +381,22 @@ const DismissibleInsight = ({
                       value={reason.value}
                       checked={selectedReason === reason.value}
                       onChange={(e) => setSelectedReason(e.target.value)}
-                      className="w-4 h-4 text-gray-600"
+                      className="w-4 h-4 text-warm-600"
                     />
-                    <span className="text-sm text-gray-700">{reason.label}</span>
+                    <span className="text-sm text-warm-700 dark:text-warm-300">{reason.label}</span>
                   </label>
                 ))}
               </div>
 
               {/* Permanent exclusion option */}
-              <label className="flex items-center gap-2 mt-3 p-2 bg-rose-50 rounded-lg cursor-pointer">
+              <label className="flex items-center gap-2 mt-3 p-2 bg-terra-50 dark:bg-terra-900/30 rounded-lg cursor-pointer">
                 <input
                   type="checkbox"
                   checked={excludePermanently}
                   onChange={(e) => setExcludePermanently(e.target.checked)}
-                  className="w-4 h-4 text-rose-600 rounded"
+                  className="w-4 h-4 text-terra-600 rounded"
                 />
-                <span className="text-sm text-rose-700">
+                <span className="text-sm text-terra-700 dark:text-terra-300">
                   Don't show insights like this again
                 </span>
               </label>
@@ -409,14 +409,14 @@ const DismissibleInsight = ({
                     setSelectedReason(null);
                     setExcludePermanently(false);
                   }}
-                  className="flex-1 py-2 text-sm font-medium text-gray-600 bg-white rounded-lg border border-gray-200 hover:bg-gray-50 transition-colors"
+                  className="flex-1 py-2 text-sm font-medium text-warm-600 dark:text-warm-400 bg-white dark:bg-warm-800 rounded-lg border border-warm-200 dark:border-warm-700 hover:bg-warm-50 dark:hover:bg-warm-700 transition-colors"
                 >
                   Cancel
                 </button>
                 <button
                   onClick={handleDismiss}
                   disabled={!selectedReason || isProcessing}
-                  className="flex-1 py-2 text-sm font-medium text-white bg-gray-800 rounded-lg hover:bg-gray-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="flex-1 py-2 text-sm font-medium text-white bg-warm-800 dark:bg-warm-200 dark:text-warm-900 rounded-lg hover:bg-warm-700 dark:hover:bg-warm-300 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {isProcessing ? 'Dismissing...' : 'Dismiss'}
                 </button>

@@ -2,6 +2,7 @@ import React, { useState, useCallback, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { CheckCircle2, Circle, RefreshCw, Sparkles } from 'lucide-react';
 import confetti from 'canvas-confetti';
+import { HEX_COLORS } from '../../../utils/colorMap';
 
 /**
  * FeedbackLoop - Task completion with visual reward animation
@@ -49,7 +50,7 @@ const FeedbackLoop = ({
       particleCount: 30,
       spread: 60,
       origin: { x, y },
-      colors: ['#10b981', '#34d399', '#6ee7b7', '#a7f3d0'],
+      colors: [HEX_COLORS.sage, HEX_COLORS.sageLight, HEX_COLORS.honey, HEX_COLORS.honeyLight],
       ticks: 100,
       gravity: 1.2,
       scalar: 0.8,

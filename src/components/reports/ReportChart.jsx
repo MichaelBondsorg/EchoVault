@@ -1,6 +1,7 @@
 import React from 'react';
+import { HEX_COLORS } from '../../utils/colorMap';
 
-const COLORS = ['#6366f1', '#8b5cf6', '#14b8a6', '#f59e0b', '#ec4899', '#06b6d4'];
+const COLORS = [HEX_COLORS.lavender, HEX_COLORS.lavenderLight, HEX_COLORS.sage, HEX_COLORS.honey, HEX_COLORS.terra, HEX_COLORS.sageLight];
 
 export default function ReportChart({ chartData }) {
   if (!chartData) return null;
@@ -46,10 +47,10 @@ function MoodTrendChart({ data }) {
         <text x={padding.left - 5} y={padding.top + 4} textAnchor="end" className="fill-warm-400" fontSize="8">10</text>
         <text x={padding.left - 5} y={padding.top + chartH + 4} textAnchor="end" className="fill-warm-400" fontSize="8">0</text>
         {/* Line */}
-        <polyline fill="none" stroke="#6366f1" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" points={polyline} />
+        <polyline fill="none" stroke={HEX_COLORS.lavender} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" points={polyline} />
         {/* Dots */}
         {points.map((p, i) => (
-          <circle key={i} cx={p.x} cy={p.y} r="3" fill="#6366f1" />
+          <circle key={i} cx={p.x} cy={p.y} r="3" fill={HEX_COLORS.lavender} />
         ))}
       </svg>
     </div>
@@ -69,7 +70,7 @@ function CategoryBarChart({ data }) {
         return (
           <div key={item.label || i} className="flex items-center gap-2">
             <span className="text-xs text-warm-500 w-20 truncate text-right">{item.label}</span>
-            <div className="flex-1 bg-warm-100 rounded-full h-3 overflow-hidden">
+            <div className="flex-1 bg-warm-100 dark:bg-warm-800 rounded-full h-3 overflow-hidden">
               <div
                 className="h-full rounded-full transition-all"
                 style={{ width: `${pct}%`, backgroundColor: COLORS[i % COLORS.length] }}

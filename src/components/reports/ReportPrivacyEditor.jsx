@@ -50,7 +50,7 @@ export default function ReportPrivacyEditor({ report, privacy, onSave, onClose }
           <button onClick={onClose} className="p-2 rounded-full hover:bg-warm-100 transition-colors">
             <ArrowLeft size={20} className="text-warm-600" />
           </button>
-          <Shield size={20} className="text-indigo-500" />
+          <Shield size={20} className="text-lavender-500 dark:text-lavender-400" />
           <h2 className="text-lg font-display font-semibold text-warm-900 dark:text-warm-50">
             Privacy Settings
           </h2>
@@ -107,7 +107,7 @@ export default function ReportPrivacyEditor({ report, privacy, onSave, onClose }
                     type="checkbox"
                     checked={anonymizedEntities.has(entity)}
                     onChange={() => toggleEntity(entity)}
-                    className="rounded text-indigo-600 focus:ring-indigo-500"
+                    className="rounded text-lavender-600 focus:ring-lavender-500 dark:text-lavender-400"
                   />
                 </label>
               ))}
@@ -122,13 +122,13 @@ export default function ReportPrivacyEditor({ report, privacy, onSave, onClose }
         <div className="flex gap-3">
           <button
             onClick={onClose}
-            className="flex-1 py-3 rounded-xl border border-warm-200 text-warm-600 text-sm font-medium hover:bg-warm-50 transition-colors"
+            className="flex-1 py-3 rounded-xl border border-warm-200 dark:border-warm-700 text-warm-600 dark:text-warm-400 text-sm font-medium hover:bg-warm-50 dark:hover:bg-warm-800 transition-colors"
           >
             Cancel
           </button>
           <button
             onClick={handleSave}
-            className="flex-1 py-3 rounded-xl bg-honey-600 text-white text-sm font-medium hover:bg-honey-700 transition-colors"
+            className="flex-1 py-3 rounded-xl bg-honey-600 dark:bg-honey-500 text-white text-sm font-medium hover:bg-honey-700 dark:hover:bg-honey-400 transition-colors"
           >
             Save
           </button>
