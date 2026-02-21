@@ -72,14 +72,14 @@ const EveningMirror = ({
       {/* Wins Section - Primary focus in evening */}
       {hasWins && (
         <motion.div
-          className="bg-gradient-to-br from-green-50 to-emerald-50 rounded-2xl p-4 border border-green-100"
+          className="bg-gradient-to-br from-sage-50 to-sage-100 dark:from-sage-900/30 dark:to-sage-900/20 rounded-2xl p-4 border border-sage-200 dark:border-sage-800"
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.1 }}
         >
           <div className="flex items-center gap-2 mb-3">
-            <Sparkles size={16} className="text-green-500" />
-            <h3 className="text-sm font-display font-semibold text-green-800">
+            <Sparkles size={16} className="text-sage-500 dark:text-sage-400" />
+            <h3 className="text-sm font-display font-semibold text-sage-800 dark:text-sage-200">
               Today's Wins
             </h3>
           </div>
@@ -88,12 +88,12 @@ const EveningMirror = ({
             {wins.map((win, i) => (
               <motion.li
                 key={i}
-                className="flex items-start gap-2 text-sm text-green-700"
+                className="flex items-start gap-2 text-sm text-sage-700 dark:text-sage-300"
                 initial={{ opacity: 0, x: -10 }}
                 animate={{ opacity: 1, x: 0 }}
                 transition={{ delay: 0.1 + i * 0.05 }}
               >
-                <CheckCircle2 size={14} className="mt-0.5 text-green-500 flex-shrink-0" />
+                <CheckCircle2 size={14} className="mt-0.5 text-sage-500 dark:text-sage-400 flex-shrink-0" />
                 <span className="font-body">
                   {typeof win === 'string' ? win : win.text}
                 </span>
@@ -103,7 +103,7 @@ const EveningMirror = ({
 
           {/* Win affirmation if provided */}
           {summary?.wins?.tone && (
-            <p className="mt-3 pt-3 border-t border-green-200 text-xs text-green-600 italic font-body">
+            <p className="mt-3 pt-3 border-t border-sage-200 dark:border-sage-800 text-xs text-sage-600 dark:text-sage-400 italic font-body">
               {summary.wins.tone === 'celebrating' && "You've earned this moment of celebration."}
               {summary.wins.tone === 'encouraging' && "Every step forward counts."}
               {summary.wins.tone === 'acknowledging' && "Progress, no matter how small."}
@@ -130,14 +130,14 @@ const EveningMirror = ({
       {/* Collapsible Tasks Section - Hidden by default */}
       {hasTasks && (
         <motion.div
-          className="bg-white rounded-2xl border border-warm-100 overflow-hidden"
+          className="bg-white dark:bg-hearth-900 rounded-2xl border border-warm-100 dark:border-hearth-800 overflow-hidden"
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.2 }}
         >
           <button
             onClick={() => setShowTasks(!showTasks)}
-            className="w-full flex items-center justify-between p-4 hover:bg-warm-50 transition-colors"
+            className="w-full flex items-center justify-between p-4 hover:bg-warm-50 dark:hover:bg-hearth-850 transition-colors"
           >
             <div className="flex items-center gap-2 text-warm-600">
               <BookOpen size={16} />
@@ -198,7 +198,7 @@ const EveningMirror = ({
             <motion.button
               key={i}
               onClick={() => onPromptClick?.(prompt)}
-              className="w-full text-left p-3 bg-white rounded-xl border border-warm-100 hover:border-violet-200 hover:shadow-sm transition-all"
+              className="w-full text-left p-3 bg-white dark:bg-hearth-900 rounded-xl border border-warm-100 dark:border-hearth-800 hover:border-lavender-200 dark:hover:border-lavender-700 hover:shadow-sm transition-all"
               whileHover={{ scale: 1.01 }}
               whileTap={{ scale: 0.99 }}
             >

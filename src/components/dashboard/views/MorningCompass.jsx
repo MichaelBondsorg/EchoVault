@@ -60,12 +60,12 @@ const MorningCompass = ({
         {!summary && (
           <motion.button
             onClick={() => onPromptClick?.("What's your intention for today?")}
-            className="w-full text-left p-3 bg-white/50 rounded-xl border border-amber-100 hover:bg-white/70 transition-all group"
+            className="w-full text-left p-3 bg-white/50 dark:bg-hearth-800/50 rounded-xl border border-honey-100 dark:border-honey-800 hover:bg-white/70 dark:hover:bg-hearth-800/70 transition-all group"
             whileHover={{ scale: 1.01 }}
             whileTap={{ scale: 0.99 }}
           >
-            <div className="flex items-center gap-2 text-amber-700">
-              <Sunrise size={16} className="text-amber-500" />
+            <div className="flex items-center gap-2 text-honey-700 dark:text-honey-300">
+              <Sunrise size={16} className="text-honey-500 dark:text-honey-400" />
               <span className="text-sm font-body">What's your intention for today?</span>
               <ChevronRight size={14} className="ml-auto opacity-50 group-hover:opacity-100 transition-opacity" />
             </div>
@@ -79,14 +79,14 @@ const MorningCompass = ({
       {/* Action Items - Only carried forward initially */}
       {allTasks.length > 0 && (
         <motion.div
-          className="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-2xl p-4 border border-blue-100"
+          className="bg-gradient-to-br from-lavender-50 to-lavender-100 dark:from-lavender-900/30 dark:to-lavender-900/20 rounded-2xl p-4 border border-lavender-200 dark:border-lavender-800"
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.1 }}
         >
           <div className="flex items-center gap-2 mb-3">
-            <Target size={16} className="text-blue-500" />
-            <h3 className="text-sm font-display font-semibold text-blue-800">
+            <Target size={16} className="text-lavender-500 dark:text-lavender-400" />
+            <h3 className="text-sm font-display font-semibold text-lavender-800 dark:text-lavender-200">
               {carryForwardItems.length > 0 ? "Pick up where you left off" : "Today's Focus"}
             </h3>
           </div>
@@ -99,7 +99,7 @@ const MorningCompass = ({
           />
 
           {allTasks.length > 4 && (
-            <p className="text-xs text-blue-500 mt-2 text-center">
+            <p className="text-xs text-lavender-500 dark:text-lavender-400 mt-2 text-center">
               +{allTasks.length - 4} more tasks
             </p>
           )}
@@ -124,7 +124,7 @@ const MorningCompass = ({
             <motion.button
               key={i}
               onClick={() => onPromptClick?.(prompt)}
-              className="w-full text-left p-3 bg-white rounded-xl border border-warm-100 hover:border-amber-200 hover:shadow-sm transition-all"
+              className="w-full text-left p-3 bg-white dark:bg-hearth-900 rounded-xl border border-warm-100 dark:border-hearth-800 hover:border-honey-200 dark:hover:border-honey-700 hover:shadow-sm transition-all"
               whileHover={{ scale: 1.01 }}
               whileTap={{ scale: 0.99 }}
             >

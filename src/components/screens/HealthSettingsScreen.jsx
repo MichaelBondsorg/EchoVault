@@ -57,10 +57,10 @@ const SourceBadge = ({ source }) => {
   if (!source) return null;
 
   const config = {
-    whoop: { label: 'Whoop', bg: 'bg-teal-100', text: 'text-teal-700' },
-    healthkit: { label: 'Apple', bg: 'bg-gray-100', text: 'text-gray-700' },
-    googlefit: { label: 'Fit', bg: 'bg-blue-100', text: 'text-blue-700' },
-    merged: { label: 'Both', bg: 'bg-purple-100', text: 'text-purple-700' },
+    whoop: { label: 'Whoop', bg: 'bg-sage-100 dark:bg-sage-900/30', text: 'text-sage-700 dark:text-sage-300' },
+    healthkit: { label: 'Apple', bg: 'bg-warm-100 dark:bg-warm-800', text: 'text-warm-700 dark:text-warm-300' },
+    googlefit: { label: 'Fit', bg: 'bg-lavender-100 dark:bg-lavender-900/30', text: 'text-lavender-700 dark:text-lavender-300' },
+    merged: { label: 'Both', bg: 'bg-lavender-200 dark:bg-lavender-900/40', text: 'text-lavender-700 dark:text-lavender-300' },
   };
 
   const { label, bg, text } = config[source] || config.healthkit;
@@ -360,11 +360,11 @@ const HealthSettingsScreen = ({ onClose }) => {
 
   // Data types we collect
   const dataTypes = [
-    { icon: Moon, name: 'Sleep', description: 'Hours slept and sleep quality', color: 'text-indigo-500', bgColor: 'bg-indigo-50' },
-    { icon: Footprints, name: 'Steps', description: 'Daily step count', color: 'text-green-500', bgColor: 'bg-green-50' },
-    { icon: Activity, name: 'Workouts', description: 'Exercise sessions you log', color: 'text-orange-500', bgColor: 'bg-orange-50' },
-    { icon: Heart, name: 'Heart Rate', description: 'Resting and average heart rate', color: 'text-red-400', bgColor: 'bg-red-50' },
-    { icon: Zap, name: 'HRV (Stress)', description: 'Heart rate variability for stress detection', color: 'text-purple-500', bgColor: 'bg-purple-50' }
+    { icon: Moon, name: 'Sleep', description: 'Hours slept and sleep quality', color: 'text-lavender-500 dark:text-lavender-400', bgColor: 'bg-lavender-50 dark:bg-lavender-900/30' },
+    { icon: Footprints, name: 'Steps', description: 'Daily step count', color: 'text-sage-500 dark:text-sage-400', bgColor: 'bg-sage-50 dark:bg-sage-900/30' },
+    { icon: Activity, name: 'Workouts', description: 'Exercise sessions you log', color: 'text-terra-500 dark:text-terra-400', bgColor: 'bg-terra-50 dark:bg-terra-900/30' },
+    { icon: Heart, name: 'Heart Rate', description: 'Resting and average heart rate', color: 'text-red-400 dark:text-red-400', bgColor: 'bg-red-50 dark:bg-red-900/30' },
+    { icon: Zap, name: 'HRV (Stress)', description: 'Heart rate variability for stress detection', color: 'text-lavender-600 dark:text-lavender-400', bgColor: 'bg-lavender-50 dark:bg-lavender-900/30' }
   ];
 
   // Handle backdrop click to close modal (MOD-001)
@@ -399,21 +399,21 @@ const HealthSettingsScreen = ({ onClose }) => {
       {/* Modal content - full width on mobile, centered with max-width on larger screens */}
       {/* MOD-004: Smoother animation with opacity for cleaner transitions */}
       <motion.div
-        className="absolute inset-y-0 inset-x-0 mx-auto w-full max-w-2xl bg-warm-50 shadow-2xl"
+        className="absolute inset-y-0 inset-x-0 mx-auto w-full max-w-2xl bg-warm-50 dark:bg-hearth-950 shadow-2xl"
         initial={{ y: 20, opacity: 0 }}
         animate={{ y: 0, opacity: 1 }}
         exit={{ y: 20, opacity: 0 }}
         transition={{ duration: 0.25, ease: 'easeOut' }}
       >
         {/* Header */}
-        <div className="sticky top-0 bg-white border-b border-warm-100 px-4 py-4 flex items-center justify-between z-10">
+        <div className="sticky top-0 bg-white dark:bg-hearth-900 border-b border-warm-100 dark:border-hearth-800 px-4 py-4 flex items-center justify-between z-10">
           <div className="flex items-center gap-3">
             {/* Fixed header icon color (CLR-001) - changed from pink to teal to match app palette */}
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-honey-400 to-teal-500 flex items-center justify-center">
+            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-honey-400 to-sage-500 flex items-center justify-center">
               <Heart className="w-5 h-5 text-white" />
             </div>
           <div>
-            <h1 id="health-settings-title" className="font-display font-bold text-warm-800">Health Settings</h1>
+            <h1 id="health-settings-title" className="font-display font-bold text-warm-800 dark:text-warm-200">Health Settings</h1>
             <p className="text-xs text-warm-500">Connect your health data</p>
           </div>
         </div>
@@ -438,13 +438,13 @@ const HealthSettingsScreen = ({ onClose }) => {
         {/* Health Sources Card */}
         {!loading && (
           <motion.div
-            className="bg-white rounded-2xl border border-warm-200 overflow-hidden"
+            className="bg-white dark:bg-hearth-900 rounded-2xl border border-warm-200 dark:border-hearth-800 overflow-hidden"
             initial={{ y: 20, opacity: 0 }}
             animate={{ y: 0, opacity: 1 }}
           >
             <div className="p-4">
               <div className="flex items-center justify-between mb-4">
-                <h2 className="font-semibold text-warm-800">Health Sources</h2>
+                <h2 className="font-semibold text-warm-800 dark:text-warm-200">Health Sources</h2>
                 {anySourceConnected && (
                   <button
                     onClick={handleRefresh}
@@ -464,28 +464,28 @@ const HealthSettingsScreen = ({ onClose }) => {
                     disabled={connecting}
                     className={`flex items-center gap-2 px-3 py-2 rounded-xl border transition-all ${
                       nativeConnected
-                        ? 'bg-green-50 border-green-200'
-                        : 'bg-warm-50 border-warm-200 hover:border-warm-300'
+                        ? 'bg-sage-50 dark:bg-sage-900/30 border-sage-200 dark:border-sage-800'
+                        : 'bg-warm-50 dark:bg-hearth-800 border-warm-200 dark:border-hearth-700 hover:border-warm-300'
                     }`}
                   >
                     <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${
-                      nativeConnected ? 'bg-green-100' : 'bg-warm-100'
+                      nativeConnected ? 'bg-sage-100 dark:bg-sage-900/40' : 'bg-warm-100 dark:bg-hearth-700'
                     }`}>
                       {status?.platform === 'ios' ? (
-                        <Heart className={`w-4 h-4 ${nativeConnected ? 'text-green-600' : 'text-warm-500'}`} />
+                        <Heart className={`w-4 h-4 ${nativeConnected ? 'text-sage-600 dark:text-sage-400' : 'text-warm-500'}`} />
                       ) : (
-                        <Activity className={`w-4 h-4 ${nativeConnected ? 'text-green-600' : 'text-warm-500'}`} />
+                        <Activity className={`w-4 h-4 ${nativeConnected ? 'text-sage-600 dark:text-sage-400' : 'text-warm-500'}`} />
                       )}
                     </div>
                     <div className="text-left">
-                      <p className={`text-sm font-medium ${nativeConnected ? 'text-green-800' : 'text-warm-700'}`}>
+                      <p className={`text-sm font-medium ${nativeConnected ? 'text-sage-800 dark:text-sage-200' : 'text-warm-700 dark:text-warm-300'}`}>
                         {platformName}
                       </p>
-                      <p className={`text-xs ${nativeConnected ? 'text-green-600' : 'text-warm-500'}`}>
+                      <p className={`text-xs ${nativeConnected ? 'text-sage-600 dark:text-sage-400' : 'text-warm-500'}`}>
                         {nativeConnected ? 'Connected' : connecting ? 'Connecting...' : 'Tap to connect'}
                       </p>
                     </div>
-                    {nativeConnected && <CheckCircle className="w-4 h-4 text-green-500 ml-1" />}
+                    {nativeConnected && <CheckCircle className="w-4 h-4 text-sage-500 dark:text-sage-400 ml-1" />}
                   </button>
                 )}
 
@@ -495,24 +495,24 @@ const HealthSettingsScreen = ({ onClose }) => {
                   disabled={whoopConnecting}
                   className={`flex items-center gap-2 px-3 py-2 rounded-xl border transition-all ${
                     whoopLinked
-                      ? 'bg-teal-50 border-teal-200'
-                      : 'bg-warm-50 border-warm-200 hover:border-warm-300'
+                      ? 'bg-sage-50 dark:bg-sage-900/30 border-sage-200 dark:border-sage-800'
+                      : 'bg-warm-50 dark:bg-hearth-800 border-warm-200 dark:border-hearth-700 hover:border-warm-300'
                   }`}
                 >
                   <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${
-                    whoopLinked ? 'bg-teal-100' : 'bg-warm-100'
+                    whoopLinked ? 'bg-sage-100 dark:bg-sage-900/40' : 'bg-warm-100 dark:bg-hearth-700'
                   }`}>
-                    <Watch className={`w-4 h-4 ${whoopLinked ? 'text-teal-600' : 'text-warm-500'}`} />
+                    <Watch className={`w-4 h-4 ${whoopLinked ? 'text-sage-600 dark:text-sage-400' : 'text-warm-500'}`} />
                   </div>
                   <div className="text-left">
-                    <p className={`text-sm font-medium ${whoopLinked ? 'text-teal-800' : 'text-warm-700'}`}>
+                    <p className={`text-sm font-medium ${whoopLinked ? 'text-sage-800 dark:text-sage-200' : 'text-warm-700 dark:text-warm-300'}`}>
                       Whoop
                     </p>
-                    <p className={`text-xs ${whoopLinked ? 'text-teal-600' : 'text-warm-500'}`}>
+                    <p className={`text-xs ${whoopLinked ? 'text-sage-600 dark:text-sage-400' : 'text-warm-500'}`}>
                       {whoopLinked ? 'Connected' : whoopConnecting ? 'Connecting...' : 'Tap to connect'}
                     </p>
                   </div>
-                  {whoopLinked && <CheckCircle className="w-4 h-4 text-teal-500 ml-1" />}
+                  {whoopLinked && <CheckCircle className="w-4 h-4 text-sage-500 dark:text-sage-400 ml-1" />}
                 </button>
 
                 {/* Add More (Future sources placeholder) */}
@@ -524,11 +524,11 @@ const HealthSettingsScreen = ({ onClose }) => {
 
               {/* Web platform notice */}
               {isWeb && !whoopLinked && (
-                <div className="mt-3 p-3 rounded-xl bg-amber-50 border border-amber-200 flex items-start gap-2">
-                  <Smartphone className="w-5 h-5 text-amber-500 flex-shrink-0 mt-0.5" />
+                <div className="mt-3 p-3 rounded-xl bg-honey-50 dark:bg-honey-900/30 border border-honey-200 dark:border-honey-800 flex items-start gap-2">
+                  <Smartphone className="w-5 h-5 text-honey-500 dark:text-honey-400 flex-shrink-0 mt-0.5" />
                   <div>
-                    <p className="text-sm font-medium text-amber-800">Use the Mobile App</p>
-                    <p className="text-xs text-amber-600">
+                    <p className="text-sm font-medium text-honey-800 dark:text-honey-200">Use the Mobile App</p>
+                    <p className="text-xs text-honey-600 dark:text-honey-400">
                       Apple Health requires the iOS app. Or connect Whoop to sync from anywhere.
                     </p>
                   </div>
@@ -553,16 +553,16 @@ const HealthSettingsScreen = ({ onClose }) => {
         {/* Today's Health Card */}
         {!loading && todayData?.available && (
           <motion.div
-            className="bg-white rounded-2xl border border-warm-200 overflow-hidden"
+            className="bg-white dark:bg-hearth-900 rounded-2xl border border-warm-200 dark:border-hearth-800 overflow-hidden"
             initial={{ y: 20, opacity: 0 }}
             animate={{ y: 0, opacity: 1 }}
             transition={{ delay: 0.05 }}
           >
             <div className="p-4">
               <div className="flex items-center justify-between mb-4">
-                <h2 className="font-semibold text-warm-800">Today's Health</h2>
+                <h2 className="font-semibold text-warm-800 dark:text-warm-200">Today's Health</h2>
                 {todayData.source === 'merged' && (
-                  <span className="text-xs text-purple-600 bg-purple-50 px-2 py-1 rounded-full">
+                  <span className="text-xs text-lavender-600 dark:text-lavender-400 bg-lavender-50 dark:bg-lavender-900/30 px-2 py-1 rounded-full">
                     Smart merged
                   </span>
                 )}
@@ -573,12 +573,12 @@ const HealthSettingsScreen = ({ onClose }) => {
                 {/* Sleep */}
                 <div className="flex items-center justify-between py-2">
                   <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-xl bg-indigo-50 flex items-center justify-center">
-                      <Moon className="w-5 h-5 text-indigo-500" />
+                    <div className="w-10 h-10 rounded-xl bg-lavender-50 dark:bg-lavender-900/30 flex items-center justify-center">
+                      <Moon className="w-5 h-5 text-lavender-500 dark:text-lavender-400" />
                     </div>
                     <div>
                       <p className="text-sm text-warm-600">Sleep</p>
-                      <p className="text-lg font-semibold text-warm-800">
+                      <p className="text-lg font-semibold text-warm-800 dark:text-warm-200">
                         {todayData.sleep?.totalHours?.toFixed(1)
                           ? `${todayData.sleep.totalHours.toFixed(1)} hrs`
                           : <span className="text-warm-400 text-sm">No data</span>}
@@ -591,12 +591,12 @@ const HealthSettingsScreen = ({ onClose }) => {
                 {/* Steps */}
                 <div className="flex items-center justify-between py-2 border-t border-warm-100">
                   <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-xl bg-green-50 flex items-center justify-center">
-                      <Footprints className="w-5 h-5 text-green-500" />
+                    <div className="w-10 h-10 rounded-xl bg-sage-50 dark:bg-sage-900/30 flex items-center justify-center">
+                      <Footprints className="w-5 h-5 text-sage-500 dark:text-sage-400" />
                     </div>
                     <div>
                       <p className="text-sm text-warm-600">Steps</p>
-                      <p className="text-lg font-semibold text-warm-800">
+                      <p className="text-lg font-semibold text-warm-800 dark:text-warm-200">
                         {todayData.activity?.stepsToday
                           ? todayData.activity.stepsToday.toLocaleString()
                           : <span className="text-warm-400 text-sm">No data</span>}
@@ -609,12 +609,12 @@ const HealthSettingsScreen = ({ onClose }) => {
                 {/* Workout */}
                 <div className="flex items-center justify-between py-2 border-t border-warm-100">
                   <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-xl bg-orange-50 flex items-center justify-center">
-                      <Activity className="w-5 h-5 text-orange-500" />
+                    <div className="w-10 h-10 rounded-xl bg-terra-50 dark:bg-terra-900/30 flex items-center justify-center">
+                      <Activity className="w-5 h-5 text-terra-500 dark:text-terra-400" />
                     </div>
                     <div>
                       <p className="text-sm text-warm-600">Workout</p>
-                      <p className="text-lg font-semibold text-warm-800">
+                      <p className="text-lg font-semibold text-warm-800 dark:text-warm-200">
                         {todayData.activity?.hasWorkout
                           ? `${todayData.activity.totalExerciseMinutes || ''} min`.trim() || '✓'
                           : <span className="text-warm-400 text-sm">None</span>}
@@ -627,12 +627,12 @@ const HealthSettingsScreen = ({ onClose }) => {
                 {/* Resting Heart Rate */}
                 <div className="flex items-center justify-between py-2 border-t border-warm-100">
                   <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-xl bg-red-50 flex items-center justify-center">
-                      <Heart className="w-5 h-5 text-red-400" />
+                    <div className="w-10 h-10 rounded-xl bg-red-50 dark:bg-red-900/30 flex items-center justify-center">
+                      <Heart className="w-5 h-5 text-red-400 dark:text-red-400" />
                     </div>
                     <div>
                       <p className="text-sm text-warm-600">Resting HR</p>
-                      <p className="text-lg font-semibold text-warm-800">
+                      <p className="text-lg font-semibold text-warm-800 dark:text-warm-200">
                         {todayData.heart?.restingRate
                           ? `${todayData.heart.restingRate} bpm`
                           : <span className="text-warm-400 text-sm">No data</span>}
@@ -646,12 +646,12 @@ const HealthSettingsScreen = ({ onClose }) => {
                 {todayData.heart?.hrv && (
                   <div className="flex items-center justify-between py-2 border-t border-warm-100">
                     <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-xl bg-purple-50 flex items-center justify-center">
-                        <Zap className="w-5 h-5 text-purple-500" />
+                      <div className="w-10 h-10 rounded-xl bg-lavender-50 dark:bg-lavender-900/30 flex items-center justify-center">
+                        <Zap className="w-5 h-5 text-lavender-600 dark:text-lavender-400" />
                       </div>
                       <div>
                         <p className="text-sm text-warm-600">HRV</p>
-                        <p className="text-lg font-semibold text-warm-800">
+                        <p className="text-lg font-semibold text-warm-800 dark:text-warm-200">
                           {todayData.heart.hrv} ms
                         </p>
                       </div>
@@ -664,22 +664,22 @@ const HealthSettingsScreen = ({ onClose }) => {
               {/* Whoop Recovery Score */}
               {todayData.recovery && (
                 <div className={`mt-4 p-4 rounded-xl flex items-center gap-3 ${
-                  todayData.recovery.status === 'green' ? 'bg-green-50 border border-green-200' :
-                  todayData.recovery.status === 'yellow' ? 'bg-yellow-50 border border-yellow-200' :
-                  'bg-red-50 border border-red-200'
+                  todayData.recovery.status === 'green' ? 'bg-sage-50 dark:bg-sage-900/30 border border-sage-200 dark:border-sage-800' :
+                  todayData.recovery.status === 'yellow' ? 'bg-honey-50 dark:bg-honey-900/30 border border-honey-200 dark:border-honey-800' :
+                  'bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800'
                 }`}>
                   <TrendingUp className={`w-6 h-6 ${
-                    todayData.recovery.status === 'green' ? 'text-green-600' :
-                    todayData.recovery.status === 'yellow' ? 'text-yellow-600' : 'text-red-500'
+                    todayData.recovery.status === 'green' ? 'text-sage-600 dark:text-sage-400' :
+                    todayData.recovery.status === 'yellow' ? 'text-honey-600 dark:text-honey-400' : 'text-red-500 dark:text-red-400'
                   }`} />
                   <div className="flex-1">
                     <div className="flex items-center gap-2">
-                      <p className="font-semibold text-warm-800">
+                      <p className="font-semibold text-warm-800 dark:text-warm-200">
                         Recovery: {todayData.recovery.score}%
                       </p>
                       <SourceBadge source="whoop" />
                     </div>
-                    <p className="text-sm text-warm-600">
+                    <p className="text-sm text-warm-600 dark:text-warm-400">
                       {getWhoopRecoveryInsight(todayData.recovery)?.message}
                     </p>
                   </div>
@@ -707,18 +707,18 @@ const HealthSettingsScreen = ({ onClose }) => {
         {/* Sync Past Entries (Backfill) */}
         {!loading && anySourceConnected && (backfillCount > 0 || backfillRunning || backfillComplete) && (
           <motion.div
-            className="bg-white rounded-2xl border border-warm-200 overflow-hidden"
+            className="bg-white dark:bg-hearth-900 rounded-2xl border border-warm-200 dark:border-hearth-800 overflow-hidden"
             initial={{ y: 20, opacity: 0 }}
             animate={{ y: 0, opacity: 1 }}
             transition={{ delay: 0.08 }}
           >
             <div className="p-4">
               <div className="flex items-center gap-3 mb-3">
-                <div className="w-10 h-10 rounded-xl bg-amber-50 flex items-center justify-center">
-                  <History className="w-5 h-5 text-amber-600" />
+                <div className="w-10 h-10 rounded-xl bg-honey-50 dark:bg-honey-900/30 flex items-center justify-center">
+                  <History className="w-5 h-5 text-honey-600 dark:text-honey-400" />
                 </div>
                 <div>
-                  <h2 className="font-semibold text-warm-800">Sync Past Entries</h2>
+                  <h2 className="font-semibold text-warm-800 dark:text-warm-200">Sync Past Entries</h2>
                   <p className="text-sm text-warm-500">
                     Add health data to older journal entries
                   </p>
@@ -734,7 +734,7 @@ const HealthSettingsScreen = ({ onClose }) => {
                   </p>
                   <button
                     onClick={handleStartBackfill}
-                    className="w-full py-2.5 px-4 bg-gradient-to-r from-amber-500 to-orange-500 text-white font-semibold rounded-xl flex items-center justify-center gap-2"
+                    className="w-full py-2.5 px-4 bg-gradient-to-r from-honey-500 to-terra-500 dark:from-honey-600 dark:to-terra-600 text-white font-semibold rounded-xl flex items-center justify-center gap-2"
                   >
                     <History className="w-4 h-4" />
                     Sync {backfillCount} Entries
@@ -748,7 +748,7 @@ const HealthSettingsScreen = ({ onClose }) => {
                   {/* Progress bar */}
                   <div className="w-full bg-warm-100 rounded-full h-2">
                     <div
-                      className="bg-gradient-to-r from-amber-500 to-orange-500 h-2 rounded-full transition-all duration-300"
+                      className="bg-gradient-to-r from-honey-500 to-terra-500 h-2 rounded-full transition-all duration-300"
                       style={{ width: `${(backfillProgress.processed / backfillProgress.total) * 100}%` }}
                     />
                   </div>
@@ -757,7 +757,7 @@ const HealthSettingsScreen = ({ onClose }) => {
                     <span className="text-warm-600">
                       Processing {backfillProgress.processed} of {backfillProgress.total}...
                     </span>
-                    <span className="text-green-600 font-medium">
+                    <span className="text-sage-600 dark:text-sage-400 font-medium">
                       {backfillProgress.updated} updated
                     </span>
                   </div>
@@ -782,12 +782,12 @@ const HealthSettingsScreen = ({ onClose }) => {
               {/* Complete - show results */}
               {backfillComplete && backfillResults && (
                 <div className="space-y-3">
-                  <div className="p-3 rounded-xl bg-green-50 border border-green-200">
+                  <div className="p-3 rounded-xl bg-sage-50 dark:bg-sage-900/30 border border-sage-200 dark:border-sage-800">
                     <div className="flex items-center gap-2 mb-2">
-                      <CheckCircle className="w-5 h-5 text-green-600" />
-                      <p className="font-semibold text-green-800">Sync Complete!</p>
+                      <CheckCircle className="w-5 h-5 text-sage-600 dark:text-sage-400" />
+                      <p className="font-semibold text-sage-800 dark:text-sage-200">Sync Complete!</p>
                     </div>
-                    <div className="text-sm text-green-700 space-y-1">
+                    <div className="text-sm text-sage-700 dark:text-sage-300 space-y-1">
                       <p>✓ Added health data to <span className="font-semibold">{backfillResults.updated}</span> entries</p>
                       {backfillResults.skipped > 0 && (
                         <p className="text-warm-600">• {backfillResults.skipped} entries had no matching health data</p>
@@ -813,14 +813,14 @@ const HealthSettingsScreen = ({ onClose }) => {
         {/* Environment Backfill Section */}
         {!loading && (envBackfillCount > 0 || envBackfillRunning || envBackfillComplete) && (
           <motion.div
-            className="bg-white rounded-2xl border border-warm-200 overflow-hidden"
+            className="bg-white dark:bg-hearth-900 rounded-2xl border border-warm-200 dark:border-hearth-800 overflow-hidden"
             initial={{ y: 20, opacity: 0 }}
             animate={{ y: 0, opacity: 1 }}
             transition={{ delay: 0.15 }}
           >
             <div className="p-4 border-b border-warm-100">
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-sky-400 to-blue-500 flex items-center justify-center">
+                <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-lavender-400 to-lavender-600 flex items-center justify-center">
                   <svg className="w-5 h-5 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                     <circle cx="12" cy="12" r="5" />
                     <line x1="12" y1="1" x2="12" y2="3" />
@@ -834,7 +834,7 @@ const HealthSettingsScreen = ({ onClose }) => {
                   </svg>
                 </div>
                 <div className="flex-1">
-                  <h2 className="font-semibold text-warm-800">Sync Weather Data</h2>
+                  <h2 className="font-semibold text-warm-800 dark:text-warm-200">Sync Weather Data</h2>
                   <p className="text-sm text-warm-500">
                     Add weather &amp; light data to past entries
                   </p>
@@ -852,7 +852,7 @@ const HealthSettingsScreen = ({ onClose }) => {
                   </p>
                   <button
                     onClick={handleStartEnvBackfill}
-                    className="w-full py-3 px-4 bg-gradient-to-r from-sky-500 to-blue-500 text-white font-medium rounded-xl flex items-center justify-center gap-2 active:scale-98 transition-transform"
+                    className="w-full py-3 px-4 bg-gradient-to-r from-lavender-500 to-lavender-600 dark:from-lavender-600 dark:to-lavender-700 text-white font-medium rounded-xl flex items-center justify-center gap-2 active:scale-98 transition-transform"
                   >
                     <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                       <circle cx="12" cy="12" r="5" />
@@ -876,7 +876,7 @@ const HealthSettingsScreen = ({ onClose }) => {
                     </span>
                     <button
                       onClick={handleCancelEnvBackfill}
-                      className="text-red-500 text-xs hover:underline"
+                      className="text-red-500 dark:text-red-400 text-xs hover:underline"
                     >
                       Cancel
                     </button>
@@ -885,7 +885,7 @@ const HealthSettingsScreen = ({ onClose }) => {
                   {/* Progress bar */}
                   <div className="h-2 bg-warm-100 rounded-full overflow-hidden">
                     <motion.div
-                      className="h-full bg-gradient-to-r from-sky-500 to-blue-500"
+                      className="h-full bg-gradient-to-r from-lavender-500 to-lavender-600"
                       initial={{ width: 0 }}
                       animate={{ width: `${(envBackfillProgress.processed / envBackfillProgress.total) * 100}%` }}
                       transition={{ duration: 0.3 }}
@@ -902,12 +902,12 @@ const HealthSettingsScreen = ({ onClose }) => {
               {/* Complete - show results */}
               {envBackfillComplete && envBackfillResults && (
                 <div className="space-y-3">
-                  <div className="p-3 rounded-xl bg-sky-50 border border-sky-200">
+                  <div className="p-3 rounded-xl bg-lavender-50 dark:bg-lavender-900/30 border border-lavender-200 dark:border-lavender-800">
                     <div className="flex items-center gap-2 mb-2">
-                      <CheckCircle className="w-5 h-5 text-sky-600" />
-                      <p className="font-semibold text-sky-800">Weather Sync Complete!</p>
+                      <CheckCircle className="w-5 h-5 text-lavender-600 dark:text-lavender-400" />
+                      <p className="font-semibold text-lavender-800 dark:text-lavender-200">Weather Sync Complete!</p>
                     </div>
-                    <div className="text-sm text-sky-700 space-y-1">
+                    <div className="text-sm text-lavender-700 dark:text-lavender-300 space-y-1">
                       <p>✓ Added weather data to <span className="font-semibold">{envBackfillResults.updated}</span> entries</p>
                       {envBackfillResults.skipped > 0 && (
                         <p className="text-warm-600">• {envBackfillResults.skipped} entries skipped (already had data or too old)</p>
@@ -933,13 +933,13 @@ const HealthSettingsScreen = ({ onClose }) => {
         {/* What We Collect */}
         {!loading && (
           <motion.div
-            className="bg-white rounded-2xl border border-warm-200 overflow-hidden"
+            className="bg-white dark:bg-hearth-900 rounded-2xl border border-warm-200 dark:border-hearth-800 overflow-hidden"
             initial={{ y: 20, opacity: 0 }}
             animate={{ y: 0, opacity: 1 }}
             transition={{ delay: 0.1 }}
           >
-            <div className="p-4 border-b border-warm-100">
-              <h2 className="font-semibold text-warm-800">What We Read</h2>
+            <div className="p-4 border-b border-warm-100 dark:border-hearth-800">
+              <h2 className="font-semibold text-warm-800 dark:text-warm-200">What We Read</h2>
               <p className="text-sm text-warm-500 mt-1">
                 Engram only reads data — we never write to your health app
               </p>
@@ -951,7 +951,7 @@ const HealthSettingsScreen = ({ onClose }) => {
                     <type.icon className={`w-5 h-5 ${type.color}`} />
                   </div>
                   <div className="flex-1">
-                    <p className="font-medium text-warm-800">{type.name}</p>
+                    <p className="font-medium text-warm-800 dark:text-warm-200">{type.name}</p>
                     <p className="text-sm text-warm-500">{type.description}</p>
                   </div>
                 </div>
@@ -963,18 +963,18 @@ const HealthSettingsScreen = ({ onClose }) => {
         {/* Why We Use Health Data */}
         {!loading && (
           <motion.div
-            className="bg-gradient-to-br from-honey-50 to-blue-50 rounded-2xl border border-honey-100 p-4"
+            className="bg-gradient-to-br from-honey-50 to-lavender-50 dark:from-honey-900/30 dark:to-lavender-900/30 rounded-2xl border border-honey-100 dark:border-honey-800 p-4"
             initial={{ y: 20, opacity: 0 }}
             animate={{ y: 0, opacity: 1 }}
             transition={{ delay: 0.2 }}
           >
             <div className="flex items-start gap-3">
-              <div className="w-10 h-10 rounded-xl bg-honey-100 flex items-center justify-center flex-shrink-0">
-                <Zap className="w-5 h-5 text-honey-600" />
+              <div className="w-10 h-10 rounded-xl bg-honey-100 dark:bg-honey-900/40 flex items-center justify-center flex-shrink-0">
+                <Zap className="w-5 h-5 text-honey-600 dark:text-honey-400" />
               </div>
               <div>
-                <h3 className="font-semibold text-honey-800">Why connect?</h3>
-                <p className="text-sm text-honey-700 mt-1">
+                <h3 className="font-semibold text-honey-800 dark:text-honey-200">Why connect?</h3>
+                <p className="text-sm text-honey-700 dark:text-honey-300 mt-1">
                   Engram can show you patterns like "You tend to feel better on days you sleep 7+ hours"
                   or "Exercise days often lead to more positive entries."
                 </p>

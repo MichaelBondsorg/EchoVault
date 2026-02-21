@@ -50,14 +50,14 @@ const WhatsNewModal = () => {
 
           {/* Modal */}
           <motion.div
-            className="relative w-full max-w-md bg-white rounded-3xl overflow-hidden shadow-2xl"
+            className="relative w-full max-w-md bg-white dark:bg-hearth-900 rounded-3xl overflow-hidden shadow-2xl"
             initial={{ scale: 0.9, opacity: 0, y: 20 }}
             animate={{ scale: 1, opacity: 1, y: 0 }}
             exit={{ scale: 0.9, opacity: 0, y: 20 }}
             transition={{ type: 'spring', damping: 25, stiffness: 300 }}
           >
             {/* Header with gradient */}
-            <div className="bg-gradient-to-br from-red-400 via-pink-500 to-amber-500 px-6 py-8 text-white relative overflow-hidden">
+            <div className="bg-gradient-to-br from-terra-400 via-honey-400 to-honey-500 dark:from-terra-700/60 dark:via-honey-700/60 dark:to-honey-800/60 px-6 py-8 text-white relative overflow-hidden">
               {/* Decorative circles */}
               <div className="absolute -top-10 -right-10 w-40 h-40 bg-white/10 rounded-full" />
               <div className="absolute -bottom-5 -left-5 w-24 h-24 bg-white/10 rounded-full" />
@@ -80,12 +80,12 @@ const WhatsNewModal = () => {
             <div className="p-6 space-y-4">
               {/* Feature 1 */}
               <div className="flex gap-4">
-                <div className="w-12 h-12 rounded-xl bg-red-100 flex items-center justify-center flex-shrink-0">
-                  <Heart size={24} className="text-red-500" />
+                <div className="w-12 h-12 rounded-xl bg-red-100 dark:bg-red-900/30 flex items-center justify-center flex-shrink-0">
+                  <Heart size={24} className="text-red-500 dark:text-red-400" />
                 </div>
                 <div>
-                  <h3 className="font-semibold text-warm-800">Health-Mood Correlations</h3>
-                  <p className="text-sm text-warm-600">
+                  <h3 className="font-semibold text-warm-800 dark:text-warm-200">Health-Mood Correlations</h3>
+                  <p className="text-sm text-warm-600 dark:text-warm-400">
                     See how sleep, exercise, and recovery affect your emotional wellbeing with personalized insights.
                   </p>
                 </div>
@@ -93,12 +93,12 @@ const WhatsNewModal = () => {
 
               {/* Feature 2 */}
               <div className="flex gap-4">
-                <div className="w-12 h-12 rounded-xl bg-amber-100 flex items-center justify-center flex-shrink-0">
-                  <Sun size={24} className="text-amber-500" />
+                <div className="w-12 h-12 rounded-xl bg-honey-100 dark:bg-honey-900/30 flex items-center justify-center flex-shrink-0">
+                  <Sun size={24} className="text-honey-600 dark:text-honey-400" />
                 </div>
                 <div>
-                  <h3 className="font-semibold text-warm-800">Weather & Light Tracking</h3>
-                  <p className="text-sm text-warm-600">
+                  <h3 className="font-semibold text-warm-800 dark:text-warm-200">Weather & Light Tracking</h3>
+                  <p className="text-sm text-warm-600 dark:text-warm-400">
                     Automatic weather data with each entry. Backfill past entries in Settings → Health.
                   </p>
                 </div>
@@ -106,12 +106,12 @@ const WhatsNewModal = () => {
 
               {/* Feature 3 */}
               <div className="flex gap-4">
-                <div className="w-12 h-12 rounded-xl bg-blue-100 flex items-center justify-center flex-shrink-0">
-                  <TrendingUp size={24} className="text-blue-500" />
+                <div className="w-12 h-12 rounded-xl bg-lavender-100 dark:bg-lavender-900/30 flex items-center justify-center flex-shrink-0">
+                  <TrendingUp size={24} className="text-lavender-600 dark:text-lavender-400" />
                 </div>
                 <div>
-                  <h3 className="font-semibold text-warm-800">Pattern Discovery</h3>
-                  <p className="text-sm text-warm-600">
+                  <h3 className="font-semibold text-warm-800 dark:text-warm-200">Pattern Discovery</h3>
+                  <p className="text-sm text-warm-600 dark:text-warm-400">
                     View your patterns in the Insights tab—see what helps you feel your best.
                   </p>
                 </div>
@@ -119,12 +119,12 @@ const WhatsNewModal = () => {
 
               {/* Feature 4 */}
               <div className="flex gap-4">
-                <div className="w-12 h-12 rounded-xl bg-green-100 flex items-center justify-center flex-shrink-0">
-                  <Lightbulb size={24} className="text-green-500" />
+                <div className="w-12 h-12 rounded-xl bg-sage-100 dark:bg-sage-900/30 flex items-center justify-center flex-shrink-0">
+                  <Lightbulb size={24} className="text-sage-600 dark:text-sage-400" />
                 </div>
                 <div>
-                  <h3 className="font-semibold text-warm-800">Smart Recommendations</h3>
-                  <p className="text-sm text-warm-600">
+                  <h3 className="font-semibold text-warm-800 dark:text-warm-200">Smart Recommendations</h3>
+                  <p className="text-sm text-warm-600 dark:text-warm-400">
                     Get daily suggestions based on your health data and what's worked for you before.
                   </p>
                 </div>
@@ -135,8 +135,8 @@ const WhatsNewModal = () => {
             <div className="px-6 pb-6">
               <button
                 onClick={handleDismiss}
-                className="w-full py-3 px-4 bg-gradient-to-r from-red-500 to-amber-500 text-white rounded-xl
-                  hover:from-red-600 hover:to-amber-600 transition-colors font-medium
+                className="w-full py-3 px-4 bg-gradient-to-r from-terra-500 to-honey-500 dark:from-terra-600 dark:to-honey-600 text-white rounded-xl
+                  hover:from-terra-600 hover:to-honey-600 dark:hover:from-terra-500 dark:hover:to-honey-500 transition-colors font-medium
                   flex items-center justify-center gap-2"
               >
                 <CheckCircle size={18} />

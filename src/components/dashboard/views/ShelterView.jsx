@@ -481,7 +481,7 @@ const ShelterView = ({
       {/* Burnout Context - Show if burnout-triggered */}
       {isBurnoutTrigger && burnoutRisk && (
         <motion.div
-          className="bg-gradient-to-br from-honey-900/30 to-red-900/30 rounded-2xl p-4 border border-honey-500/30"
+          className="bg-gradient-to-br from-honey-900/30 to-terra-900/30 dark:from-honey-950/30 dark:to-terra-950/30 rounded-2xl p-4 border border-honey-500/30 dark:border-honey-600/30"
           initial={{ opacity: 0, y: -10 }}
           animate={{ opacity: 1, y: 0 }}
         >

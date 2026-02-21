@@ -62,12 +62,12 @@ const MidDayCheckIn = ({
           <CurrentConditions compact />
           <motion.button
             onClick={onEnergyCheck || (() => onPromptClick?.("How is your energy right now?"))}
-            className="w-full text-left p-3 bg-white/50 rounded-xl border border-blue-100 hover:bg-white/70 transition-all group"
+            className="w-full text-left p-3 bg-white/50 dark:bg-hearth-800/50 rounded-xl border border-lavender-100 dark:border-lavender-800 hover:bg-white/70 dark:hover:bg-hearth-800/70 transition-all group"
             whileHover={{ scale: 1.01 }}
             whileTap={{ scale: 0.99 }}
           >
-            <div className="flex items-center gap-2 text-blue-700">
-              <Zap size={16} className="text-blue-500" />
+            <div className="flex items-center gap-2 text-lavender-700 dark:text-lavender-300">
+              <Zap size={16} className="text-lavender-500 dark:text-lavender-400" />
               <span className="text-sm font-body">Quick energy check-in</span>
               <MessageCircle size={14} className="ml-auto opacity-50 group-hover:opacity-100 transition-opacity" />
             </div>
@@ -78,14 +78,14 @@ const MidDayCheckIn = ({
       {/* Next 2 Tasks - Momentum Focus */}
       {hasTasks && (
         <motion.div
-          className="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-2xl p-4 border border-blue-100"
+          className="bg-gradient-to-br from-lavender-50 to-lavender-100 dark:from-lavender-900/30 dark:to-lavender-900/20 rounded-2xl p-4 border border-lavender-200 dark:border-lavender-800"
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.1 }}
         >
           <div className="flex items-center gap-2 mb-3">
-            <Target size={16} className="text-blue-500" />
-            <h3 className="text-sm font-display font-semibold text-blue-800">
+            <Target size={16} className="text-lavender-500 dark:text-lavender-400" />
+            <h3 className="text-sm font-display font-semibold text-lavender-800 dark:text-lavender-200">
               Next Up
             </h3>
           </div>
@@ -98,7 +98,7 @@ const MidDayCheckIn = ({
           />
 
           {(carriedForward.length + todayTasks.length) > 2 && (
-            <p className="text-xs text-blue-500 mt-2 text-center">
+            <p className="text-xs text-lavender-500 dark:text-lavender-400 mt-2 text-center">
               {(carriedForward.length + todayTasks.length) - 2} more in your list
             </p>
           )}
@@ -108,20 +108,20 @@ const MidDayCheckIn = ({
       {/* Wins so far (if any) */}
       {hasWins && (
         <motion.div
-          className="bg-gradient-to-br from-green-50 to-emerald-50 rounded-2xl p-4 border border-green-100"
+          className="bg-gradient-to-br from-sage-50 to-sage-100 dark:from-sage-900/30 dark:to-sage-900/20 rounded-2xl p-4 border border-sage-200 dark:border-sage-800"
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.15 }}
         >
           <div className="flex items-center gap-2 mb-2">
-            <TrendingUp size={16} className="text-green-500" />
-            <h3 className="text-sm font-display font-semibold text-green-800">
+            <TrendingUp size={16} className="text-sage-500 dark:text-sage-400" />
+            <h3 className="text-sm font-display font-semibold text-sage-800 dark:text-sage-200">
               Today so far
             </h3>
           </div>
           <ul className="space-y-1">
             {summary.wins.items.slice(0, 2).map((win, i) => (
-              <li key={i} className="text-sm text-green-700 font-body">
+              <li key={i} className="text-sm text-sage-700 dark:text-sage-300 font-body">
                 {typeof win === 'string' ? win : win.text}
               </li>
             ))}
@@ -162,7 +162,7 @@ const MidDayCheckIn = ({
             <motion.button
               key={i}
               onClick={() => onPromptClick?.(prompt)}
-              className="w-full text-left p-3 bg-white rounded-xl border border-warm-100 hover:border-blue-200 hover:shadow-sm transition-all"
+              className="w-full text-left p-3 bg-white dark:bg-hearth-900 rounded-xl border border-warm-100 dark:border-hearth-800 hover:border-lavender-200 dark:hover:border-lavender-700 hover:shadow-sm transition-all"
               whileHover={{ scale: 1.01 }}
               whileTap={{ scale: 0.99 }}
             >
