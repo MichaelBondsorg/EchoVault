@@ -60,13 +60,17 @@ describe('Miscellaneous Sweep Verification', () => {
   });
 
   describe('Caveat font-hand integration', () => {
-    it('should have font-hand class in at least 3 component files', () => {
+    it('should use the font-hand (handwritten accent) class in the UI', () => {
       const files = collectFiles(resolve(SRC_ROOT, 'src/components'));
       const filesWithFontHand = files.filter((f) => {
         const content = readFileSync(f, 'utf-8');
         return content.includes('font-hand');
       });
-      expect(filesWithFontHand.length).toBeGreaterThanOrEqual(3);
+      // Verify the handwritten accent font is actually integrated. Intentionally
+      // not locked to an exact count so removing unrelated components doesn't
+      // break this (it previously required >=3 and broke when dead feature
+      // domains were deleted).
+      expect(filesWithFontHand.length).toBeGreaterThanOrEqual(1);
     });
 
     it('should not exceed 2 font-hand usages per component file', () => {
