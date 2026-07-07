@@ -25,9 +25,6 @@ export * from './rag';
 // Nexus Insight Engine (replaces patterns)
 export * from './nexus';
 
-// Vector Search Services (Phase 3)
-export * from './vectorSearch';
-
 // Memory Services (AI Companion)
 export * from './memory';
 
