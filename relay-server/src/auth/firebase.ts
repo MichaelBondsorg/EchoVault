@@ -167,6 +167,49 @@ export const getRecentEntries = async (
 };
 
 /**
+ * Persist a completed voice session as a journal entry.
+ *
+ * Written with analysisStatus:'pending' so the normal server pipeline
+ * (onEntryCreate trigger + pendingEntryCleanup watchdog) completes mood
+ * analysis and the server-authoritative crisis check. Returns the new doc id.
+ */
+export const saveVoiceEntry = async (
+  userId: string,
+  data: {
+    text: string;
+    voiceTone?: unknown;
+    title?: string;
+    tags?: string[];
+    sessionType?: string;
+  }
+): Promise<string> => {
+  const entriesRef = firestore
+    .collection('artifacts')
+    .doc(APP_COLLECTION_ID)
+    .collection('users')
+    .doc(userId)
+    .collection('entries');
+
+  const now = admin.firestore.Timestamp.now();
+  const docData: Record<string, unknown> = {
+    text: data.text || '',
+    createdAt: now,
+    effectiveDate: now,
+    analysisStatus: 'pending',
+    signalExtractionVersion: 1,
+    source: 'voice',
+    createdOnPlatform: 'voice-relay',
+  };
+  if (data.voiceTone) docData.voiceTone = data.voiceTone;
+  if (data.title) docData.title = data.title;
+  if (data.tags && data.tags.length) docData.tags = data.tags;
+  if (data.sessionType) docData.sessionType = data.sessionType;
+
+  const ref = await entriesRef.add(docData);
+  return ref.id;
+};
+
+/**
  * Get user's active goals from tags
  */
 export const getActiveGoals = async (userId: string): Promise<string[]> => {

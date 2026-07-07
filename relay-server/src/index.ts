@@ -5,7 +5,7 @@ import { WebSocketServer, WebSocket } from 'ws';
 import { URL } from 'url';
 
 import { config, validateConfig } from './config/index.js';
-import { verifyToken } from './auth/firebase.js';
+import { verifyToken, saveVoiceEntry } from './auth/firebase.js';
 import {
   getAuthorizationUrl,
   completeOAuthFlow,
@@ -328,16 +328,20 @@ wss.on('connection', async (ws, req) => {
     console.log(`User ${userId} disconnected: ${code} ${reason}`);
     authenticatedConnections.delete(ws);
 
-    // Clean up any active session
+    // Clean up any active session. This whole block MUST be guarded: it awaits
+    // endSession() (a Firestore transaction), and an unhandled rejection here
+    // would terminate the Node process — killing every other concurrent voice
+    // session on this instance. Session maps are cleaned up in `finally` so a
+    // Firestore blip can't leak the session (and its buffered audio).
     const session = getSessionByUser(userId);
-    if (session) {
-      // Flush insight engagement on disconnect
+    if (!session) return;
+
+    try {
       const injector = insightInjectors.get(session.sessionId);
       if (injector) {
         try {
           await injector.flushEngagement();
         } catch { /* best-effort */ }
-        insightInjectors.delete(session.sessionId);
       }
 
       if (hasRealtimeSession(session.sessionId)) {
@@ -350,6 +354,10 @@ wss.on('connection', async (ws, req) => {
         closeGuidedSession(session.sessionId);
       }
       await endSession(session.sessionId);
+    } catch (err) {
+      console.error(`Error during disconnect cleanup for user ${userId}:`, err);
+    } finally {
+      insightInjectors.delete(session.sessionId);
     }
   });
 
@@ -658,13 +666,32 @@ async function handleEndSession(
       });
     }
 
-    // TODO: Save transcript as entry via Cloud Function
-    // For now, send success response
-    sendToClient(ws, {
-      type: 'session_saved',
-      entryId: 'pending-implementation',
-      success: true,
-    });
+    // Persist the voice session as a journal entry. Previously this was a TODO
+    // that returned success:true with a fake id while saving nothing — silent
+    // data loss on every saved voice session.
+    try {
+      const entryText = guidedData?.entryText || transcript || '';
+      const savedEntryId = await saveVoiceEntry(userId, {
+        text: entryText,
+        voiceTone: voiceToneResult || undefined,
+        title: titleTagsResult?.title,
+        tags: titleTagsResult?.tags,
+        sessionType: session.sessionType,
+      });
+      sendToClient(ws, {
+        type: 'session_saved',
+        entryId: savedEntryId,
+        success: true,
+      });
+    } catch (saveError) {
+      console.error(`[${session.sessionId}] Failed to save voice entry:`, saveError);
+      sendToClient(ws, {
+        type: 'session_saved',
+        entryId: null,
+        success: false,
+        error: 'save_failed',
+      });
+    }
   }
 
   console.log(
@@ -710,6 +737,22 @@ async function handleRestoreTranscript(
   // Restore handled by session manager
   console.log(`Transcript restored for session ${session.sessionId}`);
 }
+
+// WebSocket server-level errors must not go unhandled.
+wss.on('error', (error) => {
+  console.error('WebSocketServer error:', error);
+});
+
+// Last-resort process guards. A rejected promise or thrown error in an async
+// event handler (e.g. a Firestore blip during disconnect cleanup) would
+// otherwise terminate the process and drop every concurrent voice session.
+// Log and keep serving; real errors still surface in logs/monitoring.
+process.on('unhandledRejection', (reason) => {
+  console.error('Unhandled promise rejection:', reason);
+});
+process.on('uncaughtException', (error) => {
+  console.error('Uncaught exception:', error);
+});
 
 // Start server
 const PORT = config.port;
