@@ -15,6 +15,7 @@ import { getFirestore, FieldValue } from 'firebase-admin/firestore';
 import { getAuth } from 'firebase-admin/auth';
 import { createHash, timingSafeEqual } from 'node:crypto';
 import { verifyAppleIdentityToken } from './src/auth/appleToken.js';
+import { isCrisisText } from './src/safety/crisisKeywords.js';
 
 /**
  * Constant-time secret comparison. Hashes both inputs to a fixed-length digest
@@ -1994,6 +1995,22 @@ export const onEntryCreate = onDocumentCreated(
     console.log(`New entry created for user ${userId}, processing embedding, goals and patterns...`);
 
     try {
+      // Step 0a: Server-authoritative crisis flag. safety_flagged is otherwise
+      // client-computed and trusted; a modified client or an offline replay
+      // could set it false and suppress the crisis path. Recompute it here from
+      // the entry text (cheap regex, no API) and union with the client value.
+      // Writing a single boolean field re-fires onUpdate, but the guard makes it
+      // idempotent (only writes when the flag actually needs to flip on).
+      if (entry.text && isCrisisText(entry.text) && entry.safety_flagged !== true) {
+        try {
+          await event.data.ref.update({ safety_flagged: true, safetyServerChecked: true });
+          entry.safety_flagged = true;
+          console.log(`[Safety] Server-flagged entry ${entryId} (crisis text)`);
+        } catch (flagError) {
+          console.error(`Failed to set server safety flag for ${entryId}:`, flagError);
+        }
+      }
+
       // Step 0: Generate embedding if not present (OPTIMIZED: Background processing)
       if (!entry.embedding && entry.text) {
         console.time(`[Entry ${entryId}] Generate embedding`);
@@ -2025,6 +2042,102 @@ export const onEntryCreate = onDocumentCreated(
       console.error(`Error processing entry for user ${userId}:`, error);
       return { success: false, error: error.message };
     }
+  }
+);
+
+// Entries stuck in analysisStatus:'pending' — the client analysis pipeline is
+// fire-and-forget, so backgrounding/killing the app right after saving (or an
+// offline entry synced with analysis left to the server) leaves the entry
+// unanalyzed forever. This scheduled sweep finishes analysis server-side.
+const PENDING_ANALYSIS_THRESHOLD_MS = 10 * 60 * 1000; // client has finished by 10 min
+const PENDING_ANALYSIS_MAX_RETRIES = 2;
+const PENDING_ANALYSIS_BATCH = 25;
+
+export const pendingEntryCleanup = onSchedule(
+  {
+    schedule: '*/15 * * * *',
+    timeoutSeconds: 300,
+    memory: '512MiB',
+    secrets: [geminiApiKey],
+  },
+  async () => {
+    const cutoff = new Date(Date.now() - PENDING_ANALYSIS_THRESHOLD_MS);
+
+    const snap = await db.collectionGroup('entries')
+      .where('analysisStatus', '==', 'pending')
+      .where('createdAt', '<', cutoff)
+      .limit(PENDING_ANALYSIS_BATCH)
+      .get();
+
+    if (snap.empty) {
+      console.log('[pendingEntryCleanup] No stuck pending entries');
+      return { analyzed: 0, failed: 0 };
+    }
+
+    const apiKey = geminiApiKey.value();
+    let analyzed = 0;
+    let failed = 0;
+
+    for (const docSnap of snap.docs) {
+      const data = docSnap.data();
+      const text = data.text;
+      const retry = data.analysisRetryCount || 0;
+
+      // Server-authoritative crisis flag regardless of analysis outcome.
+      const crisisFields = (text && isCrisisText(text) && data.safety_flagged !== true)
+        ? { safety_flagged: true, safetyServerChecked: true }
+        : {};
+
+      if (!text) {
+        await docSnap.ref.update({ analysisStatus: 'failed', analysisError: 'missing text', ...crisisFields });
+        failed++;
+        continue;
+      }
+
+      try {
+        const classification = await classifyEntry(apiKey, text);
+        const entryType = classification?.entry_type || 'reflection';
+        const analysis = await analyzeEntry(apiKey, text, entryType);
+
+        // Do NOT fabricate a mood score — a missing one means analysis failed.
+        if (typeof analysis?.mood_score !== 'number') {
+          throw new Error('analysis returned no mood_score');
+        }
+
+        await docSnap.ref.update({
+          analysisStatus: 'complete',
+          entry_type: entryType,
+          title: analysis.title || 'New Memory',
+          tags: analysis.tags || [],
+          analysis: {
+            mood_score: analysis.mood_score,
+            framework: analysis.framework || 'general',
+          },
+          analyzedBy: 'watchdog',
+          ...crisisFields,
+        });
+        analyzed++;
+      } catch (e) {
+        const nextRetry = retry + 1;
+        const errMsg = (e?.message || String(e)).slice(0, 200);
+        if (nextRetry >= PENDING_ANALYSIS_MAX_RETRIES) {
+          // Mark failed (honest) rather than leaving it pending forever.
+          await docSnap.ref.update({
+            analysisStatus: 'failed',
+            analysisRetryCount: nextRetry,
+            analysisError: errMsg,
+            ...crisisFields,
+          });
+          failed++;
+        } else {
+          await docSnap.ref.update({ analysisRetryCount: nextRetry, ...crisisFields });
+        }
+        console.error(`[pendingEntryCleanup] Analysis failed for ${docSnap.id}:`, errMsg);
+      }
+    }
+
+    console.log(`[pendingEntryCleanup] analyzed=${analyzed} failed=${failed} of ${snap.size}`);
+    return { analyzed, failed };
   }
 );
 

@@ -43,6 +43,7 @@ export default defineConfig({
       'functions/src/insights/__tests__/engagementTracker.test.js',
       'functions/src/reports/__tests__/privacy.test.js',
       'functions/src/auth/__tests__/appleToken.test.js',
+      'functions/src/safety/__tests__/crisisKeywords.test.js',
     ],
 
     // Exclude patterns
