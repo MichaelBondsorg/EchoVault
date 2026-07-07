@@ -82,11 +82,16 @@ import {
   MarkdownLite, GetHelpButton, HamburgerMenu,
   DayDashboard, EntryBar
 } from './components';
-import UnifiedConversation from './components/chat/UnifiedConversation';
-import NexusSettings from './components/settings/NexusSettings';
-import EntityManagementPage from './pages/EntityManagementPage';
 import WhatsNewModal from './components/shared/WhatsNewModal';
-import { ReportListWithSuspense, ReportViewerWithSuspense } from './components/lazy';
+// Heavy screens are code-split via the lazy wrappers (aliased so JSX usage is
+// unchanged). UnifiedConversation was imported here but only rendered in
+// AppLayout — the dead import is dropped and it's lazy-loaded there instead.
+import {
+  ReportListWithSuspense,
+  ReportViewerWithSuspense,
+  NexusSettingsWithSuspense as NexusSettings,
+  EntityManagementPageWithSuspense as EntityManagementPage,
+} from './components/lazy';
 
 // Dashboard Enhancement Components
 import { QuickStatsBar, GoalsProgress, WeeklyDigest, SituationTimeline, ReflectionPrompts } from './components/dashboard/shared';

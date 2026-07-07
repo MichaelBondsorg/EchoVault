@@ -17,7 +17,7 @@ import { FABTooltip, useZenTooltips } from './ZenTooltips';
 import { HomePage, JournalPage, InsightsPage, SettingsPage } from '../../pages';
 
 // Screens (modals that overlay the entire app)
-import UnifiedConversation from '../chat/UnifiedConversation';
+import { UnifiedConversationWithSuspense as UnifiedConversation } from '../lazy';
 
 // Entry components
 import EntryBar from '../dashboard/EntryBar';
