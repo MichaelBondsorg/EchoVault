@@ -11,7 +11,7 @@ export { CrisisResourcesScreen, SafetyPlanScreen, DecompressionScreen, Therapist
 export { Chat, RealtimeConversation } from './chat';
 
 // Entries
-export { EntryCard, MoodHeatmap } from './entries';
+export { EntryCard } from './entries';
 
 // Input
 export { VoiceRecorder, TextInput, NewEntryButton } from './input';
@@ -20,7 +20,7 @@ export { VoiceRecorder, TextInput, NewEntryButton } from './input';
 export { MarkdownLite, GetHelpButton, HamburgerMenu } from './ui';
 
 // Dashboard
-export { DayDashboard, EntryBar } from './dashboard';
+export { EntryBar } from './dashboard';
 
 // Lazy-loaded components for code splitting
 export {

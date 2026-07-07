@@ -78,9 +78,8 @@ import {
 import {
   CrisisSoftBlockModal, DailySummaryModal, WeeklyReport, InsightsPanel, EntryInsightsPopup,
   CrisisResourcesScreen, SafetyPlanScreen, DecompressionScreen, TherapistExportScreen, JournalScreen, HealthSettingsScreen,
-  MoodHeatmap,
   MarkdownLite, GetHelpButton, HamburgerMenu,
-  DayDashboard, EntryBar
+  EntryBar
 } from './components';
 import WhatsNewModal from './components/shared/WhatsNewModal';
 import AiConsentModal from './components/modals/AiConsentModal';
@@ -94,8 +93,6 @@ import {
   EntityManagementPageWithSuspense as EntityManagementPage,
 } from './components/lazy';
 
-// Dashboard Enhancement Components
-import { QuickStatsBar, GoalsProgress, WeeklyDigest, SituationTimeline, ReflectionPrompts } from './components/dashboard/shared';
 import DetectedStrip from './components/entries/DetectedStrip';
 
 // Zen & Bento Components
