@@ -137,7 +137,6 @@ const loadJsPDF = () => {
 export default function App() {
   console.log('[Engram] App component rendering...');
   useIOSMeta();
-  const { permission, requestPermission } = useNotifications();
   const { isOnline, pendingCount: offlinePendingCount } = useNetworkStatus();
   const { requestWakeLock, releaseWakeLock } = useWakeLock();
   const { backupAudio, clearBackup, isProcessing: isBackgroundProcessing } = useBackgroundAudio();
@@ -163,6 +162,12 @@ export default function App() {
     startAuth, authFailed, authSuccess, resetAuthForm,
     switchToMfa, clearMfaState
   } = useAuthStore();
+
+  // Register for push notifications once we know who the user is. Previously
+  // useNotifications() was called with no userId, so token registration never
+  // fired — no fcm_tokens were written and the app could never send a reminder.
+  // This one-line fix activates the entire (already-built) notification backend.
+  const { permission, requestPermission } = useNotifications(user?.uid);
 
   // Wrapper functions for store setters that need to accept full objects
   const setMfaResolver = (resolver) => setMfaResolverStore(resolver);

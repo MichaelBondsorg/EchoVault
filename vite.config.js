@@ -60,11 +60,14 @@ export default defineConfig(({ mode }) => {
       chunkSizeWarningLimit: 500
     },
 
-    // Strip console.log and debugger in production
+    // Strip debugger and noisy console.* in production — but KEEP console.error
+    // and console.warn. Previously drop:['console'] removed every console method
+    // including error/warn, so production had zero telemetry: save failures,
+    // sync failures, and error boundaries all logged into the void. `pure` drops
+    // only the noisy levels; error/warn survive for the error reporter.
     esbuild: {
-      drop: isProduction ? ['console', 'debugger'] : [],
-      // Keep error boundaries and critical logs
-      pure: isProduction ? ['console.log', 'console.debug', 'console.trace'] : []
+      drop: isProduction ? ['debugger'] : [],
+      pure: isProduction ? ['console.log', 'console.debug', 'console.trace', 'console.info', 'console.time', 'console.timeEnd'] : []
     },
 
     // Handle external modules during dev
