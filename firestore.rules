@@ -105,6 +105,11 @@ service cloud.firestore {
         allow read, write: if isOwner(userId);
       }
 
+      // Insight moderation reports (user flags AI output as inappropriate)
+      match /insight_reports/{reportId} {
+        allow read, create: if isOwner(userId);
+      }
+
       // Insight Feedback subcollection (user feedback on insight accuracy)
       match /insightFeedback/{feedbackId} {
         allow read, write: if isOwner(userId);
