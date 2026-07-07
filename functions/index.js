@@ -62,6 +62,17 @@ const AI_CONFIG = {
 const LLM_TIMEOUT_MS = 15000;
 const TRANSCRIBE_TIMEOUT_MS = 120000;
 
+// Bound free-text inputs to the AI callables so a single request can't run up an
+// unbounded LLM bill (a journal entry is well under this; the cap only stops
+// abuse). A per-user daily token bucket is the complementary control (follow-up)
+// plus a GCP billing budget alert as a backstop.
+const MAX_TEXT_CHARS = 20000;
+function assertWithinLimit(value, field, max = MAX_TEXT_CHARS) {
+  if (typeof value === 'string' && value.length > max) {
+    throw new HttpsError('invalid-argument', `${field} exceeds the maximum length of ${max} characters`);
+  }
+}
+
 // ============================================
 // AI HELPER FUNCTIONS
 // ============================================
@@ -875,6 +886,7 @@ export const analyzeJournalEntry = onCall(
     if (!text || typeof text !== 'string') {
       throw new HttpsError('invalid-argument', 'Text is required');
     }
+    assertWithinLimit(text, 'text');
 
     const apiKey = geminiApiKey.value();
     const results = {};
@@ -1159,6 +1171,10 @@ export const executePrompt = onCall(
     if (!prompt || typeof prompt !== 'string') {
       throw new HttpsError('invalid-argument', 'Prompt is required');
     }
+    // executePrompt forwards a raw client prompt to Gemini; cap both fields so
+    // it can't be abused as an unbounded proxy.
+    assertWithinLimit(prompt, 'prompt');
+    assertWithinLimit(systemPrompt, 'systemPrompt');
 
     const apiKey = geminiApiKey.value();
 
@@ -1191,6 +1207,7 @@ export const askJournalAI = onCall(
     if (!question || typeof question !== 'string') {
       throw new HttpsError('invalid-argument', 'Question is required');
     }
+    assertWithinLimit(question, 'question');
 
     const apiKey = geminiApiKey.value();
 
