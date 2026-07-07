@@ -412,6 +412,17 @@ const SettingsPage = ({
         Sign Out
       </motion.button>
 
+      {/* Wellness disclaimer (required framing: not therapy / not a medical device) */}
+      <div className="rounded-2xl bg-white/20 border border-white/20 px-4 py-3">
+        <p className="text-xs text-warm-500 dark:text-warm-400 leading-relaxed text-center">
+          Engram is a general-wellness tool for self-reflection. It is not therapy,
+          not a medical device, and not a crisis service, and it does not diagnose,
+          treat, or prevent any condition. If you are in crisis, call or text{' '}
+          <a href="tel:988" className="font-semibold text-terra-600 underline">988</a>{' '}
+          (US Suicide &amp; Crisis Lifeline).
+        </p>
+      </div>
+
       {/* App Version */}
       <p className="text-center text-xs text-warm-400">
         Engram v2.0

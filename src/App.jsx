@@ -2039,6 +2039,13 @@ export default function App() {
                 >
                   <Mail size={18}/> Continue with Email
                 </button>
+
+                {/* Wellness-not-therapy disclaimer (App Store / FDA framing) */}
+                <p className="text-[11px] leading-relaxed text-center text-warm-400 mt-5 px-2">
+                  Engram is a general-wellness tool for self-reflection — not therapy,
+                  not a medical device, and not a crisis service. If you're in crisis,
+                  call or text 988.
+                </p>
               </motion.div>
             ) : (
               <motion.div
