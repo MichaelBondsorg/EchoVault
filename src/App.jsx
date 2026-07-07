@@ -1278,11 +1278,34 @@ export default function App() {
       })();
     } catch (e) {
       console.error('Save failed:', e);
-      // Provide more helpful error message based on error type
-      const errorMessage = e.code === 'permission-denied'
+      // Never lose the entry on a failed online save. Persist it to the durable
+      // offline queue (survives app restart, syncs on next opportunity) instead
+      // of dropping it behind an alert with the composer already cleared.
+      let queuedLocally = false;
+      try {
+        await queueEntry({
+          text: finalTex,
+          category: cat,
+          createdAt: now.toISOString(),
+          effectiveDate: effectiveDate.toISOString(),
+          healthContext,
+          environmentContext,
+          voiceTone,
+          safety_flagged: safetyFlagged || undefined,
+          safety_user_response: safetyUserResponse || undefined,
+          has_warning_indicators: hasWarning || undefined,
+          platform
+        });
+        queuedLocally = true;
+        triggerSync().catch(() => {});
+      } catch (queueErr) {
+        console.error('Failed to queue entry after save failure:', queueErr);
+      }
+
+      const errorMessage = queuedLocally
+        ? "Couldn't save right now — your entry is stored on this device and will sync automatically."
+        : e.code === 'permission-denied'
         ? 'Save failed: Permission denied. Please sign in again.'
-        : e.code === 'unavailable' || e.message?.includes('network')
-        ? 'Save failed: Network error. Please check your connection and try again.'
         : 'Save failed. Please try again.';
       alert(errorMessage);
       setProcessing(false);

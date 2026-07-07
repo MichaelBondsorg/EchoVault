@@ -11,7 +11,7 @@ import { onDocumentCreated, onDocumentUpdated, onDocumentWritten } from 'firebas
 import { onSchedule } from 'firebase-functions/v2/scheduler';
 import { defineSecret } from 'firebase-functions/params';
 import { initializeApp, getApps } from 'firebase-admin/app';
-import { getFirestore, FieldValue } from 'firebase-admin/firestore';
+import { getFirestore, FieldValue, Timestamp } from 'firebase-admin/firestore';
 import { getAuth } from 'firebase-admin/auth';
 import { createHash, timingSafeEqual } from 'node:crypto';
 import { verifyAppleIdentityToken } from './src/auth/appleToken.js';
@@ -54,6 +54,14 @@ const AI_CONFIG = {
   transcription: { primary: 'whisper-1', fallback: null }
 };
 
+// Bound every LLM/network call so a hung (not erroring) API can't consume the
+// whole function budget. analyzeJournalEntry makes 4 sequential calls in a 60s
+// window, so one silent hang would starve the rest and yield a bare
+// DEADLINE_EXCEEDED. On timeout, fetch throws AbortError → the existing
+// try/catch returns null (graceful) and any retry/fallback logic kicks in.
+const LLM_TIMEOUT_MS = 15000;
+const TRANSCRIBE_TIMEOUT_MS = 120000;
+
 // ============================================
 // AI HELPER FUNCTIONS
 // ============================================
@@ -69,7 +77,8 @@ async function callGemini(apiKey, systemPrompt, userPrompt, model = AI_CONFIG.an
       body: JSON.stringify({
         contents: [{ parts: [{ text: userPrompt }] }],
         systemInstruction: { parts: [{ text: systemPrompt }] }
-      })
+      }),
+      signal: AbortSignal.timeout(LLM_TIMEOUT_MS)
     });
 
     if (!res.ok) {
@@ -110,7 +119,8 @@ async function callOpenAI(apiKey, systemPrompt, userPrompt) {
         ],
         temperature: 0.7,
         max_tokens: 500
-      })
+      }),
+      signal: AbortSignal.timeout(LLM_TIMEOUT_MS)
     });
 
     if (!res.ok) {
@@ -944,7 +954,8 @@ async function generateEmbeddingInternal(text, apiKey) {
   const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/text-embedding-004:embedContent?key=${apiKey}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ content: { parts: [{ text: text }] } })
+    body: JSON.stringify({ content: { parts: [{ text: text }] } }),
+    signal: AbortSignal.timeout(LLM_TIMEOUT_MS)
   });
 
   if (!res.ok) {
@@ -1095,7 +1106,8 @@ export const transcribeAudio = onCall(
           'Authorization': `Bearer ${apiKey}`,
           'Content-Type': `multipart/form-data; boundary=${boundary}`
         },
-        body: formBody
+        body: formBody,
+        signal: AbortSignal.timeout(TRANSCRIBE_TIMEOUT_MS)
       });
 
       if (!res.ok) {
@@ -1287,7 +1299,8 @@ export const transcribeWithTone = onCall(
           'Authorization': `Bearer ${oaiKey}`,
           'Content-Type': `multipart/form-data; boundary=${boundary}`
         },
-        body: formBody
+        body: formBody,
+        signal: AbortSignal.timeout(TRANSCRIBE_TIMEOUT_MS)
       });
 
       if (!whisperRes.ok) {
@@ -1346,7 +1359,8 @@ Respond in this exact JSON format only, no other text:
                   { text: tonePrompt }
                 ]
               }]
-            })
+            }),
+            signal: AbortSignal.timeout(TRANSCRIBE_TIMEOUT_MS)
           });
 
           if (geminiRes.ok) {
@@ -3254,6 +3268,9 @@ async function upsertGoalState(userId, topic, entryId, updateType, context = {})
     .get();
 
   const now = FieldValue.serverTimestamp();
+  // Firestore rejects serverTimestamp() sentinels inside array elements, so
+  // stateHistory entries use a concrete Timestamp instead.
+  const nowTs = Timestamp.now();
 
   if (existingSnapshot.empty) {
     // Create new goal (proposed state)
@@ -3271,7 +3288,7 @@ async function upsertGoalState(userId, topic, entryId, updateType, context = {})
       stateHistory: [{
         from: null,
         to: 'proposed',
-        at: now,
+        at: nowTs,
         context: { detectedFrom: entryId }
       }],
       sourceEntries: [entryId],
@@ -3287,64 +3304,74 @@ async function upsertGoalState(userId, topic, entryId, updateType, context = {})
     console.log(`Created new goal: ${topicKey} (${docRef.id})`);
     return { id: docRef.id, ...newGoal, isNew: true };
   } else {
-    // Update existing goal
-    const existingDoc = existingSnapshot.docs[0];
-    const existingData = existingDoc.data();
-    const existingState = existingData.state;
+    // Update existing goal inside a transaction so concurrent entries can't
+    // clobber each other's state transition (the previous read-modify-write on
+    // a JS-spread stateHistory lost transitions under concurrency).
+    const goalRef = existingSnapshot.docs[0].ref;
 
-    // Skip if already in terminal state
-    if (['achieved', 'abandoned'].includes(existingState)) {
-      console.log(`Skipping update for terminated goal: ${topicKey} (${existingState})`);
-      return { id: existingDoc.id, ...existingData, skipped: true };
-    }
-
-    let newState = existingState;
-    let historyEntry = null;
-
-    switch (updateType) {
-      case 'termination':
-        newState = 'abandoned';
-        historyEntry = { from: existingState, to: 'abandoned', at: now, context: { terminationEntry: entryId, reason: 'termination_language' } };
-        break;
-      case 'achievement':
-        newState = 'achieved';
-        historyEntry = { from: existingState, to: 'achieved', at: now, context: { achievementEntry: entryId } };
-        break;
-      case 'progress':
-        // Auto-confirm proposed goals on progress
-        if (existingState === 'proposed') {
-          newState = 'active';
-          historyEntry = { from: 'proposed', to: 'active', at: now, context: { autoConfirmed: true, progressEntry: entryId } };
-        }
-        // For active goals, just update lastUpdated
-        break;
-      case 'mention':
-        // Just update lastUpdated to prevent false abandonment detection
-        break;
-    }
-
-    const updateData = {
-      lastUpdated: now,
-      sourceEntries: FieldValue.arrayUnion(entryId)
-    };
-
-    if (newState !== existingState && historyEntry) {
-      // Limit stateHistory to prevent document bloat
-      let newHistory = [...(existingData.stateHistory || []), historyEntry];
-      if (newHistory.length > 20) {
-        const firstEntry = newHistory[0];
-        const recentEntries = newHistory.slice(-19);
-        newHistory = [firstEntry, ...recentEntries];
+    return await db.runTransaction(async (t) => {
+      const snap = await t.get(goalRef);
+      if (!snap.exists) {
+        return { id: goalRef.id, skipped: true };
       }
 
-      updateData.state = newState;
-      updateData.stateHistory = newHistory;
-    }
+      const existingData = snap.data();
+      const existingState = existingData.state;
 
-    await existingDoc.ref.update(updateData);
-    console.log(`Updated goal ${topicKey}: ${existingState} → ${newState}`);
+      // Skip if already in terminal state
+      if (['achieved', 'abandoned'].includes(existingState)) {
+        console.log(`Skipping update for terminated goal: ${topicKey} (${existingState})`);
+        return { id: goalRef.id, ...existingData, skipped: true };
+      }
 
-    return { id: existingDoc.id, state: newState, previousState: existingState };
+      let newState = existingState;
+      let historyEntry = null;
+
+      switch (updateType) {
+        case 'termination':
+          newState = 'abandoned';
+          historyEntry = { from: existingState, to: 'abandoned', at: nowTs, context: { terminationEntry: entryId, reason: 'termination_language' } };
+          break;
+        case 'achievement':
+          newState = 'achieved';
+          historyEntry = { from: existingState, to: 'achieved', at: nowTs, context: { achievementEntry: entryId } };
+          break;
+        case 'progress':
+          // Auto-confirm proposed goals on progress
+          if (existingState === 'proposed') {
+            newState = 'active';
+            historyEntry = { from: 'proposed', to: 'active', at: nowTs, context: { autoConfirmed: true, progressEntry: entryId } };
+          }
+          // For active goals, just update lastUpdated
+          break;
+        case 'mention':
+          // Just update lastUpdated to prevent false abandonment detection
+          break;
+      }
+
+      const updateData = {
+        lastUpdated: now,
+        sourceEntries: FieldValue.arrayUnion(entryId)
+      };
+
+      if (newState !== existingState && historyEntry) {
+        // Limit stateHistory to prevent document bloat
+        let newHistory = [...(existingData.stateHistory || []), historyEntry];
+        if (newHistory.length > 20) {
+          const firstEntry = newHistory[0];
+          const recentEntries = newHistory.slice(-19);
+          newHistory = [firstEntry, ...recentEntries];
+        }
+
+        updateData.state = newState;
+        updateData.stateHistory = newHistory;
+      }
+
+      t.update(goalRef, updateData);
+      console.log(`Updated goal ${topicKey}: ${existingState} → ${newState}`);
+
+      return { id: goalRef.id, state: newState, previousState: existingState };
+    });
   }
 }
 

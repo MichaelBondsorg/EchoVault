@@ -129,15 +129,23 @@ export const processEntrySignals = async (entry, text, extractionVersion) => {
 export const reprocessSignalsOnEdit = async (entryId, newText, userId, newVersion) => {
   console.log(`Re-processing signals for edited entry ${entryId} (new version ${newVersion})`);
 
-  // Delete existing signals for this entry
-  await deleteSignalsForEntry(entryId, userId);
-
-  // Extract and save new signals
+  // Extract and save new signals FIRST. saveSignalsWithVersionCheck atomically
+  // deletes older-version signals as it writes the new ones, so a successful run
+  // replaces cleanly. Critically, if extraction FAILS, nothing is saved or
+  // deleted and the entry's existing goals/insights are preserved. (Previously
+  // this deleted all signals up front and then lost them when extraction failed,
+  // because the swallowed error looked like a successful empty result.)
   const result = await processEntrySignals(
     { id: entryId, userId },
     newText,
     newVersion
   );
+
+  // If extraction genuinely succeeded but produced no signals, the atomic
+  // version-save wasn't called — clear the now-stale older signals explicitly.
+  if (!result.error && !result.stale && (result.signals?.length ?? 0) === 0) {
+    await deleteSignalsForEntry(entryId, userId);
+  }
 
   return result;
 };
