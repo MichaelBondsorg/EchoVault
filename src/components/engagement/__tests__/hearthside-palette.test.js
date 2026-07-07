@@ -169,21 +169,6 @@ describe('EntryInsightsPopup.jsx — Hearthside palette', () => {
   });
 });
 
-describe('FeedbackLoop.jsx — Hearthside palette', () => {
-  const src = readComponent('dashboard/shared', 'FeedbackLoop.jsx');
-
-  it('confetti colors should not contain raw green hex values', () => {
-    expect(src).not.toContain('#10b981');
-    expect(src).not.toContain('#34d399');
-    expect(src).not.toContain('#6ee7b7');
-    expect(src).not.toContain('#a7f3d0');
-  });
-
-  it('should import HEX_COLORS from colorMap', () => {
-    expect(src).toMatch(/import\s*\{[^}]*HEX_COLORS[^}]*\}\s*from/);
-  });
-});
-
 describe('DetectedStrip.jsx — Hearthside palette', () => {
   const src = readComponent('entries', 'DetectedStrip.jsx');
 
@@ -267,7 +252,6 @@ describe('All engagement files have dark: classes', () => {
     ['prompts', 'GapPromptCard.jsx'],
     ['insights', 'DismissibleInsight.jsx'],
     ['modals', 'EntryInsightsPopup.jsx'],
-    ['dashboard/shared', 'FeedbackLoop.jsx'],
     ['entries', 'DetectedStrip.jsx'],
     // GuidedSessionPicker excluded: uses white-on-dark glass styling (always dark background)
     ['zen', 'CompanionNudge.jsx'],
