@@ -4010,6 +4010,50 @@ export const exchangeAppleToken = onCall(
   }
 );
 
+/**
+ * Delete the authenticated user's account and ALL of their data.
+ *
+ * Required for App Store (5.1.1(v)) and Google Play. Recursively deletes the
+ * user's entire Firestore document tree (entries, signals, nexus, safety plan,
+ * health tokens, fcm tokens, settings, memory, etc.) and then the Firebase Auth
+ * user. Auth is the last step so a mid-operation failure leaves the account
+ * recoverable rather than orphaning data under a deleted uid.
+ */
+export const deleteAccount = onCall(
+  {
+    cors: true,
+    maxInstances: 5,
+  },
+  async (request) => {
+    if (!request.auth) {
+      throw new HttpsError('unauthenticated', 'You must be signed in to delete your account.');
+    }
+
+    const uid = request.auth.uid;
+    console.log(`[deleteAccount] Deleting all data for user ${uid}`);
+
+    try {
+      // recursiveDelete removes the user document and every subcollection
+      // beneath it in batches.
+      const userDocRef = db
+        .collection('artifacts')
+        .doc(APP_COLLECTION_ID)
+        .collection('users')
+        .doc(uid);
+      await db.recursiveDelete(userDocRef);
+
+      // Finally remove the auth identity itself.
+      await getAuth().deleteUser(uid);
+
+      console.log(`[deleteAccount] Completed deletion for user ${uid}`);
+      return { success: true };
+    } catch (error) {
+      console.error(`[deleteAccount] Failed for user ${uid}:`, error);
+      throw new HttpsError('internal', 'Account deletion failed. Please try again or contact support.');
+    }
+  }
+);
+
 // ============================================
 // WEEKLY NARRATIVE DIGEST FUNCTIONS
 // ============================================
