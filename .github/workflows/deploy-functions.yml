@@ -4,7 +4,6 @@ on:
   push:
     branches:
       - main
-      - 'claude/**'
     paths:
       - 'functions/**'
       - '.github/workflows/deploy-functions.yml'
@@ -16,15 +15,47 @@ on:
         default: 'production'
 
 jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      # The Functions test files run under the ROOT vitest config
+      # (see vitest.config.js `include:` — functions/src/**/__tests__ are
+      # cherry-picked into the root run), so the root suite is the gate for
+      # Functions changes too. Emulator-backed suites (firestoreRules) are
+      # wired separately in a later hardening step.
+      - name: Install root dependencies
+        run: npm ci
+
+      # Functions test files import firebase-functions/firebase-admin, resolved
+      # from functions/node_modules — install them so the cherry-picked
+      # functions/src tests can load.
+      - name: Install Functions dependencies
+        run: |
+          cd functions
+          npm ci || npm install
+
+      - name: Run test suite (covers src/ and functions/src/)
+        run: npm test
+
   deploy:
+    needs: test
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4
         with:
           node-version: '20'
 
@@ -34,7 +65,7 @@ jobs:
           npm ci || npm install
 
       - name: Deploy to Firebase
-        uses: w9jds/firebase-action@master
+        uses: w9jds/firebase-action@a1d77669d1c6a9e6f8b731356c6015d981569a7a  # v15.22.4
         with:
           args: deploy --only functions --project echo-vault-app
         env:

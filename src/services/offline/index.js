@@ -27,6 +27,7 @@ export {
   markSyncing,
   markSynced,
   markFailed,
+  resetStuckSyncing,
   clearSyncedEntries,
   getStats
 } from './offlineStore';

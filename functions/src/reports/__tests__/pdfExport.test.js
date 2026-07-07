@@ -70,6 +70,13 @@ const makePrivacy = (overrides = {}) => ({
   ...overrides,
 });
 
+// Helper: mock the subscription read used by the entitlement gate.
+// Must be queued FIRST — handleExportRequest checks entitlement before reading
+// the report doc.
+const mockActiveSubscription = () => {
+  mockGet.mockResolvedValueOnce({ exists: true, data: () => ({ status: 'active' }) });
+};
+
 // Helper: mock entry lookups (non-crisis by default)
 const mockEntryLookups = (count, crisisIds = new Set()) => {
   for (let i = 0; i < count; i++) {
@@ -155,7 +162,27 @@ describe('pdfExport', () => {
         .rejects.toThrow(/invalid/i);
     });
 
+    it('rejects a non-premium user exporting a premium report', async () => {
+      // No active subscription → entitlement gate rejects before any report read.
+      mockGet.mockResolvedValueOnce({ exists: false });
+      const { handleExportRequest } = await import('../pdfExport.js');
+      await expect(handleExportRequest({ reportId: VALID_REPORT_ID }, 'user1'))
+        .rejects.toThrow(/premium/i);
+    });
+
+    it('allows a weekly (free) report without a subscription', async () => {
+      // Weekly is a free feature: checkEntitlement short-circuits and never
+      // reads the subscription doc, so the first Firestore get is the report.
+      mockGet.mockResolvedValueOnce({ exists: true, data: () => makeReport({ cadence: 'weekly' }) });
+      mockGet.mockResolvedValueOnce({ exists: true, data: () => makePrivacy() });
+      mockEntryLookups(4);
+      const { handleExportRequest } = await import('../pdfExport.js');
+      const result = await handleExportRequest({ reportId: 'weekly-2026-01-05' }, 'user1');
+      expect(result.downloadUrl).toBeTruthy();
+    });
+
     it('rejects if report does not exist', async () => {
+      mockActiveSubscription();
       mockGet.mockResolvedValueOnce({ exists: false });
       const { handleExportRequest } = await import('../pdfExport.js');
       await expect(handleExportRequest({ reportId: VALID_REPORT_ID }, 'user1'))
@@ -163,6 +190,7 @@ describe('pdfExport', () => {
     });
 
     it('rejects if report status is not ready', async () => {
+      mockActiveSubscription();
       mockGet.mockResolvedValueOnce({ exists: true, data: () => makeReport({ status: 'generating' }) });
       const { handleExportRequest } = await import('../pdfExport.js');
       await expect(handleExportRequest({ reportId: VALID_REPORT_ID }, 'user1'))
@@ -170,6 +198,7 @@ describe('pdfExport', () => {
     });
 
     it('generates PDF and returns download URL', async () => {
+      mockActiveSubscription();
       // Report doc
       mockGet.mockResolvedValueOnce({ exists: true, data: () => makeReport() });
       // Privacy prefs doc
@@ -187,6 +216,7 @@ describe('pdfExport', () => {
     });
 
     it('applies section redactions from privacy preferences', async () => {
+      mockActiveSubscription();
       mockGet.mockResolvedValueOnce({ exists: true, data: () => makeReport() });
       mockGet.mockResolvedValueOnce({ exists: true, data: () => makePrivacy({ hiddenSections: ['goals'] }) });
       // Entry lookups (4 unique entries)
@@ -199,6 +229,7 @@ describe('pdfExport', () => {
     });
 
     it('strips crisis-flagged entries from export', async () => {
+      mockActiveSubscription();
       mockGet.mockResolvedValueOnce({ exists: true, data: () => makeReport() });
       mockGet.mockResolvedValueOnce({ exists: true, data: () => makePrivacy() });
       // Entry lookups: e2 is crisis-flagged
@@ -212,6 +243,7 @@ describe('pdfExport', () => {
     });
 
     it('URL expires after 24 hours', async () => {
+      mockActiveSubscription();
       mockGet.mockResolvedValueOnce({ exists: true, data: () => makeReport() });
       mockGet.mockResolvedValueOnce({ exists: false });
       // Entry lookups
@@ -231,6 +263,7 @@ describe('pdfExport', () => {
     });
 
     it('uploads to correct storage path', async () => {
+      mockActiveSubscription();
       mockGet.mockResolvedValueOnce({ exists: true, data: () => makeReport() });
       mockGet.mockResolvedValueOnce({ exists: false });
       // Entry lookups

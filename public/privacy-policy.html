@@ -119,13 +119,13 @@
     <a href="/" class="back-link">&larr; Back to Engram</a>
 
     <h1>Privacy Policy</h1>
-    <p class="updated">Last Updated: December 2024</p>
+    <p class="updated">Last Updated: July 6, 2026</p>
 
     <h2>Introduction</h2>
     <p>Engram ("we", "our", or "us") is committed to protecting your privacy. This Privacy Policy explains how we collect, use, disclose, and safeguard your information when you use our mobile application and related services.</p>
 
     <div class="highlight">
-      <strong>Engram is a personal mental health journaling application. We take the privacy of your mental health data extremely seriously.</strong>
+      <strong>Engram is a general-wellness journaling tool for self-reflection. It is not therapy, not a medical device, and not a crisis service, and it does not diagnose, treat, cure, or prevent any condition. We take the privacy of your journaling and health data extremely seriously and never sell it or use it for advertising.</strong>
     </div>
 
     <h2>Information We Collect</h2>
@@ -133,27 +133,39 @@
     <h3>Information You Provide</h3>
     <ul>
       <li><strong>Journal Entries</strong>: Text entries, voice recordings, and transcriptions you create</li>
-      <li><strong>Account Information</strong>: Email address and authentication data when you sign in with Google</li>
+      <li><strong>Account Information</strong>: Email address and authentication data when you sign in with Google, Apple, or email &amp; password (including optional two-factor authentication)</li>
       <li><strong>Mood Data</strong>: Mood ratings and emotional context you provide with entries</li>
       <li><strong>Safety Plans</strong>: Personal safety information, coping strategies, and emergency contacts you choose to store</li>
+    </ul>
+
+    <h3>Health, Biometric &amp; Environmental Data (Optional)</h3>
+    <p>If you choose to connect these sources, we collect and use them only to add context to your entries and correlations. This data is never used for advertising or shared with data brokers.</p>
+    <ul>
+      <li><strong>Wearable biometrics (WHOOP)</strong>: recovery, strain, sleep, and heart-rate metrics, retrieved via WHOOP's API with your authorization</li>
+      <li><strong>Apple Health / Google Fit</strong>: sleep, heart rate, steps, and related metrics you permit the app to read</li>
+      <li><strong>Location</strong>: your approximate location (when granted) to attach weather/environmental context to an entry</li>
+      <li><strong>Weather</strong>: local weather and daylight data retrieved from the Open-Meteo service using your location</li>
     </ul>
 
     <h3>Information Collected Automatically</h3>
     <ul>
       <li><strong>Usage Data</strong>: Features used, interaction patterns (stored locally and in your private Firebase account)</li>
       <li><strong>Device Information</strong>: Device type, operating system version (for compatibility purposes only)</li>
+      <li><strong>Crash &amp; Diagnostics</strong>: crash reports and error diagnostics via Firebase Crashlytics to keep the app stable (we do not include your journal content in crash reports)</li>
     </ul>
 
     <h3>Information Processed by Third-Party AI Services</h3>
-    <p>To provide AI-powered features, certain data is processed by third-party services:</p>
+    <p>To provide AI-powered features, certain data is processed by third-party AI providers acting as our service providers. We ask for your permission before sending journal or health data to these services.</p>
     <ul>
-      <li><strong>Voice Transcription</strong>: Audio recordings are sent to OpenAI's Whisper API for transcription</li>
-      <li><strong>Entry Analysis</strong>: Journal entry text is sent to Google Gemini API for mood analysis and insights</li>
+      <li><strong>Voice Transcription</strong>: Audio recordings are sent to OpenAI (Whisper) to convert speech to text</li>
+      <li><strong>Voice Conversations</strong>: When you use the AI companion by voice, audio and transcripts are streamed to OpenAI's real-time GPT-4o service to power the conversation</li>
+      <li><strong>Entry Analysis &amp; Insights</strong>: Journal entry text is sent to Google Gemini for mood analysis, pattern detection, and insight generation</li>
+      <li><strong>AI Chat</strong>: Questions and relevant entry context you send to the AI assistant are processed by OpenAI and/or Google Gemini</li>
       <li><strong>Smart Search</strong>: Entry embeddings are generated using AI services for semantic search</li>
     </ul>
 
     <div class="highlight">
-      <strong>Important</strong>: We do not store your data on third-party AI servers beyond the time needed to process your request.
+      <strong>Important</strong>: These AI providers process your data only to return a result to you. Under their API terms they do not use your content to train their models, and retention is limited to short abuse-monitoring windows (or none, where zero-retention processing is available). We are not a HIPAA-covered entity and do not describe ourselves as "HIPAA-compliant".
     </div>
 
     <h2>How We Use Your Information</h2>
@@ -185,9 +197,10 @@
 
     <h2>Data Sharing and Disclosure</h2>
     <p><strong>We do not sell your personal information.</strong></p>
+    <p><strong>We never use your health, biometric, or journal data for advertising, and we do not share it with advertising networks or data brokers.</strong></p>
     <p>We may share your information only in these circumstances:</p>
     <ul>
-      <li><strong>Service Providers</strong>: With AI service providers (OpenAI, Google) solely to provide transcription and analysis features</li>
+      <li><strong>Service Providers</strong>: With infrastructure and AI service providers (Google Firebase, OpenAI, Google Gemini, WHOOP, Open-Meteo) solely to operate the features you use</li>
       <li><strong>Legal Requirements</strong>: If required by law or to protect our rights</li>
       <li><strong>With Your Consent</strong>: When you explicitly authorize sharing</li>
     </ul>
@@ -196,9 +209,9 @@
     <p>You have the right to:</p>
     <ul>
       <li><strong>Access</strong>: View all your stored journal entries and data within the app</li>
-      <li><strong>Delete</strong>: Delete individual entries or your entire account</li>
+      <li><strong>Delete</strong>: Delete individual entries, or permanently delete your entire account and all associated data from within the app (Settings &rarr; Safety &amp; Privacy &rarr; Delete Account) or via our <a href="/delete-account.html">account deletion page</a></li>
       <li><strong>Export</strong>: Export your journal entries (PDF export feature)</li>
-      <li><strong>Opt-Out</strong>: Stop using voice recording or AI features at any time</li>
+      <li><strong>Opt-Out</strong>: Stop using voice recording, health integrations, or AI features at any time</li>
     </ul>
 
     <h2>Data Retention</h2>
@@ -209,7 +222,7 @@
     </ul>
 
     <h2>Children's Privacy</h2>
-    <p>Engram is not intended for children under 13. We do not knowingly collect information from children under 13. If you believe we have collected such information, please contact us immediately.</p>
+    <p>Engram is intended for adults and is not directed to children. We do not knowingly collect information from anyone under 18. If you believe a minor has provided us information, please contact us and we will delete it.</p>
 
     <div class="crisis-box">
       <h3>Mental Health Disclaimer</h3>
@@ -243,8 +256,23 @@
         </tr>
         <tr>
           <td>OpenAI</td>
-          <td>Voice Transcription</td>
+          <td>Voice transcription &amp; voice conversations (Whisper, GPT-4o)</td>
           <td><a href="https://openai.com/privacy" target="_blank">OpenAI Privacy</a></td>
+        </tr>
+        <tr>
+          <td>WHOOP</td>
+          <td>Wearable biometrics (optional)</td>
+          <td><a href="https://www.whoop.com/privacy/" target="_blank">WHOOP Privacy</a></td>
+        </tr>
+        <tr>
+          <td>Open-Meteo</td>
+          <td>Weather &amp; daylight context</td>
+          <td><a href="https://open-meteo.com/en/terms" target="_blank">Open-Meteo Terms</a></td>
+        </tr>
+        <tr>
+          <td>Firebase Crashlytics</td>
+          <td>Crash &amp; error diagnostics</td>
+          <td><a href="https://firebase.google.com/support/privacy" target="_blank">Firebase Privacy</a></td>
         </tr>
       </tbody>
     </table>
@@ -253,7 +281,7 @@
     <p>We may update this Privacy Policy from time to time. We will notify you of any changes by posting the new Privacy Policy in the app and updating the "Last Updated" date.</p>
 
     <h2>Contact Us</h2>
-    <p>If you have questions about this Privacy Policy or our data practices, please contact us.</p>
+    <p>If you have questions about this Privacy Policy or our data practices, or to exercise any of your rights, contact us at <a href="mailto:support@theengram.app">support@theengram.app</a>.</p>
 
     <hr style="margin: 2rem 0; border: none; border-top: 1px solid rgba(255,255,255,0.1);">
 

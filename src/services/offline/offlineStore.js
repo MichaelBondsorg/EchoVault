@@ -197,6 +197,35 @@ export const markFailed = async (offlineId, error) => {
 };
 
 /**
+ * Reset entries stranded in 'syncing' back to 'pending'.
+ *
+ * If the app is killed mid-sync, an entry can be left in 'syncing' forever —
+ * getPendingEntries only returns 'pending', so it would never be retried and
+ * never shown. Call this on startup so stranded entries re-enter the queue.
+ *
+ * @returns {Promise<number>} Number of entries reset
+ */
+export const resetStuckSyncing = async () => {
+  const entries = await getOfflineEntries();
+  let reset = 0;
+  const repaired = entries.map(e => {
+    if (e.syncStatus === 'syncing') {
+      reset++;
+      return { ...e, syncStatus: 'pending' };
+    }
+    return e;
+  });
+  if (reset > 0) {
+    await Preferences.set({
+      key: OFFLINE_ENTRIES_KEY,
+      value: JSON.stringify(repaired)
+    });
+    console.log('[OfflineStore] Reset', reset, 'stranded syncing entries to pending');
+  }
+  return reset;
+};
+
+/**
  * Clear all synced entries from storage
  * @returns {Promise<number>} Number of entries cleared
  */
@@ -291,6 +320,7 @@ export default {
   markSyncing,
   markSynced,
   markFailed,
+  resetStuckSyncing,
   clearSyncedEntries,
   getMetadata,
   updateMetadata,

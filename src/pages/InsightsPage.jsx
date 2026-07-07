@@ -3,8 +3,9 @@ import {
   Brain, Sparkles, TrendingUp, AlertTriangle, Lightbulb, X,
   ChevronDown, ChevronUp, RefreshCw, Loader2, CheckCircle2,
   Activity, FileText, Target, Sun, Moon, Heart, Thermometer,
-  CloudRain, Footprints, Zap, Download, ThumbsUp, ThumbsDown
+  CloudRain, Footprints, Zap, Download, ThumbsUp, ThumbsDown, Flag
 } from 'lucide-react';
+import { reportInsight } from '../services/moderation/reportInsight';
 import { useNexusInsights } from '../hooks/useNexusInsights';
 import { useBasicInsights } from '../hooks/useBasicInsights';
 import { useState, useEffect, useMemo, useCallback } from 'react';
@@ -170,6 +171,16 @@ const InsightsPage = ({
     }
   };
 
+  const handleReportInsight = async (insight, e) => {
+    e?.stopPropagation?.();
+    // Record the report, then dismiss it from view. Best-effort — never blocks UI.
+    await reportInsight(userId, insight);
+    setDismissedInsights(prev => new Set([...prev, insight.id || insight.message]));
+    if (expandedInsight === insight.id) {
+      setExpandedInsight(null);
+    }
+  };
+
   const handleToggleExpand = (insightId) => {
     setExpandedInsight(expandedInsight === insightId ? null : insightId);
   };
@@ -274,6 +285,7 @@ const InsightsPage = ({
                 isExpanded={expandedInsight === (insight.id || index)}
                 onToggleExpand={() => handleToggleExpand(insight.id || index)}
                 onDismiss={(e) => handleDismissInsight(insight, e)}
+                onReport={(e) => handleReportInsight(insight, e)}
               />
             ))}
           </AnimatePresence>
@@ -1590,7 +1602,7 @@ const getStringContent = (...fields) => {
 /**
  * NexusInsightCard - Expandable insight display
  */
-const NexusInsightCard = ({ insight, isExpanded, onToggleExpand, onDismiss }) => {
+const NexusInsightCard = ({ insight, isExpanded, onToggleExpand, onDismiss, onReport }) => {
   // Determine insight type styling
   const getInsightStyle = () => {
     const type = insight.type || insight.source || 'pattern';
@@ -1704,6 +1716,17 @@ const NexusInsightCard = ({ insight, isExpanded, onToggleExpand, onDismiss }) =>
                       <ChevronDown size={14} className="text-warm-500" />
                     )}
                   </div>
+                )}
+                {/* Report AI-generated content (Play AI-content policy) */}
+                {onReport && (
+                  <button
+                    onClick={onReport}
+                    className="p-2 hover:bg-warm-200/50 rounded-full transition-colors min-w-[44px] min-h-[44px] flex items-center justify-center"
+                    aria-label="Report this insight as inappropriate"
+                    title="Report this insight"
+                  >
+                    <Flag size={16} className="text-warm-400" />
+                  </button>
                 )}
                 {/* INT-003: Increased tap target size for accessibility (44x44px minimum) */}
                 <button

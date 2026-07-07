@@ -70,8 +70,9 @@ export interface AudioResponse {
 
 export interface SessionSaved {
   type: 'session_saved';
-  entryId: string;
+  entryId: string | null;
   success: boolean;
+  error?: string;
 }
 
 export interface SessionError {

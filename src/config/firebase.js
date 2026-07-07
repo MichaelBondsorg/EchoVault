@@ -71,6 +71,7 @@ export const exchangeAppleTokenFn = httpsCallable(functions, 'exchangeAppleToken
 export const reprocessEntriesForGoalsFn = httpsCallable(functions, 'reprocessEntriesForGoals', { timeout: 540000 }); // 9 min
 export const migrateEntitiesFromEntriesFn = httpsCallable(functions, 'migrateEntitiesFromEntries', { timeout: 540000 }); // 9 min
 export const exportReportPdfFn = httpsCallable(functions, 'exportReportPdf', { timeout: 120000 }); // 2 min
+export const deleteAccountFn = httpsCallable(functions, 'deleteAccount', { timeout: 300000 }); // 5 min - recursive delete can be slow
 
 // Expose for console debugging
 if (typeof window !== 'undefined') {

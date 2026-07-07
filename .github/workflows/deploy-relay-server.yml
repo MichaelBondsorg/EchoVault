@@ -24,15 +24,15 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
 
       - name: Google Auth
-        uses: google-github-actions/auth@v2
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed  # v2
         with:
           credentials_json: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
 
       - name: Set up Cloud SDK
-        uses: google-github-actions/setup-gcloud@v2
+        uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f  # v2
         with:
           project_id: ${{ env.PROJECT_ID }}
 
@@ -49,15 +49,29 @@ jobs:
           docker push gcr.io/${{ env.PROJECT_ID }}/${{ env.SERVICE_NAME }}:${{ github.sha }}
           docker push gcr.io/${{ env.PROJECT_ID }}/${{ env.SERVICE_NAME }}:latest
 
-      - name: Deploy to Cloud Run
+      # Deploy the new revision WITHOUT sending traffic to it yet, so a bad
+      # build cannot take down live voice sessions on push. Traffic is promoted
+      # in a separate, explicit step below.
+      - name: Deploy new revision (no traffic)
         run: |
           gcloud run deploy ${{ env.SERVICE_NAME }} \
             --image gcr.io/${{ env.PROJECT_ID }}/${{ env.SERVICE_NAME }}:${{ github.sha }} \
             --region ${{ env.REGION }} \
             --platform managed \
             --allow-unauthenticated \
+            --no-traffic \
+            --tag candidate \
             --set-env-vars="NODE_ENV=production,WHOOP_REDIRECT_URI=https://echovault-voice-relay-581319345416.us-central1.run.app/auth/whoop/callback" \
             --set-secrets="OPENAI_API_KEY=OPENAI_API_KEY:latest,WHOOP_CLIENT_ID=WHOOP_CLIENT_ID:latest,WHOOP_CLIENT_SECRET=WHOOP_CLIENT_SECRET:latest,WHOOP_TOKEN_ENCRYPTION_KEY=WHOOP_TOKEN_ENCRYPTION_KEY:latest,GEMINI_API_KEY=GEMINI_API_KEY:latest"
+
+      # Promote the candidate revision to 100% traffic. Split into its own step
+      # so it can be gated/paused later (canary) without touching the build.
+      # Rollback: `gcloud run services update-traffic <svc> --to-revisions <prev>=100`.
+      - name: Promote candidate to 100% traffic
+        run: |
+          gcloud run services update-traffic ${{ env.SERVICE_NAME }} \
+            --region ${{ env.REGION }} \
+            --to-latest
 
       - name: Show deployment URL
         run: |

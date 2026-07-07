@@ -76,7 +76,8 @@ export const transcribeAudio = async (base64, mimeType, maxRetries = 3) => {
         continue;
       }
 
-      console.log('Whisper transcription result:', transcript);
+      // Do not log journal/voice content (PII). Log length only.
+      console.log('Whisper transcription result length:', transcript?.length ?? 0);
       return transcript;
     } catch (e) {
       console.error(`Whisper API exception (attempt ${attempt + 1}):`, e);

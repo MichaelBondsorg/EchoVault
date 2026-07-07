@@ -43,7 +43,8 @@ import {
 } from './services/analysis';
 import { checkCrisisKeywords, checkWarningIndicators, checkLongitudinalRisk } from './services/safety';
 import { retrofitEntriesInBackground } from './services/entries';
-import { queueEntry, getSyncStatus } from './services/offline';
+import { queueEntry, getSyncStatus, resetStuckSyncing } from './services/offline';
+import { initializeSyncOrchestrator, triggerSync } from './services/sync/syncOrchestrator';
 import { inferCategory } from './services/prompts';
 import { getActiveReflectionPrompts, dismissReflectionPrompt } from './services/prompts/activePrompts';
 import { detectTemporalContext, needsConfirmation, formatEffectiveDate } from './services/temporal';
@@ -81,11 +82,17 @@ import {
   MarkdownLite, GetHelpButton, HamburgerMenu,
   DayDashboard, EntryBar
 } from './components';
-import UnifiedConversation from './components/chat/UnifiedConversation';
-import NexusSettings from './components/settings/NexusSettings';
-import EntityManagementPage from './pages/EntityManagementPage';
 import WhatsNewModal from './components/shared/WhatsNewModal';
-import { ReportListWithSuspense, ReportViewerWithSuspense } from './components/lazy';
+import AiConsentModal from './components/modals/AiConsentModal';
+// Heavy screens are code-split via the lazy wrappers (aliased so JSX usage is
+// unchanged). UnifiedConversation was imported here but only rendered in
+// AppLayout — the dead import is dropped and it's lazy-loaded there instead.
+import {
+  ReportListWithSuspense,
+  ReportViewerWithSuspense,
+  NexusSettingsWithSuspense as NexusSettings,
+  EntityManagementPageWithSuspense as EntityManagementPage,
+} from './components/lazy';
 
 // Dashboard Enhancement Components
 import { QuickStatsBar, GoalsProgress, WeeklyDigest, SituationTimeline, ReflectionPrompts } from './components/dashboard/shared';
@@ -136,8 +143,7 @@ const loadJsPDF = () => {
 export default function App() {
   console.log('[Engram] App component rendering...');
   useIOSMeta();
-  const { permission, requestPermission } = useNotifications();
-  const { isOnline, wasOffline, clearWasOffline } = useNetworkStatus();
+  const { isOnline, pendingCount: offlinePendingCount } = useNetworkStatus();
   const { requestWakeLock, releaseWakeLock } = useWakeLock();
   const { backupAudio, clearBackup, isProcessing: isBackgroundProcessing } = useBackgroundAudio();
 
@@ -162,6 +168,54 @@ export default function App() {
     startAuth, authFailed, authSuccess, resetAuthForm,
     switchToMfa, clearMfaState
   } = useAuthStore();
+
+  // Register for push notifications once we know who the user is. Previously
+  // useNotifications() was called with no userId, so token registration never
+  // fired — no fcm_tokens were written and the app could never send a reminder.
+  // This one-line fix activates the entire (already-built) notification backend.
+  const { permission, requestPermission } = useNotifications(user?.uid);
+
+  // First-run AI-processing consent (Apple 5.1.2(i)). We must disclose and get
+  // permission before sending journal/health data to third-party AI. The modal
+  // gates the app on first run until acknowledged; consent is recorded per
+  // device (localStorage) and to Firestore for audit.
+  const AI_CONSENT_VERSION = '1';
+  const [needsAiConsent, setNeedsAiConsent] = useState(false);
+  const [aiConsentSaving, setAiConsentSaving] = useState(false);
+
+  useEffect(() => {
+    if (!user?.uid) {
+      setNeedsAiConsent(false);
+      return;
+    }
+    try {
+      const accepted = localStorage.getItem('engram.aiConsentVersion');
+      setNeedsAiConsent(accepted !== AI_CONSENT_VERSION);
+    } catch {
+      setNeedsAiConsent(true);
+    }
+  }, [user?.uid]);
+
+  const handleAiConsent = async () => {
+    setAiConsentSaving(true);
+    try {
+      localStorage.setItem('engram.aiConsentVersion', AI_CONSENT_VERSION);
+      localStorage.setItem('engram.aiConsentAcceptedAt', new Date().toISOString());
+    } catch { /* private mode — proceed anyway */ }
+    try {
+      if (user?.uid) {
+        await setDoc(
+          doc(db, 'artifacts', APP_COLLECTION_ID, 'users', user.uid, 'settings', 'consent'),
+          { aiProcessing: true, consentVersion: AI_CONSENT_VERSION, acceptedAt: Timestamp.now() },
+          { merge: true }
+        );
+      }
+    } catch (e) {
+      console.error('Failed to record AI consent:', e);
+    }
+    setNeedsAiConsent(false);
+    setAiConsentSaving(false);
+  };
 
   // Wrapper functions for store setters that need to accept full objects
   const setMfaResolver = (resolver) => setMfaResolverStore(resolver);
@@ -204,7 +258,6 @@ export default function App() {
     processing, setProcessing,
     replyContext, setReplyContext, clearReplyContext,
     entryPreferredMode, setEntryPreferredMode,
-    offlineQueue, setOfflineQueue,
     retrofitProgress, setRetrofitProgress
   } = useEntriesStore();
 
@@ -333,147 +386,80 @@ export default function App() {
     };
   }, [showHealthSettings]);
 
-  // Process offline queue when back online
+  // Initialize the offline sync orchestrator once we have a user.
+  //
+  // This drains the PERSISTENT offline queue (Capacitor Preferences, survives
+  // app restart). The previous handler drained an in-memory queue that was lost
+  // on app kill AND threw a TypeError (Timestamp.fromDate on an ISO string),
+  // silently dropping every offline entry on reconnect. Reconnect syncing is
+  // wired in useNetworkStatus (handleNetworkChange + triggerSync); it simply
+  // never ran because the orchestrator was never initialized.
   useEffect(() => {
-    const processOfflineQueue = async () => {
-      if (!isOnline || !wasOffline || offlineQueue.length === 0 || !user) return;
+    if (!user?.uid) return;
+    const uid = user.uid;
 
-      console.log(`Processing ${offlineQueue.length} offline entries...`);
-      clearWasOffline();
+    // Write a queued offline entry to Firestore. Idempotent: the doc id is
+    // derived from the offlineId, so a re-sync after a lost network ack
+    // overwrites the same doc instead of creating a duplicate. Analysis is left
+    // 'pending' and completed by the server-side pipeline / watchdog.
+    const saveEntry = async (entryData) => {
+      const entriesCol = collection(db, 'artifacts', APP_COLLECTION_ID, 'users', uid, 'entries');
+      const ref = entryData.offlineId
+        ? doc(entriesCol, entryData.offlineId)
+        : doc(entriesCol);
 
-      for (const offlineEntry of offlineQueue) {
-        try {
-          // OPTIMIZED: Skip embedding generation, let Firestore trigger handle it
-          const embedding = null;
+      const createdAtDate = entryData.createdAt ? new Date(entryData.createdAt) : new Date();
+      const effectiveDate = entryData.effectiveDate ? new Date(entryData.effectiveDate) : createdAtDate;
 
-          // Prepare entry data for Firestore
-          const entryData = {
-            text: offlineEntry.text,
-            category: offlineEntry.category,
-            analysisStatus: 'pending',
-            embedding,
-            createdAt: Timestamp.fromDate(offlineEntry.createdAt),
-            effectiveDate: Timestamp.fromDate(offlineEntry.effectiveDate || offlineEntry.createdAt),
-            userId: user.uid,
-            signalExtractionVersion: 1
-          };
+      const data = removeUndefined({
+        text: entryData.text,
+        category: entryData.category || undefined,
+        createdAt: Timestamp.fromDate(createdAtDate),
+        effectiveDate: Timestamp.fromDate(effectiveDate),
+        analysisStatus: 'pending',
+        signalExtractionVersion: 1,
+        createdOnPlatform: entryData.platform || undefined,
+        syncedFromOffline: true,
+        offlineId: entryData.offlineId || undefined,
+        localAnalysis: entryData.localAnalysis || undefined,
+        healthContext: entryData.healthContext || undefined,
+        environmentContext: entryData.environmentContext || undefined,
+        voiceTone: entryData.voiceTone || undefined,
+        safety_flagged: entryData.safety_flagged || undefined,
+        safety_user_response: entryData.safety_user_response || undefined,
+        has_warning_indicators: entryData.has_warning_indicators || undefined,
+      });
 
-          if (offlineEntry.safety_flagged) {
-            entryData.safety_flagged = true;
-            if (offlineEntry.safety_user_response) {
-              entryData.safety_user_response = offlineEntry.safety_user_response;
-            }
-          }
-
-          if (offlineEntry.has_warning_indicators) {
-            entryData.has_warning_indicators = true;
-          }
-
-          // Save to Firestore
-          const ref = await addDoc(
-            collection(db, 'artifacts', APP_COLLECTION_ID, 'users', user.uid, 'entries'),
-            entryData
-          );
-
-          console.log(`Saved offline entry: ${offlineEntry.offlineId}`);
-
-          // Generate signals for offline entry (non-blocking)
-          // Note: We don't show DetectedStrip for offline entries since user may have
-          // recorded this entry hours/days ago - signals are just saved for calendar view
-          (async () => {
-            try {
-              const result = await processEntrySignals(
-                { id: ref.id, userId: user.uid, createdAt: offlineEntry.createdAt },
-                offlineEntry.text,
-                1  // Initial extraction version
-              );
-              if (result?.signals?.length > 0) {
-                console.log(`[Signals] Generated ${result.signals.length} signals for offline entry: ${ref.id}`);
-              }
-            } catch (signalError) {
-              console.error('[Signals] Failed to generate signals for offline entry:', signalError);
-            }
-          })();
-
-          // Run analysis in background (same as online flow)
-          (async () => {
-            try {
-              const recent = entries.slice(0, 5);
-              const related = []; // No embedding yet - will be added by Firestore trigger
-              const pendingPrompts = getActiveReflectionPrompts(entries, offlineEntry.category);
-
-              const classification = await classifyEntry(offlineEntry.text);
-              const [analysis, insight, enhancedContext] = await Promise.all([
-                analyzeEntry(offlineEntry.text, classification.entry_type),
-                classification.entry_type !== 'task' ? generateInsight(offlineEntry.text, related, recent, entries, pendingPrompts) : Promise.resolve(null),
-                classification.entry_type !== 'task' ? extractEnhancedContext(offlineEntry.text, recent) : Promise.resolve(null)
-              ]);
-
-              // Auto-dismiss addressed prompts
-              if (insight?.addressedPrompts?.length > 0) {
-                insight.addressedPrompts.forEach(prompt => {
-                  dismissReflectionPrompt(prompt, offlineEntry.category);
-                });
-              }
-
-              const topicTags = analysis?.tags || [];
-              const structuredTags = enhancedContext?.structured_tags || [];
-              const contextTopicTags = enhancedContext?.topic_tags || [];
-              const allTags = [...new Set([...topicTags, ...structuredTags, ...contextTopicTags])];
-
-              const updateData = {
-                title: analysis?.title || "New Memory",
-                tags: allTags,
-                analysisStatus: 'complete',
-                entry_type: classification.entry_type,
-                classification_confidence: classification.confidence,
-                context_version: CURRENT_CONTEXT_VERSION,
-                analysis: {
-                  mood_score: analysis?.mood_score,
-                  framework: analysis?.framework || 'general'
-                }
-              };
-
-              if (enhancedContext?.continues_situation) {
-                updateData.continues_situation = enhancedContext.continues_situation;
-              }
-              if (enhancedContext?.goal_update?.tag) {
-                updateData.goal_update = enhancedContext.goal_update;
-              }
-              if (classification.extracted_tasks?.length > 0) {
-                // extracted_tasks already comes as [{text: "...", completed: false}] from Cloud Function
-                updateData.extracted_tasks = classification.extracted_tasks;
-              }
-              if (analysis?.cbt_breakdown) updateData.analysis.cbt_breakdown = analysis.cbt_breakdown;
-              if (analysis?.act_analysis) updateData.analysis.act_analysis = analysis.act_analysis;
-              if (analysis?.vent_support) updateData.analysis.vent_support = analysis.vent_support;
-              if (analysis?.celebration) updateData.analysis.celebration = analysis.celebration;
-              if (analysis?.task_acknowledgment) updateData.analysis.task_acknowledgment = analysis.task_acknowledgment;
-              if (insight?.found) updateData.contextualInsight = insight;
-
-              await updateDoc(ref, removeUndefined(updateData));
-            } catch (error) {
-              console.error('Analysis failed for offline entry:', error);
-              await updateDoc(ref, {
-                title: offlineEntry.text.substring(0, 50) + (offlineEntry.text.length > 50 ? '...' : ''),
-                tags: [],
-                analysisStatus: 'complete',
-                entry_type: 'reflection',
-                analysis: { mood_score: 0.5, framework: 'general' }
-              });
-            }
-          })();
-        } catch (error) {
-          console.error('Failed to save offline entry:', error);
-        }
-      }
-
-      // Clear the offline queue
-      setOfflineQueue([]);
+      // setDoc (not addDoc) with the offlineId-derived id makes the sync
+      // idempotent — a duplicate delivery overwrites rather than duplicates.
+      await setDoc(ref, data);
+      return { id: ref.id, analysis: entryData.localAnalysis || null };
     };
 
-    processOfflineQueue();
-  }, [isOnline, wasOffline, offlineQueue, user, entries, clearWasOffline]);
+    const cleanup = initializeSyncOrchestrator({
+      saveEntry,
+      onComplete: (results) => {
+        if (results?.succeeded > 0) {
+          console.log('[Sync] Drained', results.succeeded, 'offline entries');
+        }
+      },
+    });
+
+    (async () => {
+      try {
+        // Recover entries stranded mid-sync by a previous app kill.
+        await resetStuckSyncing();
+      } catch (e) {
+        console.warn('[Sync] resetStuckSyncing failed:', e);
+      }
+      // Drain anything left over from a previous session if we're online.
+      if (navigator.onLine) {
+        triggerSync().catch(e => console.warn('[Sync] Initial sync failed:', e));
+      }
+    })();
+
+    return cleanup;
+  }, [user?.uid]);
 
   // Auth
   useEffect(() => {
@@ -766,29 +752,49 @@ export default function App() {
     }
   }, [user, entries, cat, hasTextMeaningfullyChanged]);
 
+  // Persist a crisis-flagged pending entry exactly once, regardless of how the
+  // user exits the crisis flow. We NEVER discard the entry a user wrote at their
+  // most vulnerable moment — crisis resources are shown *in addition to* saving,
+  // never instead of it. Cleared optimistically before the await so concurrent
+  // exit paths can't double-save. voiceTone (captured on the pending entry) is
+  // forwarded so crisis-flagged voice entries don't lose their tone data.
+  const persistPendingEntry = useCallback(async (safetyUserResponse) => {
+    const entry = pendingEntry;
+    if (!entry) return;
+    setPendingEntry(null);
+    try {
+      await doSaveEntry(
+        entry.text,
+        entry.safetyFlagged ?? true,
+        safetyUserResponse,
+        null,
+        entry.voiceTone ?? null
+      );
+    } catch (e) {
+      console.error('Failed to persist crisis-flagged entry:', e);
+    }
+  }, [pendingEntry]);
+
   const handleCrisisResponse = useCallback(async (response) => {
     setCrisisModal(null);
 
-    if (response === 'okay') {
-      if (pendingEntry) {
-        await doSaveEntry(pendingEntry.text, pendingEntry.safetyFlagged, response);
-        setPendingEntry(null);
-      }
-    } else if (response === 'support') {
+    // Always save the flagged entry. For 'support'/'crisis' we also surface the
+    // resources screen, but the save happens here so the entry survives no
+    // matter how the user leaves the resources screen.
+    if (response === 'support') {
       setCrisisResources('support');
     } else if (response === 'crisis') {
       setCrisisResources('crisis');
-      setPendingEntry(null);
     }
-  }, [pendingEntry]);
+    await persistPendingEntry(response);
+  }, [persistPendingEntry]);
 
   const handleCrisisResourcesContinue = useCallback(async () => {
     setCrisisResources(null);
-    if (pendingEntry) {
-      await doSaveEntry(pendingEntry.text, pendingEntry.safetyFlagged, 'support');
-      setPendingEntry(null);
-    }
-  }, [pendingEntry]);
+    // Entry was already persisted in handleCrisisResponse; save here only if it
+    // somehow wasn't (defensive — no-op when pendingEntry is already null).
+    await persistPendingEntry('support');
+  }, [persistPendingEntry]);
 
   const doSaveEntry = async (textInput, safetyFlagged = false, safetyUserResponse = null, temporalContext = null, voiceTone = null) => {
     if (!user) return;
@@ -861,17 +867,11 @@ export default function App() {
         platform
       });
 
-      // Also add to local state for immediate UI update
-      setOfflineQueue(prev => [...prev, {
-        ...offlineEntry,
-        // Include local analysis in display
-        analysis: localAnalysis ? {
-          mood_score: localAnalysis.mood_score,
-          framework: 'local'
-        } : null,
-        entry_type: localAnalysis?.entry_type || 'reflection',
-        title: localAnalysis?.title || finalTex.substring(0, 50) + '...'
-      }]);
+      // The entry is now durably queued in the persistent offline store
+      // (offlineManager), which the sync orchestrator drains on reconnect and
+      // which useNetworkStatus reflects via pendingCount. We no longer mirror it
+      // into a separate in-memory queue that was lost on app restart.
+      void offlineEntry;
 
       setProcessing(false);
       setReplyContext(null);
@@ -1143,9 +1143,8 @@ export default function App() {
           const textForAnalysis = entityResolution?.correctedText || finalTex;
 
           if (entityResolution?.corrections?.length > 0) {
-            console.log('[EntityResolution] Name corrections applied:', entityResolution.corrections);
-            console.log('[EntityResolution] Original:', finalTex.substring(0, 100) + '...');
-            console.log('[EntityResolution] Corrected:', textForAnalysis.substring(0, 100) + '...');
+            // Do not log entry content or resolved names (PII); count only.
+            console.log('[EntityResolution] Name corrections applied:', entityResolution.corrections.length);
           }
 
           console.log('Entry classification:', classification);
@@ -1307,17 +1306,19 @@ export default function App() {
             throw updateError;
           }
         } catch (error) {
-          console.error('Analysis failed, marking entry as complete with fallback values:', error);
+          console.error('Analysis failed, marking entry as failed (no fabricated mood):', error);
 
           try {
+            // Do NOT fabricate a neutral mood_score here. Writing mood_score:0.5
+            // marked 'complete' silently poisons longitudinal risk detection —
+            // during an AI outage a genuinely declining user would read as a
+            // flat, healthy line. Mark the entry 'failed' and omit mood_score so
+            // the risk detector skips it and the pending-entry watchdog can retry.
             const fallbackData = {
-              analysis: {
-                mood_score: 0.5,
-                framework: 'general'
-              },
               title: finalTex.substring(0, 50) + (finalTex.length > 50 ? '...' : ''),
               tags: [],
-              analysisStatus: 'complete',
+              analysisStatus: 'failed',
+              analysisError: (error?.message || String(error)).slice(0, 200),
               entry_type: 'reflection'
             };
 
@@ -1330,11 +1331,34 @@ export default function App() {
       })();
     } catch (e) {
       console.error('Save failed:', e);
-      // Provide more helpful error message based on error type
-      const errorMessage = e.code === 'permission-denied'
+      // Never lose the entry on a failed online save. Persist it to the durable
+      // offline queue (survives app restart, syncs on next opportunity) instead
+      // of dropping it behind an alert with the composer already cleared.
+      let queuedLocally = false;
+      try {
+        await queueEntry({
+          text: finalTex,
+          category: cat,
+          createdAt: now.toISOString(),
+          effectiveDate: effectiveDate.toISOString(),
+          healthContext,
+          environmentContext,
+          voiceTone,
+          safety_flagged: safetyFlagged || undefined,
+          safety_user_response: safetyUserResponse || undefined,
+          has_warning_indicators: hasWarning || undefined,
+          platform
+        });
+        queuedLocally = true;
+        triggerSync().catch(() => {});
+      } catch (queueErr) {
+        console.error('Failed to queue entry after save failure:', queueErr);
+      }
+
+      const errorMessage = queuedLocally
+        ? "Couldn't save right now — your entry is stored on this device and will sync automatically."
+        : e.code === 'permission-denied'
         ? 'Save failed: Permission denied. Please sign in again.'
-        : e.code === 'unavailable' || e.message?.includes('network')
-        ? 'Save failed: Network error. Please check your connection and try again.'
         : 'Save failed. Please try again.';
       alert(errorMessage);
       setProcessing(false);
@@ -2058,6 +2082,13 @@ export default function App() {
                 >
                   <Mail size={18}/> Continue with Email
                 </button>
+
+                {/* Wellness-not-therapy disclaimer (App Store / FDA framing) */}
+                <p className="text-[11px] leading-relaxed text-center text-warm-400 mt-5 px-2">
+                  Engram is a general-wellness tool for self-reflection — not therapy,
+                  not a medical device, and not a crisis service. If you're in crisis,
+                  call or text 988.
+                </p>
               </motion.div>
             ) : (
               <motion.div
@@ -2412,7 +2443,7 @@ export default function App() {
       {!isOnline && (
         <div className="fixed top-[calc(env(safe-area-inset-top)+60px)] left-0 right-0 z-50 bg-honey-500 dark:bg-honey-600 text-white px-4 py-2 text-center text-sm font-medium">
           You're offline. Entries will be saved locally and synced when you're back online.
-          {offlineQueue.length > 0 && ` (${offlineQueue.length} pending)`}
+          {offlinePendingCount > 0 && ` (${offlinePendingCount} pending)`}
         </div>
       )}
 
@@ -2421,8 +2452,10 @@ export default function App() {
         <CrisisSoftBlockModal
           onResponse={handleCrisisResponse}
           onClose={() => {
+            // Dismissing the soft-block without choosing still saves the entry
+            // (flagged) — we never silently drop it.
             setCrisisModal(null);
-            setPendingEntry(null);
+            persistPendingEntry(null);
           }}
         />
       )}
@@ -2432,8 +2465,10 @@ export default function App() {
         <CrisisResourcesScreen
           level={crisisResources}
           onClose={() => {
+            // Entry already saved on the initial response; this is a defensive
+            // no-op when pendingEntry is already null.
             setCrisisResources(null);
-            setPendingEntry(null);
+            persistPendingEntry(null);
           }}
           onContinue={handleCrisisResourcesContinue}
         />
@@ -2546,6 +2581,11 @@ export default function App() {
 
       {/* What's New Modal - shows once after feature updates */}
       <WhatsNewModal />
+
+      {/* First-run AI-processing consent (must acknowledge before using AI features) */}
+      {needsAiConsent && (
+        <AiConsentModal onAgree={handleAiConsent} agreeing={aiConsentSaving} />
+      )}
     </AppLayout>
   );
 }

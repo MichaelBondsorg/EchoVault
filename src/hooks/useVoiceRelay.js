@@ -193,7 +193,15 @@ export const useVoiceRelay = () => {
         break;
 
       case 'session_saved':
-        console.log('Session saved:', message.entryId);
+        console.log('Session saved:', message.entryId, 'success:', message.success);
+        if (message.success === false) {
+          setError('Your voice entry could not be saved. Please try again.');
+        }
+        // Unblock endSession() which is awaiting this ack before disconnecting.
+        if (pendingSaveRef.current) {
+          pendingSaveRef.current({ entryId: message.entryId, success: message.success });
+          pendingSaveRef.current = null;
+        }
         break;
 
       case 'usage_limit':
@@ -340,19 +348,37 @@ export const useVoiceRelay = () => {
     setStatus('connected');
   }, []);
 
+  // Resolver for the server's session_saved ack, set while an end_session save
+  // is in flight so we can wait for confirmation before tearing down the socket.
+  const pendingSaveRef = useRef(null);
+
   /**
    * End session
    */
   const endSession = useCallback(async (save = false) => {
-    if (wsRef.current?.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({
-        type: 'end_session',
-        saveOptions: { save },
-      }));
-    }
-
     // Get transcript before cleanup
     const finalTranscript = localTranscriptRef.current;
+
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      if (save) {
+        // Wait for the server's session_saved ack (and the session_analysis that
+        // precedes it) before disconnecting. Previously we disconnected
+        // synchronously, dropping both — the entry's save confirmation and its
+        // tone/title analysis were lost nearly every time. Bounded so a hung
+        // server can't block the UI.
+        const savedAck = new Promise((resolve) => {
+          pendingSaveRef.current = resolve;
+        });
+        wsRef.current.send(JSON.stringify({ type: 'end_session', saveOptions: { save } }));
+        await Promise.race([
+          savedAck,
+          new Promise((resolve) => setTimeout(() => resolve({ timeout: true }), 8000)),
+        ]);
+        pendingSaveRef.current = null;
+      } else {
+        wsRef.current.send(JSON.stringify({ type: 'end_session', saveOptions: { save } }));
+      }
+    }
 
     disconnect();
 

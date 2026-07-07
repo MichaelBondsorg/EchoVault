@@ -8,71 +8,81 @@
 import { vi } from 'vitest';
 import '@testing-library/jest-dom';
 
-// Mock window.matchMedia
-Object.defineProperty(window, 'matchMedia', {
-  writable: true,
-  value: vi.fn().mockImplementation(query => ({
-    matches: false,
-    media: query,
-    onchange: null,
-    addListener: vi.fn(),
-    removeListener: vi.fn(),
-    addEventListener: vi.fn(),
-    removeEventListener: vi.fn(),
-    dispatchEvent: vi.fn(),
-  })),
-});
+// DOM-dependent mocks only apply when running under jsdom. Node-environment
+// suites (e.g. crypto/JWT verification) skip these but still get the shared
+// utilities below.
+const hasWindow = typeof window !== 'undefined';
 
-// Mock localStorage
 const localStorageMock = {
   getItem: vi.fn(),
   setItem: vi.fn(),
   removeItem: vi.fn(),
   clear: vi.fn(),
 };
-Object.defineProperty(window, 'localStorage', {
-  value: localStorageMock,
-});
 
-// Mock sessionStorage
-const sessionStorageMock = {
-  getItem: vi.fn(),
-  setItem: vi.fn(),
-  removeItem: vi.fn(),
-  clear: vi.fn(),
-};
-Object.defineProperty(window, 'sessionStorage', {
-  value: sessionStorageMock,
-});
+if (hasWindow) {
+  // Mock window.matchMedia
+  Object.defineProperty(window, 'matchMedia', {
+    writable: true,
+    value: vi.fn().mockImplementation(query => ({
+      matches: false,
+      media: query,
+      onchange: null,
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    })),
+  });
 
-// Mock IntersectionObserver
-class MockIntersectionObserver {
-  constructor(callback) {
-    this.callback = callback;
+  // Mock localStorage
+  Object.defineProperty(window, 'localStorage', {
+    value: localStorageMock,
+  });
+
+  // Mock sessionStorage
+  const sessionStorageMock = {
+    getItem: vi.fn(),
+    setItem: vi.fn(),
+    removeItem: vi.fn(),
+    clear: vi.fn(),
+  };
+  Object.defineProperty(window, 'sessionStorage', {
+    value: sessionStorageMock,
+  });
+
+  // Mock IntersectionObserver
+  class MockIntersectionObserver {
+    constructor(callback) {
+      this.callback = callback;
+    }
+    observe() { return null; }
+    unobserve() { return null; }
+    disconnect() { return null; }
   }
-  observe() { return null; }
-  unobserve() { return null; }
-  disconnect() { return null; }
+  window.IntersectionObserver = MockIntersectionObserver;
+
+  // Mock ResizeObserver
+  class MockResizeObserver {
+    observe() { return null; }
+    unobserve() { return null; }
+    disconnect() { return null; }
+  }
+  window.ResizeObserver = MockResizeObserver;
+
+  // Mock scrollTo
+  window.scrollTo = vi.fn();
 }
-window.IntersectionObserver = MockIntersectionObserver;
 
-// Mock ResizeObserver
-class MockResizeObserver {
-  observe() { return null; }
-  unobserve() { return null; }
-  disconnect() { return null; }
+// Provide a stable randomUUID for tests WITHOUT clobbering the real WebCrypto
+// implementation (jose/JWKS verification needs crypto.subtle).
+if (!globalThis.crypto) {
+  globalThis.crypto = {};
 }
-window.ResizeObserver = MockResizeObserver;
-
-// Mock crypto.randomUUID
-Object.defineProperty(global, 'crypto', {
-  value: {
-    randomUUID: () => 'test-uuid-' + Math.random().toString(36).substr(2, 9),
-  },
-});
-
-// Mock scrollTo
-window.scrollTo = vi.fn();
+if (!globalThis.crypto.randomUUID) {
+  globalThis.crypto.randomUUID = () => 'test-uuid-' + Math.random().toString(36).substr(2, 9);
+}
 
 // Mock fetch
 global.fetch = vi.fn();

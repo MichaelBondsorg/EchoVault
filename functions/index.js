@@ -11,8 +11,26 @@ import { onDocumentCreated, onDocumentUpdated, onDocumentWritten } from 'firebas
 import { onSchedule } from 'firebase-functions/v2/scheduler';
 import { defineSecret } from 'firebase-functions/params';
 import { initializeApp, getApps } from 'firebase-admin/app';
-import { getFirestore, FieldValue } from 'firebase-admin/firestore';
+import { getFirestore, FieldValue, Timestamp } from 'firebase-admin/firestore';
 import { getAuth } from 'firebase-admin/auth';
+import { createHash, timingSafeEqual } from 'node:crypto';
+import { verifyAppleIdentityToken } from './src/auth/appleToken.js';
+import { isCrisisText } from './src/safety/crisisKeywords.js';
+import { sendNotification } from './src/notifications/sender.js';
+import { getNotificationTemplate } from './src/notifications/templates.js';
+
+/**
+ * Constant-time secret comparison. Hashes both inputs to a fixed-length digest
+ * so timingSafeEqual never sees unequal-length buffers (which would throw and
+ * itself leak length), and the comparison time is independent of where the
+ * first differing byte is.
+ */
+function secretsEqual(a, b) {
+  if (typeof a !== 'string' || typeof b !== 'string') return false;
+  const ha = createHash('sha256').update(a).digest();
+  const hb = createHash('sha256').update(b).digest();
+  return timingSafeEqual(ha, hb);
+}
 
 // Initialize Firebase Admin
 if (getApps().length === 0) {
@@ -38,6 +56,25 @@ const AI_CONFIG = {
   transcription: { primary: 'whisper-1', fallback: null }
 };
 
+// Bound every LLM/network call so a hung (not erroring) API can't consume the
+// whole function budget. analyzeJournalEntry makes 4 sequential calls in a 60s
+// window, so one silent hang would starve the rest and yield a bare
+// DEADLINE_EXCEEDED. On timeout, fetch throws AbortError → the existing
+// try/catch returns null (graceful) and any retry/fallback logic kicks in.
+const LLM_TIMEOUT_MS = 15000;
+const TRANSCRIBE_TIMEOUT_MS = 120000;
+
+// Bound free-text inputs to the AI callables so a single request can't run up an
+// unbounded LLM bill (a journal entry is well under this; the cap only stops
+// abuse). A per-user daily token bucket is the complementary control (follow-up)
+// plus a GCP billing budget alert as a backstop.
+const MAX_TEXT_CHARS = 20000;
+function assertWithinLimit(value, field, max = MAX_TEXT_CHARS) {
+  if (typeof value === 'string' && value.length > max) {
+    throw new HttpsError('invalid-argument', `${field} exceeds the maximum length of ${max} characters`);
+  }
+}
+
 // ============================================
 // AI HELPER FUNCTIONS
 // ============================================
@@ -53,7 +90,8 @@ async function callGemini(apiKey, systemPrompt, userPrompt, model = AI_CONFIG.an
       body: JSON.stringify({
         contents: [{ parts: [{ text: userPrompt }] }],
         systemInstruction: { parts: [{ text: systemPrompt }] }
-      })
+      }),
+      signal: AbortSignal.timeout(LLM_TIMEOUT_MS)
     });
 
     if (!res.ok) {
@@ -94,7 +132,8 @@ async function callOpenAI(apiKey, systemPrompt, userPrompt) {
         ],
         temperature: 0.7,
         max_tokens: 500
-      })
+      }),
+      signal: AbortSignal.timeout(LLM_TIMEOUT_MS)
     });
 
     if (!res.ok) {
@@ -849,6 +888,7 @@ export const analyzeJournalEntry = onCall(
     if (!text || typeof text !== 'string') {
       throw new HttpsError('invalid-argument', 'Text is required');
     }
+    assertWithinLimit(text, 'text');
 
     const apiKey = geminiApiKey.value();
     const results = {};
@@ -928,7 +968,8 @@ async function generateEmbeddingInternal(text, apiKey) {
   const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/text-embedding-004:embedContent?key=${apiKey}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ content: { parts: [{ text: text }] } })
+    body: JSON.stringify({ content: { parts: [{ text: text }] } }),
+    signal: AbortSignal.timeout(LLM_TIMEOUT_MS)
   });
 
   if (!res.ok) {
@@ -1079,7 +1120,8 @@ export const transcribeAudio = onCall(
           'Authorization': `Bearer ${apiKey}`,
           'Content-Type': `multipart/form-data; boundary=${boundary}`
         },
-        body: formBody
+        body: formBody,
+        signal: AbortSignal.timeout(TRANSCRIBE_TIMEOUT_MS)
       });
 
       if (!res.ok) {
@@ -1131,6 +1173,10 @@ export const executePrompt = onCall(
     if (!prompt || typeof prompt !== 'string') {
       throw new HttpsError('invalid-argument', 'Prompt is required');
     }
+    // executePrompt forwards a raw client prompt to Gemini; cap both fields so
+    // it can't be abused as an unbounded proxy.
+    assertWithinLimit(prompt, 'prompt');
+    assertWithinLimit(systemPrompt, 'systemPrompt');
 
     const apiKey = geminiApiKey.value();
 
@@ -1163,6 +1209,7 @@ export const askJournalAI = onCall(
     if (!question || typeof question !== 'string') {
       throw new HttpsError('invalid-argument', 'Question is required');
     }
+    assertWithinLimit(question, 'question');
 
     const apiKey = geminiApiKey.value();
 
@@ -1271,7 +1318,8 @@ export const transcribeWithTone = onCall(
           'Authorization': `Bearer ${oaiKey}`,
           'Content-Type': `multipart/form-data; boundary=${boundary}`
         },
-        body: formBody
+        body: formBody,
+        signal: AbortSignal.timeout(TRANSCRIBE_TIMEOUT_MS)
       });
 
       if (!whisperRes.ok) {
@@ -1330,7 +1378,8 @@ Respond in this exact JSON format only, no other text:
                   { text: tonePrompt }
                 ]
               }]
-            })
+            }),
+            signal: AbortSignal.timeout(TRANSCRIBE_TIMEOUT_MS)
           });
 
           if (geminiRes.ok) {
@@ -1979,6 +2028,22 @@ export const onEntryCreate = onDocumentCreated(
     console.log(`New entry created for user ${userId}, processing embedding, goals and patterns...`);
 
     try {
+      // Step 0a: Server-authoritative crisis flag. safety_flagged is otherwise
+      // client-computed and trusted; a modified client or an offline replay
+      // could set it false and suppress the crisis path. Recompute it here from
+      // the entry text (cheap regex, no API) and union with the client value.
+      // Writing a single boolean field re-fires onUpdate, but the guard makes it
+      // idempotent (only writes when the flag actually needs to flip on).
+      if (entry.text && isCrisisText(entry.text) && entry.safety_flagged !== true) {
+        try {
+          await event.data.ref.update({ safety_flagged: true, safetyServerChecked: true });
+          entry.safety_flagged = true;
+          console.log(`[Safety] Server-flagged entry ${entryId} (crisis text)`);
+        } catch (flagError) {
+          console.error(`Failed to set server safety flag for ${entryId}:`, flagError);
+        }
+      }
+
       // Step 0: Generate embedding if not present (OPTIMIZED: Background processing)
       if (!entry.embedding && entry.text) {
         console.time(`[Entry ${entryId}] Generate embedding`);
@@ -2010,6 +2075,197 @@ export const onEntryCreate = onDocumentCreated(
       console.error(`Error processing entry for user ${userId}:`, error);
       return { success: false, error: error.message };
     }
+  }
+);
+
+// Entries stuck in analysisStatus:'pending' — the client analysis pipeline is
+// fire-and-forget, so backgrounding/killing the app right after saving (or an
+// offline entry synced with analysis left to the server) leaves the entry
+// unanalyzed forever. This scheduled sweep finishes analysis server-side.
+const PENDING_ANALYSIS_THRESHOLD_MS = 10 * 60 * 1000; // client has finished by 10 min
+const PENDING_ANALYSIS_MAX_RETRIES = 2;
+const PENDING_ANALYSIS_BATCH = 25;
+
+export const pendingEntryCleanup = onSchedule(
+  {
+    schedule: '*/15 * * * *',
+    timeoutSeconds: 300,
+    memory: '512MiB',
+    secrets: [geminiApiKey],
+  },
+  async () => {
+    const cutoff = new Date(Date.now() - PENDING_ANALYSIS_THRESHOLD_MS);
+
+    const snap = await db.collectionGroup('entries')
+      .where('analysisStatus', '==', 'pending')
+      .where('createdAt', '<', cutoff)
+      .limit(PENDING_ANALYSIS_BATCH)
+      .get();
+
+    if (snap.empty) {
+      console.log('[pendingEntryCleanup] No stuck pending entries');
+      return { analyzed: 0, failed: 0 };
+    }
+
+    const apiKey = geminiApiKey.value();
+    let analyzed = 0;
+    let failed = 0;
+
+    for (const docSnap of snap.docs) {
+      const data = docSnap.data();
+      const text = data.text;
+      const retry = data.analysisRetryCount || 0;
+
+      // Server-authoritative crisis flag regardless of analysis outcome.
+      const crisisFields = (text && isCrisisText(text) && data.safety_flagged !== true)
+        ? { safety_flagged: true, safetyServerChecked: true }
+        : {};
+
+      if (!text) {
+        await docSnap.ref.update({ analysisStatus: 'failed', analysisError: 'missing text', ...crisisFields });
+        failed++;
+        continue;
+      }
+
+      try {
+        const classification = await classifyEntry(apiKey, text);
+        const entryType = classification?.entry_type || 'reflection';
+        const analysis = await analyzeEntry(apiKey, text, entryType);
+
+        // Do NOT fabricate a mood score — a missing one means analysis failed.
+        if (typeof analysis?.mood_score !== 'number') {
+          throw new Error('analysis returned no mood_score');
+        }
+
+        await docSnap.ref.update({
+          analysisStatus: 'complete',
+          entry_type: entryType,
+          title: analysis.title || 'New Memory',
+          tags: analysis.tags || [],
+          analysis: {
+            mood_score: analysis.mood_score,
+            framework: analysis.framework || 'general',
+          },
+          analyzedBy: 'watchdog',
+          ...crisisFields,
+        });
+        analyzed++;
+      } catch (e) {
+        const nextRetry = retry + 1;
+        const errMsg = (e?.message || String(e)).slice(0, 200);
+        if (nextRetry >= PENDING_ANALYSIS_MAX_RETRIES) {
+          // Mark failed (honest) rather than leaving it pending forever.
+          await docSnap.ref.update({
+            analysisStatus: 'failed',
+            analysisRetryCount: nextRetry,
+            analysisError: errMsg,
+            ...crisisFields,
+          });
+          failed++;
+        } else {
+          await docSnap.ref.update({ analysisRetryCount: nextRetry, ...crisisFields });
+        }
+        console.error(`[pendingEntryCleanup] Analysis failed for ${docSnap.id}:`, errMsg);
+      }
+    }
+
+    console.log(`[pendingEntryCleanup] analyzed=${analyzed} failed=${failed} of ${snap.size}`);
+    return { analyzed, failed };
+  }
+);
+
+// Gentle once-a-day journaling reminder. Retention is the point of the FCM work,
+// but the evidence base is clear that daily streaks are unhelpful/harmful for a
+// mental-health audience — so this is a single, opt-out, timezone-aware nudge
+// that SKIPS users who already journaled recently (no nagging active users).
+const REMINDER_MIN_HOURS_SINCE_ENTRY = 20;
+const REMINDER_MIN_HOURS_SINCE_LAST = 20;
+
+function getLocalHourAndDay(timezone) {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: timezone,
+    hour12: false,
+    hour: '2-digit',
+    day: '2-digit',
+  }).formatToParts(new Date());
+  const hour = parseInt(parts.find(p => p.type === 'hour')?.value ?? '0', 10);
+  const day = parseInt(parts.find(p => p.type === 'day')?.value ?? '1', 10);
+  return { hour: hour === 24 ? 0 : hour, day };
+}
+
+export const journalReminder = onSchedule(
+  { schedule: '0 * * * *', timeoutSeconds: 300, memory: '256MiB' },
+  async () => {
+    // NOTE: scans all users each hour — fine at current scale. At larger scale,
+    // maintain an opt-in index of reminder-enabled users to avoid a full scan.
+    const usersSnap = await db.collection('artifacts').doc(APP_COLLECTION_ID).collection('users').get();
+
+    let sent = 0;
+    let skipped = 0;
+
+    for (const userDoc of usersSnap.docs) {
+      const userId = userDoc.id;
+      try {
+        const settingsRef = db.doc(`artifacts/${APP_COLLECTION_ID}/users/${userId}/settings/notifications`);
+        const settingsSnap = await settingsRef.get();
+        if (!settingsSnap.exists) { skipped++; continue; }
+
+        const s = settingsSnap.data();
+        // Respect explicit opt-out; require a timezone so we never nudge at the
+        // wrong local time.
+        if (s.enabled === false || s.journalRemindersEnabled === false) { skipped++; continue; }
+        if (!s.timezone) { skipped++; continue; }
+
+        const reminderHour = Number.isInteger(s.reminderHour)
+          ? s.reminderHour
+          : (Number.isInteger(s.deliveryWindowStart) ? s.deliveryWindowStart : 19);
+
+        const { hour: localHour, day: localDay } = getLocalHourAndDay(s.timezone);
+        if (localHour !== reminderHour) { skipped++; continue; }
+
+        // Skip users who already journaled recently.
+        const lastEntrySnap = await db
+          .collection(`artifacts/${APP_COLLECTION_ID}/users/${userId}/entries`)
+          .orderBy('createdAt', 'desc')
+          .limit(1)
+          .get();
+        if (!lastEntrySnap.empty) {
+          const created = lastEntrySnap.docs[0].data().createdAt;
+          const createdMs = created?.toMillis ? created.toMillis() : 0;
+          if (createdMs && Date.now() - createdMs < REMINDER_MIN_HOURS_SINCE_ENTRY * 3600 * 1000) {
+            skipped++;
+            continue;
+          }
+        }
+
+        // Dedup: don't send twice within ~a day.
+        const lastReminderMs = s.lastReminderSentAt?.toMillis ? s.lastReminderSentAt.toMillis() : 0;
+        if (lastReminderMs && Date.now() - lastReminderMs < REMINDER_MIN_HOURS_SINCE_LAST * 3600 * 1000) {
+          skipped++;
+          continue;
+        }
+
+        const template = getNotificationTemplate('journal_reminder', { variant: localDay % 3 });
+        const result = await sendNotification(
+          userId,
+          { title: template.title, body: template.body },
+          template.data
+        );
+
+        if (result.sent > 0) {
+          await settingsRef.update({ lastReminderSentAt: FieldValue.serverTimestamp() });
+          sent++;
+        } else {
+          skipped++;
+        }
+      } catch (e) {
+        console.error(`[journalReminder] failed for ${userId}:`, e.message);
+        skipped++;
+      }
+    }
+
+    console.log(`[journalReminder] sent=${sent} skipped=${skipped} of ${usersSnap.size}`);
+    return { sent, skipped };
   }
 );
 
@@ -3126,6 +3382,9 @@ async function upsertGoalState(userId, topic, entryId, updateType, context = {})
     .get();
 
   const now = FieldValue.serverTimestamp();
+  // Firestore rejects serverTimestamp() sentinels inside array elements, so
+  // stateHistory entries use a concrete Timestamp instead.
+  const nowTs = Timestamp.now();
 
   if (existingSnapshot.empty) {
     // Create new goal (proposed state)
@@ -3143,7 +3402,7 @@ async function upsertGoalState(userId, topic, entryId, updateType, context = {})
       stateHistory: [{
         from: null,
         to: 'proposed',
-        at: now,
+        at: nowTs,
         context: { detectedFrom: entryId }
       }],
       sourceEntries: [entryId],
@@ -3159,64 +3418,74 @@ async function upsertGoalState(userId, topic, entryId, updateType, context = {})
     console.log(`Created new goal: ${topicKey} (${docRef.id})`);
     return { id: docRef.id, ...newGoal, isNew: true };
   } else {
-    // Update existing goal
-    const existingDoc = existingSnapshot.docs[0];
-    const existingData = existingDoc.data();
-    const existingState = existingData.state;
+    // Update existing goal inside a transaction so concurrent entries can't
+    // clobber each other's state transition (the previous read-modify-write on
+    // a JS-spread stateHistory lost transitions under concurrency).
+    const goalRef = existingSnapshot.docs[0].ref;
 
-    // Skip if already in terminal state
-    if (['achieved', 'abandoned'].includes(existingState)) {
-      console.log(`Skipping update for terminated goal: ${topicKey} (${existingState})`);
-      return { id: existingDoc.id, ...existingData, skipped: true };
-    }
-
-    let newState = existingState;
-    let historyEntry = null;
-
-    switch (updateType) {
-      case 'termination':
-        newState = 'abandoned';
-        historyEntry = { from: existingState, to: 'abandoned', at: now, context: { terminationEntry: entryId, reason: 'termination_language' } };
-        break;
-      case 'achievement':
-        newState = 'achieved';
-        historyEntry = { from: existingState, to: 'achieved', at: now, context: { achievementEntry: entryId } };
-        break;
-      case 'progress':
-        // Auto-confirm proposed goals on progress
-        if (existingState === 'proposed') {
-          newState = 'active';
-          historyEntry = { from: 'proposed', to: 'active', at: now, context: { autoConfirmed: true, progressEntry: entryId } };
-        }
-        // For active goals, just update lastUpdated
-        break;
-      case 'mention':
-        // Just update lastUpdated to prevent false abandonment detection
-        break;
-    }
-
-    const updateData = {
-      lastUpdated: now,
-      sourceEntries: FieldValue.arrayUnion(entryId)
-    };
-
-    if (newState !== existingState && historyEntry) {
-      // Limit stateHistory to prevent document bloat
-      let newHistory = [...(existingData.stateHistory || []), historyEntry];
-      if (newHistory.length > 20) {
-        const firstEntry = newHistory[0];
-        const recentEntries = newHistory.slice(-19);
-        newHistory = [firstEntry, ...recentEntries];
+    return await db.runTransaction(async (t) => {
+      const snap = await t.get(goalRef);
+      if (!snap.exists) {
+        return { id: goalRef.id, skipped: true };
       }
 
-      updateData.state = newState;
-      updateData.stateHistory = newHistory;
-    }
+      const existingData = snap.data();
+      const existingState = existingData.state;
 
-    await existingDoc.ref.update(updateData);
-    console.log(`Updated goal ${topicKey}: ${existingState} → ${newState}`);
+      // Skip if already in terminal state
+      if (['achieved', 'abandoned'].includes(existingState)) {
+        console.log(`Skipping update for terminated goal: ${topicKey} (${existingState})`);
+        return { id: goalRef.id, ...existingData, skipped: true };
+      }
 
-    return { id: existingDoc.id, state: newState, previousState: existingState };
+      let newState = existingState;
+      let historyEntry = null;
+
+      switch (updateType) {
+        case 'termination':
+          newState = 'abandoned';
+          historyEntry = { from: existingState, to: 'abandoned', at: nowTs, context: { terminationEntry: entryId, reason: 'termination_language' } };
+          break;
+        case 'achievement':
+          newState = 'achieved';
+          historyEntry = { from: existingState, to: 'achieved', at: nowTs, context: { achievementEntry: entryId } };
+          break;
+        case 'progress':
+          // Auto-confirm proposed goals on progress
+          if (existingState === 'proposed') {
+            newState = 'active';
+            historyEntry = { from: 'proposed', to: 'active', at: nowTs, context: { autoConfirmed: true, progressEntry: entryId } };
+          }
+          // For active goals, just update lastUpdated
+          break;
+        case 'mention':
+          // Just update lastUpdated to prevent false abandonment detection
+          break;
+      }
+
+      const updateData = {
+        lastUpdated: now,
+        sourceEntries: FieldValue.arrayUnion(entryId)
+      };
+
+      if (newState !== existingState && historyEntry) {
+        // Limit stateHistory to prevent document bloat
+        let newHistory = [...(existingData.stateHistory || []), historyEntry];
+        if (newHistory.length > 20) {
+          const firstEntry = newHistory[0];
+          const recentEntries = newHistory.slice(-19);
+          newHistory = [firstEntry, ...recentEntries];
+        }
+
+        updateData.state = newState;
+        updateData.stateHistory = newHistory;
+      }
+
+      t.update(goalRef, updateData);
+      console.log(`Updated goal ${topicKey}: ${existingState} → ${newState}`);
+
+      return { id: goalRef.id, state: newState, previousState: existingState };
+    });
   }
 }
 
@@ -3654,50 +3923,23 @@ export const exchangeAppleToken = onCall(
     console.log('Received Apple identity token exchange request');
 
     try {
-      // Decode the Apple identity token (JWT)
-      // Apple's identity token is a JWT that we can decode to get user info
-      // The token is signed by Apple - we verify by checking with Apple's public keys
-
-      // Decode JWT payload (base64)
-      const tokenParts = identityToken.split('.');
-      if (tokenParts.length !== 3) {
-        throw new HttpsError('invalid-argument', 'Invalid Apple identity token format');
+      // Cryptographically verify the Apple identity token against Apple's JWKS.
+      // This checks the RS256 signature, issuer, audience, and expiry. Without
+      // signature verification a forged token grants any account (takeover).
+      let verifiedClaims;
+      try {
+        verifiedClaims = await verifyAppleIdentityToken(identityToken, {
+          appleServiceId: process.env.APPLE_SERVICE_ID,
+        });
+      } catch (verifyError) {
+        console.error('Apple identity token verification failed:', verifyError.message);
+        throw new HttpsError('unauthenticated', 'Invalid Apple identity token');
       }
 
-      const payload = JSON.parse(Buffer.from(tokenParts[1], 'base64').toString('utf8'));
-      console.log('Apple token payload:', {
-        iss: payload.iss,
-        aud: payload.aud,
-        sub: payload.sub,
-        email: payload.email
-      });
-
-      // Verify issuer is Apple
-      if (payload.iss !== 'https://appleid.apple.com') {
-        throw new HttpsError('unauthenticated', 'Invalid token issuer');
-      }
-
-      // Verify audience matches our app's bundle ID
-      const validBundleIds = [
-        'com.echovault.app',  // iOS bundle ID
-        process.env.APPLE_SERVICE_ID // Web service ID if configured
-      ].filter(Boolean);
-
-      if (!validBundleIds.includes(payload.aud)) {
-        console.error('Invalid audience:', payload.aud, 'Expected:', validBundleIds);
-        throw new HttpsError('unauthenticated', 'Token has invalid audience');
-      }
-
-      // Check token expiration
-      const now = Math.floor(Date.now() / 1000);
-      if (payload.exp < now) {
-        throw new HttpsError('unauthenticated', 'Token has expired');
-      }
-
-      // Get user info from Apple token
+      // Get user info from verified claims.
       // Note: Apple only sends email on first sign-in, may be null on subsequent sign-ins
-      const appleUserId = payload.sub; // Apple's unique user ID
-      const email = payload.email || user?.email; // email from token or passed user object
+      const appleUserId = verifiedClaims.sub; // Apple's unique user ID (trusted)
+      const email = verifiedClaims.email || user?.email; // email from token or passed user object
       const name = user?.name?.firstName && user?.name?.lastName
         ? `${user.name.firstName} ${user.name.lastName}`
         : user?.name?.firstName || null;
@@ -3764,6 +4006,50 @@ export const exchangeAppleToken = onCall(
       }
 
       throw new HttpsError('internal', 'Failed to exchange Apple token: ' + error.message);
+    }
+  }
+);
+
+/**
+ * Delete the authenticated user's account and ALL of their data.
+ *
+ * Required for App Store (5.1.1(v)) and Google Play. Recursively deletes the
+ * user's entire Firestore document tree (entries, signals, nexus, safety plan,
+ * health tokens, fcm tokens, settings, memory, etc.) and then the Firebase Auth
+ * user. Auth is the last step so a mid-operation failure leaves the account
+ * recoverable rather than orphaning data under a deleted uid.
+ */
+export const deleteAccount = onCall(
+  {
+    cors: true,
+    maxInstances: 5,
+  },
+  async (request) => {
+    if (!request.auth) {
+      throw new HttpsError('unauthenticated', 'You must be signed in to delete your account.');
+    }
+
+    const uid = request.auth.uid;
+    console.log(`[deleteAccount] Deleting all data for user ${uid}`);
+
+    try {
+      // recursiveDelete removes the user document and every subcollection
+      // beneath it in batches.
+      const userDocRef = db
+        .collection('artifacts')
+        .doc(APP_COLLECTION_ID)
+        .collection('users')
+        .doc(uid);
+      await db.recursiveDelete(userDocRef);
+
+      // Finally remove the auth identity itself.
+      await getAuth().deleteUser(uid);
+
+      console.log(`[deleteAccount] Completed deletion for user ${uid}`);
+      return { success: true };
+    } catch (error) {
+      console.error(`[deleteAccount] Failed for user ${uid}:`, error);
+      throw new HttpsError('internal', 'Account deletion failed. Please try again or contact support.');
     }
   }
 );
@@ -4416,7 +4702,12 @@ export const getChiefOfStaffContext = onCall(
       throw new HttpsError('unauthenticated', 'API key required');
     }
 
-    if (apiKey !== chiefOfStaffApiKey.value()) {
+    // Constant-time comparison to avoid leaking the key via response timing.
+    // NOTE: this endpoint is an external server-to-server integration (the
+    // Chief-of-Staff/Cosmo system) that authenticates by shared secret, not a
+    // Firebase user — so a request.auth requirement is intentionally NOT added
+    // here to avoid breaking that caller. Prefer migrating to App Check / IAM.
+    if (!secretsEqual(apiKey, chiefOfStaffApiKey.value())) {
       console.warn('Invalid API key attempt for getChiefOfStaffContext');
       throw new HttpsError('permission-denied', 'Invalid API key');
     }

@@ -12,6 +12,7 @@ import { getStorage } from 'firebase-admin/storage';
 import React from 'react';
 import { renderToBuffer, Document, Page, View, Text, StyleSheet, Font, Svg, Line, Rect } from '@react-pdf/renderer';
 import { APP_COLLECTION_ID, DEFAULT_REGION, MEMORY, TIMEOUTS } from '../shared/constants.js';
+import { checkEntitlement } from '../premium/index.js';
 
 // Placeholder labels for anonymized entities
 const PERSON_LABELS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('').map(l => `Person ${l}`);
@@ -243,6 +244,15 @@ export async function handleExportRequest(data, userId) {
   }
   if (!REPORT_ID_PATTERN.test(reportId)) {
     throw new ExportError('reportId format is invalid', 'invalid-argument');
+  }
+
+  // 2b. Entitlement gate. reportId is `cadence-YYYY-MM-DD`; weekly is free,
+  // monthly/quarterly/annual require premium. Without this, exportReportPdf
+  // was reachable directly regardless of any subscription flag.
+  const cadence = reportId.split('-')[0];
+  const { entitled } = await checkEntitlement(userId, `reports.${cadence}`);
+  if (!entitled) {
+    throw new ExportError('Premium subscription required to export this report', 'permission-denied');
   }
 
   const db = getFirestore();

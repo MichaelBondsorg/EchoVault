@@ -144,12 +144,17 @@ const syncEntryToServer = async (offlineEntry) => {
   // Transform offline entry to server format
   const entryData = {
     text: offlineEntry.text,
+    category: offlineEntry.category,
     transcriptionText: offlineEntry.transcriptionText,
     localAnalysis: offlineEntry.localAnalysis,
     healthContext: offlineEntry.healthContext,
     environmentContext: offlineEntry.environmentContext,
     voiceTone: offlineEntry.voiceTone,
+    safety_flagged: offlineEntry.safety_flagged,
+    safety_user_response: offlineEntry.safety_user_response,
+    has_warning_indicators: offlineEntry.has_warning_indicators,
     createdAt: offlineEntry.createdAt || offlineEntry.createdOfflineAt,
+    effectiveDate: offlineEntry.effectiveDate || offlineEntry.createdAt || offlineEntry.createdOfflineAt,
     // Mark as offline-created for server to handle appropriately
     offlineCreated: true,
     offlineId: offlineEntry.offlineId

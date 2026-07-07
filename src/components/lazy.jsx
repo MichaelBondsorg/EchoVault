@@ -102,6 +102,16 @@ export const LazyInsightsPanel = lazy(() =>
 );
 
 // ============================================
+// Lazy-loaded Chat (Heavy — ~1,200 lines, only shown when the AI companion opens)
+// ============================================
+
+export const LazyUnifiedConversation = lazy(() =>
+  import('./chat/UnifiedConversation').then(module => ({
+    default: module.default || module.UnifiedConversation
+  }))
+);
+
+// ============================================
 // Suspense Wrapper Component
 // ============================================
 
@@ -133,5 +143,6 @@ export const WeeklyReportWithSuspense = withSuspense(LazyWeeklyReport);
 export const InsightsPanelWithSuspense = withSuspense(LazyInsightsPanel);
 export const ReportListWithSuspense = withSuspense(LazyReportList);
 export const ReportViewerWithSuspense = withSuspense(LazyReportViewer);
+export const UnifiedConversationWithSuspense = withSuspense(LazyUnifiedConversation);
 
 export { LoadingFallback };

@@ -407,8 +407,13 @@ export const generateInsights = async (userId, options = {}) => {
       })),
     };
 
-    // Generate primary causal synthesis insight
-    if (entries.length >= 10 && (!dataStatus.isCalibrating || entries.length >= 20)) {
+    // Generate primary causal synthesis insight once there are enough entries.
+    // Previously, if Whoop was still calibrating this required 20 entries instead
+    // of 10 — so connecting a wearable IRONICALLY DELAYED the first "wow" causal
+    // insight. Since synthesis already runs at 10 entries with no biometric data
+    // at all (Whoop not connected), running during calibration is strictly more
+    // data, not less — so we no longer gate on calibration.
+    if (entries.length >= 10) {
       try {
         const synthesis = await generateCausalSynthesis(userId, synthesisContext);
         if (synthesis.success && synthesis.insight) {

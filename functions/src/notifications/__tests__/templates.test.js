@@ -22,6 +22,18 @@ describe('getNotificationTemplate', () => {
     });
   });
 
+  it('generates a journal_reminder notification and rotates copy by variant', () => {
+    const v0 = getNotificationTemplate('journal_reminder', { variant: 0 });
+    const v1 = getNotificationTemplate('journal_reminder', { variant: 1 });
+    const v2 = getNotificationTemplate('journal_reminder', { variant: 2 });
+    expect(v0.title).toBe('A moment to reflect');
+    expect(v0.data).toEqual({ type: 'reminder' });
+    // Variants produce distinct, non-streak copy; out-of-range wraps safely.
+    expect(new Set([v0.body, v1.body, v2.body]).size).toBe(3);
+    expect(getNotificationTemplate('journal_reminder', { variant: 3 }).body).toBe(v0.body);
+    expect(getNotificationTemplate('journal_reminder', {}).body).toBe(v0.body);
+  });
+
   it('generates insight_available notification', () => {
     const result = getNotificationTemplate('insight_available', {
       insightId: 'ins-123',

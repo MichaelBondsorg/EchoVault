@@ -7,7 +7,7 @@ import {
 } from 'lucide-react';
 import BackfillPanel from '../components/settings/BackfillPanel';
 import { exportDiagnosticJSON, migrateEntriesForHealthEnrichment } from '../utils/diagnosticExport';
-import { db } from '../config/firebase';
+import { db, deleteAccountFn } from '../config/firebase';
 
 /**
  * SettingsPage - App settings and account management
@@ -35,6 +35,24 @@ const SettingsPage = ({
   // INT-002: Loading state for settings items
   const [loadingItem, setLoadingItem] = useState(null);
   const [diagnosticResult, setDiagnosticResult] = useState(null);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState(null);
+
+  // Permanently delete the account and all data (App Store / Play requirement).
+  const handleDeleteAccount = async () => {
+    setDeleting(true);
+    setDeleteError(null);
+    try {
+      await deleteAccountFn();
+      // Server deleted all data + the auth user; sign out locally.
+      if (onLogout) await onLogout();
+    } catch (e) {
+      console.error('Account deletion failed:', e);
+      setDeleteError('Something went wrong deleting your account. Please try again, or contact support if it persists.');
+      setDeleting(false);
+    }
+  };
   const [migrationState, setMigrationState] = useState({
     running: false,
     progress: 0,
@@ -163,6 +181,13 @@ const SettingsPage = ({
           description: 'Download your entries',
           onClick: onOpenExport,
         },
+        {
+          icon: AlertTriangle,
+          label: 'Delete Account',
+          description: 'Permanently erase your account and all data',
+          onClick: () => setShowDeleteConfirm(true),
+          destructive: true,
+        },
       ],
     },
   ];
@@ -207,16 +232,16 @@ const SettingsPage = ({
                   whileTap={item.onClick && !isLoading ? { scale: 0.99 } : {}}
                 >
                   {/* INT-002: Show loading spinner when item is being opened */}
-                  <div className="w-10 h-10 rounded-xl bg-honey-100 flex items-center justify-center">
+                  <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${item.destructive ? 'bg-terra-100' : 'bg-honey-100'}`}>
                     {isLoading ? (
-                      <Loader2 size={20} className="text-honey-600 animate-spin" />
+                      <Loader2 size={20} className={item.destructive ? 'text-terra-600 animate-spin' : 'text-honey-600 animate-spin'} />
                     ) : (
-                      <item.icon size={20} className="text-honey-600" />
+                      <item.icon size={20} className={item.destructive ? 'text-terra-600' : 'text-honey-600'} />
                     )}
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
-                      <span className="font-medium text-warm-800">{item.label}</span>
+                      <span className={`font-medium ${item.destructive ? 'text-terra-700' : 'text-warm-800'}`}>{item.label}</span>
                       {item.badge && (
                         <span className="px-2 py-0.5 bg-honey-100 dark:bg-honey-900/30 text-honey-700 dark:text-honey-300 text-xs font-bold rounded-full">
                           {item.badge}
@@ -387,10 +412,62 @@ const SettingsPage = ({
         Sign Out
       </motion.button>
 
+      {/* Wellness disclaimer (required framing: not therapy / not a medical device) */}
+      <div className="rounded-2xl bg-white/20 border border-white/20 px-4 py-3">
+        <p className="text-xs text-warm-500 dark:text-warm-400 leading-relaxed text-center">
+          Engram is a general-wellness tool for self-reflection. It is not therapy,
+          not a medical device, and not a crisis service, and it does not diagnose,
+          treat, or prevent any condition. If you are in crisis, call or text{' '}
+          <a href="tel:988" className="font-semibold text-terra-600 underline">988</a>{' '}
+          (US Suicide &amp; Crisis Lifeline).
+        </p>
+      </div>
+
       {/* App Version */}
       <p className="text-center text-xs text-warm-400">
         Engram v2.0
       </p>
+
+      {/* Delete Account confirmation */}
+      {showDeleteConfirm && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4">
+          <motion.div
+            initial={{ scale: 0.95, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            className="w-full max-w-sm rounded-2xl bg-white dark:bg-hearth-900 p-6 shadow-xl"
+          >
+            <div className="flex items-center gap-3 mb-3">
+              <div className="w-10 h-10 rounded-xl bg-terra-100 flex items-center justify-center">
+                <AlertTriangle size={20} className="text-terra-600" />
+              </div>
+              <h3 className="font-display font-bold text-lg text-warm-800 dark:text-warm-100">Delete your account?</h3>
+            </div>
+            <p className="text-sm text-warm-600 dark:text-warm-300 mb-4">
+              This permanently erases your account and <strong>all</strong> of your journal entries,
+              insights, health data, and safety plan. This cannot be undone.
+            </p>
+            {deleteError && (
+              <p className="text-sm text-terra-600 mb-3">{deleteError}</p>
+            )}
+            <div className="flex flex-col gap-2">
+              <button
+                onClick={handleDeleteAccount}
+                disabled={deleting}
+                className="w-full py-3 rounded-xl bg-terra-600 text-white font-semibold hover:bg-terra-700 disabled:opacity-60 flex items-center justify-center gap-2"
+              >
+                {deleting ? (<><Loader2 size={18} className="animate-spin" /> Deleting…</>) : 'Delete everything'}
+              </button>
+              <button
+                onClick={() => { setShowDeleteConfirm(false); setDeleteError(null); }}
+                disabled={deleting}
+                className="w-full py-3 rounded-xl bg-warm-100 dark:bg-hearth-800 text-warm-700 dark:text-warm-200 font-medium disabled:opacity-60"
+              >
+                Cancel
+              </button>
+            </div>
+          </motion.div>
+        </div>
+      )}
     </motion.div>
   );
 };

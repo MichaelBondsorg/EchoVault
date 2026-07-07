@@ -1,4 +1,6 @@
-import { CRISIS_KEYWORDS, WARNING_INDICATORS } from '../../config';
+// Import directly from constants (not the config barrel) so this safety module
+// carries no Firebase dependency and can be unit-tested against the real code.
+import { CRISIS_KEYWORDS, WARNING_INDICATORS } from '../../config/constants';
 
 /**
  * Check if text contains crisis keywords
@@ -59,13 +61,28 @@ export const checkLongitudinalRisk = (recentEntries) => {
   }
 
   // Sort by date (oldest first for slope calculation)
-  const sorted = [...last14Days].sort((a, b) => {
+  const sortedAll = [...last14Days].sort((a, b) => {
     const aTime = a.createdAt instanceof Date ? a.createdAt.getTime() : a.createdAt?.toDate?.()?.getTime?.() || 0;
     const bTime = b.createdAt instanceof Date ? b.createdAt.getTime() : b.createdAt?.toDate?.()?.getTime?.() || 0;
     return aTime - bTime;
   });
 
-  const moodScores = sorted.map(e => e.analysis?.mood_score ?? 0.5);
+  // Only consider entries with a REAL analyzed mood score. Entries whose
+  // analysis failed (analysisStatus:'failed', no mood_score) must be skipped —
+  // never defaulted to a neutral 0.5, which would mask a genuine decline during
+  // an AI outage.
+  const sorted = sortedAll.filter(e => typeof e.analysis?.mood_score === 'number');
+
+  if (sorted.length < LONGITUDINAL_CONFIG.minimumEntries) {
+    return {
+      isAtRisk: false,
+      reason: 'insufficient_data',
+      entriesAnalyzed: sorted.length,
+      windowDays: LONGITUDINAL_CONFIG.windowDays
+    };
+  }
+
+  const moodScores = sorted.map(e => e.analysis.mood_score);
 
   // Calculate average mood
   const avgMood = moodScores.reduce((sum, score) => sum + score, 0) / moodScores.length;
@@ -88,7 +105,7 @@ export const checkLongitudinalRisk = (recentEntries) => {
 
   let acuteSlope = 0;
   if (last7Days.length >= 3) {
-    const acuteMoods = last7Days.map(e => e.analysis?.mood_score ?? 0.5);
+    const acuteMoods = last7Days.map(e => e.analysis.mood_score);
     const an = acuteMoods.length;
     const aSumX = (an * (an - 1)) / 2;
     const aSumY = acuteMoods.reduce((a, b) => a + b, 0);
