@@ -13,6 +13,7 @@ import { defineSecret } from 'firebase-functions/params';
 import { initializeApp, getApps } from 'firebase-admin/app';
 import { getFirestore, FieldValue } from 'firebase-admin/firestore';
 import { getAuth } from 'firebase-admin/auth';
+import { verifyAppleIdentityToken } from './src/auth/appleToken.js';
 
 // Initialize Firebase Admin
 if (getApps().length === 0) {
@@ -3654,50 +3655,23 @@ export const exchangeAppleToken = onCall(
     console.log('Received Apple identity token exchange request');
 
     try {
-      // Decode the Apple identity token (JWT)
-      // Apple's identity token is a JWT that we can decode to get user info
-      // The token is signed by Apple - we verify by checking with Apple's public keys
-
-      // Decode JWT payload (base64)
-      const tokenParts = identityToken.split('.');
-      if (tokenParts.length !== 3) {
-        throw new HttpsError('invalid-argument', 'Invalid Apple identity token format');
+      // Cryptographically verify the Apple identity token against Apple's JWKS.
+      // This checks the RS256 signature, issuer, audience, and expiry. Without
+      // signature verification a forged token grants any account (takeover).
+      let verifiedClaims;
+      try {
+        verifiedClaims = await verifyAppleIdentityToken(identityToken, {
+          appleServiceId: process.env.APPLE_SERVICE_ID,
+        });
+      } catch (verifyError) {
+        console.error('Apple identity token verification failed:', verifyError.message);
+        throw new HttpsError('unauthenticated', 'Invalid Apple identity token');
       }
 
-      const payload = JSON.parse(Buffer.from(tokenParts[1], 'base64').toString('utf8'));
-      console.log('Apple token payload:', {
-        iss: payload.iss,
-        aud: payload.aud,
-        sub: payload.sub,
-        email: payload.email
-      });
-
-      // Verify issuer is Apple
-      if (payload.iss !== 'https://appleid.apple.com') {
-        throw new HttpsError('unauthenticated', 'Invalid token issuer');
-      }
-
-      // Verify audience matches our app's bundle ID
-      const validBundleIds = [
-        'com.echovault.app',  // iOS bundle ID
-        process.env.APPLE_SERVICE_ID // Web service ID if configured
-      ].filter(Boolean);
-
-      if (!validBundleIds.includes(payload.aud)) {
-        console.error('Invalid audience:', payload.aud, 'Expected:', validBundleIds);
-        throw new HttpsError('unauthenticated', 'Token has invalid audience');
-      }
-
-      // Check token expiration
-      const now = Math.floor(Date.now() / 1000);
-      if (payload.exp < now) {
-        throw new HttpsError('unauthenticated', 'Token has expired');
-      }
-
-      // Get user info from Apple token
+      // Get user info from verified claims.
       // Note: Apple only sends email on first sign-in, may be null on subsequent sign-ins
-      const appleUserId = payload.sub; // Apple's unique user ID
-      const email = payload.email || user?.email; // email from token or passed user object
+      const appleUserId = verifiedClaims.sub; // Apple's unique user ID (trusted)
+      const email = verifiedClaims.email || user?.email; // email from token or passed user object
       const name = user?.name?.firstName && user?.name?.lastName
         ? `${user.name.firstName} ${user.name.lastName}`
         : user?.name?.firstName || null;
