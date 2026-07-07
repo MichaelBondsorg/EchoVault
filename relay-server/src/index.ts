@@ -13,6 +13,7 @@ import {
   getHealthSummary as getWhoopHealthSummary,
   hasWhoopLinked,
 } from './services/whoop/index.js';
+import { signState, verifyState } from './services/whoop/oauthState.js';
 import {
   createSession,
   getSession,
@@ -131,10 +132,9 @@ const authenticateHttp = async (
  */
 app.get('/auth/whoop', authenticateHttp, (req: AuthenticatedRequest, res) => {
   try {
-    // Use userId as state for CSRF protection
-    const state = Buffer.from(
-      JSON.stringify({ userId: req.userId, timestamp: Date.now() })
-    ).toString('base64');
+    // HMAC-signed state binds the authenticated userId so the (unauthenticated)
+    // callback cannot be tricked into linking Whoop to a different account.
+    const state = signState(req.userId as string);
 
     const authUrl = getAuthorizationUrl(state);
     res.json({ authUrl });
@@ -166,18 +166,11 @@ app.get('/auth/whoop/callback', async (req, res) => {
       return;
     }
 
-    // Decode state to get userId
-    let stateData: { userId: string; timestamp: number };
-    try {
-      stateData = JSON.parse(Buffer.from(state as string, 'base64').toString());
-    } catch {
+    // Verify the HMAC signature (and expiry) before trusting the userId.
+    // An unsigned or forged state is rejected — the userId cannot be attacker-set.
+    const stateData = verifyState(state as string);
+    if (!stateData) {
       res.redirect('engram://auth-error?provider=whoop&error=invalid_state');
-      return;
-    }
-
-    // Validate state timestamp (5 minute expiry)
-    if (Date.now() - stateData.timestamp > 5 * 60 * 1000) {
-      res.redirect('engram://auth-error?provider=whoop&error=state_expired');
       return;
     }
 
