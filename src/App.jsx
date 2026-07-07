@@ -43,7 +43,8 @@ import {
 } from './services/analysis';
 import { checkCrisisKeywords, checkWarningIndicators, checkLongitudinalRisk } from './services/safety';
 import { retrofitEntriesInBackground } from './services/entries';
-import { queueEntry, getSyncStatus } from './services/offline';
+import { queueEntry, getSyncStatus, resetStuckSyncing } from './services/offline';
+import { initializeSyncOrchestrator, triggerSync } from './services/sync/syncOrchestrator';
 import { inferCategory } from './services/prompts';
 import { getActiveReflectionPrompts, dismissReflectionPrompt } from './services/prompts/activePrompts';
 import { detectTemporalContext, needsConfirmation, formatEffectiveDate } from './services/temporal';
@@ -137,7 +138,7 @@ export default function App() {
   console.log('[Engram] App component rendering...');
   useIOSMeta();
   const { permission, requestPermission } = useNotifications();
-  const { isOnline, wasOffline, clearWasOffline } = useNetworkStatus();
+  const { isOnline, pendingCount: offlinePendingCount } = useNetworkStatus();
   const { requestWakeLock, releaseWakeLock } = useWakeLock();
   const { backupAudio, clearBackup, isProcessing: isBackgroundProcessing } = useBackgroundAudio();
 
@@ -204,7 +205,6 @@ export default function App() {
     processing, setProcessing,
     replyContext, setReplyContext, clearReplyContext,
     entryPreferredMode, setEntryPreferredMode,
-    offlineQueue, setOfflineQueue,
     retrofitProgress, setRetrofitProgress
   } = useEntriesStore();
 
@@ -333,147 +333,80 @@ export default function App() {
     };
   }, [showHealthSettings]);
 
-  // Process offline queue when back online
+  // Initialize the offline sync orchestrator once we have a user.
+  //
+  // This drains the PERSISTENT offline queue (Capacitor Preferences, survives
+  // app restart). The previous handler drained an in-memory queue that was lost
+  // on app kill AND threw a TypeError (Timestamp.fromDate on an ISO string),
+  // silently dropping every offline entry on reconnect. Reconnect syncing is
+  // wired in useNetworkStatus (handleNetworkChange + triggerSync); it simply
+  // never ran because the orchestrator was never initialized.
   useEffect(() => {
-    const processOfflineQueue = async () => {
-      if (!isOnline || !wasOffline || offlineQueue.length === 0 || !user) return;
+    if (!user?.uid) return;
+    const uid = user.uid;
 
-      console.log(`Processing ${offlineQueue.length} offline entries...`);
-      clearWasOffline();
+    // Write a queued offline entry to Firestore. Idempotent: the doc id is
+    // derived from the offlineId, so a re-sync after a lost network ack
+    // overwrites the same doc instead of creating a duplicate. Analysis is left
+    // 'pending' and completed by the server-side pipeline / watchdog.
+    const saveEntry = async (entryData) => {
+      const entriesCol = collection(db, 'artifacts', APP_COLLECTION_ID, 'users', uid, 'entries');
+      const ref = entryData.offlineId
+        ? doc(entriesCol, entryData.offlineId)
+        : doc(entriesCol);
 
-      for (const offlineEntry of offlineQueue) {
-        try {
-          // OPTIMIZED: Skip embedding generation, let Firestore trigger handle it
-          const embedding = null;
+      const createdAtDate = entryData.createdAt ? new Date(entryData.createdAt) : new Date();
+      const effectiveDate = entryData.effectiveDate ? new Date(entryData.effectiveDate) : createdAtDate;
 
-          // Prepare entry data for Firestore
-          const entryData = {
-            text: offlineEntry.text,
-            category: offlineEntry.category,
-            analysisStatus: 'pending',
-            embedding,
-            createdAt: Timestamp.fromDate(offlineEntry.createdAt),
-            effectiveDate: Timestamp.fromDate(offlineEntry.effectiveDate || offlineEntry.createdAt),
-            userId: user.uid,
-            signalExtractionVersion: 1
-          };
+      const data = removeUndefined({
+        text: entryData.text,
+        category: entryData.category || undefined,
+        createdAt: Timestamp.fromDate(createdAtDate),
+        effectiveDate: Timestamp.fromDate(effectiveDate),
+        analysisStatus: 'pending',
+        signalExtractionVersion: 1,
+        createdOnPlatform: entryData.platform || undefined,
+        syncedFromOffline: true,
+        offlineId: entryData.offlineId || undefined,
+        localAnalysis: entryData.localAnalysis || undefined,
+        healthContext: entryData.healthContext || undefined,
+        environmentContext: entryData.environmentContext || undefined,
+        voiceTone: entryData.voiceTone || undefined,
+        safety_flagged: entryData.safety_flagged || undefined,
+        safety_user_response: entryData.safety_user_response || undefined,
+        has_warning_indicators: entryData.has_warning_indicators || undefined,
+      });
 
-          if (offlineEntry.safety_flagged) {
-            entryData.safety_flagged = true;
-            if (offlineEntry.safety_user_response) {
-              entryData.safety_user_response = offlineEntry.safety_user_response;
-            }
-          }
-
-          if (offlineEntry.has_warning_indicators) {
-            entryData.has_warning_indicators = true;
-          }
-
-          // Save to Firestore
-          const ref = await addDoc(
-            collection(db, 'artifacts', APP_COLLECTION_ID, 'users', user.uid, 'entries'),
-            entryData
-          );
-
-          console.log(`Saved offline entry: ${offlineEntry.offlineId}`);
-
-          // Generate signals for offline entry (non-blocking)
-          // Note: We don't show DetectedStrip for offline entries since user may have
-          // recorded this entry hours/days ago - signals are just saved for calendar view
-          (async () => {
-            try {
-              const result = await processEntrySignals(
-                { id: ref.id, userId: user.uid, createdAt: offlineEntry.createdAt },
-                offlineEntry.text,
-                1  // Initial extraction version
-              );
-              if (result?.signals?.length > 0) {
-                console.log(`[Signals] Generated ${result.signals.length} signals for offline entry: ${ref.id}`);
-              }
-            } catch (signalError) {
-              console.error('[Signals] Failed to generate signals for offline entry:', signalError);
-            }
-          })();
-
-          // Run analysis in background (same as online flow)
-          (async () => {
-            try {
-              const recent = entries.slice(0, 5);
-              const related = []; // No embedding yet - will be added by Firestore trigger
-              const pendingPrompts = getActiveReflectionPrompts(entries, offlineEntry.category);
-
-              const classification = await classifyEntry(offlineEntry.text);
-              const [analysis, insight, enhancedContext] = await Promise.all([
-                analyzeEntry(offlineEntry.text, classification.entry_type),
-                classification.entry_type !== 'task' ? generateInsight(offlineEntry.text, related, recent, entries, pendingPrompts) : Promise.resolve(null),
-                classification.entry_type !== 'task' ? extractEnhancedContext(offlineEntry.text, recent) : Promise.resolve(null)
-              ]);
-
-              // Auto-dismiss addressed prompts
-              if (insight?.addressedPrompts?.length > 0) {
-                insight.addressedPrompts.forEach(prompt => {
-                  dismissReflectionPrompt(prompt, offlineEntry.category);
-                });
-              }
-
-              const topicTags = analysis?.tags || [];
-              const structuredTags = enhancedContext?.structured_tags || [];
-              const contextTopicTags = enhancedContext?.topic_tags || [];
-              const allTags = [...new Set([...topicTags, ...structuredTags, ...contextTopicTags])];
-
-              const updateData = {
-                title: analysis?.title || "New Memory",
-                tags: allTags,
-                analysisStatus: 'complete',
-                entry_type: classification.entry_type,
-                classification_confidence: classification.confidence,
-                context_version: CURRENT_CONTEXT_VERSION,
-                analysis: {
-                  mood_score: analysis?.mood_score,
-                  framework: analysis?.framework || 'general'
-                }
-              };
-
-              if (enhancedContext?.continues_situation) {
-                updateData.continues_situation = enhancedContext.continues_situation;
-              }
-              if (enhancedContext?.goal_update?.tag) {
-                updateData.goal_update = enhancedContext.goal_update;
-              }
-              if (classification.extracted_tasks?.length > 0) {
-                // extracted_tasks already comes as [{text: "...", completed: false}] from Cloud Function
-                updateData.extracted_tasks = classification.extracted_tasks;
-              }
-              if (analysis?.cbt_breakdown) updateData.analysis.cbt_breakdown = analysis.cbt_breakdown;
-              if (analysis?.act_analysis) updateData.analysis.act_analysis = analysis.act_analysis;
-              if (analysis?.vent_support) updateData.analysis.vent_support = analysis.vent_support;
-              if (analysis?.celebration) updateData.analysis.celebration = analysis.celebration;
-              if (analysis?.task_acknowledgment) updateData.analysis.task_acknowledgment = analysis.task_acknowledgment;
-              if (insight?.found) updateData.contextualInsight = insight;
-
-              await updateDoc(ref, removeUndefined(updateData));
-            } catch (error) {
-              console.error('Analysis failed for offline entry:', error);
-              await updateDoc(ref, {
-                title: offlineEntry.text.substring(0, 50) + (offlineEntry.text.length > 50 ? '...' : ''),
-                tags: [],
-                analysisStatus: 'complete',
-                entry_type: 'reflection',
-                analysis: { mood_score: 0.5, framework: 'general' }
-              });
-            }
-          })();
-        } catch (error) {
-          console.error('Failed to save offline entry:', error);
-        }
-      }
-
-      // Clear the offline queue
-      setOfflineQueue([]);
+      // setDoc (not addDoc) with the offlineId-derived id makes the sync
+      // idempotent — a duplicate delivery overwrites rather than duplicates.
+      await setDoc(ref, data);
+      return { id: ref.id, analysis: entryData.localAnalysis || null };
     };
 
-    processOfflineQueue();
-  }, [isOnline, wasOffline, offlineQueue, user, entries, clearWasOffline]);
+    const cleanup = initializeSyncOrchestrator({
+      saveEntry,
+      onComplete: (results) => {
+        if (results?.succeeded > 0) {
+          console.log('[Sync] Drained', results.succeeded, 'offline entries');
+        }
+      },
+    });
+
+    (async () => {
+      try {
+        // Recover entries stranded mid-sync by a previous app kill.
+        await resetStuckSyncing();
+      } catch (e) {
+        console.warn('[Sync] resetStuckSyncing failed:', e);
+      }
+      // Drain anything left over from a previous session if we're online.
+      if (navigator.onLine) {
+        triggerSync().catch(e => console.warn('[Sync] Initial sync failed:', e));
+      }
+    })();
+
+    return cleanup;
+  }, [user?.uid]);
 
   // Auth
   useEffect(() => {
@@ -881,17 +814,11 @@ export default function App() {
         platform
       });
 
-      // Also add to local state for immediate UI update
-      setOfflineQueue(prev => [...prev, {
-        ...offlineEntry,
-        // Include local analysis in display
-        analysis: localAnalysis ? {
-          mood_score: localAnalysis.mood_score,
-          framework: 'local'
-        } : null,
-        entry_type: localAnalysis?.entry_type || 'reflection',
-        title: localAnalysis?.title || finalTex.substring(0, 50) + '...'
-      }]);
+      // The entry is now durably queued in the persistent offline store
+      // (offlineManager), which the sync orchestrator drains on reconnect and
+      // which useNetworkStatus reflects via pendingCount. We no longer mirror it
+      // into a separate in-memory queue that was lost on app restart.
+      void offlineEntry;
 
       setProcessing(false);
       setReplyContext(null);
@@ -2433,7 +2360,7 @@ export default function App() {
       {!isOnline && (
         <div className="fixed top-[calc(env(safe-area-inset-top)+60px)] left-0 right-0 z-50 bg-honey-500 dark:bg-honey-600 text-white px-4 py-2 text-center text-sm font-medium">
           You're offline. Entries will be saved locally and synced when you're back online.
-          {offlineQueue.length > 0 && ` (${offlineQueue.length} pending)`}
+          {offlinePendingCount > 0 && ` (${offlinePendingCount} pending)`}
         </div>
       )}
 

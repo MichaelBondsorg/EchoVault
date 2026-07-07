@@ -45,12 +45,18 @@ export const queueEntry = async (entryData) => {
 
   const entry = await saveOfflineEntry({
     text: entryData.text,
+    category: entryData.category || null,
     transcriptionText: entryData.transcriptionText || null,
     localAnalysis: entryData.localAnalysis || null,
     healthContext: entryData.healthContext || null,
     environmentContext: entryData.environmentContext || null,
     voiceTone: entryData.voiceTone || null,
+    // Preserve safety flags so offline crisis entries keep their flag on sync.
+    safety_flagged: entryData.safety_flagged || null,
+    safety_user_response: entryData.safety_user_response || null,
+    has_warning_indicators: entryData.has_warning_indicators || null,
     createdAt: entryData.createdAt || new Date().toISOString(),
+    effectiveDate: entryData.effectiveDate || null,
     platform: entryData.platform || 'unknown'
   });
 
