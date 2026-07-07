@@ -22,6 +22,24 @@ const TEMPLATES = {
     body: params.promptText || 'A new reflection prompt is waiting for you.',
     data: { type: 'prompt', promptId: params.promptId || '' },
   }),
+
+  // Gentle, once-a-day journaling nudge. Deliberately NOT streak-based — the
+  // evidence base finds streaks unhelpful (often harmful) for a mental-health
+  // audience. `variant` (0-2) lets the caller rotate the copy so it doesn't
+  // read the same every day.
+  journal_reminder: (params) => {
+    const bodies = [
+      'Take a minute to check in with yourself today.',
+      'How are you, really? A short note is enough.',
+      'A quiet moment to reflect is waiting whenever you are.',
+    ];
+    const idx = ((params.variant ?? 0) % bodies.length + bodies.length) % bodies.length;
+    return {
+      title: 'A moment to reflect',
+      body: bodies[idx],
+      data: { type: 'reminder' },
+    };
+  },
 };
 
 /**

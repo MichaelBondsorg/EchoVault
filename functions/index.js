@@ -16,6 +16,8 @@ import { getAuth } from 'firebase-admin/auth';
 import { createHash, timingSafeEqual } from 'node:crypto';
 import { verifyAppleIdentityToken } from './src/auth/appleToken.js';
 import { isCrisisText } from './src/safety/crisisKeywords.js';
+import { sendNotification } from './src/notifications/sender.js';
+import { getNotificationTemplate } from './src/notifications/templates.js';
 
 /**
  * Constant-time secret comparison. Hashes both inputs to a fixed-length digest
@@ -2169,6 +2171,101 @@ export const pendingEntryCleanup = onSchedule(
 
     console.log(`[pendingEntryCleanup] analyzed=${analyzed} failed=${failed} of ${snap.size}`);
     return { analyzed, failed };
+  }
+);
+
+// Gentle once-a-day journaling reminder. Retention is the point of the FCM work,
+// but the evidence base is clear that daily streaks are unhelpful/harmful for a
+// mental-health audience — so this is a single, opt-out, timezone-aware nudge
+// that SKIPS users who already journaled recently (no nagging active users).
+const REMINDER_MIN_HOURS_SINCE_ENTRY = 20;
+const REMINDER_MIN_HOURS_SINCE_LAST = 20;
+
+function getLocalHourAndDay(timezone) {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: timezone,
+    hour12: false,
+    hour: '2-digit',
+    day: '2-digit',
+  }).formatToParts(new Date());
+  const hour = parseInt(parts.find(p => p.type === 'hour')?.value ?? '0', 10);
+  const day = parseInt(parts.find(p => p.type === 'day')?.value ?? '1', 10);
+  return { hour: hour === 24 ? 0 : hour, day };
+}
+
+export const journalReminder = onSchedule(
+  { schedule: '0 * * * *', timeoutSeconds: 300, memory: '256MiB' },
+  async () => {
+    // NOTE: scans all users each hour — fine at current scale. At larger scale,
+    // maintain an opt-in index of reminder-enabled users to avoid a full scan.
+    const usersSnap = await db.collection('artifacts').doc(APP_COLLECTION_ID).collection('users').get();
+
+    let sent = 0;
+    let skipped = 0;
+
+    for (const userDoc of usersSnap.docs) {
+      const userId = userDoc.id;
+      try {
+        const settingsRef = db.doc(`artifacts/${APP_COLLECTION_ID}/users/${userId}/settings/notifications`);
+        const settingsSnap = await settingsRef.get();
+        if (!settingsSnap.exists) { skipped++; continue; }
+
+        const s = settingsSnap.data();
+        // Respect explicit opt-out; require a timezone so we never nudge at the
+        // wrong local time.
+        if (s.enabled === false || s.journalRemindersEnabled === false) { skipped++; continue; }
+        if (!s.timezone) { skipped++; continue; }
+
+        const reminderHour = Number.isInteger(s.reminderHour)
+          ? s.reminderHour
+          : (Number.isInteger(s.deliveryWindowStart) ? s.deliveryWindowStart : 19);
+
+        const { hour: localHour, day: localDay } = getLocalHourAndDay(s.timezone);
+        if (localHour !== reminderHour) { skipped++; continue; }
+
+        // Skip users who already journaled recently.
+        const lastEntrySnap = await db
+          .collection(`artifacts/${APP_COLLECTION_ID}/users/${userId}/entries`)
+          .orderBy('createdAt', 'desc')
+          .limit(1)
+          .get();
+        if (!lastEntrySnap.empty) {
+          const created = lastEntrySnap.docs[0].data().createdAt;
+          const createdMs = created?.toMillis ? created.toMillis() : 0;
+          if (createdMs && Date.now() - createdMs < REMINDER_MIN_HOURS_SINCE_ENTRY * 3600 * 1000) {
+            skipped++;
+            continue;
+          }
+        }
+
+        // Dedup: don't send twice within ~a day.
+        const lastReminderMs = s.lastReminderSentAt?.toMillis ? s.lastReminderSentAt.toMillis() : 0;
+        if (lastReminderMs && Date.now() - lastReminderMs < REMINDER_MIN_HOURS_SINCE_LAST * 3600 * 1000) {
+          skipped++;
+          continue;
+        }
+
+        const template = getNotificationTemplate('journal_reminder', { variant: localDay % 3 });
+        const result = await sendNotification(
+          userId,
+          { title: template.title, body: template.body },
+          template.data
+        );
+
+        if (result.sent > 0) {
+          await settingsRef.update({ lastReminderSentAt: FieldValue.serverTimestamp() });
+          sent++;
+        } else {
+          skipped++;
+        }
+      } catch (e) {
+        console.error(`[journalReminder] failed for ${userId}:`, e.message);
+        skipped++;
+      }
+    }
+
+    console.log(`[journalReminder] sent=${sent} skipped=${skipped} of ${usersSnap.size}`);
+    return { sent, skipped };
   }
 );
 
