@@ -6,6 +6,7 @@ import {
   CloudRain, Footprints, Zap, Download, ThumbsUp, ThumbsDown, Flag
 } from 'lucide-react';
 import { reportInsight } from '../services/moderation/reportInsight';
+import { recordInsightEngagement } from '../services/analytics/insightEngagement';
 import { useNexusInsights } from '../hooks/useNexusInsights';
 import { useBasicInsights } from '../hooks/useBasicInsights';
 import { useState, useEffect, useMemo, useCallback } from 'react';
@@ -169,6 +170,8 @@ const InsightsPage = ({
     if (expandedInsight === insight.id) {
       setExpandedInsight(null);
     }
+    // Fire-and-forget engagement instrumentation (best-effort, never blocks UI).
+    recordInsightEngagement(userId, insight, 'dismissed');
   };
 
   const handleReportInsight = async (insight, e) => {
@@ -283,7 +286,14 @@ const InsightsPage = ({
                 key={insight.id || index}
                 insight={insight}
                 isExpanded={expandedInsight === (insight.id || index)}
-                onToggleExpand={() => handleToggleExpand(insight.id || index)}
+                onToggleExpand={() => {
+                  const wasExpanded = expandedInsight === (insight.id || index);
+                  handleToggleExpand(insight.id || index);
+                  // Record 'explored' only on the collapse→expand transition.
+                  if (!wasExpanded) {
+                    recordInsightEngagement(userId, insight, 'explored');
+                  }
+                }}
                 onDismiss={(e) => handleDismissInsight(insight, e)}
                 onReport={(e) => handleReportInsight(insight, e)}
               />
