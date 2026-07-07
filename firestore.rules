@@ -72,7 +72,12 @@ service cloud.firestore {
 
       // NEW: Settings subcollection (user preferences)
       match /settings/{settingId} {
-        allow read, write: if isOwner(userId);
+        allow read: if isOwner(userId);
+        // The subscription/entitlement doc is written ONLY by the server
+        // (IAP / RevenueCat webhook running with admin credentials) — a client
+        // must not be able to self-grant premium by writing settings/subscription.
+        // The admin catch-all below still permits the trusted server write.
+        allow write: if isOwner(userId) && settingId != 'subscription';
       }
 
       // Dashboard preferences subcollection

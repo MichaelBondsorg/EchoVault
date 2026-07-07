@@ -13,7 +13,21 @@ import { defineSecret } from 'firebase-functions/params';
 import { initializeApp, getApps } from 'firebase-admin/app';
 import { getFirestore, FieldValue } from 'firebase-admin/firestore';
 import { getAuth } from 'firebase-admin/auth';
+import { createHash, timingSafeEqual } from 'node:crypto';
 import { verifyAppleIdentityToken } from './src/auth/appleToken.js';
+
+/**
+ * Constant-time secret comparison. Hashes both inputs to a fixed-length digest
+ * so timingSafeEqual never sees unequal-length buffers (which would throw and
+ * itself leak length), and the comparison time is independent of where the
+ * first differing byte is.
+ */
+function secretsEqual(a, b) {
+  if (typeof a !== 'string' || typeof b !== 'string') return false;
+  const ha = createHash('sha256').update(a).digest();
+  const hb = createHash('sha256').update(b).digest();
+  return timingSafeEqual(ha, hb);
+}
 
 // Initialize Firebase Admin
 if (getApps().length === 0) {
@@ -4390,7 +4404,12 @@ export const getChiefOfStaffContext = onCall(
       throw new HttpsError('unauthenticated', 'API key required');
     }
 
-    if (apiKey !== chiefOfStaffApiKey.value()) {
+    // Constant-time comparison to avoid leaking the key via response timing.
+    // NOTE: this endpoint is an external server-to-server integration (the
+    // Chief-of-Staff/Cosmo system) that authenticates by shared secret, not a
+    // Firebase user — so a request.auth requirement is intentionally NOT added
+    // here to avoid breaking that caller. Prefer migrating to App Check / IAM.
+    if (!secretsEqual(apiKey, chiefOfStaffApiKey.value())) {
       console.warn('Invalid API key attempt for getChiefOfStaffContext');
       throw new HttpsError('permission-denied', 'Invalid API key');
     }

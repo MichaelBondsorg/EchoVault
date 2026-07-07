@@ -1143,9 +1143,8 @@ export default function App() {
           const textForAnalysis = entityResolution?.correctedText || finalTex;
 
           if (entityResolution?.corrections?.length > 0) {
-            console.log('[EntityResolution] Name corrections applied:', entityResolution.corrections);
-            console.log('[EntityResolution] Original:', finalTex.substring(0, 100) + '...');
-            console.log('[EntityResolution] Corrected:', textForAnalysis.substring(0, 100) + '...');
+            // Do not log entry content or resolved names (PII); count only.
+            console.log('[EntityResolution] Name corrections applied:', entityResolution.corrections.length);
           }
 
           console.log('Entry classification:', classification);

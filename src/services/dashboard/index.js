@@ -328,7 +328,8 @@ export const completeTaskAsWin = async (userId, category, task, source, index) =
       lastUpdated: Timestamp.now()
     });
 
-    console.log('Task completed and added to wins:', taskText);
+    // Do not log user task content (PII).
+    console.log('Task completed and added to wins');
     return updatedSummary;
   } catch (e) {
     console.error('Failed to complete task as win:', e);
