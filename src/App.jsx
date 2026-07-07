@@ -83,6 +83,7 @@ import {
   DayDashboard, EntryBar
 } from './components';
 import WhatsNewModal from './components/shared/WhatsNewModal';
+import AiConsentModal from './components/modals/AiConsentModal';
 // Heavy screens are code-split via the lazy wrappers (aliased so JSX usage is
 // unchanged). UnifiedConversation was imported here but only rendered in
 // AppLayout — the dead import is dropped and it's lazy-loaded there instead.
@@ -173,6 +174,48 @@ export default function App() {
   // fired — no fcm_tokens were written and the app could never send a reminder.
   // This one-line fix activates the entire (already-built) notification backend.
   const { permission, requestPermission } = useNotifications(user?.uid);
+
+  // First-run AI-processing consent (Apple 5.1.2(i)). We must disclose and get
+  // permission before sending journal/health data to third-party AI. The modal
+  // gates the app on first run until acknowledged; consent is recorded per
+  // device (localStorage) and to Firestore for audit.
+  const AI_CONSENT_VERSION = '1';
+  const [needsAiConsent, setNeedsAiConsent] = useState(false);
+  const [aiConsentSaving, setAiConsentSaving] = useState(false);
+
+  useEffect(() => {
+    if (!user?.uid) {
+      setNeedsAiConsent(false);
+      return;
+    }
+    try {
+      const accepted = localStorage.getItem('engram.aiConsentVersion');
+      setNeedsAiConsent(accepted !== AI_CONSENT_VERSION);
+    } catch {
+      setNeedsAiConsent(true);
+    }
+  }, [user?.uid]);
+
+  const handleAiConsent = async () => {
+    setAiConsentSaving(true);
+    try {
+      localStorage.setItem('engram.aiConsentVersion', AI_CONSENT_VERSION);
+      localStorage.setItem('engram.aiConsentAcceptedAt', new Date().toISOString());
+    } catch { /* private mode — proceed anyway */ }
+    try {
+      if (user?.uid) {
+        await setDoc(
+          doc(db, 'artifacts', APP_COLLECTION_ID, 'users', user.uid, 'settings', 'consent'),
+          { aiProcessing: true, consentVersion: AI_CONSENT_VERSION, acceptedAt: Timestamp.now() },
+          { merge: true }
+        );
+      }
+    } catch (e) {
+      console.error('Failed to record AI consent:', e);
+    }
+    setNeedsAiConsent(false);
+    setAiConsentSaving(false);
+  };
 
   // Wrapper functions for store setters that need to accept full objects
   const setMfaResolver = (resolver) => setMfaResolverStore(resolver);
@@ -2538,6 +2581,11 @@ export default function App() {
 
       {/* What's New Modal - shows once after feature updates */}
       <WhatsNewModal />
+
+      {/* First-run AI-processing consent (must acknowledge before using AI features) */}
+      {needsAiConsent && (
+        <AiConsentModal onAgree={handleAiConsent} agreeing={aiConsentSaving} />
+      )}
     </AppLayout>
   );
 }
