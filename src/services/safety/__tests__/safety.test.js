@@ -10,16 +10,17 @@
 
 import { describe, it, expect, vi } from 'vitest';
 
-// Import the crisis/warning regex patterns directly from constants
-// This avoids importing the safety service which imports firebase
-import { CRISIS_KEYWORDS, WARNING_INDICATORS } from '../../../config/constants';
+// Import the REAL safety functions (the service no longer pulls in Firebase, so
+// it can be unit-tested directly). Testing copies of this logic would let a
+// regression in the real code pass silently — unacceptable for crisis detection.
+import {
+  checkCrisisKeywords,
+  checkWarningIndicators,
+  checkLongitudinalRisk,
+} from '../index.js';
 
 // Mock console.log to suppress output during tests
 vi.spyOn(console, 'log').mockImplementation(() => {});
-
-// Helper functions that mirror the safety service
-const checkCrisisKeywords = (text) => CRISIS_KEYWORDS.test(text);
-const checkWarningIndicators = (text) => WARNING_INDICATORS.test(text);
 
 describe('Crisis Detection', () => {
   describe('checkCrisisKeywords', () => {
@@ -128,156 +129,119 @@ describe('Crisis Detection', () => {
   });
 });
 
-describe('Longitudinal Risk Assessment', () => {
-  // Configuration matching the service
-  const LONGITUDINAL_CONFIG = {
-    windowDays: 14,
-    minimumEntries: 5,
-    slopeThreshold: -0.03,
-    avgMoodThreshold: 0.30,
-    acuteSlopeThreshold: -0.05,
-    acuteWindowDays: 7
-  };
-
-  // Simplified version of checkLongitudinalRisk for testing
-  const checkLongitudinalRisk = (recentEntries) => {
-    const now = Date.now();
-
-    const last14Days = recentEntries.filter(e => {
-      const entryTime = e.createdAt instanceof Date
-        ? e.createdAt.getTime()
-        : e.createdAt?.toDate?.()?.getTime?.() || new Date(e.createdAt).getTime();
-      return entryTime > now - LONGITUDINAL_CONFIG.windowDays * 24 * 60 * 60 * 1000;
-    });
-
-    if (last14Days.length < LONGITUDINAL_CONFIG.minimumEntries) {
-      return {
-        isAtRisk: false,
-        reason: 'insufficient_data',
-        entriesAnalyzed: last14Days.length
-      };
-    }
-
-    const sorted = [...last14Days].sort((a, b) => {
-      const aTime = a.createdAt instanceof Date ? a.createdAt.getTime() : a.createdAt?.toDate?.()?.getTime?.() || 0;
-      const bTime = b.createdAt instanceof Date ? b.createdAt.getTime() : b.createdAt?.toDate?.()?.getTime?.() || 0;
-      return aTime - bTime;
-    });
-
-    const moodScores = sorted.map(e => e.analysis?.mood_score ?? 0.5);
-    const avgMood = moodScores.reduce((sum, score) => sum + score, 0) / moodScores.length;
-
-    const n = moodScores.length;
-    const sumX = (n * (n - 1)) / 2;
-    const sumY = moodScores.reduce((a, b) => a + b, 0);
-    const sumXY = moodScores.reduce((sum, y, x) => sum + x * y, 0);
-    const sumX2 = (n * (n - 1) * (2 * n - 1)) / 6;
-    const sustainedSlope = (n * sumXY - sumX * sumY) / (n * sumX2 - sumX * sumX);
-
-    const isLowAvgMood = avgMood < LONGITUDINAL_CONFIG.avgMoodThreshold;
-    const isSustainedDecline = sustainedSlope < LONGITUDINAL_CONFIG.slopeThreshold;
-    const isAtRisk = isLowAvgMood || isSustainedDecline;
-
-    return {
-      isAtRisk,
-      entriesAnalyzed: last14Days.length,
-      flags: { isLowAvgMood, isSustainedDecline }
-    };
-  };
-
+describe('Longitudinal Risk Assessment (real checkLongitudinalRisk)', () => {
   const createEntry = (daysAgo, moodScore) => ({
     createdAt: new Date(Date.now() - daysAgo * 24 * 60 * 60 * 1000),
     analysis: { mood_score: moodScore },
     text: 'Test entry'
   });
 
+  // An entry whose AI analysis failed: marked failed, NO mood_score. The risk
+  // detector must skip these, never treat them as a neutral 0.5.
+  const createFailedEntry = (daysAgo) => ({
+    createdAt: new Date(Date.now() - daysAgo * 24 * 60 * 60 * 1000),
+    analysis: { framework: 'general' },
+    analysisStatus: 'failed',
+    text: 'Test entry'
+  });
+
   it('should return insufficient_data when < 5 entries in window', () => {
-    const entries = [
+    const result = checkLongitudinalRisk([
       createEntry(1, 0.5),
       createEntry(2, 0.4),
-      createEntry(3, 0.3)
-    ];
-
-    const result = checkLongitudinalRisk(entries);
-
+      createEntry(3, 0.3),
+    ]);
     expect(result.isAtRisk).toBe(false);
     expect(result.reason).toBe('insufficient_data');
-    expect(result.entriesAnalyzed).toBe(3);
   });
 
   it('should detect low average mood', () => {
-    const entries = [
+    const result = checkLongitudinalRisk([
       createEntry(1, 0.2),
       createEntry(2, 0.25),
       createEntry(3, 0.22),
       createEntry(5, 0.28),
-      createEntry(7, 0.24)
-    ];
-
-    const result = checkLongitudinalRisk(entries);
-
+      createEntry(7, 0.24),
+    ]);
     expect(result.isAtRisk).toBe(true);
-    expect(result.flags.isLowAvgMood).toBe(true);
+    expect(result.reason).toMatch(/low|decline/);
+    expect(result.metrics.avgMood).toBeLessThan(0.3);
   });
 
-  it('should detect sustained decline', () => {
-    const entries = [
+  it('should detect a declining mood trajectory', () => {
+    const result = checkLongitudinalRisk([
       createEntry(1, 0.2),
       createEntry(3, 0.35),
       createEntry(5, 0.45),
       createEntry(8, 0.55),
       createEntry(10, 0.65),
-      createEntry(12, 0.75)
-    ];
-
-    const result = checkLongitudinalRisk(entries);
-
+      createEntry(12, 0.75),
+    ]);
     expect(result.isAtRisk).toBe(true);
-    expect(result.flags.isSustainedDecline).toBe(true);
+    expect(result.reason).toMatch(/decline/);
   });
 
   it('should NOT flag stable mood patterns', () => {
-    const entries = [
+    const result = checkLongitudinalRisk([
       createEntry(1, 0.55),
       createEntry(3, 0.52),
       createEntry(5, 0.58),
       createEntry(7, 0.54),
-      createEntry(10, 0.56)
-    ];
-
-    const result = checkLongitudinalRisk(entries);
-
+      createEntry(10, 0.56),
+    ]);
     expect(result.isAtRisk).toBe(false);
   });
 
   it('should NOT flag improving mood patterns', () => {
-    const entries = [
+    const result = checkLongitudinalRisk([
       createEntry(1, 0.75),
       createEntry(3, 0.65),
       createEntry(5, 0.55),
       createEntry(7, 0.45),
-      createEntry(10, 0.35)
-    ];
-
-    const result = checkLongitudinalRisk(entries);
-
+      createEntry(10, 0.35),
+    ]);
     expect(result.isAtRisk).toBe(false);
   });
 
-  it('should exclude entries outside 14-day window', () => {
-    const entries = [
+  it('should exclude entries outside the 14-day window', () => {
+    const result = checkLongitudinalRisk([
       createEntry(1, 0.5),
       createEntry(3, 0.5),
       createEntry(5, 0.5),
       createEntry(7, 0.5),
       createEntry(10, 0.5),
       createEntry(20, 0.1),
-      createEntry(25, 0.1)
-    ];
-
-    const result = checkLongitudinalRisk(entries);
-
-    expect(result.entriesAnalyzed).toBe(5);
+      createEntry(25, 0.1),
+    ]);
     expect(result.isAtRisk).toBe(false);
+  });
+
+  // Regression: during an AI outage, failed entries (no mood_score) must not be
+  // scored as a neutral 0.5 that masks a real decline or manufactures a healthy
+  // flat line. They are skipped entirely.
+  it('should SKIP entries with failed analysis, not score them as 0.5', () => {
+    // Only failed entries in the window → not enough real data to assess.
+    const allFailed = checkLongitudinalRisk([
+      createFailedEntry(1),
+      createFailedEntry(2),
+      createFailedEntry(4),
+      createFailedEntry(6),
+      createFailedEntry(8),
+    ]);
+    expect(allFailed.reason).toBe('insufficient_data');
+
+    // A genuine low-mood decline must still be detected even when interleaved
+    // with failed entries that would otherwise dilute the average toward 0.5.
+    const withFailures = checkLongitudinalRisk([
+      createEntry(1, 0.15),
+      createFailedEntry(2),
+      createEntry(3, 0.2),
+      createFailedEntry(4),
+      createEntry(5, 0.18),
+      createEntry(7, 0.22),
+      createEntry(9, 0.2),
+    ]);
+    expect(withFailures.isAtRisk).toBe(true);
+    expect(withFailures.metrics.avgMood).toBeLessThan(0.3);
   });
 });

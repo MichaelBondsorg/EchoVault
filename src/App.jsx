@@ -766,29 +766,49 @@ export default function App() {
     }
   }, [user, entries, cat, hasTextMeaningfullyChanged]);
 
+  // Persist a crisis-flagged pending entry exactly once, regardless of how the
+  // user exits the crisis flow. We NEVER discard the entry a user wrote at their
+  // most vulnerable moment — crisis resources are shown *in addition to* saving,
+  // never instead of it. Cleared optimistically before the await so concurrent
+  // exit paths can't double-save. voiceTone (captured on the pending entry) is
+  // forwarded so crisis-flagged voice entries don't lose their tone data.
+  const persistPendingEntry = useCallback(async (safetyUserResponse) => {
+    const entry = pendingEntry;
+    if (!entry) return;
+    setPendingEntry(null);
+    try {
+      await doSaveEntry(
+        entry.text,
+        entry.safetyFlagged ?? true,
+        safetyUserResponse,
+        null,
+        entry.voiceTone ?? null
+      );
+    } catch (e) {
+      console.error('Failed to persist crisis-flagged entry:', e);
+    }
+  }, [pendingEntry]);
+
   const handleCrisisResponse = useCallback(async (response) => {
     setCrisisModal(null);
 
-    if (response === 'okay') {
-      if (pendingEntry) {
-        await doSaveEntry(pendingEntry.text, pendingEntry.safetyFlagged, response);
-        setPendingEntry(null);
-      }
-    } else if (response === 'support') {
+    // Always save the flagged entry. For 'support'/'crisis' we also surface the
+    // resources screen, but the save happens here so the entry survives no
+    // matter how the user leaves the resources screen.
+    if (response === 'support') {
       setCrisisResources('support');
     } else if (response === 'crisis') {
       setCrisisResources('crisis');
-      setPendingEntry(null);
     }
-  }, [pendingEntry]);
+    await persistPendingEntry(response);
+  }, [persistPendingEntry]);
 
   const handleCrisisResourcesContinue = useCallback(async () => {
     setCrisisResources(null);
-    if (pendingEntry) {
-      await doSaveEntry(pendingEntry.text, pendingEntry.safetyFlagged, 'support');
-      setPendingEntry(null);
-    }
-  }, [pendingEntry]);
+    // Entry was already persisted in handleCrisisResponse; save here only if it
+    // somehow wasn't (defensive — no-op when pendingEntry is already null).
+    await persistPendingEntry('support');
+  }, [persistPendingEntry]);
 
   const doSaveEntry = async (textInput, safetyFlagged = false, safetyUserResponse = null, temporalContext = null, voiceTone = null) => {
     if (!user) return;
@@ -1306,17 +1326,19 @@ export default function App() {
             throw updateError;
           }
         } catch (error) {
-          console.error('Analysis failed, marking entry as complete with fallback values:', error);
+          console.error('Analysis failed, marking entry as failed (no fabricated mood):', error);
 
           try {
+            // Do NOT fabricate a neutral mood_score here. Writing mood_score:0.5
+            // marked 'complete' silently poisons longitudinal risk detection —
+            // during an AI outage a genuinely declining user would read as a
+            // flat, healthy line. Mark the entry 'failed' and omit mood_score so
+            // the risk detector skips it and the pending-entry watchdog can retry.
             const fallbackData = {
-              analysis: {
-                mood_score: 0.5,
-                framework: 'general'
-              },
               title: finalTex.substring(0, 50) + (finalTex.length > 50 ? '...' : ''),
               tags: [],
-              analysisStatus: 'complete',
+              analysisStatus: 'failed',
+              analysisError: (error?.message || String(error)).slice(0, 200),
               entry_type: 'reflection'
             };
 
@@ -2420,8 +2442,10 @@ export default function App() {
         <CrisisSoftBlockModal
           onResponse={handleCrisisResponse}
           onClose={() => {
+            // Dismissing the soft-block without choosing still saves the entry
+            // (flagged) — we never silently drop it.
             setCrisisModal(null);
-            setPendingEntry(null);
+            persistPendingEntry(null);
           }}
         />
       )}
@@ -2431,8 +2455,10 @@ export default function App() {
         <CrisisResourcesScreen
           level={crisisResources}
           onClose={() => {
+            // Entry already saved on the initial response; this is a defensive
+            // no-op when pendingEntry is already null.
             setCrisisResources(null);
-            setPendingEntry(null);
+            persistPendingEntry(null);
           }}
           onContinue={handleCrisisResourcesContinue}
         />
