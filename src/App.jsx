@@ -29,6 +29,7 @@ import {
   APP_COLLECTION_ID, CURRENT_CONTEXT_VERSION,
   DEFAULT_SAFETY_PLAN
 } from './config/constants';
+import { USE_FUSED_TRANSCRIPTION } from './config/ai';
 
 // Utils
 import { safeString, removeUndefined, formatMentions } from './utils/string';
@@ -36,7 +37,7 @@ import { safeDate, formatDateForInput, getTodayForInput, parseDateInput, getDate
 import { sanitizeEntry } from './utils/entries';
 
 // Services
-import { generateEmbedding, findRelevantMemories, transcribeAudioWithTone } from './services/ai';
+import { generateEmbedding, findRelevantMemories, transcribeAudioWithTone, transcribeEntryFused } from './services/ai';
 import {
   classifyEntry, analyzeEntry, generateInsight, extractEnhancedContext,
   performLocalAnalysis, getAnalysisStrategy
@@ -1499,7 +1500,9 @@ export default function App() {
     try {
       console.log('[Transcription] Starting transcription+tone API call...');
       const startTime = Date.now();
-      const result = await transcribeAudioWithTone(base64, mime);
+      const result = USE_FUSED_TRANSCRIPTION
+        ? await transcribeEntryFused(base64, mime)
+        : await transcribeAudioWithTone(base64, mime);
       console.log('[Transcription] API call completed in', Date.now() - startTime, 'ms');
 
       // Handle error codes (string responses)
