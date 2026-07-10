@@ -124,7 +124,7 @@ const HomePage = ({
           animate={{ opacity: 1 }}
           transition={{ delay: 0.3 }}
         >
-          <p className="font-display font-medium mb-1">Welcome to your sanctuary</p>
+          <p className="font-display font-medium mb-1">What's on your mind?</p>
           <p className="text-hearth-600 text-xs">
             Tap the + button below to add your first entry
           </p>

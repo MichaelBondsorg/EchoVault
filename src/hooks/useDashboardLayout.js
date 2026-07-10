@@ -8,6 +8,14 @@ import { APP_COLLECTION_ID } from '../config/constants';
  * Each widget has an id, type, default size, and display info
  */
 export const WIDGET_DEFINITIONS = {
+  quick_capture: {
+    id: 'quick_capture',
+    type: 'capture',
+    name: 'Quick Capture',
+    description: 'One tap to start a voice brain dump',
+    defaultSize: '2x1',
+    icon: 'Mic',
+  },
   hero_card: {
     id: 'hero_card',
     type: 'hero',
@@ -79,6 +87,7 @@ export const WIDGET_DEFINITIONS = {
  * Only shows Hero and Prompts cards by default
  */
 export const DEFAULT_DASHBOARD_LAYOUT = [
+  { id: 'quick_capture', type: 'capture', size: '2x1' },
   { id: 'hero_card', type: 'hero', size: '2x1' },
   { id: 'prompt_card', type: 'prompt', size: '2x1' },
 ];
