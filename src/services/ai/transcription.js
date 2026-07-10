@@ -197,8 +197,13 @@ export const transcribeEntryFused = async (base64, mimeType, maxRetries = 3) => 
 
       const { transcript, toneAnalysis } = result.data || {};
       if (!transcript) {
-        lastError = new Error('API_NO_CONTENT');
-        continue;
+        // Terminal, not retryable: silent/near-silent audio produces the
+        // same empty result on every attempt, so burning the retry budget
+        // (and surfacing a misleading "check your network" message) just
+        // delays the user from re-recording. Return immediately, like the
+        // other non-retryable codes above.
+        console.error('Fused transcription returned no content');
+        return 'API_NO_CONTENT';
       }
 
       console.log('Fused transcription result:', {

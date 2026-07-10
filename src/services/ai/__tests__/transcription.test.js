@@ -31,6 +31,13 @@ describe('transcribeEntryFused', () => {
     expect(mockTranscribeEntryFn).toHaveBeenCalledTimes(1);
   });
 
+  it('returns API_NO_CONTENT immediately without retrying (silent audio)', async () => {
+    mockTranscribeEntryFn.mockResolvedValue({ data: { transcript: '' } });
+    const result = await transcribeEntryFused('QUJD', 'audio/webm');
+    expect(result).toBe('API_NO_CONTENT');
+    expect(mockTranscribeEntryFn).toHaveBeenCalledTimes(1);
+  });
+
   it('retries retryable errors then gives up with API_EXCEPTION', async () => {
     mockTranscribeEntryFn.mockRejectedValue(Object.assign(new Error('network down'), { code: 'unavailable' }));
     vi.useFakeTimers();

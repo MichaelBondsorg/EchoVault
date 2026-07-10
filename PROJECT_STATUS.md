@@ -135,6 +135,7 @@ Good ideas we're explicitly NOT doing now. Don't re-suggest these.
 | **Old entries missing location data** | Medium | Environment backfill requires `entry.location` but old entries don't have it. New entries now capture location. |
 | **Analysis not extracting themes/emotions** | Low | Cloud Function `analyzeEntry` prompt doesn't request themes/emotions fields. Would need prompt update. |
 | **Existing entries need platform flag** | Low | 140 existing entries don't have `createdOnPlatform` field. Could add migration to backfill `createdOnPlatform: 'unknown'` or `'web'`. |
+| **Audio vault (Phase 1) spec-vs-implementation deferrals** | Medium | Logged during final-review fix wave, deferred to Phase 2/3 consideration: (a) audio isn't timesliced to Filesystem during recording — kill-mid-recording still loses audio, since the vault only starts at recording stop; (b) failed uploads retry via the `PendingAudioBanner` UI, not through the `offlineManager`/`syncOrchestrator` durable queue; (c) no auto-created processing-state entry is written when a recording starts — the blocking alert-based failure flow is retained instead. |
 
 ### Investigation Notes: Health Context Not Captured
 
