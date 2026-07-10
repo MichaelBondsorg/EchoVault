@@ -62,6 +62,7 @@ export async function callOpenAI(apiKey, systemPrompt, userPrompt, options = {})
  * @param {string} apiKey - OpenAI API key
  * @param {Buffer} audioBuffer - Audio data as buffer
  * @param {Object} options - Additional options
+ * @param {AbortSignal} [options.signal] - Optional AbortSignal to cancel/timeout the request
  * @returns {Promise<Object|null>} Transcription result or null on error
  */
 export async function transcribeWithWhisper(apiKey, audioBuffer, options = {}) {
@@ -75,7 +76,8 @@ export async function transcribeWithWhisper(apiKey, audioBuffer, options = {}) {
       model = 'whisper-1',
       language = 'en',
       responseFormat = 'verbose_json',
-      filename = 'audio.webm'
+      filename = 'audio.webm',
+      signal = undefined
     } = options;
 
     const formData = new FormData();
@@ -89,7 +91,8 @@ export async function transcribeWithWhisper(apiKey, audioBuffer, options = {}) {
       headers: {
         'Authorization': `Bearer ${apiKey}`
       },
-      body: formData
+      body: formData,
+      signal
     });
 
     if (!res.ok) {

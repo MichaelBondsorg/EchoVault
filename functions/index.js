@@ -1504,6 +1504,10 @@ export const transcribeEntry = onCall(
     const gemKey = geminiApiKey.value();
     const oaiKey = openaiApiKey.value();
 
+    if (!gemKey && !oaiKey) {
+      throw new HttpsError('failed-precondition', 'No transcription API key configured');
+    }
+
     await enforceDailyQuota(userId, { key: 'transcribe', limit: DAILY_QUOTA.transcribe });
 
     // 1. Primary: fused Gemini call (transcript + tone in one pass)
@@ -1519,9 +1523,9 @@ export const transcribeEntry = onCall(
           }
         );
 
-        if (geminiRes.status === 429) return { error: 'API_RATE_LIMIT' };
-
-        if (geminiRes.ok) {
+        if (geminiRes.status === 429) {
+          console.warn('[transcribeEntry] Gemini rate limited, falling back to Whisper', { userId, status: geminiRes.status });
+        } else if (geminiRes.ok) {
           const parsed = parseFusedResponse(await geminiRes.json());
           if (parsed && parsed.transcript) {
             return { transcript: parsed.transcript, toneAnalysis: parsed.toneAnalysis, engine: 'gemini' };
@@ -1545,9 +1549,22 @@ export const transcribeEntry = onCall(
     try {
       const buffer = Buffer.from(base64, 'base64');
       const fileExt = mimeType.includes('webm') ? 'webm' : mimeType.includes('mp4') ? 'mp4' : 'wav';
-      const whisperResult = await transcribeWithWhisper(oaiKey, buffer, { filename: `audio.${fileExt}` });
+      const whisperResult = await transcribeWithWhisper(oaiKey, buffer, {
+        filename: `audio.${fileExt}`,
+        signal: AbortSignal.timeout(TRANSCRIBE_TIMEOUT_MS)
+      });
+
+      if (whisperResult === null) {
+        // transcribeWithWhisper returns null on any failure (auth, 429, network) —
+        // never log audio/transcript (PII), only ids, sizes, and mimeType.
+        console.error('[transcribeEntry] both engines failed', {
+          userId, audioBytes: base64?.length, mimeType
+        });
+        return { error: 'API_ERROR' };
+      }
+
       const transcript = whisperResult?.text?.trim();
-      if (!transcript) return { error: 'API_NO_CONTENT' };
+      if (!transcript) return { error: 'API_NO_CONTENT' }; // call succeeded, no speech detected
       return { transcript, toneAnalysis: null, engine: 'whisper' };
     } catch (error) {
       console.error('[transcribeEntry] both engines failed', {
