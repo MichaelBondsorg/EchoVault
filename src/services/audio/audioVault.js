@@ -23,9 +23,20 @@ const webKey = (id) => `engram_audio_vault_${id}`;
 const readIndex = () => {
   try { return JSON.parse(localStorage.getItem(INDEX_KEY)) || {}; } catch { return {}; }
 };
+/** Returns true on success, false if persisting the index failed. */
 const writeIndex = (index) => {
-  try { localStorage.setItem(INDEX_KEY, JSON.stringify(index)); } catch (e) {
+  try {
+    localStorage.setItem(INDEX_KEY, JSON.stringify(index));
+    return true;
+  } catch (e) {
     console.warn('[audioVault] could not persist index:', e.message);
+    return false;
+  }
+};
+/** Notify listeners (e.g. PendingAudioBanner) that vault state changed. */
+const emitChanged = () => {
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('engram:audio-vault-changed'));
   }
 };
 
@@ -46,7 +57,22 @@ export const audioVault = {
       }
       const index = readIndex();
       index[id] = { createdAt: Date.now(), mime, entryId: null };
-      writeIndex(index);
+      const indexed = writeIndex(index);
+      if (!indexed) {
+        // Blob was written but the index (the only thing that makes it
+        // discoverable) wasn't — the blob is now unreachable. Clean it up
+        // rather than leaking an orphaned file/localStorage entry.
+        console.warn('[audioVault] index write failed after blob write; rolling back blob for', id);
+        try {
+          if (isNative()) {
+            await Filesystem.deleteFile({ path: filePath(id), directory: Directory.Data }).catch(() => {});
+          } else {
+            localStorage.removeItem(webKey(id));
+          }
+        } catch { /* best-effort rollback */ }
+        return null;
+      }
+      emitChanged();
       return id;
     } catch (e) {
       console.warn('[audioVault] saveRecording failed:', e.message);
@@ -76,6 +102,7 @@ export const audioVault = {
     if (index[id]) {
       index[id].entryId = entryId;
       writeIndex(index);
+      emitChanged();
     }
   },
 
@@ -90,6 +117,7 @@ export const audioVault = {
       const index = readIndex();
       delete index[id];
       writeIndex(index);
+      emitChanged();
     }
   },
 

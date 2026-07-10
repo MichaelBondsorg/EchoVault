@@ -71,4 +71,39 @@ describe('audioVault', () => {
     expect(id).toBeNull();
     spy.mockRestore();
   });
+
+  it('returns null and leaves no orphan when the index write fails after a successful blob write', async () => {
+    const setItemSpy = localStorage.setItem.getMockImplementation();
+    localStorage.setItem.mockImplementation((key, value) => {
+      if (key === 'engram_audio_vault_index') {
+        throw new Error('quota exceeded');
+      }
+      return setItemSpy(key, value);
+    });
+
+    const id = await audioVault.saveRecording('QUJD', 'audio/webm');
+    expect(id).toBeNull();
+    // The blob write path (Filesystem.writeFile, native mode) should have
+    // been rolled back — deleteFile is best-effort so just assert no
+    // orphan/entry is discoverable via the (now-restored) index.
+    localStorage.setItem.mockImplementation(setItemSpy);
+    expect(await audioVault.listOrphans()).toHaveLength(0);
+  });
+
+  it('dispatches engram:audio-vault-changed on save, link, and delete', async () => {
+    const events = [];
+    const listener = () => events.push(1);
+    window.addEventListener('engram:audio-vault-changed', listener);
+
+    const id = await audioVault.saveRecording('QUJD', 'audio/webm');
+    expect(events.length).toBe(1);
+
+    await audioVault.linkEntry(id, 'entry-123');
+    expect(events.length).toBe(2);
+
+    await audioVault.deleteRecording(id);
+    expect(events.length).toBe(3);
+
+    window.removeEventListener('engram:audio-vault-changed', listener);
+  });
 });

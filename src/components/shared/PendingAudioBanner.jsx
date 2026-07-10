@@ -4,6 +4,13 @@ import { audioVault } from '../../services/audio/audioVault';
 /**
  * Shows when unsaved recordings exist (transcription failed or app died
  * mid-flight). Retry re-runs the normal transcription+save pipeline.
+ *
+ * Linking a recording to a saved entry is owned entirely by the retry
+ * pipeline (handleAudioWrapper), not by this component — that's what makes
+ * a failed retry correctly stay in the list instead of vanishing. This
+ * component only reflects vault state, refreshed after each retry pass and
+ * whenever the vault reports a change (e.g. another tab/flow linked or
+ * deleted a recording).
  */
 const PendingAudioBanner = ({ onRetry }) => {
   const [orphans, setOrphans] = useState([]);
@@ -11,6 +18,10 @@ const PendingAudioBanner = ({ onRetry }) => {
 
   useEffect(() => {
     audioVault.listOrphans().then(setOrphans);
+
+    const refresh = () => audioVault.listOrphans().then(setOrphans);
+    window.addEventListener('engram:audio-vault-changed', refresh);
+    return () => window.removeEventListener('engram:audio-vault-changed', refresh);
   }, []);
 
   if (orphans.length === 0) return null;
@@ -20,8 +31,10 @@ const PendingAudioBanner = ({ onRetry }) => {
     for (const { id } of orphans) {
       const rec = await audioVault.getRecording(id);
       if (rec) {
-        const ok = await onRetry(rec.base64, rec.mime);
-        if (ok) await audioVault.linkEntry(id, 'saved');
+        // Linking on success (and leaving unlinked on failure) is the
+        // pipeline's responsibility now — we just drive the retry and
+        // re-read vault state afterward.
+        await onRetry(rec.base64, rec.mime, id);
       }
     }
     setOrphans(await audioVault.listOrphans());

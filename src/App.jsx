@@ -1467,7 +1467,8 @@ export default function App() {
     setSignalExtractionEntryId(null);
   }, []);
 
-  const handleAudioWrapper = async (base64, mime) => {
+  const handleAudioWrapper = async (base64, mime, options = {}) => {
+    const { existingRecordingId } = options;
     console.log('[Transcription] handleAudioWrapper called');
     console.log('[Transcription] Audio data received:', {
       base64Length: base64?.length || 0,
@@ -1478,7 +1479,7 @@ export default function App() {
     if (!base64 || base64.length < 100) {
       console.error('[Transcription] Invalid audio data received');
       alert('No audio data received. Please try recording again.');
-      return;
+      return false;
     }
 
     setProcessing(true);
@@ -1488,8 +1489,10 @@ export default function App() {
     console.log('[Transcription] Wake lock acquired:', wakeLockAcquired);
 
     // Durable local backup BEFORE any network call — recordings must never
-    // depend on a successful cloud round-trip.
-    const recordingId = await audioVault.saveRecording(base64, mime);
+    // depend on a successful cloud round-trip. If this is a retry of an
+    // already-vaulted recording, reuse its id instead of creating a
+    // duplicate vault entry.
+    const recordingId = existingRecordingId || await audioVault.saveRecording(base64, mime);
     console.log('[Transcription] Audio saved to vault:', recordingId);
 
     try {
@@ -1506,28 +1509,28 @@ export default function App() {
           alert("Too many requests - please wait a moment and try again");
           setProcessing(false);
           releaseWakeLock();
-          return;
+          return false;
         }
 
         if (result === 'API_AUTH_ERROR') {
           alert("API authentication error - please check settings");
           setProcessing(false);
           releaseWakeLock();
-          return;
+          return false;
         }
 
         if (result === 'API_BAD_REQUEST') {
           alert("Audio format not supported - please try recording again");
           setProcessing(false);
           releaseWakeLock();
-          return;
+          return false;
         }
 
         if (result.startsWith('API_')) {
           alert("Transcription failed after multiple attempts. Please check your network connection and try again. Your recording has been saved locally.");
           setProcessing(false);
           releaseWakeLock();
-          return;
+          return false;
         }
       }
 
@@ -1543,28 +1546,32 @@ export default function App() {
         alert("Transcription failed - please try again. Your recording has been saved locally.");
         setProcessing(false);
         releaseWakeLock();
-        return;
+        return false;
       }
 
       if (transcript.includes("NO_SPEECH")) {
         alert("No speech detected - please try speaking closer to the microphone");
         setProcessing(false);
         releaseWakeLock();
-        return;
+        return false;
       }
 
       // Transcription successful - keep the raw audio for RETENTION_DAYS
-      // (replay/original); link it to the entry.
-      // saveEntry currently doesn't return the entry id — link with a
-      // sentinel so the recording is not treated as an orphan. (Replay UI
-      // is deferred; see plan notes.)
-      console.log('[Transcription] Success! Linking audio and saving entry...');
-      if (recordingId) await audioVault.linkEntry(recordingId, 'saved');
+      // (replay/original). Save the entry first; only link (and thereby
+      // remove it from the recovery banner) once saveEntry has actually
+      // completed, so a failure between here and there leaves the
+      // recording correctly flagged as an orphan.
+      console.log('[Transcription] Success! Saving entry...');
 
       // Pass voice tone analysis to saveEntry
       console.log('[Transcription] Calling saveEntry with transcript length:', transcript.length, 'voiceTone:', !!toneAnalysis);
       await saveEntry(transcript, toneAnalysis);
       console.log('[Transcription] saveEntry completed');
+      // saveEntry currently doesn't return the entry id — link with a
+      // sentinel so the recording is not treated as an orphan. (Replay UI
+      // is deferred; see plan notes.)
+      if (recordingId) await audioVault.linkEntry(recordingId, 'saved');
+      return true;
     } catch (error) {
       console.error('[Transcription] handleAudioWrapper error:', error);
       console.error('[Transcription] Error details:', {
@@ -1575,6 +1582,7 @@ export default function App() {
       });
       alert("An error occurred during transcription. Your recording has been saved locally. Please try again.");
       setProcessing(false);
+      return false;
     } finally {
       console.log('[Transcription] Releasing wake lock');
       releaseWakeLock();
@@ -2394,9 +2402,7 @@ export default function App() {
       {/* Modals and overlays - passed as children to AppLayout */}
 
       {/* Recovery banner for recordings that never made it to a saved entry */}
-      <PendingAudioBanner onRetry={async (base64, mime) => {
-        try { await handleAudioWrapper(base64, mime); return true; } catch { return false; }
-      }} />
+      <PendingAudioBanner onRetry={(base64, mime, recordingId) => handleAudioWrapper(base64, mime, { existingRecordingId: recordingId })} />
 
       {/* Decompression Screen */}
       <AnimatePresence>
