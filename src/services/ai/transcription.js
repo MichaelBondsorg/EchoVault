@@ -188,7 +188,7 @@ export const transcribeEntryFused = async (base64, mimeType, maxRetries = 3) => 
 
       if (result.data?.error) {
         const errorCode = result.data.error;
-        if (errorCode === 'API_RATE_LIMIT' || errorCode === 'API_AUTH_ERROR' || errorCode === 'API_BAD_REQUEST') {
+        if (errorCode === 'API_RATE_LIMIT' || errorCode === 'API_AUTH_ERROR' || errorCode === 'API_BAD_REQUEST' || errorCode === 'API_NO_CONTENT') {
           return errorCode;
         }
         lastError = new Error(errorCode);

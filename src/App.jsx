@@ -1606,7 +1606,7 @@ export default function App() {
       if (saveResult === 'saved' && recordingId) {
         await audioVault.linkEntry(recordingId, 'saved');
       }
-      return true;
+      return saveResult === 'saved';
     } catch (error) {
       console.error('[Transcription] handleAudioWrapper error:', error);
       console.error('[Transcription] Error details:', {
