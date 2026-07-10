@@ -405,15 +405,17 @@ export default function App() {
     // Listen for deep links
     const listener = CapacitorApp.addListener('appUrlOpen', handleDeepLink);
 
-    // Cold start: if the app was launched via a deep link, appUrlOpen never fires.
+    // Cold start: process the launch URL, then remember it so a subsequent
+    // retained appUrlOpen redelivery of the same URL is skipped exactly once.
+    // (Capacitor iOS retains the launch URL and redelivers it to the listener.)
     // Guard: this effect re-runs on showHealthSettings changes, but the launch URL
     // must only be consumed once per app session.
     if (!launchUrlConsumedRef.current) {
       launchUrlConsumedRef.current = true;
       CapacitorApp.getLaunchUrl().then((result) => {
         if (result?.url) {
-          consumedLaunchUrlRef.current = result.url;
           handleDeepLink({ url: result.url });
+          consumedLaunchUrlRef.current = result.url;
         }
       }).catch(() => {});
     }
