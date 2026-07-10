@@ -19,6 +19,7 @@ export default defineConfig({
       '@capacitor/status-bar': path.resolve(__dirname, './src/test/mocks/capacitor.js'),
       '@capgo/capacitor-social-login': path.resolve(__dirname, './src/test/mocks/capacitor.js'),
       '@capacitor/push-notifications': path.resolve(__dirname, './src/test/mocks/capacitor.js'),
+      '@capacitor/filesystem': path.resolve(__dirname, './src/test/mocks/filesystem.js'),
     }
   },
   test: {
@@ -45,6 +46,7 @@ export default defineConfig({
       'functions/src/auth/__tests__/appleToken.test.js',
       'functions/src/safety/__tests__/crisisKeywords.test.js',
       'functions/src/limits/__tests__/dailyQuota.test.js',
+      'functions/src/transcription/__tests__/fusedTranscription.test.js',
     ],
 
     // Exclude patterns

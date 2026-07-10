@@ -43,7 +43,7 @@ const VoiceRecorder = ({ onSave, onSwitch, loading, minimal }) => {
       const mime = MediaRecorder.isTypeSupported("audio/webm") ? "audio/webm" : "audio/mp4";
       console.log('[VoiceRecorder] Using MIME type:', mime);
 
-      const r = new MediaRecorder(stream, { mimeType: mime, audioBitsPerSecond: 16000 });
+      const r = new MediaRecorder(stream, { mimeType: mime, audioBitsPerSecond: 32000 });
       const chunks = [];
 
       r.ondataavailable = e => {

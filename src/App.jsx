@@ -29,6 +29,7 @@ import {
   APP_COLLECTION_ID, CURRENT_CONTEXT_VERSION,
   DEFAULT_SAFETY_PLAN
 } from './config/constants';
+import { USE_FUSED_TRANSCRIPTION } from './config/ai';
 
 // Utils
 import { safeString, removeUndefined, formatMentions } from './utils/string';
@@ -36,7 +37,8 @@ import { safeDate, formatDateForInput, getTodayForInput, parseDateInput, getDate
 import { sanitizeEntry } from './utils/entries';
 
 // Services
-import { generateEmbedding, findRelevantMemories, transcribeAudioWithTone } from './services/ai';
+import { generateEmbedding, findRelevantMemories, transcribeAudioWithTone, transcribeEntryFused } from './services/ai';
+import { audioVault } from './services/audio/audioVault';
 import {
   classifyEntry, analyzeEntry, generateInsight, extractEnhancedContext,
   performLocalAnalysis, getAnalysisStrategy
@@ -83,6 +85,7 @@ import {
 } from './components';
 import WhatsNewModal from './components/shared/WhatsNewModal';
 import AiConsentModal from './components/modals/AiConsentModal';
+import PendingAudioBanner from './components/shared/PendingAudioBanner';
 // Heavy screens are code-split via the lazy wrappers (aliased so JSX usage is
 // unchanged). UnifiedConversation was imported here but only rendered in
 // AppLayout — the dead import is dropped and it's lazy-loaded there instead.
@@ -142,7 +145,10 @@ export default function App() {
   useIOSMeta();
   const { isOnline, pendingCount: offlinePendingCount } = useNetworkStatus();
   const { requestWakeLock, releaseWakeLock } = useWakeLock();
-  const { backupAudio, clearBackup, isProcessing: isBackgroundProcessing } = useBackgroundAudio();
+  // backupAudio/clearBackup/isProcessing are unused here (audio backup is now
+  // owned by audioVault); isProcessing never existed on this hook's return
+  // value, so the old `isBackgroundProcessing` binding was always falsy.
+  useBackgroundAudio();
 
   // ============================================
   // ZUSTAND STORES (migrated from useState)
@@ -285,7 +291,7 @@ export default function App() {
   // Warn user if they try to close/navigate away while processing audio
   useEffect(() => {
     const handleBeforeUnload = (e) => {
-      if (processing || isBackgroundProcessing) {
+      if (processing) {
         e.preventDefault();
         e.returnValue = 'Audio is being processed. Are you sure you want to leave?';
         return e.returnValue;
@@ -306,7 +312,7 @@ export default function App() {
       window.removeEventListener('beforeunload', handleBeforeUnload);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, [processing, isBackgroundProcessing]);
+  }, [processing]);
 
   // Cleanup stale audio backups on app startup (older than 24 hours)
   useEffect(() => {
@@ -341,6 +347,9 @@ export default function App() {
     } catch (e) {
       console.warn('Error cleaning up audio backups:', e);
     }
+
+    // Sweep the durable audio vault for recordings past the retention window.
+    audioVault.cleanupExpired().then(n => n && console.log(`[audioVault] cleaned ${n} expired recording(s)`));
   }, []);
 
   // Deep link handler for OAuth callbacks (Whoop integration)
@@ -760,13 +769,19 @@ export default function App() {
     if (!entry) return;
     setPendingEntry(null);
     try {
-      await doSaveEntry(
+      const result = await doSaveEntry(
         entry.text,
         entry.safetyFlagged ?? true,
         safetyUserResponse,
         null,
         entry.voiceTone ?? null
       );
+      // The recording (if this crisis entry came from voice) was deliberately
+      // left unlinked in the vault until the entry actually existed — link it
+      // now so the recovery banner stops showing it as unsaved.
+      if (result === 'saved' && entry.recordingId) {
+        await audioVault.linkEntry(entry.recordingId, 'saved');
+      }
     } catch (e) {
       console.error('Failed to persist crisis-flagged entry:', e);
     }
@@ -872,7 +887,7 @@ export default function App() {
 
       setProcessing(false);
       setReplyContext(null);
-      return;
+      return 'saved';
     }
 
     // OPTIMIZED: Save entry immediately, generate embedding in background
@@ -1326,6 +1341,8 @@ export default function App() {
           }
         }
       })();
+
+      return 'saved';
     } catch (e) {
       console.error('Save failed:', e);
       // Never lose the entry on a failed online save. Persist it to the durable
@@ -1359,10 +1376,12 @@ export default function App() {
         : 'Save failed. Please try again.';
       alert(errorMessage);
       setProcessing(false);
+      return queuedLocally ? 'saved' : undefined;
     }
   };
 
-  const saveEntry = async (textInput, voiceTone = null) => {
+  const saveEntry = async (textInput, voiceTone = null, options = {}) => {
+    const { recordingId } = options;
     if (!user) return;
     setProcessing(true);
     console.log('[SaveEntry] Starting save process, text length:', textInput.length, 'hasVoiceTone:', !!voiceTone);
@@ -1371,10 +1390,10 @@ export default function App() {
     const hasCrisis = checkCrisisKeywords(textInput);
     if (hasCrisis) {
       console.log('[SaveEntry] Crisis keywords detected, showing modal');
-      setPendingEntry({ text: textInput, safetyFlagged: true, voiceTone });
+      setPendingEntry({ text: textInput, safetyFlagged: true, voiceTone, recordingId });
       setCrisisModal(true);
       setProcessing(false);
-      return;
+      return 'deferred';
     }
 
     // Detect temporal context (Phase 2)
@@ -1408,10 +1427,10 @@ export default function App() {
       }
 
       // Always save with current date - signals handle temporal attribution
-      await doSaveEntry(textInput, false, null, temporal.detected ? temporal : null, voiceTone);
+      return await doSaveEntry(textInput, false, null, temporal.detected ? temporal : null, voiceTone);
     } catch (e) {
       console.error('Temporal detection failed, saving normally:', e);
-      await doSaveEntry(textInput, false, null, null, voiceTone);
+      return await doSaveEntry(textInput, false, null, null, voiceTone);
     }
   };
 
@@ -1461,7 +1480,8 @@ export default function App() {
     setSignalExtractionEntryId(null);
   }, []);
 
-  const handleAudioWrapper = async (base64, mime) => {
+  const handleAudioWrapper = async (base64, mime, options = {}) => {
+    const { existingRecordingId } = options;
     console.log('[Transcription] handleAudioWrapper called');
     console.log('[Transcription] Audio data received:', {
       base64Length: base64?.length || 0,
@@ -1472,7 +1492,15 @@ export default function App() {
     if (!base64 || base64.length < 100) {
       console.error('[Transcription] Invalid audio data received');
       alert('No audio data received. Please try recording again.');
-      return;
+      return false;
+    }
+
+    // Reentrancy guard: a second recording (or a banner "Retry now" click)
+    // firing while a pipeline is already in flight must not start a second
+    // transcription+save pipeline for the same or another recording.
+    if (processing) {
+      console.log('[Transcription] handleAudioWrapper called while already processing — ignoring');
+      return false;
     }
 
     setProcessing(true);
@@ -1481,25 +1509,19 @@ export default function App() {
     const wakeLockAcquired = await requestWakeLock();
     console.log('[Transcription] Wake lock acquired:', wakeLockAcquired);
 
-    // Save audio to localStorage as backup before attempting transcription
-    // This prevents data loss if transcription fails
-    const audioBackupKey = `echov_audio_backup_${Date.now()}`;
-    try {
-      // Only backup if audio is not too large (< 10MB to avoid localStorage limits)
-      if (base64.length < 10 * 1024 * 1024) {
-        localStorage.setItem(audioBackupKey, JSON.stringify({ base64, mime, timestamp: Date.now() }));
-        console.log('[Transcription] Audio backed up to localStorage:', audioBackupKey);
-      } else {
-        console.log('[Transcription] Audio too large for localStorage backup:', base64.length);
-      }
-    } catch (backupError) {
-      console.warn('[Transcription] Could not backup audio to localStorage:', backupError.message);
-    }
+    // Durable local backup BEFORE any network call — recordings must never
+    // depend on a successful cloud round-trip. If this is a retry of an
+    // already-vaulted recording, reuse its id instead of creating a
+    // duplicate vault entry.
+    const recordingId = existingRecordingId || await audioVault.saveRecording(base64, mime);
+    console.log('[Transcription] Audio saved to vault:', recordingId);
 
     try {
       console.log('[Transcription] Starting transcription+tone API call...');
       const startTime = Date.now();
-      const result = await transcribeAudioWithTone(base64, mime);
+      const result = USE_FUSED_TRANSCRIPTION
+        ? await transcribeEntryFused(base64, mime)
+        : await transcribeAudioWithTone(base64, mime);
       console.log('[Transcription] API call completed in', Date.now() - startTime, 'ms');
 
       // Handle error codes (string responses)
@@ -1508,35 +1530,43 @@ export default function App() {
           alert("Too many requests - please wait a moment and try again");
           setProcessing(false);
           releaseWakeLock();
-          return;
+          return false;
         }
 
         if (result === 'API_AUTH_ERROR') {
           alert("API authentication error - please check settings");
           setProcessing(false);
           releaseWakeLock();
-          return;
+          return false;
         }
 
         if (result === 'API_BAD_REQUEST') {
           alert("Audio format not supported - please try recording again");
           setProcessing(false);
           releaseWakeLock();
-          try { localStorage.removeItem(audioBackupKey); } catch (e) {}
-          return;
+          return false;
+        }
+
+        if (result === 'API_NO_CONTENT') {
+          // Silent/near-silent audio — this is terminal (retrying gets the
+          // same result), so don't fall through to the generic retry-exhausted
+          // message. Audio stays vaulted as an orphan, same as other failures.
+          alert("No speech detected - please try speaking closer to the microphone");
+          setProcessing(false);
+          releaseWakeLock();
+          return false;
         }
 
         if (result.startsWith('API_')) {
           alert("Transcription failed after multiple attempts. Please check your network connection and try again. Your recording has been saved locally.");
           setProcessing(false);
           releaseWakeLock();
-          return;
+          return false;
         }
       }
 
       const { transcript, toneAnalysis } = result;
       console.log('[Transcription] Result:', {
-        transcriptPreview: transcript?.substring?.(0, 100),
         hasToneAnalysis: !!toneAnalysis,
         toneEnergy: toneAnalysis?.energy,
         toneMood: toneAnalysis?.moodScore?.toFixed(2)
@@ -1546,25 +1576,37 @@ export default function App() {
         alert("Transcription failed - please try again. Your recording has been saved locally.");
         setProcessing(false);
         releaseWakeLock();
-        return;
+        return false;
       }
 
       if (transcript.includes("NO_SPEECH")) {
         alert("No speech detected - please try speaking closer to the microphone");
         setProcessing(false);
         releaseWakeLock();
-        try { localStorage.removeItem(audioBackupKey); } catch (e) {}
-        return;
+        return false;
       }
 
-      // Transcription successful - clear the backup
-      console.log('[Transcription] Success! Clearing backup and saving entry...');
-      try { localStorage.removeItem(audioBackupKey); } catch (e) {}
+      // Transcription successful - keep the raw audio for RETENTION_DAYS
+      // (replay/original). Save the entry first; only link (and thereby
+      // remove it from the recovery banner) once saveEntry has actually
+      // completed, so a failure between here and there leaves the
+      // recording correctly flagged as an orphan.
+      console.log('[Transcription] Success! Saving entry...');
 
       // Pass voice tone analysis to saveEntry
       console.log('[Transcription] Calling saveEntry with transcript length:', transcript.length, 'voiceTone:', !!toneAnalysis);
-      await saveEntry(transcript, toneAnalysis);
-      console.log('[Transcription] saveEntry completed');
+      const saveResult = await saveEntry(transcript, toneAnalysis, { recordingId });
+      console.log('[Transcription] saveEntry completed with result:', saveResult);
+      // Only link (and thereby clear it from the recovery banner) once the
+      // entry actually exists. When the crisis flow deferred the save,
+      // recordingId travels with pendingEntry and gets linked at the
+      // crisis-confirm site once the entry is actually persisted — leave it
+      // as an orphan here in the meantime rather than link something that
+      // doesn't exist yet.
+      if (saveResult === 'saved' && recordingId) {
+        await audioVault.linkEntry(recordingId, 'saved');
+      }
+      return saveResult === 'saved';
     } catch (error) {
       console.error('[Transcription] handleAudioWrapper error:', error);
       console.error('[Transcription] Error details:', {
@@ -1575,6 +1617,7 @@ export default function App() {
       });
       alert("An error occurred during transcription. Your recording has been saved locally. Please try again.");
       setProcessing(false);
+      return false;
     } finally {
       console.log('[Transcription] Releasing wake lock');
       releaseWakeLock();
@@ -2392,6 +2435,14 @@ export default function App() {
       notificationPermission={permission}
     >
       {/* Modals and overlays - passed as children to AppLayout */}
+
+      {/* Recovery banner for recordings that never made it to a saved entry.
+          Gated on !processing: a recording currently in flight through the
+          pipeline isn't "unsaved" yet, and showing it here invited a Retry
+          click that would race the in-flight pipeline and duplicate it. */}
+      {!processing && (
+        <PendingAudioBanner onRetry={(base64, mime, recordingId) => handleAudioWrapper(base64, mime, { existingRecordingId: recordingId })} />
+      )}
 
       {/* Decompression Screen */}
       <AnimatePresence>

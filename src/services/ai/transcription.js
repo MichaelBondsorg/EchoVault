@@ -1,4 +1,4 @@
-import { transcribeAudioFn, transcribeWithToneFn } from '../../config';
+import { transcribeAudioFn, transcribeWithToneFn, transcribeEntryFn } from '../../config';
 
 /**
  * Sleep helper for retry backoff
@@ -165,5 +165,60 @@ export const transcribeAudioWithTone = async (base64, mimeType, maxRetries = 3) 
   }
 
   console.error('All transcription+tone attempts failed:', lastError);
+  return 'API_EXCEPTION';
+};
+
+/**
+ * Fused transcription via Cloud Function (Gemini audio-in: transcript + tone
+ * in one call, Whisper fallback server-side). Same return contract as
+ * transcribeAudioWithTone: {transcript, toneAnalysis} or an error-code string.
+ */
+export const transcribeEntryFused = async (base64, mimeType, maxRetries = 3) => {
+  let lastError = null;
+
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      if (attempt > 0) {
+        const backoffMs = Math.pow(2, attempt) * 1000;
+        console.log(`Fused transcription retry ${attempt}/${maxRetries} after ${backoffMs}ms`);
+        await sleep(backoffMs);
+      }
+
+      const result = await transcribeEntryFn({ base64, mimeType });
+
+      if (result.data?.error) {
+        const errorCode = result.data.error;
+        if (errorCode === 'API_RATE_LIMIT' || errorCode === 'API_AUTH_ERROR' || errorCode === 'API_BAD_REQUEST' || errorCode === 'API_NO_CONTENT') {
+          return errorCode;
+        }
+        lastError = new Error(errorCode);
+        continue;
+      }
+
+      const { transcript, toneAnalysis } = result.data || {};
+      if (!transcript) {
+        // Terminal, not retryable: silent/near-silent audio produces the
+        // same empty result on every attempt, so burning the retry budget
+        // (and surfacing a misleading "check your network" message) just
+        // delays the user from re-recording. Return immediately, like the
+        // other non-retryable codes above.
+        console.error('Fused transcription returned no content');
+        return 'API_NO_CONTENT';
+      }
+
+      console.log('Fused transcription result:', {
+        transcriptLength: transcript.length,
+        engine: result.data?.engine,
+        hasToneAnalysis: !!toneAnalysis
+      });
+      return { transcript, toneAnalysis: toneAnalysis || null };
+    } catch (e) {
+      console.error(`Fused transcription exception (attempt ${attempt + 1}):`, e);
+      lastError = e;
+      if (!isRetryableError(e)) break;
+    }
+  }
+
+  console.error('All fused transcription attempts failed:', lastError);
   return 'API_EXCEPTION';
 };

@@ -86,7 +86,7 @@ const EntryBar = ({ onVoiceSave, onTextSave, loading, disabled, promptContext, o
       const mime = MediaRecorder.isTypeSupported("audio/webm") ? "audio/webm" : "audio/mp4";
       console.log('[Recording] Using MIME type:', mime);
 
-      const recorder = new MediaRecorder(stream, { mimeType: mime, audioBitsPerSecond: 16000 });
+      const recorder = new MediaRecorder(stream, { mimeType: mime, audioBitsPerSecond: 32000 });
       const chunks = [];
 
       recorder.ondataavailable = e => {

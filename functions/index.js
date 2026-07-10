@@ -19,6 +19,8 @@ import { isCrisisText } from './src/safety/crisisKeywords.js';
 import { sendNotification } from './src/notifications/sender.js';
 import { getNotificationTemplate } from './src/notifications/templates.js';
 import { enforceDailyQuota } from './src/limits/dailyQuota.js';
+import { GEMINI_TRANSCRIBE_MODEL, buildGeminiRequestBody, parseFusedResponse } from './src/transcription/fusedTranscription.js';
+import { transcribeWithWhisper } from './src/shared/openai.js';
 
 /**
  * Constant-time secret comparison. Hashes both inputs to a fixed-length digest
@@ -1467,6 +1469,106 @@ Respond in this exact JSON format only, no other text:
         audioBytes: base64?.length,
         mimeType,
         err: error?.message
+      });
+      return { error: 'API_EXCEPTION' };
+    }
+  }
+);
+
+/**
+ * Cloud Function: Fused transcription — one Gemini audio-in call returns a
+ * lightly-cleaned transcript + voice tone. Falls back to Whisper (raw, no
+ * filler-stripping) if Gemini fails. Same response contract as
+ * transcribeWithTone so the client can switch via config flag.
+ */
+export const transcribeEntry = onCall(
+  {
+    secrets: [openaiApiKey, geminiApiKey],
+    cors: true,
+    maxInstances: 5,
+    timeoutSeconds: 540,
+    memory: '1GiB'
+  },
+  async (request) => {
+    if (!request.auth) {
+      throw new HttpsError('unauthenticated', 'User must be authenticated');
+    }
+
+    const userId = request.auth.uid;
+    const { base64, mimeType } = request.data;
+
+    if (!base64 || !mimeType) {
+      throw new HttpsError('invalid-argument', 'Audio data and mimeType are required');
+    }
+
+    const gemKey = geminiApiKey.value();
+    const oaiKey = openaiApiKey.value();
+
+    if (!gemKey && !oaiKey) {
+      throw new HttpsError('failed-precondition', 'No transcription API key configured');
+    }
+
+    await enforceDailyQuota(userId, { key: 'transcribe', limit: DAILY_QUOTA.transcribe });
+
+    // 1. Primary: fused Gemini call (transcript + tone in one pass)
+    if (gemKey) {
+      try {
+        const geminiRes = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_TRANSCRIBE_MODEL}:generateContent?key=${gemKey}`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(buildGeminiRequestBody(base64, mimeType)),
+            signal: AbortSignal.timeout(TRANSCRIBE_TIMEOUT_MS)
+          }
+        );
+
+        if (geminiRes.status === 429) {
+          console.warn('[transcribeEntry] Gemini rate limited, falling back to Whisper', { userId, status: geminiRes.status });
+        } else if (geminiRes.ok) {
+          const parsed = parseFusedResponse(await geminiRes.json());
+          if (parsed && parsed.transcript) {
+            return { transcript: parsed.transcript, toneAnalysis: parsed.toneAnalysis, engine: 'gemini' };
+          }
+          if (parsed && parsed.transcript === '') {
+            return { error: 'API_NO_CONTENT' }; // model heard no speech
+          }
+          console.warn('[transcribeEntry] unparseable Gemini response, falling back to Whisper', { userId });
+        } else {
+          console.warn('[transcribeEntry] Gemini HTTP error, falling back to Whisper', { userId, status: geminiRes.status });
+        }
+      } catch (geminiError) {
+        console.warn('[transcribeEntry] Gemini call failed, falling back to Whisper', { userId, err: geminiError?.message });
+      }
+    }
+
+    // 2. Fallback: Whisper raw transcript (NO filler-word regex — it corrupts meaning)
+    if (!oaiKey) {
+      return { error: 'API_ERROR' };
+    }
+    try {
+      const buffer = Buffer.from(base64, 'base64');
+      const fileExt = mimeType.includes('webm') ? 'webm' : mimeType.includes('mp4') ? 'mp4' : 'wav';
+      const whisperResult = await transcribeWithWhisper(oaiKey, buffer, {
+        filename: `audio.${fileExt}`,
+        signal: AbortSignal.timeout(TRANSCRIBE_TIMEOUT_MS)
+      });
+
+      if (whisperResult === null) {
+        // transcribeWithWhisper returns null on any failure (auth, 429, network) —
+        // never log audio/transcript (PII), only ids, sizes, and mimeType.
+        console.error('[transcribeEntry] both engines failed', {
+          userId, audioBytes: base64?.length, mimeType
+        });
+        return { error: 'API_ERROR' };
+      }
+
+      const transcript = whisperResult?.text?.trim();
+      if (!transcript) return { error: 'API_NO_CONTENT' }; // call succeeded, no speech detected
+      return { transcript, toneAnalysis: null, engine: 'whisper' };
+    } catch (error) {
+      console.error('[transcribeEntry] both engines failed', {
+        userId, audioBytes: base64?.length, mimeType, err: error?.message
       });
       return { error: 'API_EXCEPTION' };
     }
