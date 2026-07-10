@@ -17,6 +17,7 @@
 
 | Item | Status | Notes |
 |------|--------|-------|
+| **Phase 1: Fused Transcription + Durable Audio Vault** (branch: `feat/fused-transcription`) | 🔄 In Progress | Gemini fused transcription replaces whisper+regex+tone pipeline. Raw audio kept 7 days in vault. Removed dormant sw-audio.js. Ready for final branch review & merge. |
 | **Nexus 2.0 Insights Engine** | ✅ Complete | All 4 layers implemented (pattern detection, baselines, LLM synthesis, interventions) |
 | **Multi-Provider Authentication** | ✅ Complete | Google, Apple (iOS only), Email/Password with MFA support |
 | **App Store Readiness** | ✅ Complete | Crashlytics, Fastlane, testing, accessibility, performance optimization |
@@ -97,6 +98,8 @@
 | 2026-02-20 | 3-state dark mode (dark/light/system) | Respects OS preference by default, user can override. FOUC prevention via inline script in index.html. | N/A |
 | 2026-02-20 | 4-tier dark surface hierarchy | hearth-950 (base) → 900 (panels) → 850 (cards) → 800 (overlays). Prevents flat "black box" dark mode. | Users find it too subtle |
 | 2026-02-20 | Fraunces/DM Sans/Caveat font stack | Display font (headings), body font (UI), handwritten accent (sparingly). Caveat loaded with display=optional to prevent FOUT. | Performance issues on low-end devices |
+| 2026-07-10 | Fused Gemini transcription (transcribeEntry) replaces whisper+regex+tone 3-hop | Better cleanup (model hears audio), 1 call, ~3x cheaper | Gemini quality regressions or pricing change |
+| 2026-07-10 | Raw audio kept 7 days in local vault, never gated on cloud | Lost recordings are the #1 trust killer in voice apps | Storage pressure complaints |
 
 ---
 
