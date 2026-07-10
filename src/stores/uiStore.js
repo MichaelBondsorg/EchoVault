@@ -30,7 +30,10 @@ const initialState = {
 
   // Complex modal data
   dailySummaryModal: null,
-  entryInsightsPopup: null
+  entryInsightsPopup: null,
+
+  // OS-level quick capture (deep links, widgets, Siri) — AppLayout reacts to this
+  captureRequest: null
 };
 
 export const useUiStore = create(
@@ -162,6 +165,21 @@ export const useUiStore = create(
        */
       openEntryInsights: (data) => set({ entryInsightsPopup: data }, false, 'ui/openEntryInsights'),
       closeEntryInsights: () => set({ entryInsightsPopup: null }, false, 'ui/closeEntryInsights'),
+
+      // ============================================
+      // OS-LEVEL QUICK CAPTURE (deep links, widgets, Siri)
+      // ============================================
+
+      /**
+       * Request that the entry modal open in the given mode (default 'voice').
+       * Consumed by AppLayout, which opens the modal and clears the request.
+       */
+      requestCapture: (mode = 'voice') => set(
+        { captureRequest: { mode, ts: Date.now() } },
+        false,
+        'ui/requestCapture'
+      ),
+      clearCaptureRequest: () => set({ captureRequest: null }, false, 'ui/clearCaptureRequest'),
 
       // ============================================
       // UTILITY ACTIONS

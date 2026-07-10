@@ -22,6 +22,9 @@ import { UnifiedConversationWithSuspense as UnifiedConversation } from '../lazy'
 // Entry components
 import EntryBar from '../dashboard/EntryBar';
 
+// Stores
+import { useUiStore } from '../../stores';
+
 /**
  * AppLayout - Main application shell with Zen & Bento navigation
  *
@@ -94,6 +97,17 @@ const AppLayout = ({
   const [currentPrompt, setCurrentPrompt] = useState(null); // Track prompt being answered for auto-dismiss
   const [daySummary, setDaySummary] = useState({ isOpen: false, date: null, dayData: null }); // Day summary modal
   const [reflectionIndex, setReflectionIndex] = useState(0); // Current reflection prompt index
+
+  // OS-level quick capture (deep links, widgets, Siri) — opens the entry modal
+  const captureRequest = useUiStore((s) => s.captureRequest);
+  const clearCaptureRequest = useUiStore((s) => s.clearCaptureRequest);
+
+  useEffect(() => {
+    if (!captureRequest) return;
+    setEntryMode(captureRequest.mode);
+    setShowEntryModal(true);
+    clearCaptureRequest();
+  }, [captureRequest, clearCaptureRequest]);
 
   // Extract reflection questions from recent entries (last 14 days)
   const reflectionQuestions = useMemo(() => {

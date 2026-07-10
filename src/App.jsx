@@ -35,6 +35,7 @@ import { USE_FUSED_TRANSCRIPTION } from './config/ai';
 import { safeString, removeUndefined, formatMentions } from './utils/string';
 import { safeDate, formatDateForInput, getTodayForInput, parseDateInput, getDateString, getISOYearWeek } from './utils/date';
 import { sanitizeEntry } from './utils/entries';
+import { parseCaptureLink } from './utils/deepLinks';
 
 // Services
 import { generateEmbedding, findRelevantMemories, transcribeAudioWithTone, transcribeEntryFused } from './services/ai';
@@ -358,6 +359,14 @@ export default function App() {
       try {
         const url = new URL(event.url);
         console.log('[Engram] Deep link received:', url.toString());
+
+        // Handle capture deep links (widget/Siri quick capture) before OAuth branches
+        const capture = parseCaptureLink(event.url);
+        if (capture) {
+          console.log('[Engram] Capture deep link:', capture.mode);
+          useUiStore.getState().requestCapture(capture.mode);
+          return;
+        }
 
         // Handle OAuth success callback
         if (url.host === 'auth-success') {
