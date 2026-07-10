@@ -17,10 +17,14 @@ export const AI_CONFIG = {
     fallback: null
   },
   transcription: {
-    primary: 'whisper-1',
-    fallback: null
+    primary: 'gemini-2.5-flash',   // fused transcript+tone via transcribeEntry
+    fallback: 'whisper-1'          // server-side fallback inside transcribeEntry
   }
 };
+
+// Kill switch: false restores the legacy whisper-1 + separate tone pipeline
+// (transcribeWithTone) with no server redeploy.
+export const USE_FUSED_TRANSCRIPTION = true;
 
 // Note: API keys are now securely stored in Firebase Cloud Functions
 // and are no longer exposed in the frontend code
