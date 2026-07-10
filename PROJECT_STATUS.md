@@ -17,7 +17,9 @@
 
 | Item | Status | Notes |
 |------|--------|-------|
-| **Phase 1: Fused Transcription + Durable Audio Vault** (branch: `feat/fused-transcription`) | 🔄 In Progress | Gemini fused transcription replaces whisper+regex+tone pipeline. Raw audio kept 7 days in vault. Removed dormant sw-audio.js. Ready for final branch review & merge. |
+| **Phase 1: Fused Transcription + Durable Audio Vault** (PR #145) | ✅ Merged & Deployed | Gemini fused transcription replaces whisper+regex+tone pipeline. Raw audio kept 7 days in vault. Removed dormant sw-audio.js. |
+| **Phase 2: Background Recording + Live Activity** (DRAFT PR #146) | 🔄 Code Done | Awaiting device/Xcode testing by PR owner. Waveform recording, background app refresh, Live Activity dynamic island timer. |
+| **Phase 3: Quick Capture Card + What's New** (branch: `feat/capture-first-reframe`) | 🔄 In Progress | Home screen bento quick-capture card, copy/paste support, What's New modal (v2.3.0). Status doc + decision log added. |
 | **Nexus 2.0 Insights Engine** | ✅ Complete | All 4 layers implemented (pattern detection, baselines, LLM synthesis, interventions) |
 | **Multi-Provider Authentication** | ✅ Complete | Google, Apple (iOS only), Email/Password with MFA support |
 | **App Store Readiness** | ✅ Complete | Crashlytics, Fastlane, testing, accessibility, performance optimization |
@@ -100,6 +102,8 @@
 | 2026-02-20 | Fraunces/DM Sans/Caveat font stack | Display font (headings), body font (UI), handwritten accent (sparingly). Caveat loaded with display=optional to prevent FOUT. | Performance issues on low-end devices |
 | 2026-07-10 | Fused Gemini transcription (transcribeEntry) replaces whisper+regex+tone 3-hop | Better cleanup (model hears audio), 1 call, ~3x cheaper | Gemini quality regressions or pricing change |
 | 2026-07-10 | Raw audio kept 7 days in local vault, never gated on cloud | Lost recordings are the #1 trust killer in voice apps | Storage pressure complaints |
+| 2026-07-10 | Quick Capture bento card is default-first on Home | Capture-first reframe: make voice journaling the primary UX entry point on launch | Engagement data shows users prefer other entry modes |
+| 2026-07-10 | Live Activity gated on background-recording go/no-go test | WKWebView may not record while device locked — do not ship a lying lock-screen timer | Go/no-go test passes and confirms recording works when locked |
 
 ---
 
@@ -136,6 +140,11 @@ Good ideas we're explicitly NOT doing now. Don't re-suggest these.
 | **Analysis not extracting themes/emotions** | Low | Cloud Function `analyzeEntry` prompt doesn't request themes/emotions fields. Would need prompt update. |
 | **Existing entries need platform flag** | Low | 140 existing entries don't have `createdOnPlatform` field. Could add migration to backfill `createdOnPlatform: 'unknown'` or `'web'`. |
 | **Audio vault (Phase 1) spec-vs-implementation deferrals** | Medium | Logged during final-review fix wave, deferred to Phase 2/3 consideration: (a) audio isn't timesliced to Filesystem during recording — kill-mid-recording still loses audio, since the vault only starts at recording stop; (b) failed uploads retry via the `PendingAudioBanner` UI, not through the `offlineManager`/`syncOrchestrator` durable queue; (c) no auto-created processing-state entry is written when a recording starts — the blocking alert-based failure flow is retained instead. |
+| **Existing customized dashboards don't auto-gain new widgets** | Low | Quick Capture card won't appear on home screens that users have customized. Requires a layout merge mechanism (compare stored layout vs new default). Acceptable to ship; users can reset to default or manually add. |
+| **Android capture surfaces deferred** | Medium | Android Quick Settings tile + notification surface for voice capture designed but not shipped. Viable, defer until Android user base matters. |
+| **App-Group widget data + dynamic content deferred** | Medium | Home screen widget can show static UI, but dynamic entry counts/streaks require capacitor-widget-bridge. Planned post-launch. |
+| **Replay-original audio UI deferred** | Low | Vault retains audio; UI to play original recording on entry detail screen not built. No blocker for launch; low user demand signal yet. |
+| **Entry restyle actions deferred** | Low | Planned "tighten/structure/expand" actions on entry cards. Depends on improved analysis backend; parked pending engagement data. |
 
 ### Investigation Notes: Health Context Not Captured
 

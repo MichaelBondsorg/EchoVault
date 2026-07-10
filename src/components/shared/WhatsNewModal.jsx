@@ -9,7 +9,7 @@ import { X, Heart, Sun, TrendingUp, Sparkles, CheckCircle, Lightbulb } from 'luc
  */
 
 // Increment this when adding new features to show the modal again
-const FEATURE_VERSION = '2.2.0';
+const FEATURE_VERSION = '2.3.0';
 const STORAGE_KEY = 'engram.lastSeenVersion';
 
 const WhatsNewModal = () => {
@@ -68,10 +68,10 @@ const WhatsNewModal = () => {
                   <span className="text-sm font-medium text-white/80">What's New</span>
                 </div>
                 <h2 className="font-display text-2xl font-bold">
-                  Health & Environment Insights
+                  Brain Dump Capture
                 </h2>
                 <p className="text-white/80 text-sm mt-1">
-                  Discover how your body and surroundings affect your mood
+                  Voice journaling, faster and smarter than ever
                 </p>
               </div>
             </div>
@@ -80,52 +80,52 @@ const WhatsNewModal = () => {
             <div className="p-6 space-y-4">
               {/* Feature 1 */}
               <div className="flex gap-4">
-                <div className="w-12 h-12 rounded-xl bg-red-100 dark:bg-red-900/30 flex items-center justify-center flex-shrink-0">
-                  <Heart size={24} className="text-red-500 dark:text-red-400" />
+                <div className="w-12 h-12 rounded-xl bg-honey-100 dark:bg-honey-900/30 flex items-center justify-center flex-shrink-0">
+                  <Sparkles size={24} className="text-honey-600 dark:text-honey-400" />
                 </div>
                 <div>
-                  <h3 className="font-semibold text-warm-800 dark:text-warm-200">Health-Mood Correlations</h3>
+                  <h3 className="font-semibold text-warm-800 dark:text-warm-200">Sharper voice transcription</h3>
                   <p className="text-sm text-warm-600 dark:text-warm-400">
-                    See how sleep, exercise, and recovery affect your emotional wellbeing with personalized insights.
+                    Smarter cleanup that keeps your meaning—no more mangled sentences
                   </p>
                 </div>
               </div>
 
               {/* Feature 2 */}
               <div className="flex gap-4">
-                <div className="w-12 h-12 rounded-xl bg-honey-100 dark:bg-honey-900/30 flex items-center justify-center flex-shrink-0">
-                  <Sun size={24} className="text-honey-600 dark:text-honey-400" />
+                <div className="w-12 h-12 rounded-xl bg-sage-100 dark:bg-sage-900/30 flex items-center justify-center flex-shrink-0">
+                  <CheckCircle size={24} className="text-sage-600 dark:text-sage-400" />
                 </div>
                 <div>
-                  <h3 className="font-semibold text-warm-800 dark:text-warm-200">Weather & Light Tracking</h3>
+                  <h3 className="font-semibold text-warm-800 dark:text-warm-200">Never lose a recording</h3>
                   <p className="text-sm text-warm-600 dark:text-warm-400">
-                    Automatic weather data with each entry. Backfill past entries in Settings → Health.
+                    Audio is saved on your device the moment you stop talking, with easy retry if transcription fails
                   </p>
                 </div>
               </div>
 
               {/* Feature 3 */}
               <div className="flex gap-4">
-                <div className="w-12 h-12 rounded-xl bg-lavender-100 dark:bg-lavender-900/30 flex items-center justify-center flex-shrink-0">
-                  <TrendingUp size={24} className="text-lavender-600 dark:text-lavender-400" />
+                <div className="w-12 h-12 rounded-xl bg-terra-100 dark:bg-terra-900/30 flex items-center justify-center flex-shrink-0">
+                  <TrendingUp size={24} className="text-terra-600 dark:text-terra-400" />
                 </div>
                 <div>
-                  <h3 className="font-semibold text-warm-800 dark:text-warm-200">Pattern Discovery</h3>
+                  <h3 className="font-semibold text-warm-800 dark:text-warm-200">Brain dump from your home screen</h3>
                   <p className="text-sm text-warm-600 dark:text-warm-400">
-                    View your patterns in the Insights tab—see what helps you feel your best.
+                    New Quick Capture card opens the mic in one tap
                   </p>
                 </div>
               </div>
 
               {/* Feature 4 */}
               <div className="flex gap-4">
-                <div className="w-12 h-12 rounded-xl bg-sage-100 dark:bg-sage-900/30 flex items-center justify-center flex-shrink-0">
-                  <Lightbulb size={24} className="text-sage-600 dark:text-sage-400" />
+                <div className="w-12 h-12 rounded-xl bg-lavender-100 dark:bg-lavender-900/30 flex items-center justify-center flex-shrink-0">
+                  <Lightbulb size={24} className="text-lavender-600 dark:text-lavender-400" />
                 </div>
                 <div>
-                  <h3 className="font-semibold text-warm-800 dark:text-warm-200">Smart Recommendations</h3>
+                  <h3 className="font-semibold text-warm-800 dark:text-warm-200">Coming to iOS: lock-screen widget + 'Hey Siri, start a brain dump'</h3>
                   <p className="text-sm text-warm-600 dark:text-warm-400">
-                    Get daily suggestions based on your health data and what's worked for you before.
+                    Voice capture wherever you are, even without unlocking your phone
                   </p>
                 </div>
               </div>
