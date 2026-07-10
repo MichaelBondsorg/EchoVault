@@ -16,6 +16,9 @@
 		504EC3121FED79650016851F /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 504EC3101FED79650016851F /* LaunchScreen.storyboard */; };
 		50B271D11FEDC1A000F3C39B /* public in Resources */ = {isa = PBXBuildFile; fileRef = 50B271D01FEDC1A000F3C39B /* public */; };
 		E7C53DCB2F1F0C050066247C /* GoogleService-Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = E7C53DCA2F1F0C050066247C /* GoogleService-Info.plist */; };
+		D239184A873E45AD9AE41705 /* CaptureIntents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 730ABB98E8A548638D3C9D16 /* CaptureIntents.swift */; };
+		9D9C430998E6485B92811338 /* EngramWidget.appex in Copy Files */ = {isa = PBXBuildFile; fileRef = 717076523F424EFD88532FDA /* EngramWidget.appex */; };
+		13362DE09640453AB298768C /* EngramWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = 40227A1F5E274CBCAB876C24 /* EngramWidget.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -30,6 +33,9 @@
 		50B271D01FEDC1A000F3C39B /* public */ = {isa = PBXFileReference; lastKnownFileType = folder; path = public; sourceTree = "<group>"; };
 		958DCC722DB07C7200EA8C5F /* debug.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; name = debug.xcconfig; path = ../debug.xcconfig; sourceTree = SOURCE_ROOT; };
 		E7C53DCA2F1F0C050066247C /* GoogleService-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = "GoogleService-Info.plist"; sourceTree = "<group>"; };
+		730ABB98E8A548638D3C9D16 /* CaptureIntents.swift */ = {isa = PBXFileReference; name = "CaptureIntents.swift"; path = "CaptureIntents.swift"; sourceTree = "<group>"; fileEncoding = 4; lastKnownFileType = sourcecode.swift; explicitFileType = undefined; includeInIndex = 0; };
+		717076523F424EFD88532FDA /* EngramWidget.appex */ = {isa = PBXFileReference; name = "EngramWidget.appex"; path = "EngramWidget.appex"; sourceTree = BUILT_PRODUCTS_DIR; fileEncoding = undefined; lastKnownFileType = undefined; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; };
+		40227A1F5E274CBCAB876C24 /* EngramWidget.swift */ = {isa = PBXFileReference; name = "EngramWidget.swift"; path = "EngramWidget/EngramWidget.swift"; sourceTree = "<group>"; fileEncoding = 4; lastKnownFileType = sourcecode.swift; explicitFileType = undefined; includeInIndex = 0; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -38,6 +44,13 @@
 			buildActionMask = 2147483647;
 			files = (
 				4D22ABE92AF431CB00220026 /* CapApp-SPM in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		2FE6F7F70C6249EDAD62104F /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -57,6 +70,7 @@
 			isa = PBXGroup;
 			children = (
 				504EC3041FED79650016851F /* App.app */,
+				717076523F424EFD88532FDA /* EngramWidget.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -73,6 +87,7 @@
 				2FAD9762203C412B000D30F8 /* config.xml */,
 				50B271D01FEDC1A000F3C39B /* public */,
 				E7C53DCA2F1F0C050066247C /* GoogleService-Info.plist */,
+				730ABB98E8A548638D3C9D16 /* CaptureIntents.swift */,
 			);
 			path = App;
 			sourceTree = "<group>";
@@ -87,6 +102,7 @@
 				504EC3001FED79650016851F /* Sources */,
 				504EC3011FED79650016851F /* Frameworks */,
 				504EC3021FED79650016851F /* Resources */,
+				8EE3299AF36E4111B903F66D /* Embed Foundation Extensions */,
 			);
 			buildRules = (
 			);
@@ -100,14 +116,31 @@
 			productReference = 504EC3041FED79650016851F /* App.app */;
 			productType = "com.apple.product-type.application";
 		};
+		0CF2C089E864405892B0FE29 /* "EngramWidget" */ = {
+			isa = PBXNativeTarget;
+			name = "EngramWidget";
+			productName = "EngramWidget";
+			productReference = 717076523F424EFD88532FDA;
+			productType = "com.apple.product-type.app-extension";
+			buildConfigurationList = 55BAF81D2A8B4C4F80562235;
+			buildPhases = (
+				31E5A87A8B4E4F41A409FD08 /* Sources */,
+				2FE6F7F70C6249EDAD62104F /* Frameworks */,
+				BDD1E91BC0604E849A5A49B4 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
 		504EC2FC1FED79650016851F /* Project object */ = {
 			isa = PBXProject;
 			attributes = {
-				LastSwiftUpdateCheck = 0920;
-				LastUpgradeCheck = 0920;
+				LastSwiftUpdateCheck = 920;
+				LastUpgradeCheck = 920;
 				TargetAttributes = {
 					504EC3031FED79650016851F = {
 						CreatedOnToolsVersion = 9.2;
@@ -133,6 +166,7 @@
 			projectRoot = "";
 			targets = (
 				504EC3031FED79650016851F /* App */,
+				0CF2C089E864405892B0FE29 /* "EngramWidget" */,
 			);
 		};
 /* End PBXProject section */
@@ -152,6 +186,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		BDD1E91BC0604E849A5A49B4 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
@@ -160,6 +201,15 @@
 			buildActionMask = 2147483647;
 			files = (
 				504EC3081FED79650016851F /* AppDelegate.swift in Sources */,
+				D239184A873E45AD9AE41705 /* CaptureIntents.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		31E5A87A8B4E4F41A409FD08 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				13362DE09640453AB298768C /* EngramWidget.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -342,6 +392,50 @@
 			};
 			name = Release;
 		};
+		A161E3E08B8E49FDB971DE7C /* Debug */ = {
+			name = Debug;
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				INFOPLIST_FILE = EngramWidget/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks @executable_path/../../Frameworks";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				PRODUCT_BUNDLE_IDENTIFIER = com.echovault.engram.EngramWidget;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = "Quick Capture";
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = 38L5F86597;
+				CURRENT_PROJECT_VERSION = 1;
+				MARKETING_VERSION = 1.0;
+			};
+		};
+		EF538138A6734FBDBF21B9D6 /* Release */ = {
+			name = Release;
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				INFOPLIST_FILE = EngramWidget/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks @executable_path/../../Frameworks";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				PRODUCT_BUNDLE_IDENTIFIER = com.echovault.engram.EngramWidget;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = "Quick Capture";
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = 38L5F86597;
+				CURRENT_PROJECT_VERSION = 1;
+				MARKETING_VERSION = 1.0;
+			};
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -363,6 +457,15 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
+		55BAF81D2A8B4C4F80562235 /* Build configuration list for PBXNativeTarget "EngramWidget" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A161E3E08B8E49FDB971DE7C /* Debug */,
+				EF538138A6734FBDBF21B9D6 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 /* End XCConfigurationList section */
 
 /* Begin XCLocalSwiftPackageReference section */
@@ -379,6 +482,20 @@
 			productName = "CapApp-SPM";
 		};
 /* End XCSwiftPackageProductDependency section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		8EE3299AF36E4111B903F66D /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				9D9C430998E6485B92811338 /* "EngramWidget.appex" in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			name = "Embed Foundation Extensions";
+			dstPath = "";
+			dstSubfolderSpec = 13;
+		};
+/* End PBXCopyFilesBuildPhase section */
 	};
 	rootObject = 504EC2FC1FED79650016851F /* Project object */;
 }
