@@ -397,9 +397,14 @@ export default function App() {
     const listener = CapacitorApp.addListener('appUrlOpen', handleDeepLink);
 
     // Cold start: if the app was launched via a deep link, appUrlOpen never fires.
-    CapacitorApp.getLaunchUrl().then((result) => {
-      if (result?.url) handleDeepLink({ url: result.url });
-    }).catch(() => {});
+    // Guard: this effect re-runs on showHealthSettings changes, but the launch URL
+    // must only be consumed once per app session.
+    if (!launchUrlConsumedRef.current) {
+      launchUrlConsumedRef.current = true;
+      CapacitorApp.getLaunchUrl().then((result) => {
+        if (result?.url) handleDeepLink({ url: result.url });
+      }).catch(() => {});
+    }
 
     return () => {
       listener.then(l => l.remove());
@@ -518,6 +523,9 @@ export default function App() {
       setEntries(safeData);
     });
   }, [user]);
+
+  // Guard for deep-link cold start — launch URL consumed only once per app session
+  const launchUrlConsumedRef = useRef(false);
 
   // Background retrofit for enhanced context extraction
   const retrofitStarted = useRef(false);
