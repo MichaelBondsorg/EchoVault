@@ -38,6 +38,7 @@ import { sanitizeEntry } from './utils/entries';
 
 // Services
 import { generateEmbedding, findRelevantMemories, transcribeAudioWithTone, transcribeEntryFused } from './services/ai';
+import { audioVault } from './services/audio/audioVault';
 import {
   classifyEntry, analyzeEntry, generateInsight, extractEnhancedContext,
   performLocalAnalysis, getAnalysisStrategy
@@ -84,6 +85,7 @@ import {
 } from './components';
 import WhatsNewModal from './components/shared/WhatsNewModal';
 import AiConsentModal from './components/modals/AiConsentModal';
+import PendingAudioBanner from './components/shared/PendingAudioBanner';
 // Heavy screens are code-split via the lazy wrappers (aliased so JSX usage is
 // unchanged). UnifiedConversation was imported here but only rendered in
 // AppLayout — the dead import is dropped and it's lazy-loaded there instead.
@@ -342,6 +344,9 @@ export default function App() {
     } catch (e) {
       console.warn('Error cleaning up audio backups:', e);
     }
+
+    // Sweep the durable audio vault for recordings past the retention window.
+    audioVault.cleanupExpired().then(n => n && console.log(`[audioVault] cleaned ${n} expired recording(s)`));
   }, []);
 
   // Deep link handler for OAuth callbacks (Whoop integration)
@@ -1482,20 +1487,10 @@ export default function App() {
     const wakeLockAcquired = await requestWakeLock();
     console.log('[Transcription] Wake lock acquired:', wakeLockAcquired);
 
-    // Save audio to localStorage as backup before attempting transcription
-    // This prevents data loss if transcription fails
-    const audioBackupKey = `echov_audio_backup_${Date.now()}`;
-    try {
-      // Only backup if audio is not too large (< 10MB to avoid localStorage limits)
-      if (base64.length < 10 * 1024 * 1024) {
-        localStorage.setItem(audioBackupKey, JSON.stringify({ base64, mime, timestamp: Date.now() }));
-        console.log('[Transcription] Audio backed up to localStorage:', audioBackupKey);
-      } else {
-        console.log('[Transcription] Audio too large for localStorage backup:', base64.length);
-      }
-    } catch (backupError) {
-      console.warn('[Transcription] Could not backup audio to localStorage:', backupError.message);
-    }
+    // Durable local backup BEFORE any network call — recordings must never
+    // depend on a successful cloud round-trip.
+    const recordingId = await audioVault.saveRecording(base64, mime);
+    console.log('[Transcription] Audio saved to vault:', recordingId);
 
     try {
       console.log('[Transcription] Starting transcription+tone API call...');
@@ -1525,7 +1520,6 @@ export default function App() {
           alert("Audio format not supported - please try recording again");
           setProcessing(false);
           releaseWakeLock();
-          try { localStorage.removeItem(audioBackupKey); } catch (e) {}
           return;
         }
 
@@ -1556,13 +1550,16 @@ export default function App() {
         alert("No speech detected - please try speaking closer to the microphone");
         setProcessing(false);
         releaseWakeLock();
-        try { localStorage.removeItem(audioBackupKey); } catch (e) {}
         return;
       }
 
-      // Transcription successful - clear the backup
-      console.log('[Transcription] Success! Clearing backup and saving entry...');
-      try { localStorage.removeItem(audioBackupKey); } catch (e) {}
+      // Transcription successful - keep the raw audio for RETENTION_DAYS
+      // (replay/original); link it to the entry.
+      // saveEntry currently doesn't return the entry id — link with a
+      // sentinel so the recording is not treated as an orphan. (Replay UI
+      // is deferred; see plan notes.)
+      console.log('[Transcription] Success! Linking audio and saving entry...');
+      if (recordingId) await audioVault.linkEntry(recordingId, 'saved');
 
       // Pass voice tone analysis to saveEntry
       console.log('[Transcription] Calling saveEntry with transcript length:', transcript.length, 'voiceTone:', !!toneAnalysis);
@@ -2395,6 +2392,11 @@ export default function App() {
       notificationPermission={permission}
     >
       {/* Modals and overlays - passed as children to AppLayout */}
+
+      {/* Recovery banner for recordings that never made it to a saved entry */}
+      <PendingAudioBanner onRetry={async (base64, mime) => {
+        try { await handleAudioWrapper(base64, mime); return true; } catch { return false; }
+      }} />
 
       {/* Decompression Screen */}
       <AnimatePresence>
