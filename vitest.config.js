@@ -45,6 +45,7 @@ export default defineConfig({
       'functions/src/auth/__tests__/appleToken.test.js',
       'functions/src/safety/__tests__/crisisKeywords.test.js',
       'functions/src/limits/__tests__/dailyQuota.test.js',
+      'functions/src/transcription/__tests__/fusedTranscription.test.js',
     ],
 
     // Exclude patterns
