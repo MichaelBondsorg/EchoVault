@@ -25,6 +25,9 @@ import EntryBar from '../dashboard/EntryBar';
 // Stores
 import { useUiStore } from '../../stores';
 
+// Utils
+import { isCaptureRequestStale } from '../../utils/deepLinks';
+
 /**
  * AppLayout - Main application shell with Zen & Bento navigation
  *
@@ -104,6 +107,13 @@ const AppLayout = ({
 
   useEffect(() => {
     if (!captureRequest) return;
+    // A capture request can sit in the store for hours (e.g. a widget tap
+    // while signed out) — don't auto-start the mic on a stale request once
+    // the user finally opens the app.
+    if (isCaptureRequestStale(captureRequest)) {
+      clearCaptureRequest();
+      return;
+    }
     setEntryMode(captureRequest.mode);
     setShowEntryModal(true);
     clearCaptureRequest();

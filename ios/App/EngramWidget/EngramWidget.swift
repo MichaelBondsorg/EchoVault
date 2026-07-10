@@ -1,3 +1,4 @@
+// Target: EngramWidget extension ONLY (declares @main — never add to the App target). Set the extension's deployment target to iOS 17+ (containerBackground(for:) requires it).
 import WidgetKit
 import SwiftUI
 

@@ -356,6 +356,15 @@ export default function App() {
   // Deep link handler for OAuth callbacks (Whoop integration)
   useEffect(() => {
     const handleDeepLink = async (event) => {
+      // Capacitor iOS retains the launch URL and re-delivers it via appUrlOpen
+      // once the listener registers, causing double-processing (harmful for
+      // OAuth callbacks). Skip exactly one duplicate delivery of the URL we
+      // already consumed via getLaunchUrl(), then stop suppressing so a user
+      // can legitimately re-trigger the same URL later.
+      if (event.url && event.url === consumedLaunchUrlRef.current) {
+        consumedLaunchUrlRef.current = null;
+        return;
+      }
       try {
         const url = new URL(event.url);
         console.log('[Engram] Deep link received:', url.toString());
@@ -402,7 +411,10 @@ export default function App() {
     if (!launchUrlConsumedRef.current) {
       launchUrlConsumedRef.current = true;
       CapacitorApp.getLaunchUrl().then((result) => {
-        if (result?.url) handleDeepLink({ url: result.url });
+        if (result?.url) {
+          consumedLaunchUrlRef.current = result.url;
+          handleDeepLink({ url: result.url });
+        }
       }).catch(() => {});
     }
 
@@ -526,6 +538,9 @@ export default function App() {
 
   // Guard for deep-link cold start — launch URL consumed only once per app session
   const launchUrlConsumedRef = useRef(false);
+  // Tracks the specific URL delivered via getLaunchUrl() so we can dedupe the
+  // matching appUrlOpen delivery Capacitor iOS fires for the same cold-start URL.
+  const consumedLaunchUrlRef = useRef(null);
 
   // Background retrofit for enhanced context extraction
   const retrofitStarted = useRef(false);

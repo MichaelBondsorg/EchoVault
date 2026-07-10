@@ -1,6 +1,8 @@
+// Target: App (main). Requires iOS 17+ availability annotations because the App target deploys to iOS 15.
 import AppIntents
 import UIKit
 
+@available(iOS 17.0, *)
 struct StartBrainDumpIntent: AppIntent {
     static var title: LocalizedStringResource = "Start a Brain Dump"
     static var description = IntentDescription("Opens Engram and starts recording immediately.")
@@ -16,6 +18,7 @@ struct StartBrainDumpIntent: AppIntent {
     }
 }
 
+@available(iOS 17.0, *)
 struct EngramShortcuts: AppShortcutsProvider {
     static var appShortcuts: [AppShortcut] {
         AppShortcut(

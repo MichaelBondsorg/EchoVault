@@ -9,3 +9,10 @@ export function parseCaptureLink(urlString) {
     return null;
   }
 }
+
+export const CAPTURE_REQUEST_MAX_AGE_MS = 60_000;
+
+/** A capture request older than CAPTURE_REQUEST_MAX_AGE_MS must not auto-start the mic. */
+export function isCaptureRequestStale(request, now = Date.now()) {
+  return !request || typeof request.ts !== 'number' || now - request.ts > CAPTURE_REQUEST_MAX_AGE_MS;
+}
