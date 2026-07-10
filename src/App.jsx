@@ -396,6 +396,11 @@ export default function App() {
     // Listen for deep links
     const listener = CapacitorApp.addListener('appUrlOpen', handleDeepLink);
 
+    // Cold start: if the app was launched via a deep link, appUrlOpen never fires.
+    CapacitorApp.getLaunchUrl().then((result) => {
+      if (result?.url) handleDeepLink({ url: result.url });
+    }).catch(() => {});
+
     return () => {
       listener.then(l => l.remove());
     };
