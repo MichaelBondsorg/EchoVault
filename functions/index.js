@@ -18,6 +18,7 @@ import { verifyAppleIdentityToken } from './src/auth/appleToken.js';
 import { isCrisisText } from './src/safety/crisisKeywords.js';
 import { sendNotification } from './src/notifications/sender.js';
 import { getNotificationTemplate } from './src/notifications/templates.js';
+import { enforceDailyQuota } from './src/limits/dailyQuota.js';
 
 /**
  * Constant-time secret comparison. Hashes both inputs to a fixed-length digest
@@ -46,6 +47,15 @@ const chiefOfStaffApiKey = defineSecret('CHIEF_OF_STAFF_API_KEY');
 // Constants
 const APP_COLLECTION_ID = 'echo-vault-v5-fresh';
 const PATTERN_VERSION = 1;
+
+// Per-user daily quotas for AI callables (WS4.2). These bound LLM spend per
+// authenticated user; the enforceDailyQuota helper buckets counts by UTC day.
+const DAILY_QUOTA = {
+  analyze: 200,       // analyzeJournalEntry
+  executePrompt: 200, // executePrompt
+  ask: 200,           // askJournalAI
+  transcribe: 100     // transcribeAudio / transcribeWithTone
+};
 
 // AI Model Configuration
 const AI_CONFIG = {
@@ -96,14 +106,15 @@ async function callGemini(apiKey, systemPrompt, userPrompt, model = AI_CONFIG.an
 
     if (!res.ok) {
       const errorData = await res.json().catch(() => ({}));
-      console.error('Gemini API error:', res.status, errorData);
+      // Structured: log status + API error message only, never the prompt text.
+      console.error('[callGemini] API error', { model, status: res.status, err: errorData?.error?.message });
       return null;
     }
 
     const data = await res.json();
     return data.candidates?.[0]?.content?.parts?.[0]?.text || null;
   } catch (e) {
-    console.error('Gemini API exception:', e);
+    console.error('[callGemini] exception', { model, err: e?.message });
     return null;
   }
 }
@@ -114,7 +125,7 @@ async function callGemini(apiKey, systemPrompt, userPrompt, model = AI_CONFIG.an
 async function callOpenAI(apiKey, systemPrompt, userPrompt) {
   try {
     if (!apiKey) {
-      console.error('OpenAI API key not configured');
+      console.error('[callOpenAI] API key not configured');
       return null;
     }
 
@@ -138,14 +149,15 @@ async function callOpenAI(apiKey, systemPrompt, userPrompt) {
 
     if (!res.ok) {
       const errorData = await res.json().catch(() => ({}));
-      console.error('OpenAI API error:', res.status, errorData);
+      // Structured: log status + API error message only, never the prompt text.
+      console.error('[callOpenAI] API error', { status: res.status, err: errorData?.error?.message });
       return null;
     }
 
     const data = await res.json();
     return data.choices?.[0]?.message?.content || null;
   } catch (e) {
-    console.error('OpenAI API exception:', e);
+    console.error('[callOpenAI] exception', { err: e?.message });
     return null;
   }
 }
@@ -890,6 +902,8 @@ export const analyzeJournalEntry = onCall(
     }
     assertWithinLimit(text, 'text');
 
+    await enforceDailyQuota(userId, { key: 'analyze', limit: DAILY_QUOTA.analyze });
+
     const apiKey = geminiApiKey.value();
     const results = {};
 
@@ -942,7 +956,13 @@ export const analyzeJournalEntry = onCall(
 
       return results;
     } catch (error) {
-      console.error('analyzeJournalEntry error:', error);
+      // Structured context for prod debugging; never log entry text (PII).
+      console.error('[analyzeJournalEntry] failed', {
+        userId,
+        textLength: text?.length,
+        ops: operations || null,
+        err: error?.message
+      });
       throw new HttpsError('internal', 'Analysis failed');
     }
   }
@@ -1078,6 +1098,7 @@ export const transcribeAudio = onCall(
       throw new HttpsError('unauthenticated', 'User must be authenticated');
     }
 
+    const userId = request.auth.uid;
     const { base64, mimeType } = request.data;
 
     if (!base64 || !mimeType) {
@@ -1089,6 +1110,8 @@ export const transcribeAudio = onCall(
     if (!apiKey) {
       throw new HttpsError('failed-precondition', 'OpenAI API key not configured');
     }
+
+    await enforceDailyQuota(userId, { key: 'transcribe', limit: DAILY_QUOTA.transcribe });
 
     try {
       // Convert base64 to buffer
@@ -1147,7 +1170,13 @@ export const transcribeAudio = onCall(
 
       return { transcript };
     } catch (error) {
-      console.error('transcribeAudio error:', error);
+      // Never log audio/transcript (PII) — only ids, sizes, error message.
+      console.error('[transcribeAudio] failed', {
+        userId,
+        audioBytes: base64?.length,
+        mimeType,
+        err: error?.message
+      });
       return { error: 'API_EXCEPTION' };
     }
   }
@@ -1168,6 +1197,7 @@ export const executePrompt = onCall(
       throw new HttpsError('unauthenticated', 'User must be authenticated');
     }
 
+    const userId = request.auth.uid;
     const { prompt, systemPrompt } = request.data;
 
     if (!prompt || typeof prompt !== 'string') {
@@ -1178,13 +1208,20 @@ export const executePrompt = onCall(
     assertWithinLimit(prompt, 'prompt');
     assertWithinLimit(systemPrompt, 'systemPrompt');
 
+    await enforceDailyQuota(userId, { key: 'executePrompt', limit: DAILY_QUOTA.executePrompt });
+
     const apiKey = geminiApiKey.value();
 
     try {
       const response = await callGemini(apiKey, systemPrompt || '', prompt);
       return { response };
     } catch (error) {
-      console.error('executePrompt error:', error);
+      // Never log prompt text (PII) — only ids, lengths, error message.
+      console.error('[executePrompt] failed', {
+        userId,
+        promptLength: prompt?.length,
+        err: error?.message
+      });
       throw new HttpsError('internal', 'Prompt execution failed');
     }
   }
@@ -1204,12 +1241,15 @@ export const askJournalAI = onCall(
       throw new HttpsError('unauthenticated', 'User must be authenticated');
     }
 
+    const userId = request.auth.uid;
     const { question, entriesContext } = request.data;
 
     if (!question || typeof question !== 'string') {
       throw new HttpsError('invalid-argument', 'Question is required');
     }
     assertWithinLimit(question, 'question');
+
+    await enforceDailyQuota(userId, { key: 'ask', limit: DAILY_QUOTA.ask });
 
     const apiKey = geminiApiKey.value();
 
@@ -1252,7 +1292,12 @@ FORMATTING:
       const response = await callGemini(apiKey, systemPrompt, question);
       return { response };
     } catch (error) {
-      console.error('askJournalAI error:', error);
+      // Never log question/entries text (PII) — only ids, lengths, error message.
+      console.error('[askJournalAI] failed', {
+        userId,
+        questionLength: question?.length,
+        err: error?.message
+      });
       throw new HttpsError('internal', 'Chat failed');
     }
   }
@@ -1275,6 +1320,7 @@ export const transcribeWithTone = onCall(
       throw new HttpsError('unauthenticated', 'User must be authenticated');
     }
 
+    const userId = request.auth.uid;
     const { base64, mimeType } = request.data;
 
     if (!base64 || !mimeType) {
@@ -1287,6 +1333,8 @@ export const transcribeWithTone = onCall(
     if (!oaiKey) {
       throw new HttpsError('failed-precondition', 'OpenAI API key not configured');
     }
+
+    await enforceDailyQuota(userId, { key: 'transcribe', limit: DAILY_QUOTA.transcribe });
 
     try {
       // Convert base64 to buffer
@@ -1413,7 +1461,13 @@ Respond in this exact JSON format only, no other text:
         toneAnalysis  // Will be null if Gemini unavailable or audio too short
       };
     } catch (error) {
-      console.error('transcribeWithTone error:', error);
+      // Never log audio/transcript (PII) — only ids, sizes, error message.
+      console.error('[transcribeWithTone] failed', {
+        userId,
+        audioBytes: base64?.length,
+        mimeType,
+        err: error?.message
+      });
       return { error: 'API_EXCEPTION' };
     }
   }

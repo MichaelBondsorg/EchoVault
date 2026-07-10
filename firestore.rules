@@ -110,6 +110,11 @@ service cloud.firestore {
         allow read, create: if isOwner(userId);
       }
 
+      // Insight engagement events (which insights the user explores/dismisses)
+      match /insight_engagement_events/{eventId} {
+        allow read, create: if isOwner(userId);
+      }
+
       // Insight Feedback subcollection (user feedback on insight accuracy)
       match /insightFeedback/{feedbackId} {
         allow read, write: if isOwner(userId);
