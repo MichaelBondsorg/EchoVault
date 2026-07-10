@@ -29,11 +29,11 @@ Replace Whisper + regex + separate tone call with **a single Gemini 2.5 Flash mu
 ```json
 {
   "transcript": "cleaned transcript — light cleanup only",
-  "title": "auto-generated short title",
-  "tags": ["..."],
-  "tone": { "moodScore": 0, "energy": "", "emotions": [], "confidence": 0 }
+  "toneAnalysis": { "moodScore": 0, "energy": "", "emotions": [], "confidence": 0, "summary": "" }
 }
 ```
+
+(Title/tags stay with the existing `analyzeJournalEntry` pipeline, which already classifies and titles entries downstream — duplicating them in the transcription call would risk conflicts for no gain. This also keeps the response contract identical to today's `transcribeWithTone`, making the client switch a flagged one-liner.)
 
 Cleanup instructions ported **verbatim in spirit from Cosmo** (`chief-of-staff/ui/backend/src/services/gemini.ts` `TRANSCRIPTION_PROMPT`), which is the proven piece:
 
@@ -84,7 +84,7 @@ Target: **one tap from lock screen or home screen to actively recording.**
   - **Home screen widget**: big record button (+ optional small "streak/last entry" text), `Button(intent:)` on iOS 17+.
   - **Lock screen accessory widget** (circular/rectangular): mic glyph, one tap.
 - The record action is an **App Intent that opens the app** into `engram://capture?mode=voice`. Apple's docs confirm audio-related intents execute in the app process — recording purely inside the widget extension is not a supported pattern, so 1-tap-to-app-recording is the ceiling, and it matches what AudioPen/Voicenotes ship.
-- **App Group** (`group.com.echovault.engram`) added to app + widget entitlements. Data bridge via a community plugin — evaluate `capacitor-widget-bridge` (v8.x, maintained) first, `@capgo/capacitor-widget-kit` if we want Live Activities from the same plugin (note: low adoption, lightly battle-tested). Widget displays lightweight state (entry count today / last capture time) written from the web layer.
+- The Phase 2 widget is **static** (a capture button with a `widgetURL` deep link), so it needs **no App Group and no data-bridge plugin**. App Group (`group.com.echovault.engram`) + a bridge plugin (`capacitor-widget-bridge` or `@capgo/capacitor-widget-kit`) come only when the widget shows dynamic data (entry counts, streaks) — explicitly deferred.
 
 ### 3.3 Near-free additions once the App Intent exists
 
