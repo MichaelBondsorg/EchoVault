@@ -65,6 +65,20 @@ describe('audioVault', () => {
     expect(await audioVault.getRecording(freshId)).not.toBeNull();
   });
 
+  it('saveRecording honors options.createdAt (e.g. a background-capture timestamp)', async () => {
+    const capturedAt = Date.parse('2026-01-01T00:00:00.000Z');
+    const id = await audioVault.saveRecording('QUJD', 'audio/webm', { createdAt: capturedAt });
+    const rec = await audioVault.getRecording(id);
+    expect(rec.createdAt).toBe(capturedAt);
+  });
+
+  it('saveRecording defaults createdAt to now when options are omitted', async () => {
+    const before = Date.now();
+    const id = await audioVault.saveRecording('QUJD', 'audio/webm');
+    const rec = await audioVault.getRecording(id);
+    expect(rec.createdAt).toBeGreaterThanOrEqual(before);
+  });
+
   it('never throws when storage fails — returns null id', async () => {
     const spy = vi.spyOn(Filesystem, 'writeFile').mockRejectedValueOnce(new Error('disk full'));
     const id = await audioVault.saveRecording('QUJD', 'audio/webm');

@@ -41,8 +41,17 @@ const emitChanged = () => {
 };
 
 export const audioVault = {
-  /** Returns the recording id, or null if storage failed (never throws). */
-  async saveRecording(base64, mime) {
+  /**
+   * Returns the recording id, or null if storage failed (never throws).
+   * @param {string} base64
+   * @param {string} mime
+   * @param {object} [options]
+   * @param {number} [options.createdAt] - ms-epoch override for the index
+   *   `createdAt` (e.g. the actual capture time for a background-captured
+   *   recording swept in later). Defaults to `Date.now()`.
+   */
+  async saveRecording(base64, mime, options = {}) {
+    const { createdAt } = options;
     const id = `rec_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
     try {
       if (isNative()) {
@@ -56,7 +65,7 @@ export const audioVault = {
         localStorage.setItem(webKey(id), base64);
       }
       const index = readIndex();
-      index[id] = { createdAt: Date.now(), mime, entryId: null };
+      index[id] = { createdAt: createdAt ?? Date.now(), mime, entryId: null };
       const indexed = writeIndex(index);
       if (!indexed) {
         // Blob was written but the index (the only thing that makes it

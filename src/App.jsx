@@ -40,6 +40,7 @@ import { parseCaptureLink } from './utils/deepLinks';
 // Services
 import { generateEmbedding, findRelevantMemories, transcribeAudioWithTone, transcribeEntryFused } from './services/ai';
 import { audioVault } from './services/audio/audioVault';
+import { sweepCaptureInbox } from './services/audio/captureInbox';
 import {
   classifyEntry, analyzeEntry, generateInsight, extractEnhancedContext,
   performLocalAnalysis, getAnalysisStrategy
@@ -500,6 +501,58 @@ export default function App() {
     return cleanup;
   }, [user?.uid]);
 
+  // Background capture inbox: recordings written by the iOS Shortcuts
+  // "Record Audio" -> SaveBrainDumpIntent while Engram was never opened
+  // (see ios/App/App/CaptureIntents.swift + src/services/audio/captureInbox.js).
+  // Swept once on login and again every time the app returns to the
+  // foreground, since a recording can land in the inbox at any point while
+  // the app is backgrounded. handleAudioWrapper carries capturedAt through so
+  // the resulting entry is timestamped at capture time, not sweep time.
+  //
+  // Note: handleAudioWrapper returns false (no-op) if a save is already in
+  // flight (its `processing` reentrancy guard). sweepCaptureInbox has already
+  // vault-copied the recording by then, so it isn't lost — it just becomes an
+  // unlinked orphan that PendingAudioBanner already knows how to surface for
+  // manual retry, same as any other interrupted save.
+  useEffect(() => {
+    if (!user?.uid) return;
+    let cancelled = false;
+
+    const processCaptureInbox = async () => {
+      let items;
+      try {
+        items = await sweepCaptureInbox();
+      } catch (e) {
+        console.warn('[CaptureInbox] sweep failed:', e);
+        return;
+      }
+      if (cancelled || !items?.length) return;
+      console.log('[CaptureInbox] processing', items.length, 'background-captured recording(s)');
+      for (const item of items) {
+        if (cancelled) break;
+        try {
+          await handleAudioWrapper(item.base64, item.mime, {
+            existingRecordingId: item.recordingId,
+            capturedAt: item.capturedAt
+          });
+        } catch (e) {
+          console.warn('[CaptureInbox] failed to process item:', e);
+        }
+      }
+    };
+
+    processCaptureInbox();
+
+    const listenerPromise = CapacitorApp.addListener('appStateChange', ({ isActive }) => {
+      if (isActive) processCaptureInbox();
+    });
+
+    return () => {
+      cancelled = true;
+      listenerPromise.then(l => l.remove());
+    };
+  }, [user?.uid]);
+
   // Auth
   useEffect(() => {
     console.log('[Engram] Setting up auth listener...');
@@ -813,7 +866,8 @@ export default function App() {
         entry.safetyFlagged ?? true,
         safetyUserResponse,
         null,
-        entry.voiceTone ?? null
+        entry.voiceTone ?? null,
+        { capturedAt: entry.capturedAt }
       );
       // The recording (if this crisis entry came from voice) was deliberately
       // left unlinked in the vault until the entry actually existed — link it
@@ -847,8 +901,16 @@ export default function App() {
     await persistPendingEntry('support');
   }, [persistPendingEntry]);
 
-  const doSaveEntry = async (textInput, safetyFlagged = false, safetyUserResponse = null, temporalContext = null, voiceTone = null) => {
+  const doSaveEntry = async (textInput, safetyFlagged = false, safetyUserResponse = null, temporalContext = null, voiceTone = null, options = {}) => {
     if (!user) return;
+
+    // capturedAt (ISO string) is the sole exception to "always current date"
+    // below: it's set only for entries swept from the background-capture
+    // inbox (Shortcuts -> SaveBrainDumpIntent), where "now" is when the app
+    // happened to process the recording, not when the user actually spoke.
+    // Every downstream use of `now` in this function (createdAt, effectiveDate,
+    // the offline-queue path, signal extraction) picks this up for free.
+    const { capturedAt } = options;
 
     console.time('⏱️ TOTAL: Save entry to Firestore');
 
@@ -862,7 +924,8 @@ export default function App() {
     // TEMPORAL REDESIGN: Always use current date for effectiveDate.
     // Temporal attribution is now handled by signals, not by backdating entries.
     // effectiveDate is kept for backwards compatibility with old entries.
-    const now = new Date();
+    const parsedCapturedAt = capturedAt && !isNaN(Date.parse(capturedAt)) ? new Date(capturedAt) : null;
+    const now = parsedCapturedAt || new Date();
     const effectiveDate = now;  // Always current date - signals handle temporal attribution
 
     console.log('Saving entry with:', {
@@ -1020,7 +1083,7 @@ export default function App() {
         category: cat,
         analysisStatus: 'pending',
         embedding,
-        createdAt: Timestamp.now(),
+        createdAt: Timestamp.fromDate(now),
         effectiveDate: Timestamp.fromDate(effectiveDate),
         userId: user.uid,
         // Signal extraction version - increments on each edit for race condition handling
@@ -1420,7 +1483,7 @@ export default function App() {
   };
 
   const saveEntry = async (textInput, voiceTone = null, options = {}) => {
-    const { recordingId } = options;
+    const { recordingId, capturedAt } = options;
     if (!user) return;
     setProcessing(true);
     console.log('[SaveEntry] Starting save process, text length:', textInput.length, 'hasVoiceTone:', !!voiceTone);
@@ -1429,7 +1492,7 @@ export default function App() {
     const hasCrisis = checkCrisisKeywords(textInput);
     if (hasCrisis) {
       console.log('[SaveEntry] Crisis keywords detected, showing modal');
-      setPendingEntry({ text: textInput, safetyFlagged: true, voiceTone, recordingId });
+      setPendingEntry({ text: textInput, safetyFlagged: true, voiceTone, recordingId, capturedAt });
       setCrisisModal(true);
       setProcessing(false);
       return 'deferred';
@@ -1466,10 +1529,13 @@ export default function App() {
       }
 
       // Always save with current date - signals handle temporal attribution
-      return await doSaveEntry(textInput, false, null, temporal.detected ? temporal : null, voiceTone);
+      // (capturedAt is the one exception: a background-captured recording's
+      // entry is stamped at capture time, not at whenever the app next opened
+      // and swept it — see src/services/audio/captureInbox.js.)
+      return await doSaveEntry(textInput, false, null, temporal.detected ? temporal : null, voiceTone, { capturedAt });
     } catch (e) {
       console.error('Temporal detection failed, saving normally:', e);
-      return await doSaveEntry(textInput, false, null, null, voiceTone);
+      return await doSaveEntry(textInput, false, null, null, voiceTone, { capturedAt });
     }
   };
 
@@ -1520,7 +1586,7 @@ export default function App() {
   }, []);
 
   const handleAudioWrapper = async (base64, mime, options = {}) => {
-    const { existingRecordingId } = options;
+    const { existingRecordingId, capturedAt } = options;
     console.log('[Transcription] handleAudioWrapper called');
     console.log('[Transcription] Audio data received:', {
       base64Length: base64?.length || 0,
@@ -1634,7 +1700,7 @@ export default function App() {
 
       // Pass voice tone analysis to saveEntry
       console.log('[Transcription] Calling saveEntry with transcript length:', transcript.length, 'voiceTone:', !!toneAnalysis);
-      const saveResult = await saveEntry(transcript, toneAnalysis, { recordingId });
+      const saveResult = await saveEntry(transcript, toneAnalysis, { recordingId, capturedAt });
       console.log('[Transcription] saveEntry completed with result:', saveResult);
       // Only link (and thereby clear it from the recovery banner) once the
       // entry actually exists. When the crisis flow deferred the save,
