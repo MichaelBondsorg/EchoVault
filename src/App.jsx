@@ -550,7 +550,10 @@ export default function App() {
         // sweepCaptureInbox before we got here, so unprocessed items just sit
         // as recoverable orphans that PendingAudioBanner already knows how to
         // surface for manual retry.
-        if (useSafetyStore.getState().crisisModal) {
+        // Gate on pendingEntry as well: the modal can close into the crisis-
+        // resources screen while pendingEntry is still held (unresolved flow).
+        const safetyState = useSafetyStore.getState();
+        if (safetyState.crisisModal || safetyState.pendingEntry) {
           const remaining = items.length - (i + 1);
           console.log(`[captureInbox] pausing sweep — crisis flow open, ${remaining} items remain as recoverable orphans`);
           break;
