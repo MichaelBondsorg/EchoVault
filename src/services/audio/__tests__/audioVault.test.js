@@ -53,9 +53,11 @@ describe('audioVault', () => {
 
   it('cleanupExpired deletes recordings older than 7 days but keeps fresh ones', async () => {
     const oldId = await audioVault.saveRecording('T0xE', 'audio/webm');
-    // Backdate via the metadata index
+    // Backdate via the metadata index (both createdAt and vaultedAt, since
+    // this recording predates the vaultedAt-based retention clock).
     const index = JSON.parse(localStorage.getItem('engram_audio_vault_index'));
     index[oldId].createdAt = Date.now() - 8 * 24 * 60 * 60 * 1000;
+    index[oldId].vaultedAt = Date.now() - 8 * 24 * 60 * 60 * 1000;
     localStorage.setItem('engram_audio_vault_index', JSON.stringify(index));
     const freshId = await audioVault.saveRecording('RlJFU0g=', 'audio/webm');
 
@@ -63,6 +65,51 @@ describe('audioVault', () => {
     expect(deleted).toBe(1);
     expect(await audioVault.getRecording(oldId)).toBeNull();
     expect(await audioVault.getRecording(freshId)).not.toBeNull();
+  });
+
+  it('retention is measured from vaultedAt, not createdAt: a capture-time-overridden createdAt that looks stale is NOT purged while vaultedAt is fresh', async () => {
+    // e.g. a background-captured recording whose createdAt was overridden to
+    // the original capture time (10 days ago) but was only just swept into
+    // the vault (vaultedAt = now). It should get its full retention window
+    // starting from vaultedAt, not be purged immediately because createdAt
+    // already looks old.
+    const staleCreatedAt = Date.now() - 10 * 24 * 60 * 60 * 1000;
+    const id = await audioVault.saveRecording('QUJD', 'audio/mp4', { createdAt: staleCreatedAt });
+
+    const deleted = await audioVault.cleanupExpired();
+    expect(deleted).toBe(0);
+    expect(await audioVault.getRecording(id)).not.toBeNull();
+  });
+
+  it('retention purges based on a backdated vaultedAt even when createdAt is fresh', async () => {
+    const id = await audioVault.saveRecording('QUJD', 'audio/mp4');
+    const index = JSON.parse(localStorage.getItem('engram_audio_vault_index'));
+    index[id].vaultedAt = Date.now() - 8 * 24 * 60 * 60 * 1000;
+    localStorage.setItem('engram_audio_vault_index', JSON.stringify(index));
+
+    const deleted = await audioVault.cleanupExpired();
+    expect(deleted).toBe(1);
+    expect(await audioVault.getRecording(id)).toBeNull();
+  });
+
+  it('falls back to createdAt for pre-existing entries with no vaultedAt field', async () => {
+    const id = await audioVault.saveRecording('QUJD', 'audio/mp4');
+    const index = JSON.parse(localStorage.getItem('engram_audio_vault_index'));
+    delete index[id].vaultedAt;
+    index[id].createdAt = Date.now() - 8 * 24 * 60 * 60 * 1000;
+    localStorage.setItem('engram_audio_vault_index', JSON.stringify(index));
+
+    const deleted = await audioVault.cleanupExpired();
+    expect(deleted).toBe(1);
+    expect(await audioVault.getRecording(id)).toBeNull();
+  });
+
+  it('saveRecording stamps vaultedAt with the current wall-clock time regardless of a createdAt override', async () => {
+    const before = Date.now();
+    const staleCreatedAt = Date.now() - 10 * 24 * 60 * 60 * 1000;
+    const id = await audioVault.saveRecording('QUJD', 'audio/mp4', { createdAt: staleCreatedAt });
+    const index = JSON.parse(localStorage.getItem('engram_audio_vault_index'));
+    expect(index[id].vaultedAt).toBeGreaterThanOrEqual(before);
   });
 
   it('saveRecording honors options.createdAt (e.g. a background-capture timestamp)', async () => {

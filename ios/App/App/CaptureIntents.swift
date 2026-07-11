@@ -45,14 +45,24 @@ struct SaveBrainDumpIntent: AppIntent {
         let id = UUID().uuidString
         // IntentFile.data is the stored (already-loaded) Data for the file;
         // no async accessor needed here.
+        //
+        // Order matters: write the .m4a FIRST, then the .json sidecar LAST,
+        // and use .atomic writes for both so a crash mid-write never leaves
+        // a half-written file on disk. sweepCaptureInbox() (JS side) treats
+        // a sidecar-less .m4a as processable (falls back to default
+        // capturedAt/mime), so a crash after the m4a write but before the
+        // json write just loses the capture-time metadata for that one
+        // recording — harmless. The reverse order would be worse: a crash
+        // after a json-first write but before the m4a write leaves a
+        // dangling sidecar with no audio to ever pair it with.
         let data = audio.data
-        try data.write(to: inbox.appendingPathComponent("\(id).m4a"))
+        try data.write(to: inbox.appendingPathComponent("\(id).m4a"), options: .atomic)
         let meta: [String: Any] = [
             "capturedAt": ISO8601DateFormatter().string(from: Date()),
             "mime": "audio/mp4"
         ]
         let metaData = try JSONSerialization.data(withJSONObject: meta)
-        try metaData.write(to: inbox.appendingPathComponent("\(id).json"))
+        try metaData.write(to: inbox.appendingPathComponent("\(id).json"), options: .atomic)
         return .result()
     }
 }

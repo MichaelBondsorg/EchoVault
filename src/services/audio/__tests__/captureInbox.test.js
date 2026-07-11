@@ -124,4 +124,46 @@ describe('sweepCaptureInbox', () => {
     const { files } = await Filesystem.readdir({ path: INBOX, directory: Directory.Data });
     expect(files).toHaveLength(0);
   });
+
+  it('is reentrancy-safe: an overlapping concurrent call is a no-op, not a double-process', async () => {
+    await seed('concurrent', { sidecar: { capturedAt: '2026-01-01T00:00:00.000Z', mime: 'audio/mp4' } });
+
+    // Deliberately don't await the first call before starting the second —
+    // App.jsx can trigger overlapping sweeps (auth + rapid foreground
+    // flapping). The reentrancy guard is set synchronously before the first
+    // await inside sweepCaptureInbox, so the second call below sees it
+    // already in progress and bails immediately.
+    const first = sweepCaptureInbox();
+    const second = sweepCaptureInbox();
+
+    const [firstResults, secondResults] = await Promise.all([first, second]);
+
+    expect(secondResults).toEqual([]);
+    expect(firstResults).toHaveLength(1);
+
+    // Exactly one vault entry was created — no double-processing.
+    expect(await audioVault.listOrphans()).toHaveLength(1);
+  });
+
+  it('deletes an orphan .json sidecar whose matching .m4a no longer exists', async () => {
+    // Simulate a dangling sidecar left behind by e.g. an interrupted delete
+    // or a pre-atomic-write crash on the native side: a .json with no
+    // corresponding .m4a anywhere in the inbox.
+    await Filesystem.mkdir({ path: INBOX, directory: Directory.Data, recursive: true });
+    await Filesystem.writeFile({
+      path: `${INBOX}/dangling.json`,
+      directory: Directory.Data,
+      data: JSON.stringify({ capturedAt: '2026-01-01T00:00:00.000Z', mime: 'audio/mp4' })
+    });
+    // Also seed a normal recording to confirm the cleanup doesn't disturb it.
+    await seed('normal', { sidecar: { capturedAt: '2026-01-02T00:00:00.000Z', mime: 'audio/mp4' } });
+
+    const results = await sweepCaptureInbox();
+
+    expect(results).toHaveLength(1);
+    expect(results[0].capturedAt).toBe('2026-01-02T00:00:00.000Z');
+
+    const { files } = await Filesystem.readdir({ path: INBOX, directory: Directory.Data });
+    expect(files).toHaveLength(0);
+  });
 });

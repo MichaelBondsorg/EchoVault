@@ -528,8 +528,9 @@ export default function App() {
       }
       if (cancelled || !items?.length) return;
       console.log('[CaptureInbox] processing', items.length, 'background-captured recording(s)');
-      for (const item of items) {
+      for (let i = 0; i < items.length; i++) {
         if (cancelled) break;
+        const item = items[i];
         try {
           await handleAudioWrapper(item.base64, item.mime, {
             existingRecordingId: item.recordingId,
@@ -537,6 +538,22 @@ export default function App() {
           });
         } catch (e) {
           console.warn('[CaptureInbox] failed to process item:', e);
+        }
+        // Invariant: safetyStore's crisisModal/pendingEntry are single-slot —
+        // only one crisis flow can be "open" at a time. If the item we just
+        // processed tripped crisis detection, handleAudioWrapper already called
+        // startCrisisFlow() and populated that slot. If we kept looping and the
+        // *next* item also tripped crisis detection, its startCrisisFlow() call
+        // would silently overwrite this item's modal/pendingEntry before the
+        // user ever saw it. So: stop sweeping the instant a crisis flow opens.
+        // Nothing is lost by pausing — every item was already vault-copied by
+        // sweepCaptureInbox before we got here, so unprocessed items just sit
+        // as recoverable orphans that PendingAudioBanner already knows how to
+        // surface for manual retry.
+        if (useSafetyStore.getState().crisisModal) {
+          const remaining = items.length - (i + 1);
+          console.log(`[captureInbox] pausing sweep — crisis flow open, ${remaining} items remain as recoverable orphans`);
+          break;
         }
       }
     };

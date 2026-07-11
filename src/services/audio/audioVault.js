@@ -65,7 +65,15 @@ export const audioVault = {
         localStorage.setItem(webKey(id), base64);
       }
       const index = readIndex();
-      index[id] = { createdAt: createdAt ?? Date.now(), mime, entryId: null };
+      // vaultedAt is always the wall-clock time this blob actually landed in
+      // the vault, independent of `createdAt` (which callers — e.g. the
+      // background-capture sweep — may override to the original capture
+      // time so journal entries display correctly). Retention must be
+      // measured from vaultedAt: a recording captured 10 days ago but only
+      // just swept into the vault should still get its full 7-day grace
+      // period, not be purged on arrival because its createdAt already
+      // looks stale.
+      index[id] = { createdAt: createdAt ?? Date.now(), vaultedAt: Date.now(), mime, entryId: null };
       const indexed = writeIndex(index);
       if (!indexed) {
         // Blob was written but the index (the only thing that makes it
@@ -145,7 +153,13 @@ export const audioVault = {
     const index = readIndex();
     let deleted = 0;
     for (const [id, meta] of Object.entries(index)) {
-      if (meta.createdAt < cutoff) {
+      // Retention is measured from vaultedAt (when the blob actually landed
+      // in the vault), not createdAt (which may be capture-time-overridden
+      // and could already be "old" the moment it's swept in). Entries
+      // written before this field existed fall back to createdAt so their
+      // existing behavior is unchanged.
+      const retentionClock = meta.vaultedAt || meta.createdAt;
+      if (retentionClock < cutoff) {
         await this.deleteRecording(id);
         deleted++;
       }

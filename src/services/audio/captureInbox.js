@@ -25,6 +25,14 @@ const DEFAULT_MIME = 'audio/mp4';
 
 const isNative = () => Capacitor.isNativePlatform();
 
+// Reentrancy guard: App.jsx sweeps on auth *and* on every foreground
+// transition, so an overlapping call (e.g. rapid foreground/background
+// flapping) is possible. Without this, two concurrent sweeps could both
+// read the same inbox file, double-save it to the vault, and race on
+// deleting it. Module-level (not per-call) because there is only ever one
+// inbox for the whole app.
+let sweepInProgress = false;
+
 const inboxPath = (name) => `${INBOX_DIR}/${name}`;
 
 /** Best-effort delete — never throws, callers don't need to know if it worked. */
@@ -64,53 +72,85 @@ async function readSidecar(name) {
 export async function sweepCaptureInbox() {
   if (!isNative()) return [];
 
-  let files;
-  try {
-    ({ files } = await Filesystem.readdir({ path: INBOX_DIR, directory: Directory.Data }));
-  } catch {
-    // Directory doesn't exist yet — nothing has ever been captured.
+  if (sweepInProgress) {
+    console.log('[captureInbox] sweep already in progress, skipping');
     return [];
   }
-
-  const names = (files || []).map((f) => (typeof f === 'string' ? f : f.name));
-  const nameSet = new Set(names);
-  const ids = [...new Set(
-    names.filter((n) => n.endsWith(AUDIO_EXT)).map((n) => n.slice(0, -AUDIO_EXT.length))
-  )];
-
-  const results = [];
-  for (const id of ids) {
-    const audioName = `${id}${AUDIO_EXT}`;
-    const metaName = `${id}${META_EXT}`;
+  sweepInProgress = true;
+  try {
+    let files;
     try {
-      const hasSidecar = nameSet.has(metaName);
-      const { capturedAt, mime } = hasSidecar
-        ? await readSidecar(metaName)
-        : { capturedAt: new Date().toISOString(), mime: DEFAULT_MIME };
-
-      const { data: base64 } = await Filesystem.readFile({
-        path: inboxPath(audioName),
-        directory: Directory.Data
-      });
-
-      const recordingId = await audioVault.saveRecording(base64, mime, {
-        createdAt: Date.parse(capturedAt) || Date.now()
-      });
-
-      if (!recordingId) {
-        // Vault write failed — leave both files for the next sweep.
-        continue;
-      }
-
-      await safeDelete(audioName);
-      if (hasSidecar) await safeDelete(metaName);
-
-      results.push({ recordingId, base64, mime, capturedAt });
-    } catch (e) {
-      // Never let one bad file take down the whole sweep.
-      console.warn('[captureInbox] failed to process', id, e);
+      ({ files } = await Filesystem.readdir({ path: INBOX_DIR, directory: Directory.Data }));
+    } catch {
+      // Directory doesn't exist yet — nothing has ever been captured.
+      return [];
     }
-  }
 
-  return results;
+    const names = (files || []).map((f) => (typeof f === 'string' ? f : f.name));
+    const nameSet = new Set(names);
+    const ids = [...new Set(
+      names.filter((n) => n.endsWith(AUDIO_EXT)).map((n) => n.slice(0, -AUDIO_EXT.length))
+    )];
+
+    const results = [];
+    for (const id of ids) {
+      const audioName = `${id}${AUDIO_EXT}`;
+      const metaName = `${id}${META_EXT}`;
+      try {
+        const hasSidecar = nameSet.has(metaName);
+        const { capturedAt, mime } = hasSidecar
+          ? await readSidecar(metaName)
+          : { capturedAt: new Date().toISOString(), mime: DEFAULT_MIME };
+
+        const { data: base64 } = await Filesystem.readFile({
+          path: inboxPath(audioName),
+          directory: Directory.Data
+        });
+
+        const recordingId = await audioVault.saveRecording(base64, mime, {
+          createdAt: Date.parse(capturedAt) || Date.now()
+        });
+
+        if (!recordingId) {
+          // Vault write failed — leave both files for the next sweep.
+          continue;
+        }
+
+        await safeDelete(audioName);
+        if (hasSidecar) await safeDelete(metaName);
+
+        results.push({ recordingId, base64, mime, capturedAt });
+      } catch (e) {
+        // Never let one bad file take down the whole sweep.
+        console.warn('[captureInbox] failed to process', id, e);
+      }
+    }
+
+    // Orphan sidecar cleanup: a .json sidecar whose matching .m4a no longer
+    // exists is dead weight that would otherwise linger in the inbox forever
+    // — the main loop above only ever iterates ids derived from *.m4a files,
+    // so a sidecar with no audio file is never visited by it. This can arise
+    // from an interrupted delete (audio deleted, sweep killed before deleting
+    // its sidecar) or a pre-atomic-write crash on the native side. Re-read
+    // the directory (rather than reuse the pre-loop `names` snapshot) so this
+    // reflects what's actually left on disk after the deletes above.
+    try {
+      const { files: filesAfter } = await Filesystem.readdir({ path: INBOX_DIR, directory: Directory.Data });
+      const namesAfter = (filesAfter || []).map((f) => (typeof f === 'string' ? f : f.name));
+      const namesAfterSet = new Set(namesAfter);
+      for (const name of namesAfter) {
+        if (!name.endsWith(META_EXT)) continue;
+        const matchingAudio = `${name.slice(0, -META_EXT.length)}${AUDIO_EXT}`;
+        if (!namesAfterSet.has(matchingAudio)) {
+          await safeDelete(name);
+        }
+      }
+    } catch (e) {
+      console.warn('[captureInbox] orphan sidecar cleanup failed:', e);
+    }
+
+    return results;
+  } finally {
+    sweepInProgress = false;
+  }
 }
