@@ -29,7 +29,8 @@ struct SaveBrainDumpIntent: AppIntent {
     static var description = IntentDescription("Saves a recording into Engram for transcription on next open. Works without opening the app.")
     static var openAppWhenRun: Bool = false
 
-    @Parameter(title: "Audio", supportedContentTypes: [.audio, .mpeg4Audio])
+    // Note: supportedContentTypes on @Parameter requires iOS 18 — omitted for iOS 17 compat.
+    @Parameter(title: "Audio")
     var audio: IntentFile
 
     func perform() async throws -> some IntentResult {
