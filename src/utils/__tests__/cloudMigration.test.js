@@ -140,6 +140,27 @@ export const MIGRATED = [
   // the static scan below.
   'src/pages/JournalPage.jsx',
   'src/components/entries/EntryCard.jsx',
+  // C5 (Insights): full top-level restyle of the 1906-line InsightsPage —
+  // GenerationStatus, CorrelationsSection ("Your Patterns" — the spec's
+  // Patterns card, dot + sentence + bold stat), RecommendationsSection,
+  // QuickInsightsSection, and NexusInsightCard all converted from the
+  // 4-hue Hearthside palette (honey/sage/lavender/terra) onto Cloud tokens.
+  // The design spec's literal Week/Month segment + trend-bar-chart + Rising
+  // Tide/streak widgets have no corresponding feature or data in this page
+  // (no weekly mood-by-day series, no streak/momentum computation is ever
+  // passed to or computed by InsightsPage) — inventing them would mean
+  // adding new state/data-flow, which the task explicitly forbids ("no
+  // data-flow changes, no hook changes"). Per §3 ("ONE user-selectable
+  // accent"), the 4 legacy semantic hues collapse to a single accent scale
+  // (bg-accent-wash/text-accent-deep) differentiated by icon + label only;
+  // existing health-warning/low-mood/urgent-priority reds are left as `red-*`
+  // (not a banned token, matches the EntryCard C4 precedent of keeping
+  // `/* @color-safe: ... */`-flagged reds for warnings). All insight-
+  // generation, correlation/statistics computation, feedback/export/report
+  // logic, and store calls are unchanged — only className strings and a
+  // couple of derived-style helper objects (pure presentation, e.g.
+  // getInsightStyle()'s per-type color/gradient fields) changed.
+  'src/pages/InsightsPage.jsx',
 ];
 
 // --- Ratchet: how many non-migrated .jsx files still use legacy palette classes ---
@@ -161,7 +182,11 @@ export const MIGRATED = [
 // offenders; both fully cleaned (day-grouped cards, mood dot, meta line,
 // cloud Chip filter/date controls) and moved to MIGRATED. Budget drops
 // 69 -> 67.
-export const LEGACY_BUDGET = 67;
+// C5 (2026-07-18): InsightsPage.jsx (1906 lines) was 1 of the 67 offenders;
+// fully cleaned (GenerationStatus, CorrelationsSection/Patterns card,
+// RecommendationsSection, QuickInsightsSection, NexusInsightCard all onto
+// Cloud tokens) and moved to MIGRATED. Budget drops 67 -> 66.
+export const LEGACY_BUDGET = 66;
 
 function collectJsxFiles(dir) {
   const out = [];
