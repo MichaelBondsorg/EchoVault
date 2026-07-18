@@ -72,14 +72,17 @@ const SortableWidget = ({
           className="
             absolute -top-2 -right-2 z-50
             w-8 h-8
-            bg-red-500 hover:bg-red-600 active:bg-red-700
+            bg-destructive hover:opacity-90 active:opacity-80
             text-white
             rounded-full
             shadow-lg
             flex items-center justify-center
-            transition-colors
+            transition-opacity
             select-none
           "
+          /* text-white is intentional: destructive background needs
+             light-text contrast in both light and dark modes. No semantic
+             foreground token maintains this without flipping in light mode. */
           style={{
             WebkitTapHighlightColor: 'transparent',
             touchAction: 'manipulation',

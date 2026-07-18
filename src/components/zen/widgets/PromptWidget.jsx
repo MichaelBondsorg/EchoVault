@@ -186,7 +186,7 @@ const PromptWidget = ({
               type="button"
               onClick={() => dismissQuestion(currentQuestion.question)}
               aria-label="Dismiss this prompt"
-              className="cloud-icon-button -m-2 h-8 w-8"
+              className="cloud-icon-button"
             >
               <X size={12} />
             </button>
@@ -232,7 +232,7 @@ const PromptWidget = ({
               onClick={goPrev}
               disabled={isEditing}
               aria-label="Previous prompt"
-              className="cloud-icon-button -m-2.5 h-9 w-9 disabled:opacity-50"
+              className="cloud-icon-button disabled:opacity-50"
             >
               <ChevronLeft size={16} />
             </button>
@@ -241,7 +241,7 @@ const PromptWidget = ({
               onClick={goNext}
               disabled={isEditing}
               aria-label="Next prompt"
-              className="cloud-icon-button -m-2.5 h-9 w-9 disabled:opacity-50"
+              className="cloud-icon-button disabled:opacity-50"
             >
               <ChevronRight size={16} />
             </button>
