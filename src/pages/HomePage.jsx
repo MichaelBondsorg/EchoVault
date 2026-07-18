@@ -5,10 +5,11 @@ import { useDashboardLayout } from '../hooks';
 import { BentoGrid, WidgetDrawer } from '../components/zen';
 
 /**
- * HomePage - Customizable Bento dashboard
+ * HomePage - Customizable Bento dashboard (CLOUD-DESIGN-SPEC.md §7 Home)
  *
- * Default state: Hero + Prompt widgets only (minimalist Zen approach)
- * Users can add more widgets via the Customize feature.
+ * Default state: serif greeting -> Reflect card -> 3 stat cells -> mood-
+ * trend bar card -> Recent list. Users can still add more widgets (Goals,
+ * Tasks, Ongoing Stories, AI Insights) via the Customize feature.
  */
 const HomePage = ({
   entries,
@@ -21,7 +22,7 @@ const HomePage = ({
   onStartRecording,
   onStartTextEntry,
   onPromptResponse, // Opens entry modal with prompt context
-  onDayClick, // Opens day summary modal from 30-day journey
+  onDayClick, // Opens day summary modal from 30-day journey / Recent list
 }) => {
   const [showWidgetDrawer, setShowWidgetDrawer] = useState(false);
 
@@ -47,7 +48,7 @@ const HomePage = ({
     onWritePrompt: (prompt) => onPromptResponse?.(prompt, 'text'),
     onVoicePrompt: (prompt) => onPromptResponse?.(prompt, 'voice'),
     onToggleTask,
-    // 30-day journey - open day summary modal
+    // 30-day journey / Recent list - open day summary modal
     onDayClick,
   };
 
@@ -59,11 +60,11 @@ const HomePage = ({
   if (isLoading) {
     return (
       <motion.div
-        className="px-4 py-8 flex items-center justify-center"
+        className="flex items-center justify-center px-4 py-8"
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
       >
-        <div className="text-warm-500 text-sm">Loading your dashboard...</div>
+        <div className="text-sm text-muted-foreground">Loading your dashboard...</div>
       </motion.div>
     );
   }
@@ -90,12 +91,10 @@ const HomePage = ({
         <motion.button
           onClick={handleAddClick}
           className="
-            w-full mt-3 py-3 px-4
-            bg-honey-100 hover:bg-honey-200
-            border-2 border-dashed border-honey-300
-            rounded-2xl
-            text-honey-700 font-medium text-sm
-            flex items-center justify-center gap-2
+            mt-3 flex w-full items-center justify-center gap-2
+            rounded-2xl border-2 border-dashed border-border
+            bg-card py-3 px-4
+            text-sm font-medium text-accent-deep
             transition-colors
           "
           initial={{ opacity: 0, y: 10 }}
@@ -119,13 +118,13 @@ const HomePage = ({
       {/* Install Prompt for new users (no entries) */}
       {entries.length === 0 && !isEditMode && (
         <motion.div
-          className="mt-6 p-4 bg-hearth-50/50 backdrop-blur-sm rounded-2xl text-sm text-hearth-800 text-center border border-hearth-200"
+          className="mt-6 rounded-2xl border border-border bg-card p-4 text-center text-sm text-secondary-foreground"
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           transition={{ delay: 0.3 }}
         >
-          <p className="font-display font-medium mb-1">Welcome to your sanctuary</p>
-          <p className="text-hearth-600 text-xs">
+          <p className="mb-1 font-display font-medium text-foreground">Welcome to your sanctuary</p>
+          <p className="text-xs text-muted-foreground">
             Tap the + button below to add your first entry
           </p>
         </motion.div>

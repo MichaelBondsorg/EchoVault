@@ -105,6 +105,18 @@ export const MIGRATED = [
   'src/components/zen/BottomNavbar.jsx',
   'src/components/zen/TopBar.jsx',
   'src/components/zen/AppLayout.jsx',
+  // C2 (Home): serif greeting, Reflect card, stat cells w/ RisingTide, accent
+  // trend bars, Recent list. BentoGrid's Customize button/edit toolbar reskinned
+  // too (visible Home chrome); GlassCard/WidgetDrawer/Tasks/Goals/Stories/Nexus
+  // widgets are out of scope (not part of the default Home composition) and stay
+  // in the legacy budget below.
+  'src/pages/HomePage.jsx',
+  'src/components/zen/BentoGrid.jsx',
+  'src/components/zen/widgets/HeroWidget.jsx',
+  'src/components/zen/widgets/PromptWidget.jsx',
+  'src/components/zen/widgets/MiniStatsWidget.jsx',
+  'src/components/zen/widgets/MoodHeatmapWidget.jsx',
+  'src/components/zen/widgets/RecentEntriesWidget.jsx',
 ];
 
 // --- Ratchet: how many non-migrated .jsx files still use legacy palette classes ---
@@ -114,7 +126,11 @@ export const MIGRATED = [
 // C1 (2026-07-18): AppLayout.jsx's `dark:bg-hearth-950` was the only remaining legacy-
 // class offender among the three shell files migrated in this task (BottomNavbar.jsx/
 // TopBar.jsx were already clean); budget drops 77 -> 76.
-export const LEGACY_BUDGET = 76;
+// C2 (2026-07-18): HomePage.jsx, BentoGrid.jsx, HeroWidget.jsx, PromptWidget.jsx,
+// MiniStatsWidget.jsx, MoodHeatmapWidget.jsx were 6 of the 76 offenders; all fully
+// cleaned and moved to MIGRATED (RecentEntriesWidget.jsx is a new file, already
+// clean, so it doesn't change the offender count). Budget drops 76 -> 70.
+export const LEGACY_BUDGET = 70;
 
 function collectJsxFiles(dir) {
   const out = [];

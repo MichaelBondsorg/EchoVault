@@ -250,15 +250,13 @@ const BentoGrid = ({
       {/* Customize Button (visible when not in edit mode) */}
       {!isEditing && (
         <motion.button
+          type="button"
           onClick={onToggleEdit}
           className="
-            w-full mt-4 py-3 px-4
-            bg-white/30 backdrop-blur-sm
-            border border-white/20
-            rounded-2xl
-            text-warm-500 font-medium text-sm
-            flex items-center justify-center gap-2
-            hover:bg-white/40 transition-colors
+            mt-4 flex w-full items-center justify-center gap-2
+            rounded-2xl border border-border bg-card py-3 px-4
+            text-sm font-medium text-muted-foreground
+            transition-colors hover:bg-divider
           "
           whileHover={{ scale: 1.01 }}
           whileTap={{ scale: 0.99 }}
@@ -278,19 +276,18 @@ const BentoGrid = ({
             exit={{ opacity: 0, y: 20 }}
           >
             <div className="
-              bg-warm-800 text-white
-              px-4 py-2 rounded-full
-              shadow-lg
               flex items-center gap-3
+              rounded-full bg-primary text-primary-foreground
+              px-4 py-2 shadow-soft
             ">
               <span className="text-sm">Drag to reorder</span>
               <button
+                type="button"
                 onClick={onToggleEdit}
                 className="
-                  px-3 py-1
-                  bg-honey-500 hover:bg-honey-600
-                  rounded-full text-sm font-medium
-                  transition-colors
+                  rounded-full bg-accent-deep px-3 py-1
+                  text-sm font-medium text-background
+                  transition-colors hover:opacity-90
                 "
               >
                 Done

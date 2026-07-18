@@ -1,16 +1,17 @@
 import { useState, useMemo, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { MessageCircle, Mic, PenLine, ChevronLeft, ChevronRight, X, Sparkles, AlertCircle, Sun, Moon, Zap } from 'lucide-react';
-import GlassCard from '../GlassCard';
+import { Mic, PenLine, ChevronLeft, ChevronRight, X } from 'lucide-react';
+import { Card, SectionLabel } from '../../cloud';
 import { getQuickContextInsights } from '../../../services/nexus/insightIntegration';
 
 /**
- * PromptWidget - Reflection prompts for Bento dashboard
+ * PromptWidget - "Reflect" card for the Home screen (CLOUD-DESIGN-SPEC.md
+ * §7 Home: "Reflect card (prompt + Write/Speak)").
  *
- * RESTORED: Uses follow-up questions from entries' contextualInsight
- * These are the insightful, personalized questions based on journal history.
- *
- * ENHANCED: Also shows context-aware prompts based on health/environment data.
+ * Uses follow-up questions from entries' contextualInsight (personalized,
+ * based on journal history) plus context-aware prompts from health/
+ * environment data. Restyle only — the question sourcing/dismissal/paging
+ * logic below is unchanged from the pre-Cloud widget.
  */
 const PromptWidget = ({
   entries = [],
@@ -19,7 +20,6 @@ const PromptWidget = ({
   onVoicePrompt,
   isEditing = false,
   onDelete,
-  size = '2x1',
   todayHealth = null,
   todayEnvironment = null,
 }) => {
@@ -127,7 +127,7 @@ const PromptWidget = ({
         hour < 12 ? "What are you hoping to accomplish today?" : "What was the highlight of your day?",
         "What's one thing you're grateful for?",
       ];
-      return fallbacks.map((q, i) => ({ question: q, entryId: null, entryDate: null, isContext: false }));
+      return fallbacks.map((q) => ({ question: q, entryId: null, entryDate: null, isContext: false }));
     }
 
     return filtered;
@@ -169,167 +169,111 @@ const PromptWidget = ({
   const currentQuestion = questions[currentIndex];
   const isPersonalized = currentQuestion?.entryId !== null;
   const isContextPrompt = currentQuestion?.isContext === true;
-  const isHighPriority = currentQuestion?.priority === 'high';
-
-  // Get icon and label based on prompt type
-  const getPromptDisplay = () => {
-    if (isContextPrompt) {
-      const type = currentQuestion?.contextType || '';
-      if (type.includes('sleep') || type.includes('recovery')) {
-        return {
-          icon: Moon,
-          label: isHighPriority ? 'Check In' : 'Context',
-          colorClass: 'text-lavender-600',
-          bgClass: isHighPriority ? 'bg-gradient-to-br from-lavender-50/70 to-lavender-100/70' : undefined
-        };
-      }
-      if (type.includes('sun') || type.includes('light') || type.includes('environment')) {
-        return {
-          icon: Sun,
-          label: isHighPriority ? 'Today' : 'Context',
-          colorClass: 'text-honey-600',
-          bgClass: isHighPriority ? 'bg-gradient-to-br from-honey-50/70 to-terra-50/70' : undefined
-        };
-      }
-      if (type.includes('energy') || type.includes('strain')) {
-        return {
-          icon: Zap,
-          label: 'Energy',
-          colorClass: 'text-sage-600',
-          bgClass: isHighPriority ? 'bg-gradient-to-br from-sage-50/70 to-sage-100/70' : undefined
-        };
-      }
-      return {
-        icon: AlertCircle,
-        label: isHighPriority ? 'Check In' : 'Context',
-        colorClass: 'text-honey-600',
-        bgClass: isHighPriority ? 'bg-gradient-to-br from-honey-50/70 to-hearth-100/70' : undefined
-      };
-    }
-    if (isPersonalized) {
-      return { icon: Sparkles, label: 'Reflect', colorClass: 'text-lavender-600' };
-    }
-    return { icon: MessageCircle, label: 'Prompt', colorClass: 'text-honey-600' };
-  };
-
-  const promptDisplay = getPromptDisplay();
-  const PromptIcon = promptDisplay.icon;
 
   return (
-    <GlassCard
-      size={size}
-      isEditing={isEditing}
-      onDelete={onDelete}
-      className={promptDisplay.bgClass || "bg-gradient-to-br from-honey-50/50 to-hearth-50/50"}
-    >
-      <div className="h-full flex flex-col">
-        {/* Header */}
-        <div className="flex items-center justify-between mb-2">
-          <div className={`flex items-center gap-2 ${promptDisplay.colorClass}`}>
-            <PromptIcon size={14} />
-            <span className="text-xs font-semibold uppercase tracking-wide">
-              {promptDisplay.label}
+    <Card className={`w-full p-4 ${isEditing ? 'animate-shake' : ''}`}>
+      {/* Header: REFLECT section label + pager */}
+      <div className="mb-2.5 flex items-center justify-between">
+        <SectionLabel>Reflect</SectionLabel>
+        <div className="flex items-center gap-1">
+          {questions.length > 1 && (
+            <span className="text-xs text-faint">
+              {currentIndex + 1} of {questions.length}
             </span>
-            {isHighPriority && (
-              <span className="text-[10px] px-1.5 py-0.5 bg-white/60 rounded-full font-medium">
-                {currentQuestion?.trigger || 'today'}
-              </span>
-            )}
-          </div>
-          <div className="flex items-center gap-1">
-            {questions.length > 1 && (
-              <span className="text-xs text-warm-400 mr-1">
-                {currentIndex + 1}/{questions.length}
-              </span>
-            )}
-            {(isPersonalized || isContextPrompt) && !isEditing && (
-              <button
-                onClick={() => dismissQuestion(currentQuestion.question)}
-                className="p-1 rounded-full hover:bg-white/50 text-warm-400 hover:text-warm-600"
-              >
-                <X size={12} />
-              </button>
-            )}
-          </div>
-        </div>
-
-        {/* Question */}
-        <AnimatePresence mode="wait">
-          <motion.div
-            key={currentIndex}
-            initial={{ opacity: 0, x: 20 }}
-            animate={{ opacity: 1, x: 0 }}
-            exit={{ opacity: 0, x: -20 }}
-            className="flex-1 min-h-[48px]"
-          >
-            <p className="text-warm-800 font-medium text-sm leading-relaxed">
-              {currentQuestion?.question}
-            </p>
-            {isPersonalized && currentQuestion?.entryDate && (
-              <p className="text-xs text-warm-400 mt-1">
-                From {currentQuestion.entryDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
-              </p>
-            )}
-            {isContextPrompt && (
-              <p className="text-xs text-warm-400 mt-1">
-                Based on today's {currentQuestion?.contextType?.includes('sleep') || currentQuestion?.contextType?.includes('recovery')
-                  ? 'health data'
-                  : currentQuestion?.contextType?.includes('sun') || currentQuestion?.contextType?.includes('light')
-                    ? 'weather'
-                    : 'context'}
-              </p>
-            )}
-          </motion.div>
-        </AnimatePresence>
-
-        {/* Navigation + Actions */}
-        <div className="flex items-center justify-between mt-2">
-          {/* Navigation arrows */}
-          {questions.length > 1 ? (
-            <div className="flex items-center gap-0.5">
-              <button
-                onClick={goPrev}
-                disabled={isEditing}
-                className="p-1 rounded-full hover:bg-white/50 text-warm-400 hover:text-warm-600 disabled:opacity-50"
-              >
-                <ChevronLeft size={16} />
-              </button>
-              <button
-                onClick={goNext}
-                disabled={isEditing}
-                className="p-1 rounded-full hover:bg-white/50 text-warm-400 hover:text-warm-600 disabled:opacity-50"
-              >
-                <ChevronRight size={16} />
-              </button>
-            </div>
-          ) : <div />}
-
-          {/* Action Buttons */}
-          <div className="flex gap-2">
-            <motion.button
-              onClick={() => onWritePrompt?.(currentQuestion?.question)}
-              disabled={isEditing}
-              className="py-1.5 px-3 bg-white/50 hover:bg-white/70 text-hearth-600 text-xs font-medium rounded-xl flex items-center gap-1 disabled:opacity-50"
-              whileHover={{ scale: 1.02 }}
-              whileTap={{ scale: 0.98 }}
+          )}
+          {(isPersonalized || isContextPrompt) && !isEditing && (
+            <button
+              type="button"
+              onClick={() => dismissQuestion(currentQuestion.question)}
+              aria-label="Dismiss this prompt"
+              className="cloud-icon-button -m-2 h-8 w-8"
             >
-              <PenLine size={12} />
-              Write
-            </motion.button>
-            <motion.button
-              onClick={() => onVoicePrompt?.(currentQuestion?.question)}
-              disabled={isEditing}
-              className="py-1.5 px-3 bg-terra-500 hover:bg-terra-600 text-white text-xs font-medium rounded-xl flex items-center gap-1 shadow-sm disabled:opacity-50"
-              whileHover={{ scale: 1.02 }}
-              whileTap={{ scale: 0.98 }}
-            >
-              <Mic size={12} />
-              Speak
-            </motion.button>
-          </div>
+              <X size={12} />
+            </button>
+          )}
         </div>
       </div>
-    </GlassCard>
+
+      {/* Question - serif per §4 "reflective copy" */}
+      <AnimatePresence mode="wait">
+        <motion.div
+          key={currentIndex}
+          initial={{ opacity: 0, x: 20 }}
+          animate={{ opacity: 1, x: 0 }}
+          exit={{ opacity: 0, x: -20 }}
+          className="min-h-[48px]"
+        >
+          <p className="font-display text-[16px] leading-[1.5] text-secondary-foreground">
+            {currentQuestion?.question}
+          </p>
+          {isPersonalized && currentQuestion?.entryDate && (
+            <p className="mt-1 text-xs text-faint">
+              From {currentQuestion.entryDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+            </p>
+          )}
+          {isContextPrompt && (
+            <p className="mt-1 text-xs text-faint">
+              Based on today's {currentQuestion?.contextType?.includes('sleep') || currentQuestion?.contextType?.includes('recovery')
+                ? 'health data'
+                : currentQuestion?.contextType?.includes('sun') || currentQuestion?.contextType?.includes('light')
+                  ? 'weather'
+                  : 'context'}
+            </p>
+          )}
+        </motion.div>
+      </AnimatePresence>
+
+      {/* Navigation + Write/Speak actions */}
+      <div className="mt-3.5 flex items-center gap-2">
+        {questions.length > 1 && (
+          <div className="flex items-center gap-0.5">
+            <button
+              type="button"
+              onClick={goPrev}
+              disabled={isEditing}
+              aria-label="Previous prompt"
+              className="cloud-icon-button -m-2.5 h-9 w-9 disabled:opacity-50"
+            >
+              <ChevronLeft size={16} />
+            </button>
+            <button
+              type="button"
+              onClick={goNext}
+              disabled={isEditing}
+              aria-label="Next prompt"
+              className="cloud-icon-button -m-2.5 h-9 w-9 disabled:opacity-50"
+            >
+              <ChevronRight size={16} />
+            </button>
+          </div>
+        )}
+
+        <div className="flex flex-1 gap-2">
+          <motion.button
+            type="button"
+            onClick={() => onWritePrompt?.(currentQuestion?.question)}
+            disabled={isEditing}
+            className="flex flex-1 items-center justify-center gap-1.5 rounded-[10px] bg-accent-deep py-2.5 text-[13px] font-medium text-background disabled:opacity-50"
+            whileHover={{ scale: 1.02 }}
+            whileTap={{ scale: 0.98 }}
+          >
+            <PenLine size={13} />
+            Write
+          </motion.button>
+          <motion.button
+            type="button"
+            onClick={() => onVoicePrompt?.(currentQuestion?.question)}
+            disabled={isEditing}
+            className="flex flex-1 items-center justify-center gap-1.5 rounded-[10px] border border-border bg-card py-2.5 text-[13px] font-medium text-accent-deep disabled:opacity-50"
+            whileHover={{ scale: 1.02 }}
+            whileTap={{ scale: 0.98 }}
+          >
+            <Mic size={13} />
+            Speak
+          </motion.button>
+        </div>
+      </div>
+    </Card>
   );
 };
 
