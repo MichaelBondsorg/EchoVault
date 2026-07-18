@@ -23,13 +23,21 @@ describe('LinenWaveBackground', () => {
     const { getByTestId } = render(<LinenWaveBackground />);
     expect(getByTestId('linen-wave-background')).toBeTruthy();
     expect(getByTestId('linen-wave-gradient')).toBeTruthy();
-    expect(getByTestId('linen-wave-grain')).toBeTruthy();
+    const grainEl = getByTestId('linen-wave-grain');
+    expect(grainEl).toBeTruthy();
+    expect(grainEl.style.backgroundSize).toBe('256px 256px');
   });
 
   it('renders the wave rings when backgroundMotion is enabled', () => {
     useUiStore.setState({ backgroundMotion: true });
-    const { getByTestId } = render(<LinenWaveBackground />);
+    const { getByTestId, container } = render(<LinenWaveBackground />);
     expect(getByTestId('linen-wave-rings')).toBeTruthy();
+    // Verify the three wave rings have correct animation classes
+    const waveRings = container.querySelectorAll('[class*="animate-cloud-wave"]');
+    expect(waveRings.length).toBe(3);
+    expect(waveRings[0].className).toContain('animate-cloud-wave-11s');
+    expect(waveRings[1].className).toContain('animate-cloud-wave-15s');
+    expect(waveRings[2].className).toContain('animate-cloud-wave-19s');
   });
 
   it('omits the wave rings (but keeps gradient + grain) when backgroundMotion is disabled', () => {

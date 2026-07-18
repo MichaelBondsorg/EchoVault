@@ -72,6 +72,10 @@
   --accent-d2: #2e3642;
   --accent-d3: #3c4859;
   --accent-d4: #56688a;
+  --accent-1: var(--accent-d1);
+  --accent-2: var(--accent-d2);
+  --accent-3: var(--accent-d3);
+  --accent-4: var(--accent-d4);
 }
 
 :root.dark[data-accent='mauve'] {
@@ -87,6 +91,10 @@
   --accent-d2: #342e3f;
   --accent-d3: #453c55;
   --accent-d4: #66597f;
+  --accent-1: var(--accent-d1);
+  --accent-2: var(--accent-d2);
+  --accent-3: var(--accent-d3);
+  --accent-4: var(--accent-d4);
 }
 
 :root.dark[data-accent='terracotta'] {
@@ -102,6 +110,10 @@
   --accent-d2: #3a2e28;
   --accent-d3: #4d3b32;
   --accent-d4: #75544392;
+  --accent-1: var(--accent-d1);
+  --accent-2: var(--accent-d2);
+  --accent-3: var(--accent-d3);
+  --accent-4: var(--accent-d4);
 }
 
 html,

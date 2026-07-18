@@ -234,7 +234,7 @@ export const useUiStore = create(
       /**
        * Reset UI state
        */
-      reset: () => set(initialState, false, 'ui/reset')
+      reset: () => set({ ...initialState, backgroundMotion: getBackgroundMotion() }, false, 'ui/reset')
     }),
     { name: 'ui-store' }
   )
