@@ -1,6 +1,54 @@
+/* Cloud motion vocabulary — spec §6.4.
+   All keyframes/utilities below are prefixed `cloud-` to avoid collisions
+   with legacy Hearthside keyframes of the same conceptual name defined in
+   tailwind.config.js (e.g. `breathe`). Every animation is unconditionally
+   disabled under prefers-reduced-motion (see guard at the bottom), matching
+   this file's existing pattern for `.cloud-background::before`. */
+
 @keyframes cloud-wave {
   from { transform: translate3d(-52px, -52px, 0); }
   to { transform: translate3d(52px, 52px, 0); }
+}
+
+@keyframes cloud-breathe {
+  0%, 100% { transform: scale(1); }
+  50%      { transform: scale(1.08); }
+}
+
+@keyframes cloud-tilt {
+  from { transform: rotate(-4deg); }
+  to   { transform: rotate(4deg); }
+}
+
+@keyframes cloud-bounce {
+  0%   { transform: translateY(0); }
+  30%  { transform: translateY(-12px); }
+  60%  { transform: translateY(-4px); }
+  80%  { transform: translateY(-8px); }
+  100% { transform: translateY(0); }
+}
+
+@keyframes cloud-rise {
+  0%   { transform: translateY(6px); opacity: 0; }
+  50%  { opacity: 1; }
+  100% { transform: translateY(-6px); opacity: 0; }
+}
+
+@keyframes cloud-eq {
+  0%, 100% { transform: scaleY(0.25); }
+  50%      { transform: scaleY(1); }
+}
+
+@keyframes cloud-blink {
+  0%, 90%  { transform: scaleY(1); }
+  92%      { transform: scaleY(0.1); }
+  95%      { transform: scaleY(1); }
+  100%     { transform: scaleY(1); }
+}
+
+@keyframes cloud-spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
 }
 
 .cloud-background {
@@ -24,6 +72,56 @@
   z-index: -1;
 }
 
+/* Breathe — Pebble calm (8s) / empathy (9s) / resting (10s). */
+.animate-cloud-breathe-8s  { animation: cloud-breathe 8s  ease-in-out infinite; }
+.animate-cloud-breathe-9s  { animation: cloud-breathe 9s  ease-in-out infinite; }
+.animate-cloud-breathe-10s { animation: cloud-breathe 10s ease-in-out infinite; }
+
+/* Tilt — Pebble listening state. */
+.animate-cloud-tilt-4s { animation: cloud-tilt 4s ease-in-out infinite alternate; }
+
+/* Bounce — Pebble celebrating state. */
+.animate-cloud-bounce-1600ms { animation: cloud-bounce 1.6s ease-in-out infinite; }
+
+/* Rise — confetti pips / rising arrow. */
+.animate-cloud-rise-2200ms { animation: cloud-rise 2.2s ease-in-out infinite; }
+.animate-cloud-rise-2800ms { animation: cloud-rise 2.8s ease-in-out infinite; }
+
+/* Eq — voice bars / blinking caret, meant to be staggered per-bar via
+   animation-delay on the consuming component. */
+.animate-cloud-eq-1100ms { animation: cloud-eq 1.1s ease-in-out infinite; }
+.animate-cloud-eq-1200ms { animation: cloud-eq 1.2s ease-in-out infinite; }
+
+/* Blink — Pebble calm-state eyes. */
+.animate-cloud-blink-5s { animation: cloud-blink 5s ease-in-out infinite; }
+
+/* Wave — Linen background layer(s), alternating drift. */
+.animate-cloud-wave-11s { animation: cloud-wave 11s ease-in-out infinite alternate; }
+.animate-cloud-wave-15s { animation: cloud-wave 15s ease-in-out infinite alternate; }
+.animate-cloud-wave-19s { animation: cloud-wave 19s ease-in-out infinite alternate; }
+
+/* Spin — Rising tide widget (two rings, one reversed). */
+.animate-cloud-spin-12s         { animation: cloud-spin 12s linear infinite; }
+.animate-cloud-spin-17s-reverse { animation: cloud-spin 17s linear infinite reverse; }
+
 @media (prefers-reduced-motion: reduce) {
   .cloud-background::before { animation: none; }
+
+  .animate-cloud-breathe-8s,
+  .animate-cloud-breathe-9s,
+  .animate-cloud-breathe-10s,
+  .animate-cloud-tilt-4s,
+  .animate-cloud-bounce-1600ms,
+  .animate-cloud-rise-2200ms,
+  .animate-cloud-rise-2800ms,
+  .animate-cloud-eq-1100ms,
+  .animate-cloud-eq-1200ms,
+  .animate-cloud-blink-5s,
+  .animate-cloud-wave-11s,
+  .animate-cloud-wave-15s,
+  .animate-cloud-wave-19s,
+  .animate-cloud-spin-12s,
+  .animate-cloud-spin-17s-reverse {
+    animation: none;
+  }
 }
