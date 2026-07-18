@@ -161,6 +161,21 @@ export const MIGRATED = [
   // couple of derived-style helper objects (pure presentation, e.g.
   // getInsightStyle()'s per-type color/gradient fields) changed.
   'src/pages/InsightsPage.jsx',
+  // C6 (Settings): full restyle — profile row, HEALTH & DATA / AI & PRIVACY
+  // / APP grouped Cards + SectionLabels (spec §7). APP gained the accent
+  // swatch row (22px circles, active ring, 44px non-overlapping tap
+  // targets — see the geometry comment in SettingsPage.jsx), a Dark mode
+  // Switch, and a Background motion Switch wired to the existing
+  // uiStore.backgroundMotion pref (no new pref created). Accent
+  // persistence, which SettingsPage previously duplicated with its own
+  // owner-scoped localStorage read/write, is now consolidated onto
+  // src/utils/accent.js (initAccent(uid)/setAccent(name, uid)) — the
+  // single implementation; SettingsPage calls only those functions. All
+  // other handlers/props (health/reports/reliability/privacy/nexus/
+  // entities/safety/export/delete-account/notifications, plus the
+  // BackfillPanel/Diagnostic Export/Health Migration data-enrichment
+  // cards) are unchanged, just reskinned onto Cloud tokens.
+  'src/pages/SettingsPage.jsx',
 ];
 
 // --- Ratchet: how many non-migrated .jsx files still use legacy palette classes ---
@@ -186,7 +201,11 @@ export const MIGRATED = [
 // fully cleaned (GenerationStatus, CorrelationsSection/Patterns card,
 // RecommendationsSection, QuickInsightsSection, NexusInsightCard all onto
 // Cloud tokens) and moved to MIGRATED. Budget drops 67 -> 66.
-export const LEGACY_BUDGET = 66;
+// C6 (2026-07-18): SettingsPage.jsx was 1 of the 66 offenders (honey/terra/
+// sage/warm classes throughout); fully cleaned (grouped Cards/SectionLabels,
+// accent swatches, Dark mode + Background motion Switches) and moved to
+// MIGRATED. Budget drops 66 -> 65.
+export const LEGACY_BUDGET = 65;
 
 function collectJsxFiles(dir) {
   const out = [];

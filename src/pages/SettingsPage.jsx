@@ -1,25 +1,52 @@
 import { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 import {
-  User, Bell, Heart, Shield, Download, LogOut,
-  ChevronRight, Smartphone, Brain, Users, Loader2,
-  FileJson, AlertTriangle, ScrollText, Palette, CloudCog, LockKeyhole
+  ChevronRight, Loader2, AlertTriangle, Download, LogOut, FileJson, Heart,
 } from 'lucide-react';
 import BackfillPanel from '../components/settings/BackfillPanel';
 import { exportDiagnosticJSON, migrateEntriesForHealthEnrichment } from '../utils/diagnosticExport';
 import { db, deleteAccountFn } from '../config/firebase';
-import DarkModeToggle from '../components/ui/DarkModeToggle';
-import { ownerStorageKey } from '../services/storage/ownerScopedStorage';
+import { Card, CardRow, Chip, SectionLabel, Switch, Button } from '../components/cloud';
+import { initAccent, setAccent } from '../utils/accent';
+import { initDarkMode, cleanupDarkMode, toggleDarkMode } from '../utils/darkMode';
+import { useDarkMode } from '../hooks/useDarkMode';
+import { useUiStore, useBackgroundMotion } from '../stores/uiStore';
+
+// Cloud Settings accent picker options (CLOUD-DESIGN-SPEC.md §7/§5: "22px
+// swatch circles"). Fill colors come from theme-invariant CSS custom
+// properties (src/styles/cloud-tokens.css --swatch-*) rather than hex in
+// this file, since raw hex is banned for MIGRATED files.
+const ACCENT_OPTIONS = [
+  { name: 'blue', var: '--swatch-blue' },
+  { name: 'mauve', var: '--swatch-mauve' },
+  { name: 'terracotta', var: '--swatch-terracotta' },
+];
 
 /**
  * SettingsPage - App settings and account management
+ * (CLOUD-DESIGN-SPEC.md §7 Settings: profile row, HEALTH & DATA / AI &
+ * PRIVACY / APP grouped Cards + SectionLabels).
  *
- * Settings categories:
- * - Account (profile, sign out)
- * - Notifications
- * - Health integrations
- * - Safety plan
- * - Export data
+ * Restyle only: every handler/prop below is unchanged from the pre-Cloud
+ * version. The one behavioral change is the sanctioned accent-persistence
+ * consolidation (see src/utils/accent.js) — SettingsPage previously kept
+ * its own owner-scoped localStorage read/write that bypassed accent.js;
+ * it now calls only initAccent(uid)/setAccent(name, uid).
+ *
+ * The mockup's illustrative Settings screen (5f/6f) shows a much shorter,
+ * icon-free list (Health sync, AI insights, Therapist export, Safety plan,
+ * then APP: Accent/Dark mode/Notifications) than this real screen, which
+ * has ~10 real destinations plus data-enrichment tooling. Every existing
+ * item is kept and distributed across the spec's three named sections by
+ * subject matter (HEALTH & DATA: health/report/reliability tooling; AI &
+ * PRIVACY: AI, entities, safety, export, account deletion; APP: appearance
+ * + notifications), following the mockup's plain-text-row treatment (no
+ * per-row icon squares) rather than inventing icon iconography the spec
+ * doesn't call for. The Data Enrichment cards (BackfillPanel, Diagnostic
+ * Export, Health Migration) are richer standalone action cards, not simple
+ * nav rows, so they keep an icon-square treatment — recolored onto the
+ * single Cloud accent per §3 (collapsing the old honey/sage 2-hue split),
+ * consistent with the C5 InsightsPage precedent.
  */
 const SettingsPage = ({
   user,
@@ -42,23 +69,37 @@ const SettingsPage = ({
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState(null);
-  const [accent, setAccent] = useState('blue');
+  const [accentName, setAccentName] = useState('blue');
 
+  const dark = useDarkMode();
+  const backgroundMotion = useBackgroundMotion();
+  const setBackgroundMotion = useUiStore((state) => state.setBackgroundMotion);
+
+  // Dark mode: attach the live system-preference listener once (mirrors
+  // what the old DarkModeToggle mounted here used to do — this is now the
+  // only place in the app that renders a dark-mode control, so it owns the
+  // init/cleanup lifecycle). The actual class + boot-time value are already
+  // applied synchronously by the inline script in index.html; this just
+  // wires up the "system" auto-switch listener.
   useEffect(() => {
-    if (!user?.uid) return;
-    const stored = localStorage.getItem(ownerStorageKey(user.uid, 'appearance/accent'))
-      || localStorage.getItem('engram-accent')
-      || 'blue';
-    const safeAccent = ['blue', 'mauve', 'terracotta'].includes(stored) ? stored : 'blue';
-    setAccent(safeAccent);
-    document.documentElement.dataset.accent = safeAccent;
+    initDarkMode();
+    return () => cleanupDarkMode();
+  }, []);
+
+  // Accent: resolve owner-scoped (if signed in) vs global persisted value
+  // and apply it. Re-runs when the signed-in user changes (e.g. sign-in
+  // completes after this page has already mounted).
+  useEffect(() => {
+    setAccentName(initAccent(user?.uid));
   }, [user?.uid]);
 
   const chooseAccent = (nextAccent) => {
-    setAccent(nextAccent);
-    document.documentElement.dataset.accent = nextAccent;
-    localStorage.setItem('engram-accent', nextAccent);
-    if (user?.uid) localStorage.setItem(ownerStorageKey(user.uid, 'appearance/accent'), nextAccent);
+    const applied = setAccent(nextAccent, user?.uid);
+    if (applied) setAccentName(applied);
+  };
+
+  const handleDarkModeChange = (checked) => {
+    toggleDarkMode(checked ? 'dark' : 'light');
   };
 
   // Permanently delete the account and all data (App Store / Play requirement).
@@ -135,96 +176,105 @@ const SettingsPage = ({
     setTimeout(() => setLoadingItem(null), 300);
   };
 
-  const settingsSections = [
+  const healthDataItems = [
     {
-      title: 'Account',
-      items: [
-        {
-          icon: User,
-          label: 'Profile',
-          description: user?.email || 'Not signed in',
-          onClick: null, // Future: profile editing
-        },
-      ],
+      label: 'Health Integration',
+      description: 'Whoop / Apple Health / Google Fit',
+      onClick: onOpenHealthSettings,
     },
     {
-      title: 'Preferences',
-      items: [
-        {
-          icon: Bell,
-          label: 'Notifications',
-          description: notificationPermission === 'granted' ? 'Enabled' : 'Tap to enable',
-          onClick: notificationPermission !== 'granted' ? onRequestNotifications : null,
-          badge: notificationPermission !== 'granted' ? 'Off' : null,
-        },
-        {
-          icon: LockKeyhole,
-          label: 'Privacy & AI',
-          description: 'Data inventory, memory, consent, and export',
-          onClick: onOpenPrivacy,
-        },
-        {
-          icon: CloudCog,
-          label: 'Entry Reliability',
-          description: 'Review saved, queued, and recoverable entries',
-          onClick: onOpenReliability,
-        },
-        {
-          icon: Users,
-          label: 'People & Things',
-          description: 'Edit names, relationships, and entities',
-          onClick: onOpenEntityManagement,
-        },
-        {
-          icon: Brain,
-          label: 'Nexus Insights',
-          description: 'Control AI pattern detection',
-          onClick: onOpenNexusSettings,
-        },
-        {
-          icon: Smartphone,
-          label: 'Health Integration',
-          description: 'Whoop / Apple Health / Google Fit',
-          onClick: onOpenHealthSettings,
-        },
-      ],
+      label: 'Entry Reliability',
+      description: 'Review saved, queued, and recoverable entries',
+      onClick: onOpenReliability,
     },
     {
-      title: 'Reports',
-      items: [
-        {
-          icon: ScrollText,
-          label: 'Life Reports',
-          description: 'Weekly, monthly & quarterly digests',
-          onClick: onOpenReports,
-        },
-      ],
-    },
-    {
-      title: 'Safety & Privacy',
-      items: [
-        {
-          icon: Shield,
-          label: 'Safety Plan',
-          description: 'Your support resources',
-          onClick: onOpenSafetyPlan,
-        },
-        {
-          icon: Download,
-          label: 'Export for Therapist',
-          description: 'Download your entries',
-          onClick: onOpenExport,
-        },
-        {
-          icon: AlertTriangle,
-          label: 'Delete Account',
-          description: 'Permanently erase your account and all data',
-          onClick: () => setShowDeleteConfirm(true),
-          destructive: true,
-        },
-      ],
+      label: 'Life Reports',
+      description: 'Weekly, monthly & quarterly digests',
+      onClick: onOpenReports,
     },
   ];
+
+  const aiPrivacyItems = [
+    {
+      label: 'Privacy & AI',
+      description: 'Data inventory, memory, consent, and export',
+      onClick: onOpenPrivacy,
+    },
+    {
+      label: 'Nexus Insights',
+      description: 'Control AI pattern detection',
+      onClick: onOpenNexusSettings,
+    },
+    {
+      label: 'People & Things',
+      description: 'Edit names, relationships, and entities',
+      onClick: onOpenEntityManagement,
+    },
+    {
+      label: 'Safety Plan',
+      description: 'Your support resources',
+      onClick: onOpenSafetyPlan,
+    },
+    {
+      label: 'Export for Therapist',
+      description: 'Download your entries',
+      onClick: onOpenExport,
+    },
+    {
+      label: 'Delete Account',
+      description: 'Permanently erase your account and all data',
+      onClick: () => setShowDeleteConfirm(true),
+      destructive: true,
+    },
+  ];
+
+  const notificationsItem = {
+    label: 'Notifications',
+    description: notificationPermission === 'granted' ? 'Enabled' : 'Tap to enable',
+    onClick: notificationPermission !== 'granted' ? onRequestNotifications : null,
+    badge: notificationPermission !== 'granted' ? 'Off' : null,
+  };
+
+  // Shared row renderer for the simple label/description/chevron nav items
+  // across HEALTH & DATA, AI & PRIVACY, and the APP section's Notifications
+  // row. The whole row is the tap target (native <button>, not an
+  // overlay-inflated one), so there's no min-44px hit-target math needed —
+  // px-4 py-3 around two lines of text already clears 44px, and it's the
+  // only interactive element in the row.
+  const renderNavRow = (item, isLast) => {
+    const isLoading = loadingItem === item.label;
+    return (
+      <button
+        key={item.label}
+        type="button"
+        onClick={() => handleItemClick(item.label, item.onClick)}
+        disabled={!item.onClick || isLoading}
+        className={`flex min-h-[44px] w-full items-center justify-between gap-3 px-4 py-3 text-left transition-colors ${
+          isLast ? '' : 'border-b border-divider'
+        } ${item.onClick ? 'hover:bg-divider active:bg-divider' : ''} ${
+          !item.onClick || isLoading ? 'opacity-70' : ''
+        }`}
+      >
+        <div className="min-w-0 flex-1">
+          <p className={`text-[13.5px] font-medium ${item.destructive ? 'text-destructive' : 'text-foreground'}`}>
+            {item.label}
+          </p>
+          <p className="truncate text-sm text-muted-foreground">{item.description}</p>
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
+          {item.badge && !isLoading && <Chip>{item.badge}</Chip>}
+          {isLoading ? (
+            <Loader2 size={18} className="animate-spin text-muted-foreground" aria-hidden="true" />
+          ) : item.onClick ? (
+            <ChevronRight size={18} className="text-faint" aria-hidden="true" />
+          ) : null}
+        </div>
+      </button>
+    );
+  };
+
+  const displayName = user?.displayName || (user?.email ? user.email.split('@')[0] : 'You');
+  const initial = (displayName.trim().charAt(0) || 'Y').toUpperCase();
 
   return (
     <motion.div
@@ -235,139 +285,55 @@ const SettingsPage = ({
     >
       {/* Page Title */}
       <div className="pt-2">
-        <h2 className="font-display font-bold text-xl text-warm-800">
+        <h2 className="font-display font-medium text-[27px] leading-[1.2] tracking-[-0.01em] text-foreground">
           Settings
         </h2>
       </div>
 
-      {/* Settings Sections */}
-      <div className="space-y-2">
-        <h3 className="cloud-kicker px-1">APP</h3>
-        <div className="cloud-sheet overflow-hidden rounded-2xl border shadow-sm">
-          <div className="flex min-h-14 items-center gap-3 border-b border-[var(--divider)] px-4 py-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[var(--accent-wash)] text-[var(--accent-deep)]"><Palette size={20} /></div>
-            <div className="flex-1">
-              <p className="font-semibold">Accent color</p>
-              <p className="text-sm text-[var(--muted-foreground)]">Choose the tone that feels most like you</p>
-            </div>
-            <div className="flex gap-3" aria-label="Accent color">
-              {[
-                ['blue', '#667FA8'],
-                ['mauve', '#8E7BA8'],
-                ['terracotta', '#B87355'],
-              ].map(([name, color]) => (
-                <button
-                  key={name}
-                  type="button"
-                  aria-label={`${name} accent`}
-                  aria-pressed={accent === name}
-                  onClick={() => chooseAccent(name)}
-                  className={`h-11 w-11 rounded-full border-[10px] border-[var(--card)] ${accent === name ? 'ring-2 ring-[var(--foreground)] ring-offset-2 ring-offset-[var(--card)]' : ''}`}
-                  style={{ backgroundColor: color }}
-                />
-              ))}
-            </div>
-          </div>
-          <div className="flex min-h-14 items-center justify-between px-4 py-3">
-            <div>
-              <p className="font-semibold">Dark mode</p>
-              <p className="text-sm text-[var(--muted-foreground)]">Use a quieter palette at night</p>
-            </div>
-            <DarkModeToggle />
-          </div>
+      {/* Profile row — no onClick handler exists for profile editing yet,
+          so this stays a static display row (no chevron/nav affordance) to
+          avoid implying an action that doesn't exist. */}
+      <Card className="flex items-center gap-3 p-3.5">
+        <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-accent-wash text-[15px] font-semibold text-accent-deep">
+          {initial}
+        </span>
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-sm font-semibold text-foreground">{displayName}</p>
+          <p className="truncate text-xs text-muted-foreground">{user?.email || 'Not signed in'}</p>
         </div>
-      </div>
+      </Card>
 
-      {settingsSections.map((section) => (
-        <div key={section.title} className="space-y-2">
-          <h3 className="text-xs font-bold text-warm-400 uppercase tracking-wider px-1">
-            {section.title}
-          </h3>
-          <div className="bg-white/30 backdrop-blur-sm border border-white/20 rounded-2xl overflow-hidden">
-            {section.items.map((item, index) => {
-              const isLoading = loadingItem === item.label;
-              return (
-                <motion.button
-                  key={item.label}
-                  onClick={() => handleItemClick(item.label, item.onClick)}
-                  disabled={!item.onClick || isLoading}
-                  className={`
-                    w-full px-4 py-3
-                    flex items-center gap-3
-                    ${index !== section.items.length - 1 ? 'border-b border-white/10' : ''}
-                    ${item.onClick ? 'hover:bg-white/20 active:bg-white/30' : 'opacity-70'}
-                    ${isLoading ? 'opacity-80' : ''}
-                    transition-colors
-                    text-left
-                  `}
-                  whileTap={item.onClick && !isLoading ? { scale: 0.99 } : {}}
-                >
-                  {/* INT-002: Show loading spinner when item is being opened */}
-                  <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${item.destructive ? 'bg-terra-100' : 'bg-honey-100'}`}>
-                    {isLoading ? (
-                      <Loader2 size={20} className={item.destructive ? 'text-terra-600 animate-spin' : 'text-honey-600 animate-spin'} />
-                    ) : (
-                      <item.icon size={20} className={item.destructive ? 'text-terra-600' : 'text-honey-600'} />
-                    )}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
-                      <span className={`font-medium ${item.destructive ? 'text-terra-700' : 'text-warm-800'}`}>{item.label}</span>
-                      {item.badge && (
-                        <span className="px-2 py-0.5 bg-honey-100 dark:bg-honey-900/30 text-honey-700 dark:text-honey-300 text-xs font-bold rounded-full">
-                          {item.badge}
-                        </span>
-                      )}
-                    </div>
-                    <p className="text-sm text-warm-500 truncate">{item.description}</p>
-                  </div>
-                  {item.onClick && !isLoading && (
-                    <ChevronRight size={20} className="text-warm-400" />
-                  )}
-                  {isLoading && (
-                    <span className="text-xs text-honey-500 font-medium">Loading...</span>
-                  )}
-                </motion.button>
-              );
-            })}
-          </div>
-        </div>
-      ))}
-
-      {/* Data Enrichment Section */}
+      {/* HEALTH & DATA */}
       <div className="space-y-2">
-        <h3 className="text-xs font-bold text-warm-400 uppercase tracking-wider px-1">
-          Data
-        </h3>
+        <SectionLabel className="px-1">Health &amp; Data</SectionLabel>
+        <Card className="overflow-hidden">
+          {healthDataItems.map((item, i) => renderNavRow(item, i === healthDataItems.length - 1))}
+        </Card>
+
         <BackfillPanel entries={entries} />
 
         {/* Diagnostic Export */}
-        <div className="bg-white/30 backdrop-blur-sm border border-white/20 rounded-2xl overflow-hidden p-4 space-y-3">
+        <Card className="space-y-3 p-4">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-honey-100 dark:bg-honey-900/30 flex items-center justify-center">
-              <FileJson size={20} className="text-honey-600 dark:text-honey-400" />
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-accent-wash text-accent-deep">
+              <FileJson size={20} />
             </div>
             <div className="flex-1">
-              <span className="font-medium text-warm-800">Diagnostic Export</span>
-              <p className="text-sm text-warm-500">Export all entry data as JSON for troubleshooting</p>
+              <span className="font-medium text-foreground">Diagnostic Export</span>
+              <p className="text-sm text-muted-foreground">Export all entry data as JSON for troubleshooting</p>
             </div>
           </div>
 
-          <motion.button
-            onClick={handleDiagnosticExport}
-            disabled={entries.length === 0}
-            className="w-full py-2.5 px-4 bg-honey-500 dark:bg-honey-600 hover:bg-honey-600 dark:hover:bg-honey-700 disabled:bg-warm-300 text-white font-medium rounded-xl flex items-center justify-center gap-2 transition-colors"
-            whileTap={{ scale: 0.98 }}
-          >
+          <Button onClick={handleDiagnosticExport} disabled={entries.length === 0} className="w-full">
             <Download size={18} />
             Export {entries.length} Entries as JSON
-          </motion.button>
+          </Button>
 
           {/* Show summary after export */}
           {diagnosticResult && !diagnosticResult.error && (
-            <div className="text-xs bg-white/50 rounded-lg p-3 space-y-1">
-              <p className="font-medium text-warm-700">Export Summary:</p>
-              <div className="grid grid-cols-2 gap-1 text-warm-600">
+            <div className="text-xs bg-divider rounded-lg p-3 space-y-1">
+              <p className="font-medium text-foreground">Export Summary:</p>
+              <div className="grid grid-cols-2 gap-1 text-secondary-foreground">
                 <span>Total entries:</span>
                 <span className="font-mono">{diagnosticResult.totalEntries}</span>
                 <span>With mood score:</span>
@@ -382,7 +348,7 @@ const SettingsPage = ({
                 <span className="font-mono">{diagnosticResult.entriesWithThemes}</span>
               </div>
               {diagnosticResult.warning && (
-                <div className="mt-2 flex items-start gap-2 text-honey-700 dark:text-honey-300 bg-honey-50 dark:bg-honey-900/30 rounded p-2">
+                <div className="mt-2 flex items-start gap-2 text-accent-deep bg-accent-wash rounded p-2">
                   <AlertTriangle size={14} className="flex-shrink-0 mt-0.5" />
                   <span>{diagnosticResult.warning}</span>
                 </div>
@@ -391,21 +357,22 @@ const SettingsPage = ({
           )}
 
           {diagnosticResult?.error && (
-            <div className="text-xs bg-red-50 text-red-600 rounded-lg p-3">
+            // @color-safe: error state — not part of the single-accent system (spec §3)
+            <div className="text-xs bg-red-50 dark:bg-red-950/40 text-red-600 dark:text-red-400 rounded-lg p-3">
               Export failed: {diagnosticResult.error}
             </div>
           )}
-        </div>
+        </Card>
 
         {/* Health Data Migration */}
-        <div className="bg-white/30 backdrop-blur-sm border border-white/20 rounded-2xl overflow-hidden p-4 space-y-3">
+        <Card className="space-y-3 p-4">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-sage-100 dark:bg-sage-900/30 flex items-center justify-center">
-              <Heart size={20} className="text-sage-600 dark:text-sage-400" />
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-accent-wash text-accent-deep">
+              <Heart size={20} />
             </div>
             <div className="flex-1">
-              <span className="font-medium text-warm-800">Prepare for Health Enrichment</span>
-              <p className="text-sm text-warm-500">
+              <span className="font-medium text-foreground">Prepare for Health Enrichment</span>
+              <p className="text-sm text-muted-foreground">
                 Flag old entries for health data when you open the mobile app
               </p>
             </div>
@@ -413,17 +380,12 @@ const SettingsPage = ({
 
           {entriesNeedingMigration > 0 ? (
             <>
-              <p className="text-xs text-warm-600">
+              <p className="text-xs text-secondary-foreground">
                 {entriesNeedingMigration} entries don't have platform tracking.
                 This will mark them so health data can be added when you open the mobile app.
               </p>
 
-              <motion.button
-                onClick={handleHealthMigration}
-                disabled={migrationState.running}
-                className="w-full py-2.5 px-4 bg-sage-500 dark:bg-sage-600 hover:bg-sage-600 dark:hover:bg-sage-700 disabled:bg-warm-300 text-white font-medium rounded-xl flex items-center justify-center gap-2 transition-colors"
-                whileTap={{ scale: 0.98 }}
-              >
+              <Button onClick={handleHealthMigration} disabled={migrationState.running} className="w-full">
                 {migrationState.running ? (
                   <>
                     <Loader2 size={18} className="animate-spin" />
@@ -435,17 +397,17 @@ const SettingsPage = ({
                     Migrate {entriesNeedingMigration} Entries
                   </>
                 )}
-              </motion.button>
+              </Button>
             </>
           ) : (
-            <p className="text-xs text-sage-600 dark:text-sage-300 bg-sage-50 dark:bg-sage-900/30 rounded-lg p-3">
+            <p className="text-xs text-accent-deep bg-accent-wash rounded-lg p-3">
               ✓ All entries have platform tracking. Open the mobile app to enrich web entries with health data.
             </p>
           )}
 
           {/* Show result after migration */}
           {migrationState.result && !migrationState.result.error && (
-            <div className="text-xs bg-sage-50 dark:bg-sage-900/30 text-sage-700 dark:text-sage-300 rounded-lg p-3 space-y-1">
+            <div className="text-xs bg-accent-wash text-accent-deep rounded-lg p-3 space-y-1">
               <p className="font-medium">Migration Complete!</p>
               <p>{migrationState.result.message}</p>
               <div className="grid grid-cols-2 gap-1 mt-2">
@@ -458,83 +420,151 @@ const SettingsPage = ({
           )}
 
           {migrationState.result?.error && (
-            <div className="text-xs bg-red-50 text-red-600 rounded-lg p-3">
+            // @color-safe: error state — not part of the single-accent system (spec §3)
+            <div className="text-xs bg-red-50 dark:bg-red-950/40 text-red-600 dark:text-red-400 rounded-lg p-3">
               Migration failed: {migrationState.result.error}
             </div>
           )}
-        </div>
+        </Card>
+      </div>
+
+      {/* AI & PRIVACY */}
+      <div className="space-y-2">
+        <SectionLabel className="px-1">AI &amp; Privacy</SectionLabel>
+        <Card className="overflow-hidden">
+          {aiPrivacyItems.map((item, i) => renderNavRow(item, i === aiPrivacyItems.length - 1))}
+        </Card>
+      </div>
+
+      {/* APP */}
+      <div className="space-y-2">
+        <SectionLabel className="px-1">App</SectionLabel>
+        <Card className="overflow-hidden">
+          <CardRow>
+            <div className="min-w-0 flex-1">
+              <p className="text-[13.5px] font-medium text-foreground">Accent color</p>
+              <p className="text-sm text-muted-foreground">Choose the tone that feels most like you</p>
+            </div>
+            {/*
+              Hit-area geometry (44px min target, non-overlapping) — same
+              analysis as the C5 InsightsPage fix. Each swatch button is a
+              real 22px circle (spec: "22px swatch circles"); a
+              `before:-inset-[11px]` overlay inflates the invisible tap area
+              to 22 + 2*11 = 44px (meets the 44px minimum). Two such
+              overlays centered on dots `gap` apart overlap by
+              (2*11 - gap). This row uses gap-6 (24px), so overlap =
+              22 - 24 = -2px, i.e. a 2px real gap between hitboxes, not an
+              overlap — unlike the pre-fix Insights bug where gap-1 (4px)
+              was far less than the 20px combined inset. Any future change
+              here must keep gap-6 (24px) as the floor while inset stays
+              11px (22px dot).
+            */}
+            <div className="flex shrink-0 items-center gap-6" role="group" aria-label="Accent color">
+              {ACCENT_OPTIONS.map(({ name, var: swatchVar }) => (
+                <button
+                  key={name}
+                  type="button"
+                  aria-label={`${name} accent`}
+                  aria-pressed={accentName === name}
+                  onClick={() => chooseAccent(name)}
+                  className={`relative h-[22px] w-[22px] rounded-full before:absolute before:-inset-[11px] before:content-[''] ${
+                    accentName === name ? 'ring-2 ring-foreground ring-offset-2 ring-offset-card' : ''
+                  }`}
+                  style={{ backgroundColor: `var(${swatchVar})` }}
+                />
+              ))}
+            </div>
+          </CardRow>
+          <CardRow>
+            <label htmlFor="settings-dark-mode-switch" className="min-w-0 flex-1 cursor-pointer">
+              <p className="text-[13.5px] font-medium text-foreground">Dark mode</p>
+              <p className="text-sm text-muted-foreground">Use a quieter palette at night</p>
+            </label>
+            <Switch id="settings-dark-mode-switch" checked={dark} onCheckedChange={handleDarkModeChange} />
+          </CardRow>
+          <CardRow>
+            <label htmlFor="settings-background-motion-switch" className="min-w-0 flex-1 cursor-pointer">
+              <p className="text-[13.5px] font-medium text-foreground">Background motion</p>
+              <p className="text-sm text-muted-foreground">Drifting wave animation behind screens</p>
+            </label>
+            <Switch
+              id="settings-background-motion-switch"
+              checked={backgroundMotion}
+              onCheckedChange={setBackgroundMotion}
+            />
+          </CardRow>
+          {renderNavRow(notificationsItem, true)}
+        </Card>
       </div>
 
       {/* Sign Out Button */}
-      <motion.button
+      <Button
+        variant="outline"
         onClick={onLogout}
-        className="
-          w-full py-3 px-4
-          bg-red-50 border border-red-100
-          text-red-600 font-medium
-          rounded-2xl
-          flex items-center justify-center gap-2
-          hover:bg-red-100 transition-colors
-        "
-        whileHover={{ scale: 1.01 }}
-        whileTap={{ scale: 0.99 }}
+        className="w-full border-destructive bg-[var(--destructive-wash)] text-destructive hover:bg-[var(--destructive-wash)] hover:opacity-90"
       >
         <LogOut size={18} />
         Sign Out
-      </motion.button>
+      </Button>
 
       {/* Wellness disclaimer (required framing: not therapy / not a medical device) */}
-      <div className="rounded-2xl bg-white/20 border border-white/20 px-4 py-3">
-        <p className="text-xs text-warm-500 dark:text-warm-400 leading-relaxed text-center">
+      <Card className="px-4 py-3">
+        <p className="text-xs text-muted-foreground leading-relaxed text-center">
           Engram is a general-wellness tool for self-reflection. It is not therapy,
           not a medical device, and not a crisis service, and it does not diagnose,
           treat, or prevent any condition. If you are in crisis, call or text{' '}
-          <a href="tel:988" className="font-semibold text-terra-600 underline">988</a>{' '}
+          <a href="tel:988" className="font-semibold text-accent-deep underline">988</a>{' '}
           (US Suicide &amp; Crisis Lifeline).
         </p>
-      </div>
+      </Card>
 
       {/* App Version */}
-      <p className="text-center text-xs text-warm-400">
+      <p className="text-center text-xs text-faint">
         Engram v2.0
       </p>
 
       {/* Delete Account confirmation */}
       {showDeleteConfirm && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4">
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-[var(--overlay)] p-4">
           <motion.div
             initial={{ scale: 0.95, opacity: 0 }}
             animate={{ scale: 1, opacity: 1 }}
-            className="w-full max-w-sm rounded-2xl bg-white dark:bg-hearth-900 p-6 shadow-xl"
+            className="w-full max-w-sm rounded-2xl border border-border bg-card p-6 shadow-xl"
           >
             <div className="flex items-center gap-3 mb-3">
-              <div className="w-10 h-10 rounded-xl bg-terra-100 flex items-center justify-center">
-                <AlertTriangle size={20} className="text-terra-600" />
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[var(--destructive-wash)] text-destructive">
+                <AlertTriangle size={20} />
               </div>
-              <h3 className="font-display font-bold text-lg text-warm-800 dark:text-warm-100">Delete your account?</h3>
+              <h3 className="font-display font-bold text-lg text-foreground">Delete your account?</h3>
             </div>
-            <p className="text-sm text-warm-600 dark:text-warm-300 mb-4">
+            <p className="text-sm text-secondary-foreground mb-4">
               This permanently erases your account and <strong>all</strong> of your journal entries,
               insights, health data, and safety plan. This cannot be undone.
             </p>
             {deleteError && (
-              <p className="text-sm text-terra-600 mb-3">{deleteError}</p>
+              <p className="text-sm text-destructive mb-3">{deleteError}</p>
             )}
             <div className="flex flex-col gap-2">
-              <button
+              <Button
                 onClick={handleDeleteAccount}
                 disabled={deleting}
-                className="w-full py-3 rounded-xl bg-terra-600 text-white font-semibold hover:bg-terra-700 disabled:opacity-60 flex items-center justify-center gap-2"
+                // text-white (not text-background): --destructive is a fixed
+                // mid-tone red-brown in both themes (spec never defines a
+                // dark-mode variant), so a background-colored label would
+                // flip to near-black in dark mode and fail contrast against
+                // it. White stays ~5:1 in both themes.
+                className="w-full bg-destructive text-white hover:opacity-90"
               >
                 {deleting ? (<><Loader2 size={18} className="animate-spin" /> Deleting…</>) : 'Delete everything'}
-              </button>
-              <button
+              </Button>
+              <Button
+                variant="outline"
                 onClick={() => { setShowDeleteConfirm(false); setDeleteError(null); }}
                 disabled={deleting}
-                className="w-full py-3 rounded-xl bg-warm-100 dark:bg-hearth-800 text-warm-700 dark:text-warm-200 font-medium disabled:opacity-60"
+                className="w-full"
               >
                 Cancel
-              </button>
+              </Button>
             </div>
           </motion.div>
         </div>
