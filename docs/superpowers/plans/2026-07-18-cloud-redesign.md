@@ -33,7 +33,7 @@
 - **C3 New entry**: `EntryComposer` → cloud `Drawer` with §7-New-entry details (context chip, 15px/1.65 editor, blinking accent caret, mic + Aa, Save pill).
 - **C4 Journal**: `JournalPage` day-grouped cards, mood dots, meta line format.
 - **C5 Insights**: `InsightsPage` top-level restyle (Week/Month `Tabs`, trend bars accent scale, tide+streak cells, Patterns card). File is 1906 lines — restyle sections, do NOT refactor logic.
-- **C6 Settings**: `SettingsPage` grouped Cards + section labels; APP section gains Accent swatch row (22px circles, ring), Dark mode `Switch`, **Background motion** `Switch`.
+- **C6 Settings**: `SettingsPage` grouped Cards + section labels; APP section gains Accent swatch row (22px circles, ring), Dark mode `Switch`, **Background motion** `Switch`. CONSOLIDATION (review finding): SettingsPage has its own owner-scoped accent picker (ownerStorageKey 'appearance/accent' + 'engram-accent' fallback) that bypasses `src/utils/accent.js`; the boot script in index.html reads 'engram-accent'. C6 must consolidate onto utils/accent.js as the single implementation (preserving owner-scoped persistence if that behavior is wanted) — do NOT create a third path.
 
 ## Phase D — Conversational & wellness screens
 - **D1 AI chat**: `UnifiedConversation` bubbles/chips/input per §7-AI-chat (companion = white card radius 16/6, user = accent-deep, "here with you" subtitle).
