@@ -371,6 +371,6 @@ describe('Verification: Build Check', () => {
 
     expect(html).not.toContain('fonts.googleapis.com');
     expect(html).not.toContain('fonts.gstatic.com');
-    expect(html).toContain('font-family: Geist, Inter');
+    expect(html).toContain("font-family: 'Geist Sans', Geist, Inter");
   });
 });

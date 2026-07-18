@@ -213,7 +213,7 @@ export default {
       // ============================================
       fontFamily: {
         display: ['Newsreader', 'Iowan Old Style', 'Charter', 'Georgia', 'serif'],
-        body:    ['Geist', 'Inter', 'system-ui', 'sans-serif'],
+        body:    ['Geist Sans', 'Geist', 'Inter', 'system-ui', 'sans-serif'],
         hand:    ['Newsreader', 'Georgia', 'serif'],
       },
 

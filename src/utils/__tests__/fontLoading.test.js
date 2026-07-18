@@ -21,8 +21,12 @@ describe('Font loading — index.html', () => {
   });
 
   it('boots with the Cloud system font stack', () => {
-    expect(indexHtml).toContain('font-family: Geist, Inter');
+    expect(indexHtml).toContain("font-family: 'Geist Sans', Geist, Inter");
     expect(indexHtml).not.toContain('fonts.gstatic.com');
+  });
+
+  it('includes the correct Geist Sans font family name matching @fontsource/geist-sans', () => {
+    expect(indexHtml).toContain("'Geist Sans'");
   });
 
   it('does not reference any remote font host anywhere in the document', () => {
