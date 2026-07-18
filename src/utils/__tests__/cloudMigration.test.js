@@ -176,6 +176,34 @@ export const MIGRATED = [
   // BackfillPanel/Diagnostic Export/Health Migration data-enrichment
   // cards) are unchanged, just reskinned onto Cloud tokens.
   'src/pages/SettingsPage.jsx',
+  // D1 (2026-07-18): UnifiedConversation.jsx (1197 lines) — the picker,
+  // chat, voice, guided-session, and mindfulness modes it hosts all fully
+  // cleaned onto Cloud tokens. Spec §7 AI chat is the chat mode specifically:
+  // companion bubble = bg-card, radius 16 with a 6px corner on the speaker
+  // (bottom-left) side; user bubble = accent-deep with the 6px corner on its
+  // (bottom-right) side; "here with you" subtitle under the Companion header
+  // (chat mode only); pill input + Send (bg-accent-deep, the row's actual
+  // submit action) + secondary Mic (bg-card, opens the existing voice-input
+  // overlay) — see the in-file comment for why Send, not Mic, carries the
+  // accent-deep primary treatment (this component keeps two always-visible
+  // buttons; the mockup's one icon morphs mic<->send around a single
+  // action, and collapsing them would be a behavior change). No suggestion
+  // chips: the mockup's "2-min unwind / Keep talking / Just listen" chips
+  // have no backing state/data in this component (messages carry no
+  // quick-reply options) — inventing non-functional chip UI was out of
+  // scope ("no data-flow changes"). Picker/Guided/Mindfulness modes and the
+  // in-modal Voice mode (a distinct code path from D2's target
+  // `RealtimeConversation.jsx`) have no literal spec mockup of their own;
+  // they're tokenized onto the same Cloud vocabulary (bg-card/border-border/
+  // text-foreground/bg-accent-deep) for consistency, without inventing D2's
+  // Pebble/Equalizer signature elements. MarkdownLite (shared across four
+  // other consumers, out of D1's target-file scope) still injects its own
+  // legacy text-color classes at render time; those are forced to the
+  // correct Cloud token per bubble via a local `[&_*]:!text-*` override
+  // (documented in-file) rather than touching the shared component — the
+  // same "override locally, don't touch cross-app infra" precedent as
+  // EntryCard's colorMap.js badges (C4). Budget drops 65 -> 64.
+  'src/components/chat/UnifiedConversation.jsx',
 ];
 
 // --- Ratchet: how many non-migrated .jsx files still use legacy palette classes ---
@@ -205,7 +233,11 @@ export const MIGRATED = [
 // sage/warm classes throughout); fully cleaned (grouped Cards/SectionLabels,
 // accent swatches, Dark mode + Background motion Switches) and moved to
 // MIGRATED. Budget drops 66 -> 65.
-export const LEGACY_BUDGET = 65;
+// D1 (2026-07-18): UnifiedConversation.jsx was 1 of the 65 offenders
+// (lavender/honey/sage/terra/gray classes across its picker/chat/voice/
+// guided/mindfulness modes); fully cleaned and moved to MIGRATED. Budget
+// drops 65 -> 64.
+export const LEGACY_BUDGET = 64;
 
 function collectJsxFiles(dir) {
   const out = [];
