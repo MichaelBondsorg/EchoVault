@@ -117,6 +117,13 @@ export const MIGRATED = [
   'src/components/zen/widgets/MiniStatsWidget.jsx',
   'src/components/zen/widgets/MoodHeatmapWidget.jsx',
   'src/components/zen/widgets/RecentEntriesWidget.jsx',
+  // C3 (New entry): EntryComposer restyled onto the cloud `Drawer` primitive
+  // (mic/Aa entry-method picker, sr-only DrawerDescription). EntryBar is
+  // EntryComposer's private editor sub-component (its only consumer) and is
+  // where the spec's 15px/1.65 editor, accent caret, mic/Aa buttons, and
+  // Save entry pill actually render, so it's reskinned + migrated alongside
+  // it rather than left half-restyled underneath a clean wrapper.
+  'src/components/dashboard/EntryBar.jsx',
 ];
 
 // --- Ratchet: how many non-migrated .jsx files still use legacy palette classes ---
@@ -130,7 +137,11 @@ export const MIGRATED = [
 // MiniStatsWidget.jsx, MoodHeatmapWidget.jsx were 6 of the 76 offenders; all fully
 // cleaned and moved to MIGRATED (RecentEntriesWidget.jsx is a new file, already
 // clean, so it doesn't change the offender count). Budget drops 76 -> 70.
-export const LEGACY_BUDGET = 70;
+// C3 (2026-07-18): EntryComposer.jsx was already clean (added to MIGRATED
+// pre-C3, before this task restyled it onto the Drawer primitive). EntryBar.jsx
+// — EntryComposer's private editor, its only consumer — was 1 of the 70
+// offenders; fully cleaned and moved to MIGRATED. Budget drops 70 -> 69.
+export const LEGACY_BUDGET = 69;
 
 function collectJsxFiles(dir) {
   const out = [];
