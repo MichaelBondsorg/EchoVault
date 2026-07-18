@@ -1,7 +1,8 @@
 import { motion } from 'framer-motion';
 
 /**
- * TopBar - Translucent top navigation bar with mood indicator
+ * TopBar - Cloud top bar: transparent canvas (LinenWaveBackground shows
+ * through from AppLayout) with a serif brand mark and a mood-log shortcut.
  *
  * LAY-004: Shows "Engram" brand instead of greeting to avoid redundancy
  * (HeroWidget already shows time-based greeting on home page)
@@ -16,7 +17,7 @@ const TopBar = ({ greeting, onMoodOrbClick, latestMoodScore = null }) => {
     <motion.header
       className="
         fixed top-0 left-0 right-0 z-50
-        bg-[var(--background)] border-b border-[var(--border)]
+        bg-transparent
         px-4 py-3
         pt-[calc(env(safe-area-inset-top)+12px)]
         flex items-center justify-between
@@ -25,9 +26,9 @@ const TopBar = ({ greeting, onMoodOrbClick, latestMoodScore = null }) => {
       animate={{ y: 0, opacity: 1 }}
       transition={{ duration: 0.3, ease: 'easeOut' }}
     >
-      {/* Left: Brand (LAY-004: Always show brand, not greeting) */}
+      {/* Left: Brand (LAY-004: Always show brand, not greeting) - serif per §4 typography */}
       <motion.h1
-        className="font-display font-semibold text-lg text-[var(--foreground)]"
+        className="font-display font-semibold text-lg text-foreground"
         initial={{ opacity: 0, x: -10 }}
         animate={{ opacity: 1, x: 0 }}
         transition={{ delay: 0.1 }}
@@ -37,10 +38,11 @@ const TopBar = ({ greeting, onMoodOrbClick, latestMoodScore = null }) => {
 
       {/* Right: Mood Indicator Orb */}
       <motion.button
+        type="button"
         onClick={onMoodOrbClick}
         className="
-          w-10 h-10 rounded-full
-          bg-[var(--accent)] shadow-sm
+          w-11 h-11 rounded-full
+          bg-accent-deep shadow-sm
           flex items-center justify-center
           transition-all duration-300
           active:scale-95

@@ -101,13 +101,20 @@ export const MIGRATED = [
   'src/lib/cn.js',
   'src/styles/cloud-tokens.css',
   'src/components/capture/EntryComposer.jsx',
+  // C1 (shell): tab bar, TopBar, LinenWaveBackground mounted in AppLayout.
+  'src/components/zen/BottomNavbar.jsx',
+  'src/components/zen/TopBar.jsx',
+  'src/components/zen/AppLayout.jsx',
 ];
 
 // --- Ratchet: how many non-migrated .jsx files still use legacy palette classes ---
 // Set to the actual count as of A5 (2026-07-18). Every migration task (Phase B/C/D) that
 // restyles a screen should add it to MIGRATED and lower this number to match reality —
 // it must never go up.
-export const LEGACY_BUDGET = 77;
+// C1 (2026-07-18): AppLayout.jsx's `dark:bg-hearth-950` was the only remaining legacy-
+// class offender among the three shell files migrated in this task (BottomNavbar.jsx/
+// TopBar.jsx were already clean); budget drops 77 -> 76.
+export const LEGACY_BUDGET = 76;
 
 function collectJsxFiles(dir) {
   const out = [];
@@ -188,6 +195,6 @@ describe('Legacy palette migration ratchet', () => {
 
   it('LEGACY_BUDGET never increases beyond the current committed value', () => {
     // Guardrail against accidentally bumping the constant up instead of down.
-    expect(LEGACY_BUDGET).toBeLessThanOrEqual(77);
+    expect(LEGACY_BUDGET).toBeLessThanOrEqual(76);
   });
 });
