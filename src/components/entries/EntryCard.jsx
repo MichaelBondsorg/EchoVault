@@ -8,7 +8,6 @@ import {
 } from 'lucide-react';
 import { safeString, formatMentions } from '../../utils/string';
 import { formatDateForInput, getTodayForInput, parseDateInput, getDateString } from '../../utils/date';
-import { getEntryTypeColors, getEntityTypeColors } from '../../utils/colorMap';
 import ProvenanceDisclosure from '../ui/ProvenanceDisclosure';
 
 // Entity tag emoji lookup (hoisted for performance - used in tag rendering)
@@ -103,15 +102,17 @@ const PrimaryReadinessMetric = ({ healthContext }) => {
   return null;
 };
 
-// Mood dot color — CSS-var driven accent scale (mirrors the bucketing used
-// by MoodHeatmapWidget's `accentForMood`, CLOUD-DESIGN-SPEC.md §7 Journal
-// "mood dot per row"). No legacy `mood-*`/raw hex — accent tokens only.
+// Mood dot color — CSS-var driven accent scale, exactly matching
+// MoodHeatmapWidget's `accentForMood` bucketing (CLOUD-DESIGN-SPEC.md §7
+// Journal "mood dot per row" / §7 Home "mood-trend bar card") so the same
+// mood_score renders the same intensity on both Home and Journal. No
+// legacy `mood-*` classes, no raw hex — accent tokens only.
 const getMoodDotColor = (score) => {
-  if (score === null || score === undefined) return 'var(--faint)';
-  if (score >= 0.75) return 'var(--accent)';
-  if (score >= 0.5) return 'var(--accent-4)';
-  if (score >= 0.25) return 'var(--accent-3)';
-  return 'var(--accent-2)';
+  if (score === null || score === undefined) return 'var(--divider)';
+  if (score >= 0.75) return 'var(--accent-4)';
+  if (score >= 0.5) return 'var(--accent-3)';
+  if (score >= 0.25) return 'var(--accent-2)';
+  return 'var(--accent-1)';
 };
 
 const EntryCard = ({ entry, onDelete, onUpdate }) => {
@@ -367,15 +368,16 @@ const EntryCard = ({ entry, onDelete, onUpdate }) => {
             {entry.category}
             <RefreshCw size={8} className="opacity-50" />
           </button>
-          {entryType !== 'reflection' && (() => {
-            const typeColors = getEntryTypeColors(entryType);
-            return (
-              <span className={`text-[10px] font-display font-bold px-2 py-0.5 rounded-full uppercase tracking-wide flex items-center gap-1 ${typeColors.bg} ${typeColors.text}`}>
-                {isMixed && <Clipboard size={10} />}
-                {entryType}
-              </span>
-            );
-          })()}
+          {/* Entry-type badge: single neutral Cloud badge treatment (spec
+              favors ONE accent + minimal surfaces over per-type hue coding;
+              `isMixed`'s Clipboard icon already differentiates that type) —
+              local styling, not colorMap.js's getEntryTypeColors(). */}
+          {entryType !== 'reflection' && (
+            <span className="text-[10px] font-display font-bold px-2 py-0.5 rounded-full uppercase tracking-wide flex items-center gap-1 bg-divider text-secondary-foreground">
+              {isMixed && <Clipboard size={10} />}
+              {entryType}
+            </span>
+          )}
           {/* LAY-001: Limit visible tags to prevent overflow */}
           {(() => {
             const MAX_VISIBLE_TAGS = 5;
@@ -392,9 +394,12 @@ const EntryCard = ({ entry, onDelete, onUpdate }) => {
                   const entityPrefix = ENTITY_PREFIXES.find(p => tag.startsWith(p));
 
                   if (entityPrefix) {
-                    const entityType = entityPrefix.slice(0, -1); // Remove trailing ':'
-                    const colors = getEntityTypeColors(entityType);
-                    return <span key={i} className={`text-[10px] font-semibold ${colors.text} ${colors.bg} px-2 py-0.5 rounded-full`}>{ENTITY_EMOJIS[entityPrefix]} {formatName(entityPrefix)}</span>;
+                    // Single neutral Cloud badge treatment for entity tags —
+                    // the per-prefix emoji already differentiates @person/
+                    // @place/@goal/etc., so no hue coding via colorMap.js's
+                    // getEntityTypeColors() is needed (spec §4/§5: minimal
+                    // surfaces, ONE accent).
+                    return <span key={i} className="text-[10px] font-semibold text-secondary-foreground bg-divider px-2 py-0.5 rounded-full">{ENTITY_EMOJIS[entityPrefix]} {formatName(entityPrefix)}</span>;
                   } else if (tag.startsWith('@')) {
                     // Unknown @ tag - show without prefix
                     return <span key={i} className="text-[10px] font-semibold text-secondary-foreground bg-divider px-2 py-0.5 rounded-full">{tag.split(':')[1]?.replace(/_/g, ' ') || tag}</span>;
