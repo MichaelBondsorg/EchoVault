@@ -1402,7 +1402,23 @@ const QuickInsightsSection = ({
                   >
                     <div className="p-3 space-y-2">
                       {/* Feedback & Export Row */}
-                      <div className="flex items-center justify-between pb-2 border-b border-border">
+                      {/*
+                        Hit-area geometry (44px min-target, non-overlapping):
+                        thumbs buttons are p-1.5 (6px) around a 14px icon =
+                        26px visual box; before:-inset-2.5 (10px/side) inflates
+                        each to 46px (>=44 [OK]). Two 46px hitboxes centered on
+                        boxes `gap` apart overlap by (2*10 - gap). At gap-1
+                        (4px) that's a 16px overlap (the bug). gap-6 (24px)
+                        between the two thumbs buttons yields 20-24 = -4px,
+                        i.e. a 4px *gap* between hitboxes, not an overlap.
+                        The outer row's justify-between gap between the
+                        thumbs group and Export (also a 44px-ish overlay
+                        target) is content-driven and normally much larger
+                        than 24px, but a `gap-6` floor is added here too so a
+                        narrow card can never shrink it below the same
+                        20px-required / 24px-actual safe margin.
+                      */}
+                      <div className="flex items-center justify-between gap-6 pb-2 border-b border-border">
                         <div className="flex items-center gap-1">
                           <span className="text-xs text-muted-foreground mr-2">Is this accurate?</span>
                           {feedbackSubmitted.has(insight.id) ? (
@@ -1410,7 +1426,7 @@ const QuickInsightsSection = ({
                               <CheckCircle2 size={12} /> Thanks!
                             </span>
                           ) : (
-                            <>
+                            <div className="flex items-center gap-6">
                               <button
                                 onClick={(e) => { e.stopPropagation(); handleFeedback(insight, true); }}
                                 className="relative p-1.5 hover:bg-divider rounded-lg transition-colors before:absolute before:-inset-2.5 before:content-['']"
@@ -1425,7 +1441,7 @@ const QuickInsightsSection = ({
                               >
                                 <ThumbsDown size={14} className="text-red-500 dark:text-red-400" /> {/* @color-safe: negative feedback */}
                               </button>
-                            </>
+                            </div>
                           )}
                         </div>
                         <button
