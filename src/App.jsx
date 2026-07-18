@@ -45,8 +45,10 @@ import {
 } from './services/analysis';
 import { checkCrisisKeywords, checkWarningIndicators, checkLongitudinalRisk } from './services/safety';
 import { retrofitEntriesInBackground } from './services/entries';
-import { queueEntry, getSyncStatus, resetStuckSyncing } from './services/offline';
+import { queueEntry, resetStuckSyncing } from './services/offline';
 import { initializeSyncOrchestrator, triggerSync } from './services/sync/syncOrchestrator';
+import { ownerStorageKey } from './services/storage/ownerScopedStorage';
+import { deleteNativeDraft, recoverNativeDrafts } from './services/capture/nativeCaptureAdapter';
 import { inferCategory } from './services/prompts';
 import { getActiveReflectionPrompts, dismissReflectionPrompt } from './services/prompts/activePrompts';
 import { detectTemporalContext, needsConfirmation, formatEffectiveDate } from './services/temporal';
@@ -78,10 +80,8 @@ import {
 
 // Components
 import {
-  CrisisSoftBlockModal, DailySummaryModal, WeeklyReport, InsightsPanel, EntryInsightsPopup,
-  CrisisResourcesScreen, SafetyPlanScreen, DecompressionScreen, TherapistExportScreen, JournalScreen, HealthSettingsScreen,
+  CrisisSoftBlockModal, DailySummaryModal, EntryInsightsPopup,
   MarkdownLite, GetHelpButton, HamburgerMenu,
-  EntryBar
 } from './components';
 import WhatsNewModal from './components/shared/WhatsNewModal';
 import AiConsentModal from './components/modals/AiConsentModal';
@@ -94,6 +94,12 @@ import {
   ReportViewerWithSuspense,
   NexusSettingsWithSuspense as NexusSettings,
   EntityManagementPageWithSuspense as EntityManagementPage,
+  InsightsPanelWithSuspense as InsightsPanel,
+  CrisisResourcesScreenWithSuspense as CrisisResourcesScreen,
+  SafetyPlanScreenWithSuspense as SafetyPlanScreen,
+  DecompressionScreenWithSuspense as DecompressionScreen,
+  TherapistExportScreenWithSuspense as TherapistExportScreen,
+  HealthSettingsScreenWithSuspense as HealthSettingsScreen,
 } from './components/lazy';
 
 import DetectedStrip from './components/entries/DetectedStrip';
@@ -143,7 +149,6 @@ const loadJsPDF = () => {
 export default function App() {
   console.log('[Engram] App component rendering...');
   useIOSMeta();
-  const { isOnline, pendingCount: offlinePendingCount } = useNetworkStatus();
   const { requestWakeLock, releaseWakeLock } = useWakeLock();
   // backupAudio/clearBackup/isProcessing are unused here (audio backup is now
   // owned by audioVault); isProcessing never existed on this hook's return
@@ -172,6 +177,10 @@ export default function App() {
     switchToMfa, clearMfaState
   } = useAuthStore();
 
+  const { isOnline, pendingCount: offlinePendingCount } = useNetworkStatus({
+    ownerUid: user?.uid,
+  });
+
   // Register for push notifications once we know who the user is. Previously
   // useNotifications() was called with no userId, so token registration never
   // fired — no fcm_tokens were written and the app could never send a reminder.
@@ -184,17 +193,23 @@ export default function App() {
   // device (localStorage) and to Firestore for audit.
   const AI_CONSENT_VERSION = '1';
   const [needsAiConsent, setNeedsAiConsent] = useState(false);
+  const [aiProcessingEnabled, setAiProcessingEnabled] = useState(false);
   const [aiConsentSaving, setAiConsentSaving] = useState(false);
 
   useEffect(() => {
     if (!user?.uid) {
       setNeedsAiConsent(false);
+      setAiProcessingEnabled(false);
       return;
     }
     try {
-      const accepted = localStorage.getItem('engram.aiConsentVersion');
-      setNeedsAiConsent(accepted !== AI_CONSENT_VERSION);
+      const accepted = localStorage.getItem(ownerStorageKey(user.uid, 'consent/aiVersion'));
+      const declined = localStorage.getItem(ownerStorageKey(user.uid, 'consent/aiDeclinedVersion'));
+      const enabled = accepted === AI_CONSENT_VERSION;
+      setAiProcessingEnabled(enabled);
+      setNeedsAiConsent(!enabled && declined !== AI_CONSENT_VERSION);
     } catch {
+      setAiProcessingEnabled(false);
       setNeedsAiConsent(true);
     }
   }, [user?.uid]);
@@ -202,8 +217,11 @@ export default function App() {
   const handleAiConsent = async () => {
     setAiConsentSaving(true);
     try {
-      localStorage.setItem('engram.aiConsentVersion', AI_CONSENT_VERSION);
-      localStorage.setItem('engram.aiConsentAcceptedAt', new Date().toISOString());
+      if (user?.uid) {
+        localStorage.setItem(ownerStorageKey(user.uid, 'consent/aiVersion'), AI_CONSENT_VERSION);
+        localStorage.setItem(ownerStorageKey(user.uid, 'consent/aiAcceptedAt'), new Date().toISOString());
+        localStorage.removeItem(ownerStorageKey(user.uid, 'consent/aiDeclinedVersion'));
+      }
     } catch { /* private mode — proceed anyway */ }
     try {
       if (user?.uid) {
@@ -216,8 +234,47 @@ export default function App() {
     } catch (e) {
       console.error('Failed to record AI consent:', e);
     }
+    setAiProcessingEnabled(true);
     setNeedsAiConsent(false);
     setAiConsentSaving(false);
+  };
+
+  const continueWithoutAi = async () => {
+    if (!user?.uid) return;
+    setAiConsentSaving(true);
+    try {
+      localStorage.removeItem(ownerStorageKey(user.uid, 'consent/aiVersion'));
+      localStorage.removeItem(ownerStorageKey(user.uid, 'consent/aiAcceptedAt'));
+      localStorage.setItem(ownerStorageKey(user.uid, 'consent/aiDeclinedVersion'), AI_CONSENT_VERSION);
+    } catch { /* storage can be unavailable in private browsing */ }
+    try {
+      await setDoc(
+        doc(db, 'artifacts', APP_COLLECTION_ID, 'users', user.uid, 'settings', 'consent'),
+        { aiProcessing: false, consentVersion: AI_CONSENT_VERSION, declinedAt: Timestamp.now() },
+        { merge: true }
+      );
+    } catch (error) {
+      console.error('Failed to record AI preference:', error);
+    }
+    setAiProcessingEnabled(false);
+    setNeedsAiConsent(false);
+    setAiConsentSaving(false);
+  };
+
+  const revokeAiConsent = async () => {
+    if (!user?.uid) return;
+    try {
+      localStorage.removeItem(ownerStorageKey(user.uid, 'consent/aiVersion'));
+      localStorage.removeItem(ownerStorageKey(user.uid, 'consent/aiAcceptedAt'));
+      localStorage.setItem(ownerStorageKey(user.uid, 'consent/aiDeclinedVersion'), AI_CONSENT_VERSION);
+    } catch { /* storage can be unavailable in private browsing */ }
+    await setDoc(
+      doc(db, 'artifacts', APP_COLLECTION_ID, 'users', user.uid, 'settings', 'consent'),
+      { aiProcessing: false, consentVersion: AI_CONSENT_VERSION, revokedAt: Timestamp.now() },
+      { merge: true }
+    );
+    setAiProcessingEnabled(false);
+    setNeedsAiConsent(false);
   };
 
   // Wrapper functions for store setters that need to accept full objects
@@ -349,8 +406,17 @@ export default function App() {
     }
 
     // Sweep the durable audio vault for recordings past the retention window.
-    audioVault.cleanupExpired().then(n => n && console.log(`[audioVault] cleaned ${n} expired recording(s)`));
-  }, []);
+    if (user?.uid) {
+      audioVault.cleanupExpired(user.uid).then(n => n && console.log(`[audioVault] cleaned ${n} expired recording(s)`));
+      if (Capacitor.isNativePlatform()) {
+        recoverNativeDrafts(
+          user.uid,
+          (base64, mime) => audioVault.saveRecording(user.uid, base64, mime)
+        ).then((count) => count && console.log(`[Capture] recovered ${count} interrupted recording(s)`))
+          .catch((error) => console.warn('[Capture] recovery scan failed:', error?.message));
+      }
+    }
+  }, [user?.uid]);
 
   // Deep link handler for OAuth callbacks (Whoop integration)
   useEffect(() => {
@@ -358,6 +424,19 @@ export default function App() {
       try {
         const url = new URL(event.url);
         console.log('[Engram] Deep link received:', url.toString());
+
+        if (url.host === 'new-entry') {
+          const requested = url.searchParams.get('mode');
+          window.dispatchEvent(new CustomEvent('engram:open-entry', {
+            detail: { mode: requested === 'record' || requested === 'voice' ? 'voice' : 'text' },
+          }));
+          return;
+        }
+
+        if (url.host === 'talk') {
+          window.dispatchEvent(new CustomEvent('engram:open-companion'));
+          return;
+        }
 
         // Handle OAuth success callback
         if (url.host === 'auth-success') {
@@ -416,13 +495,15 @@ export default function App() {
 
       const createdAtDate = entryData.createdAt ? new Date(entryData.createdAt) : new Date();
       const effectiveDate = entryData.effectiveDate ? new Date(entryData.effectiveDate) : createdAtDate;
+      const aiConsent = entryData.aiProcessingConsent !== false;
 
       const data = removeUndefined({
         text: entryData.text,
         category: entryData.category || undefined,
         createdAt: Timestamp.fromDate(createdAtDate),
         effectiveDate: Timestamp.fromDate(effectiveDate),
-        analysisStatus: 'pending',
+        analysisStatus: aiConsent ? 'pending' : 'disabled',
+        aiProcessingConsent: aiConsent,
         signalExtractionVersion: 1,
         createdOnPlatform: entryData.platform || undefined,
         syncedFromOffline: true,
@@ -431,6 +512,7 @@ export default function App() {
         healthContext: entryData.healthContext || undefined,
         environmentContext: entryData.environmentContext || undefined,
         voiceTone: entryData.voiceTone || undefined,
+        transcription: entryData.transcription || undefined,
         safety_flagged: entryData.safety_flagged || undefined,
         safety_user_response: entryData.safety_user_response || undefined,
         has_warning_indicators: entryData.has_warning_indicators || undefined,
@@ -443,6 +525,7 @@ export default function App() {
     };
 
     const cleanup = initializeSyncOrchestrator({
+      ownerUid: uid,
       saveEntry,
       onComplete: (results) => {
         if (results?.succeeded > 0) {
@@ -454,7 +537,7 @@ export default function App() {
     (async () => {
       try {
         // Recover entries stranded mid-sync by a previous app kill.
-        await resetStuckSyncing();
+        await resetStuckSyncing(uid);
       } catch (e) {
         console.warn('[Sync] resetStuckSyncing failed:', e);
       }
@@ -774,13 +857,14 @@ export default function App() {
         entry.safetyFlagged ?? true,
         safetyUserResponse,
         null,
-        entry.voiceTone ?? null
+        entry.voiceTone ?? null,
+        entry.rawTranscript ?? null
       );
       // The recording (if this crisis entry came from voice) was deliberately
       // left unlinked in the vault until the entry actually existed — link it
       // now so the recovery banner stops showing it as unsaved.
       if (result === 'saved' && entry.recordingId) {
-        await audioVault.linkEntry(entry.recordingId, 'saved');
+        await audioVault.linkEntry(user.uid, entry.recordingId, 'saved');
       }
     } catch (e) {
       console.error('Failed to persist crisis-flagged entry:', e);
@@ -808,7 +892,14 @@ export default function App() {
     await persistPendingEntry('support');
   }, [persistPendingEntry]);
 
-  const doSaveEntry = async (textInput, safetyFlagged = false, safetyUserResponse = null, temporalContext = null, voiceTone = null) => {
+  const doSaveEntry = async (
+    textInput,
+    safetyFlagged = false,
+    safetyUserResponse = null,
+    temporalContext = null,
+    voiceTone = null,
+    rawTranscript = null
+  ) => {
     if (!user) return;
 
     console.time('⏱️ TOTAL: Save entry to Firestore');
@@ -848,6 +939,7 @@ export default function App() {
 
       // Perform local analysis for immediate feedback (iOS/Android only)
       let localAnalysis = null;
+      let offlineHealthContext = null;
       if (isNative) {
         try {
           console.time('⏱️ Local Analysis');
@@ -861,18 +953,29 @@ export default function App() {
         } catch (localError) {
           console.warn('[LocalAnalysis] Failed:', localError);
         }
+        try {
+          offlineHealthContext = await getEntryHealthContext();
+        } catch (healthError) {
+          console.warn('[EntrySave] Offline health context unavailable:', healthError?.message);
+        }
       }
 
       // Queue with the new offline manager
-      const offlineEntry = await queueEntry({
+      const offlineEntry = await queueEntry(user.uid, {
         text: finalTex,
         category: cat,
         createdAt: now.toISOString(),
         effectiveDate: effectiveDate.toISOString(),
         localAnalysis,
-        healthContext,
-        environmentContext,
+        healthContext: offlineHealthContext,
+        environmentContext: null,
+        aiProcessingConsent: aiProcessingEnabled,
         voiceTone,
+        transcription: rawTranscript ? {
+          rawTranscript,
+          cleanedTranscript: finalTex,
+          schemaVersion: 1
+        } : undefined,
         safety_flagged: safetyFlagged || undefined,
         safety_user_response: safetyUserResponse || undefined,
         has_warning_indicators: hasWarning || undefined,
@@ -979,7 +1082,8 @@ export default function App() {
       const entryData = {
         text: finalTex,
         category: cat,
-        analysisStatus: 'pending',
+        analysisStatus: aiProcessingEnabled ? 'pending' : 'disabled',
+        aiProcessingConsent: aiProcessingEnabled,
         embedding,
         createdAt: Timestamp.now(),
         effectiveDate: Timestamp.fromDate(effectiveDate),
@@ -990,6 +1094,15 @@ export default function App() {
         createdOnPlatform: platform,
         needsHealthContext: !healthContext && !isNative // Flag web entries that need health data
       };
+
+      if (rawTranscript) {
+        entryData.transcription = {
+          rawTranscript,
+          cleanedTranscript: finalTex,
+          schemaVersion: 1,
+          correctedByUser: false
+        };
+      }
 
       // Store health context if available (from Apple Health / Google Fit)
       if (healthContext) {
@@ -1093,6 +1206,11 @@ export default function App() {
       setProcessing(false);
       setReplyContext(null);
 
+      if (!aiProcessingEnabled) {
+        console.log('[AI] Processing paused; entry stored without third-party analysis');
+        return 'saved';
+      }
+
       // Signal extraction (non-blocking, parallel to analysis)
       // This extracts temporal signals for the DetectedStrip UI
       (async () => {
@@ -1131,7 +1249,7 @@ export default function App() {
             user.uid,
             ref.id,
             finalTex,
-            0.5  // Sentiment placeholder, will be updated after analysis
+            Number.isFinite(localAnalysis?.mood_score) ? localAnalysis.mood_score : null
           );
           console.log('[Nexus] Incremental insights updated');
         } catch (nexusError) {
@@ -1173,7 +1291,12 @@ export default function App() {
           ]);
           console.timeEnd('⏱️ AI Analysis (parallel)');
 
-          console.log('Analysis complete:', { analysis, insight, classification, enhancedContext });
+          console.log('Analysis complete:', {
+            available: !!analysis,
+            hasInsight: !!insight?.found,
+            entryType: classification?.entry_type,
+            hasEnhancedContext: !!enhancedContext,
+          });
 
           // Auto-dismiss addressed prompts based on AI detection
           if (insight?.addressedPrompts?.length > 0) {
@@ -1263,7 +1386,11 @@ export default function App() {
             updateData.contextualInsight = insight;
           }
 
-          console.log('Final updateData to save:', JSON.stringify(updateData, null, 2));
+          console.log('Analysis update ready:', {
+            status: updateData.analysisStatus,
+            entryType: updateData.entry_type,
+            tagCount: updateData.tags?.length || 0,
+          });
 
           const cleanedUpdateData = removeUndefined(updateData);
 
@@ -1350,7 +1477,7 @@ export default function App() {
       // of dropping it behind an alert with the composer already cleared.
       let queuedLocally = false;
       try {
-        await queueEntry({
+        await queueEntry(user.uid, {
           text: finalTex,
           category: cat,
           createdAt: now.toISOString(),
@@ -1358,6 +1485,12 @@ export default function App() {
           healthContext,
           environmentContext,
           voiceTone,
+          aiProcessingConsent: aiProcessingEnabled,
+          transcription: rawTranscript ? {
+            rawTranscript,
+            cleanedTranscript: finalTex,
+            schemaVersion: 1
+          } : undefined,
           safety_flagged: safetyFlagged || undefined,
           safety_user_response: safetyUserResponse || undefined,
           has_warning_indicators: hasWarning || undefined,
@@ -1381,7 +1514,7 @@ export default function App() {
   };
 
   const saveEntry = async (textInput, voiceTone = null, options = {}) => {
-    const { recordingId } = options;
+    const { recordingId, rawTranscript = null } = options;
     if (!user) return;
     setProcessing(true);
     console.log('[SaveEntry] Starting save process, text length:', textInput.length, 'hasVoiceTone:', !!voiceTone);
@@ -1390,7 +1523,13 @@ export default function App() {
     const hasCrisis = checkCrisisKeywords(textInput);
     if (hasCrisis) {
       console.log('[SaveEntry] Crisis keywords detected, showing modal');
-      setPendingEntry({ text: textInput, safetyFlagged: true, voiceTone, recordingId });
+      setPendingEntry({
+        text: textInput,
+        rawTranscript,
+        safetyFlagged: true,
+        voiceTone,
+        recordingId
+      });
       setCrisisModal(true);
       setProcessing(false);
       return 'deferred';
@@ -1427,10 +1566,17 @@ export default function App() {
       }
 
       // Always save with current date - signals handle temporal attribution
-      return await doSaveEntry(textInput, false, null, temporal.detected ? temporal : null, voiceTone);
+      return await doSaveEntry(
+        textInput,
+        false,
+        null,
+        temporal.detected ? temporal : null,
+        voiceTone,
+        rawTranscript
+      );
     } catch (e) {
       console.error('Temporal detection failed, saving normally:', e);
-      return await doSaveEntry(textInput, false, null, null, voiceTone);
+      return await doSaveEntry(textInput, false, null, null, voiceTone, rawTranscript);
     }
   };
 
@@ -1481,7 +1627,11 @@ export default function App() {
   }, []);
 
   const handleAudioWrapper = async (base64, mime, options = {}) => {
-    const { existingRecordingId } = options;
+    const { existingRecordingId, nativeDraftId } = options;
+    if (!aiProcessingEnabled) {
+      setNeedsAiConsent(true);
+      return false;
+    }
     console.log('[Transcription] handleAudioWrapper called');
     console.log('[Transcription] Audio data received:', {
       base64Length: base64?.length || 0,
@@ -1513,14 +1663,26 @@ export default function App() {
     // depend on a successful cloud round-trip. If this is a retry of an
     // already-vaulted recording, reuse its id instead of creating a
     // duplicate vault entry.
-    const recordingId = existingRecordingId || await audioVault.saveRecording(base64, mime);
+    const recordingId = existingRecordingId || await audioVault.saveRecording(user.uid, base64, mime);
     console.log('[Transcription] Audio saved to vault:', recordingId);
+    if (recordingId && nativeDraftId && Capacitor.isNativePlatform()) {
+      await deleteNativeDraft(user.uid, nativeDraftId).catch((error) => {
+        console.warn('[Capture] Native handoff cleanup deferred:', error?.message);
+      });
+    }
 
     try {
       console.log('[Transcription] Starting transcription+tone API call...');
       const startTime = Date.now();
+      const properNouns = Array.from(new Set([
+        'WHOOP',
+        'Engram',
+        ...entries.flatMap((entry) => (entry.tags || []))
+          .filter((tag) => typeof tag === 'string' && tag.startsWith('@person:'))
+          .map((tag) => tag.slice('@person:'.length).replace(/_/g, ' '))
+      ])).slice(0, 50);
       const result = USE_FUSED_TRANSCRIPTION
-        ? await transcribeEntryFused(base64, mime)
+        ? await transcribeEntryFused(base64, mime, 3, properNouns)
         : await transcribeAudioWithTone(base64, mime);
       console.log('[Transcription] API call completed in', Date.now() - startTime, 'ms');
 
@@ -1565,7 +1727,7 @@ export default function App() {
         }
       }
 
-      const { transcript, toneAnalysis } = result;
+      const { transcript, rawTranscript = transcript, toneAnalysis } = result;
       console.log('[Transcription] Result:', {
         hasToneAnalysis: !!toneAnalysis,
         toneEnergy: toneAnalysis?.energy,
@@ -1595,7 +1757,10 @@ export default function App() {
 
       // Pass voice tone analysis to saveEntry
       console.log('[Transcription] Calling saveEntry with transcript length:', transcript.length, 'voiceTone:', !!toneAnalysis);
-      const saveResult = await saveEntry(transcript, toneAnalysis, { recordingId });
+      const saveResult = await saveEntry(transcript, toneAnalysis, {
+        recordingId,
+        rawTranscript
+      });
       console.log('[Transcription] saveEntry completed with result:', saveResult);
       // Only link (and thereby clear it from the recovery banner) once the
       // entry actually exists. When the crisis flow deferred the save,
@@ -1604,7 +1769,7 @@ export default function App() {
       // as an orphan here in the meantime rather than link something that
       // doesn't exist yet.
       if (saveResult === 'saved' && recordingId) {
-        await audioVault.linkEntry(recordingId, 'saved');
+        await audioVault.linkEntry(user.uid, recordingId, 'saved');
       }
       return saveResult === 'saved';
     } catch (error) {
@@ -2374,10 +2539,16 @@ export default function App() {
       onShowEntityManagement={() => setShowEntityManagement(true)}
       onShowReports={() => setView('reports')}
       onRequestNotifications={requestPermission}
-      onLogout={() => {
-        resetAllStores();
-        signOut(auth);
+      onLogout={async () => {
+        try {
+          await signOut(auth);
+        } finally {
+          resetAllStores();
+        }
       }}
+      aiProcessingEnabled={aiProcessingEnabled}
+      onRequestAiConsent={() => setNeedsAiConsent(true)}
+      onRevokeAiConsent={revokeAiConsent}
 
       // Entry bar context (for prompts)
       setEntryPreferredMode={setEntryPreferredMode}
@@ -2441,7 +2612,7 @@ export default function App() {
           pipeline isn't "unsaved" yet, and showing it here invited a Retry
           click that would race the in-flight pipeline and duplicate it. */}
       {!processing && (
-        <PendingAudioBanner onRetry={(base64, mime, recordingId) => handleAudioWrapper(base64, mime, { existingRecordingId: recordingId })} />
+        <PendingAudioBanner ownerUid={user?.uid} onRetry={(base64, mime, recordingId) => handleAudioWrapper(base64, mime, { existingRecordingId: recordingId })} />
       )}
 
       {/* Decompression Screen */}
@@ -2632,7 +2803,11 @@ export default function App() {
 
       {/* First-run AI-processing consent (must acknowledge before using AI features) */}
       {needsAiConsent && (
-        <AiConsentModal onAgree={handleAiConsent} agreeing={aiConsentSaving} />
+        <AiConsentModal
+          onAgree={handleAiConsent}
+          onDecline={continueWithoutAi}
+          agreeing={aiConsentSaving}
+        />
       )}
     </AppLayout>
   );

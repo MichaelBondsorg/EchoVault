@@ -13,6 +13,14 @@ import {
   isTokenExpired,
   WhoopTokens,
 } from './tokenStore.js';
+import {
+  assertLocalDate,
+  assertTimezone,
+  buildWhoopQueryWindow,
+  durationSeconds,
+  filterRecordsForLocalDate,
+  sleepDurationHours,
+} from './whoopTransforms.js';
 
 const WHOOP_API_BASE = 'https://api.prod.whoop.com/developer';
 const WHOOP_AUTH_BASE = 'https://api.prod.whoop.com/oauth/oauth2';
@@ -264,7 +272,7 @@ const getValidAccessToken = async (userId: string): Promise<string> => {
 
   // Check if token is expired or about to expire
   if (isTokenExpired(tokens.expiresAt)) {
-    console.log(`Refreshing Whoop token for user ${userId}`);
+    console.log('Refreshing Whoop token');
 
     const refreshed = await refreshAccessToken(tokens.refreshToken);
     const newExpiresAt = new Date(Date.now() + refreshed.expiresIn * 1000);
@@ -410,7 +418,8 @@ export const getCycles = async (
  */
 export const getHealthSummary = async (
   userId: string,
-  date: Date = new Date()
+  requestedLocalDate: string = new Date().toISOString().split('T')[0],
+  timezone: string = 'UTC'
 ): Promise<{
   available: boolean;
   source: 'whoop';
@@ -418,6 +427,7 @@ export const getHealthSummary = async (
   sleep: {
     totalHours: number;
     quality: 'good' | 'fair' | 'poor';
+    score: number;
     inBed: number;
     asleep: number;
     efficiency: number;
@@ -444,47 +454,78 @@ export const getHealthSummary = async (
   } | null;
   workouts: Array<{
     type: string;
-    duration: number;
+    durationSeconds: number;
     strain: number;
     calories: number;
     averageHR: number;
+    sourceRecordId: string;
+    observedStart: string;
+    observedEnd: string;
   }>;
   heartRate: {
     resting: number;
   } | null;
+  requestedLocalDate: string;
+  timezone: string;
+  sourceRecordIds: Record<string, string | string[]>;
+  observedIntervals: Record<string, { start: string; end: string }>;
   queriedAt: string;
 }> => {
-  // Set date range for the query (24 hours centered on the date)
-  const dateStr = date.toISOString().split('T')[0];
-  const startOfDay = new Date(date);
-  startOfDay.setHours(0, 0, 0, 0);
-  const endOfDay = new Date(date);
-  endOfDay.setHours(23, 59, 59, 999);
+  const dateStr = assertLocalDate(requestedLocalDate);
+  const requestedTimezone = assertTimezone(timezone);
+  const { start, end } = buildWhoopQueryWindow(dateStr);
 
   // Fetch all data types in parallel
   const [recoveryData, sleepData, cycleData, workoutData] = await Promise.all([
-    getRecovery(userId, startOfDay, endOfDay).catch((e) => {
+    getRecovery(userId, start, end).catch((e) => {
       console.error(`[Whoop] Recovery fetch failed for ${dateStr}:`, e.message);
       return [];
     }),
-    getSleep(userId, startOfDay, endOfDay).catch((e) => {
+    getSleep(userId, start, end).catch((e) => {
       console.error(`[Whoop] Sleep fetch failed for ${dateStr}:`, e.message);
       return [];
     }),
-    getCycles(userId, startOfDay, endOfDay).catch((e) => {
+    getCycles(userId, start, end).catch((e) => {
       console.error(`[Whoop] Cycles fetch failed for ${dateStr}:`, e.message);
       return [];
     }),
-    getWorkouts(userId, startOfDay, endOfDay).catch((e) => {
+    getWorkouts(userId, start, end).catch((e) => {
       console.error(`[Whoop] Workouts fetch failed for ${dateStr}:`, e.message);
       return [];
     }),
   ]);
 
-  console.log(`[Whoop] Data for ${dateStr}: recovery=${recoveryData.length}, sleep=${sleepData.length}, cycles=${cycleData.length}, workouts=${workoutData.length}`);
+  // WHOOP may return records outside the requested bounds. Filter every
+  // response explicitly before choosing a record or calculating a value.
+  const recoveriesForDate = filterRecordsForLocalDate(
+    recoveryData,
+    dateStr,
+    requestedTimezone,
+    (record) => record.created_at
+  );
+  const sleepsForDate = filterRecordsForLocalDate(
+    sleepData,
+    dateStr,
+    requestedTimezone,
+    (record) => record.end
+  );
+  const cyclesForDate = filterRecordsForLocalDate(
+    cycleData,
+    dateStr,
+    requestedTimezone,
+    (record) => record.end || record.start
+  );
+  const workoutsForDate = filterRecordsForLocalDate(
+    workoutData,
+    dateStr,
+    requestedTimezone,
+    (record) => record.start
+  );
+
+  console.log(`[Whoop] Filtered data for requested day: recovery=${recoveriesForDate.length}, sleep=${sleepsForDate.length}, cycles=${cyclesForDate.length}, workouts=${workoutsForDate.length}`);
 
   // Process recovery data (most recent)
-  const latestRecovery = recoveryData.find((r) => r.score?.recovery_score != null);
+  const latestRecovery = recoveriesForDate.find((r) => r.score?.recovery_score != null);
   const recovery = latestRecovery?.score
     ? {
         score: latestRecovery.score.recovery_score,
@@ -514,18 +555,19 @@ export const getHealthSummary = async (
     : null;
 
   // Process sleep data (most recent non-nap)
-  const latestSleep = sleepData.find((s) => !s.nap && s.score);
+  const latestSleep = sleepsForDate.find((s) => !s.nap && s.score);
   const sleep = latestSleep?.score
     ? {
-        totalHours:
-          (latestSleep.score.stage_summary.total_in_bed_time_milli -
-            latestSleep.score.stage_summary.total_awake_time_milli) /
-          3600000,
+        totalHours: sleepDurationHours(
+          latestSleep.score.stage_summary.total_in_bed_time_milli,
+          latestSleep.score.stage_summary.total_awake_time_milli
+        ),
         quality: (latestSleep.score.sleep_performance_percentage >= 80
           ? 'good'
           : latestSleep.score.sleep_performance_percentage >= 60
           ? 'fair'
           : 'poor') as 'good' | 'fair' | 'poor',
+        score: latestSleep.score.sleep_performance_percentage,
         inBed: latestSleep.score.stage_summary.total_in_bed_time_milli / 3600000,
         asleep:
           (latestSleep.score.stage_summary.total_in_bed_time_milli -
@@ -542,7 +584,7 @@ export const getHealthSummary = async (
     : null;
 
   // Process cycle (strain) data
-  const latestCycle = cycleData.find((c) => c.score);
+  const latestCycle = cyclesForDate.find((c) => c.score);
   const strain = latestCycle?.score
     ? {
         score: latestCycle.score.strain,
@@ -553,14 +595,17 @@ export const getHealthSummary = async (
     : null;
 
   // Process workouts
-  const workouts = workoutData
+  const workouts = workoutsForDate
     .filter((w) => w.score)
     .map((w) => ({
       type: getSportName(w.sport_id),
-      duration: new Date(w.end).getTime() - new Date(w.start).getTime(),
+      durationSeconds: durationSeconds(w.start, w.end),
       strain: w.score!.strain,
       calories: Math.round(w.score!.kilojoule / 4.184),
       averageHR: w.score!.average_heart_rate,
+      sourceRecordId: String(w.id),
+      observedStart: w.start,
+      observedEnd: w.end,
     }));
 
   // Check if we actually got any meaningful data
@@ -570,12 +615,33 @@ export const getHealthSummary = async (
     available: hasData,
     source: 'whoop',
     date: dateStr,
+    requestedLocalDate: dateStr,
+    timezone: requestedTimezone,
     sleep,
     hrv,
     recovery,
     strain,
     workouts,
     heartRate,
+    sourceRecordIds: {
+      ...(latestSleep ? { sleep: String(latestSleep.id) } : {}),
+      ...(latestRecovery ? { recovery: String(latestRecovery.cycle_id) } : {}),
+      ...(latestCycle ? { strain: String(latestCycle.id) } : {}),
+      workouts: workouts.map((workout) => workout.sourceRecordId),
+    },
+    observedIntervals: {
+      ...(latestSleep
+        ? { sleep: { start: latestSleep.start, end: latestSleep.end } }
+        : {}),
+      ...(latestCycle
+        ? {
+            strain: {
+              start: latestCycle.start,
+              end: latestCycle.end || latestCycle.start,
+            },
+          }
+        : {}),
+    },
     queriedAt: new Date().toISOString(),
   };
 };

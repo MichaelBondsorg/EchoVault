@@ -84,8 +84,20 @@ export const useVoiceRelay = () => {
 
       const token = await user.getIdToken(true);
 
+      const relayHttpUrl = VOICE_RELAY_URL
+        .replace(/^wss:/, 'https:')
+        .replace(/^ws:/, 'http:')
+        .replace(/\/voice(?:\?.*)?$/, '');
+      const ticketResponse = await fetch(`${relayHttpUrl}/voice-ticket`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!ticketResponse.ok) throw new Error('voice_ticket_failed');
+      const { ticket } = await ticketResponse.json();
+      if (!ticket) throw new Error('voice_ticket_missing');
+
       // Connect to relay
-      const wsUrl = `${VOICE_RELAY_URL}?token=${encodeURIComponent(token)}`;
+      const wsUrl = `${VOICE_RELAY_URL}?ticket=${encodeURIComponent(ticket)}`;
       const ws = new WebSocket(wsUrl);
       wsRef.current = ws;
 

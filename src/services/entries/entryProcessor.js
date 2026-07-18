@@ -40,9 +40,12 @@ let localSentiment = null;
 export const processEntry = async (entryData, options = {}) => {
   const {
     isOnline = true,
+    ownerUid = entryData.ownerUid,
     serverAnalyze,
     serverSave
   } = options;
+
+  if (!ownerUid) throw new Error('ownerUid is required');
 
   const platform = Capacitor.getPlatform();
   const isNative = isOfflineCapable();
@@ -74,7 +77,7 @@ export const processEntry = async (entryData, options = {}) => {
     console.log('[EntryProcessor] Offline mode - using local analysis');
     const localAnalysis = await performLocalAnalysis(textToAnalyze);
 
-    const queuedEntry = await queueEntry({
+    const queuedEntry = await queueEntry(ownerUid, {
       ...baseEntry,
       localAnalysis
     });
@@ -120,7 +123,7 @@ export const processEntry = async (entryData, options = {}) => {
     // If server failed, queue for later sync
     if (serverError || !serverResult) {
       console.log('[EntryProcessor] Server failed, queuing for later sync');
-      const queuedEntry = await queueEntry({
+      const queuedEntry = await queueEntry(ownerUid, {
         ...baseEntry,
         localAnalysis
       });
@@ -248,7 +251,10 @@ const mergeAnalysis = (localAnalysis, serverAnalysis) => {
     local_classification: localAnalysis.entry_type,
     local_mood_score: localAnalysis.mood_score,
     classification_match: localAnalysis.entry_type === serverAnalysis.entry_type,
-    mood_score_diff: Math.abs((serverAnalysis.mood_score ?? 0.5) - (localAnalysis.mood_score ?? 0.5)),
+    mood_score_diff:
+      Number.isFinite(serverAnalysis.mood_score) && Number.isFinite(localAnalysis.mood_score)
+        ? Math.abs(serverAnalysis.mood_score - localAnalysis.mood_score)
+        : null,
 
     // Preserve all server fields
     ...serverAnalysis,

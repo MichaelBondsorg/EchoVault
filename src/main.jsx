@@ -15,10 +15,11 @@ const initializeApp = async () => {
   console.log('[Engram] Platform:', Capacitor.getPlatform(), 'isNative:', Capacitor.isNativePlatform());
 
   if (Capacitor.isNativePlatform()) {
-    // Configure status bar for dark theme
+    // Match status-bar content and background to the boot-time Cloud theme.
     try {
-      await StatusBar.setStyle({ style: Style.Dark });
-      await StatusBar.setBackgroundColor({ color: '#1a1a2e' });
+      const isDark = document.documentElement.classList.contains('dark');
+      await StatusBar.setStyle({ style: isDark ? Style.Light : Style.Dark });
+      await StatusBar.setBackgroundColor({ color: isDark ? '#151618' : '#F7F6F2' });
     } catch (e) {
       // Status bar may not be available on all platforms
     }

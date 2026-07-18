@@ -19,7 +19,7 @@ import {
 } from './offlineStore';
 
 // Sync state
-let isSyncing = false;
+const syncingOwners = new Set();
 let syncListeners = [];
 
 // Retry configuration
@@ -40,10 +40,10 @@ const RETRY_CONFIG = {
  * @param {Object} entryData.environmentContext - Environment data
  * @returns {Promise<Object>} Queued entry with offline metadata
  */
-export const queueEntry = async (entryData) => {
+export const queueEntry = async (ownerUid, entryData) => {
   console.log('[OfflineManager] Queueing entry for offline storage');
 
-  const entry = await saveOfflineEntry({
+  const entry = await saveOfflineEntry(ownerUid, {
     text: entryData.text,
     category: entryData.category || null,
     transcriptionText: entryData.transcriptionText || null,
@@ -51,6 +51,8 @@ export const queueEntry = async (entryData) => {
     healthContext: entryData.healthContext || null,
     environmentContext: entryData.environmentContext || null,
     voiceTone: entryData.voiceTone || null,
+    transcription: entryData.transcription || null,
+    aiProcessingConsent: entryData.aiProcessingConsent !== false,
     // Preserve safety flags so offline crisis entries keep their flag on sync.
     safety_flagged: entryData.safety_flagged || null,
     safety_user_response: entryData.safety_user_response || null,
@@ -61,7 +63,7 @@ export const queueEntry = async (entryData) => {
   });
 
   // Notify listeners of queue change
-  notifyListeners({ type: 'queued', entry });
+  notifyListeners({ type: 'queued', ownerUid, entry });
 
   return entry;
 };
@@ -74,14 +76,14 @@ export const queueEntry = async (entryData) => {
  * @param {boolean} options.force - Force sync even if already syncing
  * @returns {Promise<Object>} Sync results
  */
-export const syncPendingEntries = async (syncFn, { force = false } = {}) => {
-  if (isSyncing && !force) {
+export const syncPendingEntries = async (ownerUid, syncFn) => {
+  if (syncingOwners.has(ownerUid)) {
     console.log('[OfflineManager] Sync already in progress, skipping');
     return { skipped: true, reason: 'already_syncing' };
   }
 
-  isSyncing = true;
-  notifyListeners({ type: 'sync_started' });
+  syncingOwners.add(ownerUid);
+  notifyListeners({ type: 'sync_started', ownerUid });
 
   const results = {
     attempted: 0,
@@ -91,41 +93,41 @@ export const syncPendingEntries = async (syncFn, { force = false } = {}) => {
   };
 
   try {
-    const pending = await getPendingEntries({ maxRetries: RETRY_CONFIG.maxRetries });
+    const pending = await getPendingEntries(ownerUid, { maxRetries: RETRY_CONFIG.maxRetries });
     console.log('[OfflineManager] Found', pending.length, 'pending entries to sync');
 
     for (const entry of pending) {
       results.attempted++;
 
       try {
-        await markSyncing(entry.offlineId);
+        await markSyncing(ownerUid, entry.offlineId);
 
         // Call the provided sync function
         const serverResult = await syncFn(entry);
 
         if (serverResult && serverResult.id) {
-          await markSynced(entry.offlineId, serverResult.id, serverResult.analysis);
+          await markSynced(ownerUid, entry.offlineId, serverResult.id, serverResult.analysis);
           results.succeeded++;
           results.entries.push({
             offlineId: entry.offlineId,
             serverId: serverResult.id,
             status: 'synced'
           });
-          notifyListeners({ type: 'entry_synced', entry, serverResult });
+          notifyListeners({ type: 'entry_synced', ownerUid, entry, serverResult });
         } else {
           throw new Error('Invalid server response - missing ID');
         }
 
       } catch (error) {
         console.error('[OfflineManager] Sync failed for entry:', entry.offlineId, error);
-        await markFailed(entry.offlineId, error.message);
+        await markFailed(ownerUid, entry.offlineId, error.message);
         results.failed++;
         results.entries.push({
           offlineId: entry.offlineId,
           status: 'failed',
           error: error.message
         });
-        notifyListeners({ type: 'entry_failed', entry, error });
+        notifyListeners({ type: 'entry_failed', ownerUid, entry, error });
 
         // Add delay before next attempt (exponential backoff)
         const delay = calculateBackoffDelay(entry.retryCount || 0);
@@ -135,12 +137,12 @@ export const syncPendingEntries = async (syncFn, { force = false } = {}) => {
 
     // Clean up successfully synced entries
     if (results.succeeded > 0) {
-      await clearSyncedEntries();
+      await clearSyncedEntries(ownerUid);
     }
 
   } finally {
-    isSyncing = false;
-    notifyListeners({ type: 'sync_completed', results });
+    syncingOwners.delete(ownerUid);
+    notifyListeners({ type: 'sync_completed', ownerUid, results });
   }
 
   console.log('[OfflineManager] Sync completed:', results);
@@ -154,8 +156,8 @@ export const syncPendingEntries = async (syncFn, { force = false } = {}) => {
  * @param {Function} syncFn - Sync function
  * @returns {Promise<Object>} Retry result
  */
-export const retryEntry = async (offlineId, syncFn) => {
-  const failed = await getFailedEntries();
+export const retryEntry = async (ownerUid, offlineId, syncFn) => {
+  const failed = await getFailedEntries(ownerUid);
   const entry = failed.find(e => e.offlineId === offlineId);
 
   if (!entry) {
@@ -163,20 +165,20 @@ export const retryEntry = async (offlineId, syncFn) => {
   }
 
   // Reset retry count and status
-  await markSyncing(offlineId);
+  await markSyncing(ownerUid, offlineId);
 
   try {
     const serverResult = await syncFn(entry);
 
     if (serverResult && serverResult.id) {
-      await markSynced(offlineId, serverResult.id, serverResult.analysis);
-      notifyListeners({ type: 'entry_synced', entry, serverResult });
+      await markSynced(ownerUid, offlineId, serverResult.id, serverResult.analysis);
+      notifyListeners({ type: 'entry_synced', ownerUid, entry, serverResult });
       return { success: true, serverId: serverResult.id };
     } else {
       throw new Error('Invalid server response');
     }
   } catch (error) {
-    await markFailed(offlineId, error.message);
+    await markFailed(ownerUid, offlineId, error.message);
     return { success: false, error: error.message };
   }
 };
@@ -187,12 +189,12 @@ export const retryEntry = async (offlineId, syncFn) => {
  * @param {Function} syncFn - Sync function
  * @returns {Promise<Object>} Retry results
  */
-export const retryAllFailed = async (syncFn) => {
-  const failed = await getFailedEntries();
+export const retryAllFailed = async (ownerUid, syncFn) => {
+  const failed = await getFailedEntries(ownerUid);
   const results = { attempted: failed.length, succeeded: 0, failed: 0 };
 
   for (const entry of failed) {
-    const result = await retryEntry(entry.offlineId, syncFn);
+    const result = await retryEntry(ownerUid, entry.offlineId, syncFn);
     if (result.success) {
       results.succeeded++;
     } else {
@@ -207,8 +209,8 @@ export const retryAllFailed = async (syncFn) => {
  * Check if there are entries pending sync
  * @returns {Promise<boolean>}
  */
-export const hasPendingEntries = async () => {
-  const pending = await getPendingEntries();
+export const hasPendingEntries = async (ownerUid) => {
+  const pending = await getPendingEntries(ownerUid);
   return pending.length > 0;
 };
 
@@ -216,10 +218,10 @@ export const hasPendingEntries = async () => {
  * Get current sync status
  * @returns {Promise<Object>} Sync status
  */
-export const getSyncStatus = async () => {
-  const stats = await getStats();
+export const getSyncStatus = async (ownerUid) => {
+  const stats = await getStats(ownerUid);
   return {
-    isSyncing,
+    isSyncing: syncingOwners.has(ownerUid),
     ...stats
   };
 };
@@ -280,10 +282,10 @@ const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
  * @param {string} offlineId - Offline ID of entry to discard
  * @returns {Promise<boolean>} True if discarded
  */
-export const discardEntry = async (offlineId) => {
-  const removed = await removeOfflineEntry(offlineId);
+export const discardEntry = async (ownerUid, offlineId) => {
+  const removed = await removeOfflineEntry(ownerUid, offlineId);
   if (removed) {
-    notifyListeners({ type: 'entry_discarded', offlineId });
+    notifyListeners({ type: 'entry_discarded', ownerUid, offlineId });
   }
   return removed;
 };
@@ -292,9 +294,9 @@ export const discardEntry = async (offlineId) => {
  * Get all entries that are currently queued (for UI display)
  * @returns {Promise<Array>} All offline entries
  */
-export const getQueuedEntries = async () => {
-  const pending = await getPendingEntries();
-  const failed = await getFailedEntries();
+export const getQueuedEntries = async (ownerUid) => {
+  const pending = await getPendingEntries(ownerUid);
+  const failed = await getFailedEntries(ownerUid);
   return [...pending, ...failed].sort((a, b) =>
     new Date(b.createdOfflineAt) - new Date(a.createdOfflineAt)
   );

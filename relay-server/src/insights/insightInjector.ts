@@ -87,7 +87,7 @@ export class InsightInjector {
           typeof item.confidence === 'number'
       ) as ConversationReadyInsight[];
     } catch (error) {
-      console.error(`[insightInjector] Failed to fetch conversation queue for user ${this.userId}:`, error);
+      console.error('[insightInjector] Failed to fetch conversation queue:', error);
       this.insights = [];
     }
   }

@@ -5,7 +5,7 @@
  */
 
 import crypto from 'crypto';
-import { admin, firestore, APP_COLLECTION_ID } from '../../auth/firebase.js';
+import { firestore, APP_COLLECTION_ID, Timestamp } from '../../auth/firebase.js';
 import { config } from '../../config/index.js';
 
 export interface WhoopTokens {
@@ -22,9 +22,9 @@ interface StoredTokens {
   refresh_token_encrypted: string;
   refresh_token_iv: string;
   refresh_token_tag: string;
-  expires_at: FirebaseFirestore.Timestamp;
+  expires_at: Timestamp;
   scopes: string[];
-  linked_at: FirebaseFirestore.Timestamp;
+  linked_at: Timestamp;
   whoop_user_id?: string;
 }
 
@@ -110,9 +110,9 @@ export const storeTokens = async (
     refresh_token_encrypted: encrypted,
     refresh_token_iv: iv,
     refresh_token_tag: tag,
-    expires_at: admin.firestore.Timestamp.fromDate(tokens.expiresAt),
+    expires_at: Timestamp.fromDate(tokens.expiresAt),
     scopes: tokens.scopes,
-    linked_at: admin.firestore.Timestamp.fromDate(tokens.linkedAt),
+    linked_at: Timestamp.fromDate(tokens.linkedAt),
     whoop_user_id: tokens.whoopUserId,
   };
 
@@ -175,7 +175,7 @@ export const updateAccessToken = async (
 
   const updateData: Partial<StoredTokens> = {
     access_token: newAccessToken,
-    expires_at: admin.firestore.Timestamp.fromDate(newExpiresAt),
+    expires_at: Timestamp.fromDate(newExpiresAt),
   };
 
   // If a new refresh token is provided, encrypt and store it

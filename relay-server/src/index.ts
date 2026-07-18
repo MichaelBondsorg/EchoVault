@@ -5,7 +5,7 @@ import { WebSocketServer, WebSocket } from 'ws';
 import { URL } from 'url';
 
 import { config, validateConfig } from './config/index.js';
-import { verifyToken, saveVoiceEntry } from './auth/firebase.js';
+import { consumeVoiceTicket, hasAiProcessingConsent, issueVoiceTicket, verifyToken, saveVoiceEntry } from './auth/firebase.js';
 import {
   getAuthorizationUrl,
   completeOAuthFlow,
@@ -122,6 +122,22 @@ const authenticateHttp = async (
   next();
 };
 
+app.post('/voice-ticket', authenticateHttp, async (req: AuthenticatedRequest, res) => {
+  try {
+    res.setHeader('Cache-Control', 'no-store');
+    if (!(await hasAiProcessingConsent(req.userId!))) {
+      res.status(403).json({ error: 'AI processing consent is required' });
+      return;
+    }
+    res.json(await issueVoiceTicket(req.userId!));
+  } catch (error) {
+    const rateLimited = error instanceof Error && error.message === 'voice_ticket_rate_limited';
+    res.status(rateLimited ? 429 : 503).json({
+      error: rateLimited ? 'Please wait a moment and try again' : 'Unable to start a voice session',
+    });
+  }
+});
+
 // ============================================================================
 // Whoop OAuth Endpoints
 // ============================================================================
@@ -177,7 +193,7 @@ app.get('/auth/whoop/callback', async (req, res) => {
     // Complete the OAuth flow
     await completeOAuthFlow(stateData.userId, code as string);
 
-    console.log(`Whoop linked successfully for user ${stateData.userId}`);
+    console.log('Whoop linked successfully');
 
     // Redirect to app with success
     res.redirect('engram://auth-success?provider=whoop');
@@ -194,7 +210,7 @@ app.get('/auth/whoop/callback', async (req, res) => {
 app.delete('/auth/whoop', authenticateHttp, async (req: AuthenticatedRequest, res) => {
   try {
     await disconnectWhoop(req.userId!);
-    console.log(`Whoop disconnected for user ${req.userId}`);
+    console.log('Whoop disconnected successfully');
     res.json({ success: true });
   } catch (error) {
     console.error('Error disconnecting Whoop:', error);
@@ -226,9 +242,10 @@ app.get('/auth/whoop/status', authenticateHttp, async (req: AuthenticatedRequest
  */
 app.get('/health/whoop/summary', authenticateHttp, async (req: AuthenticatedRequest, res) => {
   try {
-    // Parse date from query param, default to today
+    // The client sends an explicit local calendar date and IANA timezone.
     const dateParam = req.query.date as string | undefined;
-    const date = dateParam ? new Date(dateParam) : new Date();
+    const timezone = (req.query.timezone as string | undefined) || 'UTC';
+    const requestedLocalDate = dateParam || new Date().toISOString().split('T')[0];
 
     // Check if user has Whoop linked
     const linked = await hasWhoopLinked(req.userId!);
@@ -241,7 +258,7 @@ app.get('/health/whoop/summary', authenticateHttp, async (req: AuthenticatedRequ
       return;
     }
 
-    const summary = await getWhoopHealthSummary(req.userId!, date);
+    const summary = await getWhoopHealthSummary(req.userId!, requestedLocalDate, timezone);
     res.json(summary);
   } catch (error) {
     console.error('Error fetching Whoop summary:', error);
@@ -285,27 +302,26 @@ const insightInjectors = new Map<string, InsightInjector>();
 wss.on('connection', async (ws, req) => {
   console.log('New WebSocket connection');
 
-  // Parse token from query string
+  // A one-time ticket is safe for URL transport and consumed atomically. Never
+  // put a long-lived Firebase ID token in access logs, proxy logs, or history.
   const url = new URL(req.url || '', `http://${req.headers.host}`);
-  const token = url.searchParams.get('token');
+  const ticket = url.searchParams.get('ticket');
 
-  if (!token) {
-    console.log('Connection rejected: No token provided');
+  if (!ticket) {
+    console.log('Connection rejected: No ticket provided');
     ws.close(4001, 'Authentication required');
     return;
   }
 
-  // Verify token
-  const authResult = await verifyToken(token);
-  if (!authResult.success || !authResult.userId) {
-    console.log('Connection rejected: Invalid token');
+  const userId = await consumeVoiceTicket(ticket);
+  if (!userId) {
+    console.log('Connection rejected: Invalid ticket');
     ws.close(4002, 'Invalid authentication');
     return;
   }
 
-  const userId = authResult.userId;
   authenticatedConnections.set(ws, userId);
-  console.log(`User ${userId} connected`);
+  console.log('Authenticated voice connection established');
 
   // Handle messages
   ws.on('message', async (data) => {
@@ -325,7 +341,7 @@ wss.on('connection', async (ws, req) => {
 
   // Handle disconnection
   ws.on('close', async (code, reason) => {
-    console.log(`User ${userId} disconnected: ${code} ${reason}`);
+    console.log(`Voice connection closed: ${code} ${reason}`);
     authenticatedConnections.delete(ws);
 
     // Clean up any active session. This whole block MUST be guarded: it awaits
@@ -355,7 +371,7 @@ wss.on('connection', async (ws, req) => {
       }
       await endSession(session.sessionId);
     } catch (err) {
-      console.error(`Error during disconnect cleanup for user ${userId}:`, err);
+      console.error('Error during voice disconnect cleanup:', err);
     } finally {
       insightInjectors.delete(session.sessionId);
     }
@@ -363,7 +379,7 @@ wss.on('connection', async (ws, req) => {
 
   // Handle errors
   ws.on('error', (error) => {
-    console.error(`WebSocket error for user ${userId}:`, error);
+    console.error('Voice WebSocket error:', error);
   });
 });
 
@@ -500,7 +516,7 @@ async function handleStartSession(
       await initializeStandardSession(ws, session, context, insightPrompt);
     }
 
-    console.log(`Session ${session.sessionId} started for user ${userId} in ${session.mode} mode (${typedSessionType})`);
+    console.log(`Voice session started in ${session.mode} mode (${typedSessionType})`);
   } catch (error) {
     console.error('Failed to start session:', error);
     sendToClient(ws, {
@@ -714,7 +730,7 @@ async function handleTokenRefresh(
     return;
   }
 
-  console.log(`Token refreshed for user ${userId}`);
+  console.log('Voice session token refreshed');
 }
 
 /**
@@ -730,7 +746,7 @@ async function handleRestoreTranscript(
   if (!session) {
     // Create new session to restore into
     // TODO: Implement proper reconnection flow
-    console.log(`Restore attempted but no session for user ${userId}`);
+    console.log('Restore attempted without an active session');
     return;
   }
 

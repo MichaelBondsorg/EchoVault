@@ -31,8 +31,8 @@ export const sanitizeEntry = (id, data) => {
         })
       : [],
     title: safeString(data.title) || safeString(data.analysis?.summary) || 'Untitled Memory',
-    analysis: data.analysis || { mood_score: 0.5 },
-    analysisStatus: data.analysisStatus || 'complete',
+    analysis: data.analysis || null,
+    analysisStatus: data.analysisStatus || (data.analysis ? 'complete' : 'unavailable'),
     embedding: data.embedding || null,
     contextualInsight: data.contextualInsight || null,
     createdAt: safeDate(data.createdAt),
@@ -43,7 +43,7 @@ export const sanitizeEntry = (id, data) => {
     // Enhanced context fields
     continues_situation: data.continues_situation || null,
     goal_update: data.goal_update || null,
-    entry_type: data.entry_type || 'reflection',
+    entry_type: data.entry_type || data.analysis?.entry_type || 'unknown',
     // Extracted tasks for mixed entries (ensure consistent structure)
     extracted_tasks: Array.isArray(data.extracted_tasks)
       ? data.extracted_tasks.map(normalizeTask)

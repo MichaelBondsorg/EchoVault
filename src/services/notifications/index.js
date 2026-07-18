@@ -1,3 +1,6 @@
+import { registerToken, updateTimezone } from './tokenManager';
+import { initializeDeepLinks } from './deepLinks';
+
 /**
  * Notifications Service
  *
@@ -16,10 +19,6 @@ export { initializeDeepLinks, handleDeepLink, parseDeepLink } from './deepLinks'
  * @returns {Promise<{granted: boolean, token?: string}>}
  */
 export async function initializeNotifications(userId) {
-  const { registerToken } = await import('./tokenManager');
-  const { initializeDeepLinks } = await import('./deepLinks');
-  const { updateTimezone } = await import('./tokenManager');
-
   // Register token (requests permissions if needed)
   const result = await registerToken(userId);
 

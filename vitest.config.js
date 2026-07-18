@@ -44,6 +44,7 @@ export default defineConfig({
       'functions/src/insights/__tests__/engagementTracker.test.js',
       'functions/src/reports/__tests__/privacy.test.js',
       'functions/src/auth/__tests__/appleToken.test.js',
+      'functions/src/auth/__tests__/providerSubjects.test.js',
       'functions/src/safety/__tests__/crisisKeywords.test.js',
       'functions/src/limits/__tests__/dailyQuota.test.js',
       'functions/src/transcription/__tests__/fusedTranscription.test.js',
@@ -81,8 +82,10 @@ export default defineConfig({
     testTimeout: 10000,
 
     // Mock Firebase for all tests
-    deps: {
-      inline: ['firebase']
+    server: {
+      deps: {
+        inline: ['firebase']
+      }
     }
   }
 });

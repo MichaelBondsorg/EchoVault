@@ -19,10 +19,12 @@ describe('buildGeminiRequestBody', () => {
 describe('parseFusedResponse', () => {
   it('parses a clean JSON response', () => {
     const result = parseFusedResponse(wrap(JSON.stringify({
+      rawTranscript: 'I had, um, a solid idea about the widget today.',
       transcript: 'I had a solid idea about the widget today.',
       toneAnalysis: { moodScore: 0.8, energy: 'high', emotions: ['excited'], confidence: 0.9, summary: 'Upbeat and energized.' }
     })));
     expect(result.transcript).toBe('I had a solid idea about the widget today.');
+    expect(result.rawTranscript).toContain('um');
     expect(result.toneAnalysis.energy).toBe('high');
   });
 
@@ -46,7 +48,7 @@ describe('parseFusedResponse', () => {
 
   it('returns empty transcript + null tone for the no-speech contract', () => {
     const result = parseFusedResponse(wrap('{"transcript":"","toneAnalysis":null}'));
-    expect(result).toEqual({ transcript: '', toneAnalysis: null });
+    expect(result).toEqual({ rawTranscript: '', transcript: '', toneAnalysis: null });
   });
 
   it('returns null for garbage / missing candidates (fallback signal)', () => {
@@ -60,5 +62,20 @@ describe('parseFusedResponse', () => {
       transcript: 'I actually like this, so well done.', toneAnalysis: null
     })));
     expect(result.transcript).toBe('I actually like this, so well done.');
+  });
+
+  it('cleans punctuation artifacts without changing the retained raw transcript', () => {
+    const result = parseFusedResponse(wrap(JSON.stringify({
+      rawTranscript: 'I slept pretty, um, good.',
+      transcript: 'I slept pretty, , good .',
+      toneAnalysis: null
+    })));
+    expect(result.rawTranscript).toBe('I slept pretty, um, good.');
+    expect(result.transcript).toBe('I slept pretty, good.');
+  });
+
+  it('injects a bounded proper-noun dictionary into the prompt', () => {
+    const body = buildGeminiRequestBody('QUJD', 'audio/webm', ["Barry's", 'Sterling']);
+    expect(body.contents[0].parts[1].text).toContain("Barry's, Sterling");
   });
 });

@@ -1,6 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Mic, Square, Keyboard, X, Loader2, Send } from 'lucide-react';
+import { Capacitor } from '@capacitor/core';
+import { CaptureService } from '../../services/capture/captureService';
+import { nativeCaptureAdapter } from '../../services/capture/nativeCaptureAdapter';
 
 /**
  * EntryBar - Persistent bottom bar for instant entry creation
@@ -11,7 +14,7 @@ import { Mic, Square, Keyboard, X, Loader2, Send } from 'lucide-react';
  * - Always visible at bottom of screen
  * - Can show prompt context when responding to a prompt
  */
-const EntryBar = ({ onVoiceSave, onTextSave, loading, disabled, promptContext, onClearPrompt, preferredMode = 'text', embedded = false }) => {
+const EntryBar = ({ ownerUid, onVoiceSave, onTextSave, onStateChange, loading, disabled, promptContext, onClearPrompt, preferredMode = 'text', embedded = false }) => {
   const [mode, setMode] = useState('idle'); // idle, recording, typing
   const [recording, setRecording] = useState(false);
   const [mediaRecorder, setMediaRecorder] = useState(null);
@@ -20,6 +23,7 @@ const EntryBar = ({ onVoiceSave, onTextSave, loading, disabled, promptContext, o
   const timerRef = useRef(null);
   const textInputRef = useRef(null);
   const shouldAutoStartVoice = useRef(false);
+  const nativeCaptureRef = useRef(null);
 
   // Use refs to always have the latest callbacks
   // This prevents stale closure issues during long recordings
@@ -29,6 +33,10 @@ const EntryBar = ({ onVoiceSave, onTextSave, loading, disabled, promptContext, o
     onVoiceSaveRef.current = onVoiceSave;
     onTextSaveRef.current = onTextSave;
   }, [onVoiceSave, onTextSave]);
+
+  useEffect(() => {
+    onStateChange?.(mode);
+  }, [mode, onStateChange]);
 
   // Cleanup on unmount
   useEffect(() => {
@@ -75,6 +83,30 @@ const EntryBar = ({ onVoiceSave, onTextSave, loading, disabled, promptContext, o
   }, [mode]);
 
   const startRecording = async () => {
+    if (Capacitor.isNativePlatform()) {
+      if (!ownerUid) {
+        alert('Please sign in before recording.');
+        return;
+      }
+      setMode('preparing');
+      const capture = new CaptureService(ownerUid, nativeCaptureAdapter);
+      nativeCaptureRef.current = capture;
+      const confirmed = await capture.start();
+      if (confirmed.status !== 'recording') {
+        setMode('idle');
+        alert(confirmed.status === 'error' && confirmed.code === 'microphone_permission_denied'
+          ? 'Microphone access is off. Enable it in Settings to record.'
+          : 'Recording could not start. Your typed entries are still available.');
+        return;
+      }
+      setMediaRecorder({ native: true, draftId: confirmed.draftId });
+      setRecording(true);
+      setMode('recording');
+      setRecordingSeconds(0);
+      timerRef.current = setInterval(() => setRecordingSeconds((seconds) => seconds + 1), 1000);
+      return;
+    }
+
     if (typeof navigator === 'undefined' || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
       alert("Microphone access not available in this browser");
       return;
@@ -186,7 +218,21 @@ const EntryBar = ({ onVoiceSave, onTextSave, loading, disabled, promptContext, o
     }
   };
 
-  const stopRecording = () => {
+  const stopRecording = async () => {
+    if (mediaRecorder?.native) {
+      clearInterval(timerRef.current);
+      setRecording(false);
+      setMode('preparing');
+      const stored = await nativeCaptureRef.current?.stop();
+      if (!stored?.base64) {
+        setMode('idle');
+        alert('The recording is safe on this device but needs review before processing.');
+        return;
+      }
+      await onVoiceSaveRef.current(stored.base64, stored.mime, { nativeDraftId: stored.draftId });
+      setMode('idle');
+      return;
+    }
     if (mediaRecorder) {
       mediaRecorder.stop();
       setRecording(false);
@@ -194,9 +240,9 @@ const EntryBar = ({ onVoiceSave, onTextSave, loading, disabled, promptContext, o
     }
   };
 
-  const handleMicClick = () => {
+  const handleMicClick = async () => {
     if (mode === 'recording') {
-      stopRecording();
+      await stopRecording();
     } else {
       startRecording();
     }
@@ -209,12 +255,8 @@ const EntryBar = ({ onVoiceSave, onTextSave, loading, disabled, promptContext, o
 
   const handleTextSubmit = () => {
     if (textValue.trim()) {
-      // If responding to a prompt, prefix the entry with the context
-      const finalText = promptContext
-        ? `[Responding to: "${promptContext}"]\n\n${textValue.trim()}`
-        : textValue.trim();
       // Use ref to get the latest callback, avoiding stale closure
-      onTextSaveRef.current(finalText);
+      onTextSaveRef.current(textValue.trim());
       setTextValue('');
       setMode('idle');
       if (onClearPrompt) onClearPrompt();
@@ -303,6 +345,7 @@ const EntryBar = ({ onVoiceSave, onTextSave, loading, disabled, promptContext, o
                 </div>
                 <motion.button
                   onClick={handleTextCancel}
+                  aria-label="Cancel text entry"
                   className="p-3 text-warm-400 hover:text-warm-600 hover:bg-warm-100 rounded-full"
                   whileHover={{ scale: 1.05 }}
                   whileTap={{ scale: 0.95 }}
@@ -311,6 +354,7 @@ const EntryBar = ({ onVoiceSave, onTextSave, loading, disabled, promptContext, o
                 </motion.button>
                 <motion.button
                   onClick={handleTextSubmit}
+                  aria-label="Save text entry"
                   disabled={!textValue.trim()}
                   className={`p-3 rounded-full ${textValue.trim() ? 'bg-honey-600 text-white' : 'bg-warm-100 text-warm-300'}`}
                   whileHover={textValue.trim() ? { scale: 1.05 } : {}}
@@ -320,6 +364,13 @@ const EntryBar = ({ onVoiceSave, onTextSave, loading, disabled, promptContext, o
                 </motion.button>
               </div>
             </div>
+          </motion.div>
+        )}
+
+        {mode === 'preparing' && (
+          <motion.div className="flex min-h-32 items-center justify-center gap-3 bg-[var(--card)] p-5 text-[var(--secondary-foreground)]" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
+            <Loader2 className="animate-spin text-[var(--accent)]" size={22} aria-hidden="true" />
+            <span className="font-medium">Preparing secure recording…</span>
           </motion.div>
         )}
 
@@ -344,6 +395,7 @@ const EntryBar = ({ onVoiceSave, onTextSave, loading, disabled, promptContext, o
                 </div>
                 <motion.button
                   onClick={handleMicClick}
+                  aria-label="Stop recording"
                   className="h-16 w-16 rounded-full bg-red-500 flex items-center justify-center shadow-lg"
                   animate={{ scale: [1, 1.08, 1] }}
                   transition={{ duration: 1.5, repeat: Infinity }}

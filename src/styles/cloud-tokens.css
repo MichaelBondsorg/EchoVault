@@ -1,0 +1,147 @@
+:root {
+  --background: #f7f6f2;
+  --card: #ffffff;
+  --border: #e3e0d8;
+  --divider: #efede7;
+  --foreground: #1e1d19;
+  --secondary-foreground: #4a4842;
+  --muted-foreground: #6f6b62;
+  --faint: #746f65;
+  --primary: #1e1d19;
+  --primary-foreground: #f7f6f2;
+  --destructive: #a15247;
+  --radius: 1rem;
+}
+
+:root[data-accent='blue'] {
+  --accent: #667fa8;
+  --accent-deep: #3d5273;
+  --accent-wash: #eef0f4;
+  --accent-wave: rgba(102, 127, 168, 0.17);
+}
+
+:root[data-accent='mauve'] {
+  --accent: #8e7ba8;
+  --accent-deep: #5e4f73;
+  --accent-wash: #f1eef4;
+  --accent-wave: rgba(142, 123, 168, 0.17);
+}
+
+:root[data-accent='terracotta'] {
+  --accent: #b87355;
+  --accent-deep: #7e4a33;
+  --accent-wash: #f5efeb;
+  --accent-wave: rgba(184, 115, 85, 0.17);
+}
+
+:root.dark {
+  --background: #151618;
+  --card: #1e1f22;
+  --border: #34353a;
+  --divider: #292a2e;
+  --foreground: #f0f0ee;
+  --secondary-foreground: #c5c4be;
+  --muted-foreground: #b2b1ac;
+  --faint: #a1a2a5;
+  --primary: var(--accent-btn);
+  --primary-foreground: var(--accent-btn-fg);
+}
+
+:root.dark[data-accent='blue'] {
+  --accent: #9db4d8;
+  --accent-deep: #b6c8e3;
+  --accent-wash: #1a1e24;
+  --accent-btn: #afc0dc;
+  --accent-btn-fg: #1c2330;
+  --accent-wave: rgba(157, 180, 216, 0.09);
+}
+
+:root.dark[data-accent='mauve'] {
+  --accent: #b4a5d0;
+  --accent-deep: #cabde0;
+  --accent-wash: #1d1a22;
+  --accent-btn: #c3b6da;
+  --accent-btn-fg: #262033;
+  --accent-wave: rgba(180, 165, 208, 0.09);
+}
+
+:root.dark[data-accent='terracotta'] {
+  --accent: #d8a288;
+  --accent-deep: #e7b9a1;
+  --accent-wash: #211b18;
+  --accent-btn: #e0b29a;
+  --accent-btn-fg: #2e211a;
+  --accent-wave: rgba(216, 162, 136, 0.09);
+}
+
+html,
+body {
+  background: var(--background);
+  color: var(--foreground);
+}
+
+body {
+  font-family: Geist, Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+
+h1,
+h2,
+h3,
+h4,
+.cloud-title {
+  font-family: Newsreader, Iowan Old Style, Charter, Georgia, serif;
+}
+
+.cloud-sheet {
+  background: var(--card);
+  border-color: var(--border);
+  color: var(--foreground);
+}
+
+.cloud-kicker {
+  color: var(--muted-foreground);
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+}
+
+.cloud-icon-button {
+  align-items: center;
+  border-radius: 999px;
+  color: var(--secondary-foreground);
+  display: inline-flex;
+  height: 44px;
+  justify-content: center;
+  width: 44px;
+}
+
+.cloud-icon-button:hover {
+  background: var(--divider);
+}
+
+/* Transitional bridge while legacy screens move to semantic Cloud tokens. */
+[class~='bg-white/20'],
+[class~='bg-white/30'],
+[class~='bg-white/50'] {
+  background: color-mix(in srgb, var(--card) 94%, transparent) !important;
+  backdrop-filter: none !important;
+}
+
+[class~='border-white/10'],
+[class~='border-white/20'],
+[class~='border-white/30'] { border-color: var(--border) !important; }
+
+.text-warm-800,
+.text-hearth-800 { color: var(--foreground) !important; }
+.text-warm-700,
+.text-hearth-700,
+.text-warm-600 { color: var(--secondary-foreground) !important; }
+.text-warm-500,
+.text-warm-400,
+.text-hearth-500 { color: var(--muted-foreground) !important; }
+
+*:focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--accent) 72%, white);
+  outline-offset: 2px;
+  box-shadow: none;
+}

@@ -23,8 +23,14 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4
         with:
-          node-version: '20'
+          node-version: '22'
           cache: 'npm'
+
+      - name: Setup Java for Firebase emulators
+        uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95  # v5
+        with:
+          distribution: temurin
+          java-version: '21'
 
       - name: Install dependencies
         run: npm ci
@@ -34,10 +40,13 @@ jobs:
       - name: Install Functions dependencies
         run: |
           cd functions
-          npm ci || npm install
+          npm ci
 
       - name: Run test suite
         run: npm test
+
+      - name: Run Firestore rules suite
+        run: npm run test:rules
 
   # Live deploy: only on push to main.
   deploy_live:
@@ -51,7 +60,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4
         with:
-          node-version: '20'
+          node-version: '22'
           cache: 'npm'
 
       - name: Install dependencies
@@ -85,7 +94,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4
         with:
-          node-version: '20'
+          node-version: '22'
           cache: 'npm'
 
       - name: Install dependencies

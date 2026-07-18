@@ -18,11 +18,17 @@ Do NOT try to:
 - Restructure into bullet points
 - Fix proper nouns you don't recognize
 - Summarize or condense meaning
+- Delete adjectives, adverbs, or other content words
+
+Return both the verbatim transcript and the lightly cleaned transcript. The
+rawTranscript must preserve every intelligible spoken word. Use known proper
+nouns only to correct spelling; never change meaning to force a match.
 
 Separately, analyze the speaker's emotional tone from the voice itself (pace, pitch, pauses, energy).
 
 Return JSON only, exactly this shape:
 {
+  "rawTranscript": "<verbatim transcript>",
   "transcript": "<cleaned transcript as natural sentences>",
   "toneAnalysis": {
     "moodScore": <number 0-1, 0 = very negative/distressed, 1 = very positive/joyful>,
@@ -33,14 +39,25 @@ Return JSON only, exactly this shape:
   }
 }
 
-If there is no intelligible speech, return {"transcript": "", "toneAnalysis": null}.`;
+If there is no intelligible speech, return {"rawTranscript": "", "transcript": "", "toneAnalysis": null}.`;
 
-export function buildGeminiRequestBody(base64, mimeType) {
+const normalizeProperNouns = (properNouns) =>
+  Array.from(new Set((Array.isArray(properNouns) ? properNouns : [])
+    .filter((value) => typeof value === 'string')
+    .map((value) => value.trim().replace(/[\r\n,]+/g, ' '))
+    .filter((value) => value.length > 0 && value.length <= 80)))
+    .slice(0, 50);
+
+export function buildGeminiRequestBody(base64, mimeType, properNouns = []) {
+  const dictionary = normalizeProperNouns(properNouns);
+  const prompt = dictionary.length
+    ? `${TRANSCRIPTION_PROMPT}\n\nKNOWN PROPER NOUN SPELLINGS:\n${dictionary.join(', ')}`
+    : TRANSCRIPTION_PROMPT;
   return {
     contents: [{
       parts: [
         { inline_data: { mime_type: mimeType, data: base64 } },
-        { text: TRANSCRIPTION_PROMPT }
+        { text: prompt }
       ]
     }],
     generationConfig: {
@@ -51,6 +68,12 @@ export function buildGeminiRequestBody(base64, mimeType) {
 }
 
 const clamp01 = (n) => Math.max(0, Math.min(1, Number(n) || 0));
+
+export const cleanTranscriptArtifacts = (value) => value
+  .replace(/,\s*,+/g, ',')
+  .replace(/\s+([,.!?;:])/g, '$1')
+  .replace(/[ \t]{2,}/g, ' ')
+  .trim();
 
 export function parseFusedResponse(geminiJson) {
   const text = geminiJson?.candidates?.[0]?.content?.parts?.[0]?.text || '';
@@ -65,7 +88,10 @@ export function parseFusedResponse(geminiJson) {
   }
   if (typeof parsed.transcript !== 'string') return null;
 
-  const transcript = parsed.transcript.trim();
+  const rawTranscript = typeof parsed.rawTranscript === 'string'
+    ? parsed.rawTranscript.trim()
+    : parsed.transcript.trim();
+  const transcript = cleanTranscriptArtifacts(parsed.transcript);
 
   let toneAnalysis = null;
   const t = parsed.toneAnalysis;
@@ -79,5 +105,5 @@ export function parseFusedResponse(geminiJson) {
     };
   }
 
-  return { transcript, toneAnalysis };
+  return { rawTranscript, transcript, toneAnalysis };
 }

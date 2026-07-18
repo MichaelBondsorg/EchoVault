@@ -1,29 +1,38 @@
-import admin from 'firebase-admin';
+import {
+  applicationDefault,
+  cert,
+  getApp,
+  getApps,
+  initializeApp,
+} from 'firebase-admin/app';
+import { getAuth } from 'firebase-admin/auth';
+import { FieldValue, getFirestore, Timestamp } from 'firebase-admin/firestore';
+import { createHash, randomBytes } from 'node:crypto';
 
 // Initialize Firebase Admin SDK
 // In Cloud Run, credentials come from the environment
 const initializeFirebase = () => {
-  if (admin.apps.length > 0) {
-    return admin.app();
+  if (getApps().length > 0) {
+    return getApp();
   }
 
   // Check for service account JSON (for local dev)
   if (process.env.FIREBASE_SERVICE_ACCOUNT) {
     const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
-    return admin.initializeApp({
-      credential: admin.credential.cert(serviceAccount),
+    return initializeApp({
+      credential: cert(serviceAccount),
     });
   }
 
   // In Cloud Run, use default credentials
-  return admin.initializeApp({
-    credential: admin.credential.applicationDefault(),
+  return initializeApp({
+    credential: applicationDefault(),
   });
 };
 
 const app = initializeFirebase();
-const auth = admin.auth(app);
-const firestore = admin.firestore(app);
+const auth = getAuth(app);
+const firestore = getFirestore(app);
 
 // Collection path for EchoVault
 const APP_COLLECTION_ID = 'echo-vault-v5-fresh';
@@ -33,6 +42,65 @@ export interface AuthResult {
   userId?: string;
   error?: string;
 }
+
+const ticketHash = (ticket: string): string => createHash('sha256').update(ticket).digest('hex');
+
+/** Issue a short-lived, single-use relay credential so Firebase ID tokens never enter URLs. */
+export const issueVoiceTicket = async (userId: string): Promise<{ ticket: string; expiresAt: string }> => {
+  const ticket = randomBytes(32).toString('base64url');
+  const now = Date.now();
+  const expires = Timestamp.fromMillis(now + 60_000);
+  const hash = ticketHash(ticket);
+  const ticketRef = firestore.collection('voice_relay_tickets').doc(hash);
+  const limitRef = firestore.collection('voice_relay_ticket_limits').doc(ticketHash(userId));
+  await firestore.runTransaction(async (transaction) => {
+    const limit = await transaction.get(limitRef);
+    const lastIssuedAt = limit.data()?.lastIssuedAt;
+    if (lastIssuedAt instanceof Timestamp && now - lastIssuedAt.toMillis() < 1_000) {
+      throw new Error('voice_ticket_rate_limited');
+    }
+    const previousHash = limit.data()?.activeTicketHash;
+    if (typeof previousHash === 'string' && previousHash !== hash) {
+      transaction.delete(firestore.collection('voice_relay_tickets').doc(previousHash));
+    }
+    transaction.create(ticketRef, {
+      userId,
+      expiresAt: expires,
+      createdAt: FieldValue.serverTimestamp(),
+    });
+    transaction.set(limitRef, {
+      activeTicketHash: hash,
+      lastIssuedAt: Timestamp.fromMillis(now),
+    });
+  });
+  return { ticket, expiresAt: expires.toDate().toISOString() };
+};
+
+export const hasAiProcessingConsent = async (userId: string): Promise<boolean> => {
+  const snapshot = await firestore
+    .collection('artifacts')
+    .doc(APP_COLLECTION_ID)
+    .collection('users')
+    .doc(userId)
+    .collection('settings')
+    .doc('consent')
+    .get();
+  return snapshot.data()?.aiProcessing === true;
+};
+
+/** Atomically consume a relay ticket. Replays and expired tickets fail closed. */
+export const consumeVoiceTicket = async (ticket: string): Promise<string | null> => {
+  if (!ticket || ticket.length > 128) return null;
+  const ref = firestore.collection('voice_relay_tickets').doc(ticketHash(ticket));
+  return firestore.runTransaction(async (transaction) => {
+    const snapshot = await transaction.get(ref);
+    if (!snapshot.exists) return null;
+    transaction.delete(ref);
+    const data = snapshot.data()!;
+    if (!(data.expiresAt instanceof Timestamp) || data.expiresAt.toMillis() <= Date.now()) return null;
+    return typeof data.userId === 'string' ? data.userId : null;
+  });
+};
 
 /**
  * Verify a Firebase ID token from the client
@@ -122,7 +190,7 @@ export const updateUserUsage = async (
       standardMinutes:
         current.standardMinutes + (mode === 'standard' ? durationMinutes : 0),
       estimatedCostUSD: current.estimatedCostUSD + costUSD,
-      lastUpdated: admin.firestore.FieldValue.serverTimestamp(),
+      lastUpdated: FieldValue.serverTimestamp(),
     };
 
     transaction.set(usageRef, update, { merge: true });
@@ -190,12 +258,13 @@ export const saveVoiceEntry = async (
     .doc(userId)
     .collection('entries');
 
-  const now = admin.firestore.Timestamp.now();
+  const now = Timestamp.now();
   const docData: Record<string, unknown> = {
     text: data.text || '',
     createdAt: now,
     effectiveDate: now,
     analysisStatus: 'pending',
+    aiProcessingConsent: true,
     signalExtractionVersion: 1,
     source: 'voice',
     createdOnPlatform: 'voice-relay',
@@ -531,4 +600,4 @@ const extractExcerpt = (text: string, queryWords: string[]): string => {
   return excerpt;
 };
 
-export { admin, firestore, APP_COLLECTION_ID };
+export { firestore, APP_COLLECTION_ID, FieldValue, Timestamp };

@@ -1,0 +1,29 @@
+@keyframes cloud-wave {
+  from { transform: translate3d(-52px, -52px, 0); }
+  to { transform: translate3d(52px, 52px, 0); }
+}
+
+.cloud-background {
+  background: linear-gradient(180deg, var(--accent-wash) 0%, var(--background) 240px);
+  isolation: isolate;
+  position: relative;
+}
+
+.cloud-background::before {
+  animation: cloud-wave 15s ease-in-out infinite alternate;
+  background:
+    radial-gradient(circle at 50% 50%, transparent 38%, var(--accent-wave) 39%, transparent 42%),
+    radial-gradient(circle at 50% 50%, transparent 51%, var(--accent-wave) 52%, transparent 55%);
+  content: '';
+  height: 1800px;
+  left: -1200px;
+  pointer-events: none;
+  position: fixed;
+  top: -1050px;
+  width: 1800px;
+  z-index: -1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cloud-background::before { animation: none; }
+}

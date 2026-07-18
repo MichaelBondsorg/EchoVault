@@ -1,13 +1,15 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 import {
   User, Bell, Heart, Shield, Download, LogOut,
   ChevronRight, Smartphone, Brain, Users, Loader2,
-  FileJson, AlertTriangle, ScrollText
+  FileJson, AlertTriangle, ScrollText, Palette, CloudCog, LockKeyhole
 } from 'lucide-react';
 import BackfillPanel from '../components/settings/BackfillPanel';
 import { exportDiagnosticJSON, migrateEntriesForHealthEnrichment } from '../utils/diagnosticExport';
 import { db, deleteAccountFn } from '../config/firebase';
+import DarkModeToggle from '../components/ui/DarkModeToggle';
+import { ownerStorageKey } from '../services/storage/ownerScopedStorage';
 
 /**
  * SettingsPage - App settings and account management
@@ -28,6 +30,8 @@ const SettingsPage = ({
   onOpenExport,
   onOpenEntityManagement,
   onOpenReports,
+  onOpenReliability,
+  onOpenPrivacy,
   onRequestNotifications,
   onLogout,
   notificationPermission,
@@ -38,6 +42,24 @@ const SettingsPage = ({
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState(null);
+  const [accent, setAccent] = useState('blue');
+
+  useEffect(() => {
+    if (!user?.uid) return;
+    const stored = localStorage.getItem(ownerStorageKey(user.uid, 'appearance/accent'))
+      || localStorage.getItem('engram-accent')
+      || 'blue';
+    const safeAccent = ['blue', 'mauve', 'terracotta'].includes(stored) ? stored : 'blue';
+    setAccent(safeAccent);
+    document.documentElement.dataset.accent = safeAccent;
+  }, [user?.uid]);
+
+  const chooseAccent = (nextAccent) => {
+    setAccent(nextAccent);
+    document.documentElement.dataset.accent = nextAccent;
+    localStorage.setItem('engram-accent', nextAccent);
+    if (user?.uid) localStorage.setItem(ownerStorageKey(user.uid, 'appearance/accent'), nextAccent);
+  };
 
   // Permanently delete the account and all data (App Store / Play requirement).
   const handleDeleteAccount = async () => {
@@ -136,6 +158,18 @@ const SettingsPage = ({
           badge: notificationPermission !== 'granted' ? 'Off' : null,
         },
         {
+          icon: LockKeyhole,
+          label: 'Privacy & AI',
+          description: 'Data inventory, memory, consent, and export',
+          onClick: onOpenPrivacy,
+        },
+        {
+          icon: CloudCog,
+          label: 'Entry Reliability',
+          description: 'Review saved, queued, and recoverable entries',
+          onClick: onOpenReliability,
+        },
+        {
           icon: Users,
           label: 'People & Things',
           description: 'Edit names, relationships, and entities',
@@ -207,6 +241,43 @@ const SettingsPage = ({
       </div>
 
       {/* Settings Sections */}
+      <div className="space-y-2">
+        <h3 className="cloud-kicker px-1">APP</h3>
+        <div className="cloud-sheet overflow-hidden rounded-2xl border shadow-sm">
+          <div className="flex min-h-14 items-center gap-3 border-b border-[var(--divider)] px-4 py-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[var(--accent-wash)] text-[var(--accent-deep)]"><Palette size={20} /></div>
+            <div className="flex-1">
+              <p className="font-semibold">Accent color</p>
+              <p className="text-sm text-[var(--muted-foreground)]">Choose the tone that feels most like you</p>
+            </div>
+            <div className="flex gap-3" aria-label="Accent color">
+              {[
+                ['blue', '#667FA8'],
+                ['mauve', '#8E7BA8'],
+                ['terracotta', '#B87355'],
+              ].map(([name, color]) => (
+                <button
+                  key={name}
+                  type="button"
+                  aria-label={`${name} accent`}
+                  aria-pressed={accent === name}
+                  onClick={() => chooseAccent(name)}
+                  className={`h-11 w-11 rounded-full border-[10px] border-[var(--card)] ${accent === name ? 'ring-2 ring-[var(--foreground)] ring-offset-2 ring-offset-[var(--card)]' : ''}`}
+                  style={{ backgroundColor: color }}
+                />
+              ))}
+            </div>
+          </div>
+          <div className="flex min-h-14 items-center justify-between px-4 py-3">
+            <div>
+              <p className="font-semibold">Dark mode</p>
+              <p className="text-sm text-[var(--muted-foreground)]">Use a quieter palette at night</p>
+            </div>
+            <DarkModeToggle />
+          </div>
+        </div>
+      </div>
+
       {settingsSections.map((section) => (
         <div key={section.title} className="space-y-2">
           <h3 className="text-xs font-bold text-warm-400 uppercase tracking-wider px-1">

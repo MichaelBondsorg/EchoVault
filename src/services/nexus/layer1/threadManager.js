@@ -261,6 +261,7 @@ export const createThread = async (userId, threadData) => {
 
   const threadId = generateThreadId(displayName);
   const now = Timestamp.now();
+  const hasSentiment = Number.isFinite(sentiment);
 
   // Generate embedding
   let embedding = null;
@@ -287,14 +288,14 @@ export const createThread = async (userId, threadData) => {
     evolutionContext,
 
     // Sentiment tracking
-    sentimentBaseline: sentiment || 0.5,
-    sentimentHistory: sentiment ? [sentiment] : [],
+    sentimentBaseline: hasSentiment ? sentiment : null,
+    sentimentHistory: hasSentiment ? [sentiment] : [],
     sentimentTrajectory: 'stable',
 
     // Emotional arc
     emotionalArc: [{
       date: now.toDate().toISOString().split('T')[0],
-      sentiment: sentiment || 0.5,
+      sentiment: hasSentiment ? sentiment : null,
       event: 'Thread created'
     }],
 
@@ -464,7 +465,7 @@ const calculateTrajectory = (history) => {
  */
 const buildThreadIdentificationPrompt = (entryText, activeThreads, archivedThreads = []) => {
   const activeList = activeThreads.length > 0
-    ? activeThreads.map(t => `- "${t.displayName}" (${t.category}, sentiment: ${Math.round((t.sentimentBaseline || 0.5) * 100)}%)`).join('\n')
+    ? activeThreads.map(t => `- "${t.displayName}" (${t.category}, sentiment: ${Number.isFinite(t.sentimentBaseline) ? `${Math.round(t.sentimentBaseline * 100)}%` : 'unknown'})`).join('\n')
     : 'No active threads.';
 
   const archivedList = archivedThreads.length > 0
@@ -584,7 +585,7 @@ export const identifyThreadAssociation = async (userId, entryId, entryText, sent
     }
 
     const { thread, somaticSignals, sentiment: llmSentiment, confidence, arcEvent } = llmResult;
-    const finalSentiment = sentiment ?? llmSentiment ?? 0.5;
+    const finalSentiment = sentiment ?? llmSentiment ?? null;
 
     // Handle based on action
     switch (thread.action) {

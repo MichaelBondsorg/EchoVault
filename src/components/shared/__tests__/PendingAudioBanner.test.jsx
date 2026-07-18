@@ -20,6 +20,7 @@ vi.mock('../../../services/audio/audioVault', () => ({
 }));
 
 const orphan = { id: 'rec_1', createdAt: Date.now() };
+const OWNER = 'user-a';
 
 describe('PendingAudioBanner', () => {
   beforeEach(() => {
@@ -30,13 +31,13 @@ describe('PendingAudioBanner', () => {
 
   it('renders nothing when there are no orphans', async () => {
     audioVault.listOrphans.mockResolvedValue([]);
-    const { container } = render(<PendingAudioBanner onRetry={vi.fn()} />);
+    const { container } = render(<PendingAudioBanner ownerUid={OWNER} onRetry={vi.fn()} />);
     await waitFor(() => expect(audioVault.listOrphans).toHaveBeenCalled());
     expect(container.firstChild).toBeNull();
   });
 
   it('shows the orphaned recording count', async () => {
-    render(<PendingAudioBanner onRetry={vi.fn()} />);
+    render(<PendingAudioBanner ownerUid={OWNER} onRetry={vi.fn()} />);
     expect(await screen.findByText(/1 unsaved recording/)).toBeTruthy();
   });
 
@@ -44,7 +45,7 @@ describe('PendingAudioBanner', () => {
     // Simulate the pipeline: retry fails, so the vault still reports the
     // recording as an orphan (nothing calls linkEntry on failure).
     const onRetry = vi.fn().mockResolvedValue(false);
-    render(<PendingAudioBanner onRetry={onRetry} />);
+    render(<PendingAudioBanner ownerUid={OWNER} onRetry={onRetry} />);
 
     await screen.findByText(/1 unsaved recording/);
     fireEvent.click(screen.getByText('Retry now'));
@@ -58,7 +59,7 @@ describe('PendingAudioBanner', () => {
   });
 
   it('refreshes when the vault emits engram:audio-vault-changed', async () => {
-    render(<PendingAudioBanner onRetry={vi.fn()} />);
+    render(<PendingAudioBanner ownerUid={OWNER} onRetry={vi.fn()} />);
     await screen.findByText(/1 unsaved recording/);
 
     audioVault.listOrphans.mockResolvedValue([]);

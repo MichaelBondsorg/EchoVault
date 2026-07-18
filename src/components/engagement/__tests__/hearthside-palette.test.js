@@ -236,8 +236,8 @@ describe('CompanionNudge.jsx — Hearthside dark mode', () => {
     expect(src).toMatch(/dark:/);
   });
 
-  it('should have dark text variant for honey icon', () => {
-    expect(src).toContain('dark:text-honey-400');
+  it('should use a semantic accent token for the icon', () => {
+    expect(src).toContain('text-[var(--accent-deep)]');
   });
 });
 

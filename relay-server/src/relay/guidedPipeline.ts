@@ -122,7 +122,7 @@ const fetchInsightSummaries = async (userId: string): Promise<string[]> => {
       .filter((item: any) => item && typeof item.summary === 'string')
       .map((item: any) => item.summary);
   } catch (error) {
-    console.error(`[guidedPipeline] Failed to fetch insight summaries for user ${userId}:`, error);
+    console.error('[guidedPipeline] Failed to fetch insight summaries:', error);
     return [];
   }
 };

@@ -9,6 +9,7 @@ import {
 import { safeString, formatMentions } from '../../utils/string';
 import { formatDateForInput, getTodayForInput, parseDateInput, getDateString } from '../../utils/date';
 import { getEntryTypeColors, getEntityTypeColors, getTherapeuticColors } from '../../utils/colorMap';
+import ProvenanceDisclosure from '../ui/ProvenanceDisclosure';
 
 // Entity tag emoji lookup (hoisted for performance - used in tag rendering)
 const ENTITY_EMOJIS = {
@@ -116,12 +117,14 @@ const EntryCard = ({ entry, onDelete, onUpdate }) => {
   const [editing, setEditing] = useState(false);
   const [title, setTitle] = useState(entry.title);
   const [showAllTags, setShowAllTags] = useState(false); // LAY-001: Control tag overflow
+  const [showCorrections, setShowCorrections] = useState(false);
   // Use effectiveDate if set, otherwise fall back to createdAt
   const [editDate, setEditDate] = useState(
     formatDateForInput(entry.effectiveDate || entry.createdAt)
   );
   const isPending = entry.analysisStatus === 'pending';
-  const entryType = entry.entry_type || 'reflection';
+  const entryType = entry.userCorrections?.entryType?.value || entry.entry_type || 'unknown';
+  const tags = Array.isArray(entry.tags) ? entry.tags : [];
   const isTask = entryType === 'task';
   const isMixed = entryType === 'mixed';
   const isVent = entryType === 'vent';
@@ -386,8 +389,8 @@ const EntryCard = ({ entry, onDelete, onUpdate }) => {
           {/* LAY-001: Limit visible tags to prevent overflow */}
           {(() => {
             const MAX_VISIBLE_TAGS = 5;
-            const visibleTags = showAllTags ? entry.tags : entry.tags.slice(0, MAX_VISIBLE_TAGS);
-            const hiddenCount = entry.tags.length - MAX_VISIBLE_TAGS;
+            const visibleTags = showAllTags ? tags : tags.slice(0, MAX_VISIBLE_TAGS);
+            const hiddenCount = tags.length - MAX_VISIBLE_TAGS;
 
             return (
               <>
@@ -421,7 +424,7 @@ const EntryCard = ({ entry, onDelete, onUpdate }) => {
                   </button>
                 )}
                 {/* Show "Show less" button when all tags are visible */}
-                {showAllTags && entry.tags.length > MAX_VISIBLE_TAGS && (
+                {showAllTags && tags.length > MAX_VISIBLE_TAGS && (
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
@@ -438,11 +441,48 @@ const EntryCard = ({ entry, onDelete, onUpdate }) => {
         </div>
         <div className="flex items-center gap-2">
           {typeof entry.analysis?.mood_score === 'number' && entry.analysis.mood_score !== null && (
-            <span className="px-2 py-1 rounded-full text-[10px] font-display font-bold bg-warm-100">{(entry.analysis.mood_score * 100).toFixed(0)}%</span>
+            <span className="rounded-full bg-[var(--accent-wash)] px-2 py-1 text-[10px] font-bold text-[var(--accent-deep)]">
+              {entry.analysis.mood_score >= 0.7 ? 'Lighter' : entry.analysis.mood_score >= 0.4 ? 'Steady' : 'Heavy'}
+            </span>
           )}
-          <button onClick={() => onDelete(entry.id)} className="text-warm-300 hover:text-red-400 transition-colors"><Trash2 size={16}/></button>
+          <button onClick={() => setShowCorrections((shown) => !shown)} className="min-h-11 px-2 text-xs font-semibold text-[var(--accent-deep)]">Correct AI</button>
+          <button aria-label="Delete entry" onClick={() => onDelete(entry.id)} className="cloud-icon-button text-warm-300 hover:text-red-400 transition-colors"><Trash2 size={16}/></button>
         </div>
       </div>
+
+      {showCorrections && (
+        <div className="mb-4 grid gap-3 rounded-2xl border border-[var(--border)] bg-[var(--card)] p-3 sm:grid-cols-2">
+          <label className="text-xs font-semibold text-[var(--secondary-foreground)]">Entry type
+            <select defaultValue={entryType} className="mt-1 min-h-11 w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 text-sm" onChange={(event) => {
+              const value = event.target.value;
+              onUpdate(entry.id, {
+                entry_type: value,
+                userCorrections: { ...entry.userCorrections, entryType: { value, correctedAt: new Date().toISOString() } },
+              });
+            }}>
+              {['reflection', 'vent', 'task', 'mixed', 'celebration', 'unknown'].map((value) => <option key={value} value={value}>{value}</option>)}
+            </select>
+          </label>
+          <label className="text-xs font-semibold text-[var(--secondary-foreground)]">How it felt to you
+            <select defaultValue="" className="mt-1 min-h-11 w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 text-sm" onChange={(event) => {
+              if (!event.target.value) return;
+              const [label, numeric] = event.target.value.split(':');
+              const moodScore = Number(numeric);
+              onUpdate(entry.id, {
+                analysis: { ...entry.analysis, mood_score: moodScore },
+                userCorrections: { ...entry.userCorrections, mood: { label, value: moodScore, correctedAt: new Date().toISOString() } },
+              });
+            }}>
+              <option value="">Choose…</option>
+              <option value="very-heavy:0.15">Very heavy</option>
+              <option value="heavy:0.3">Heavy</option>
+              <option value="steady:0.5">Steady</option>
+              <option value="lighter:0.7">Lighter</option>
+              <option value="very-light:0.85">Very light</option>
+            </select>
+          </label>
+        </div>
+      )}
 
       <div className="mb-2">
         {editing ? (
@@ -723,6 +763,7 @@ const EntryCard = ({ entry, onDelete, onUpdate }) => {
           </div>
         </div>
       )}
+      <ProvenanceDisclosure entry={entry} />
     </motion.div>
   );
 };

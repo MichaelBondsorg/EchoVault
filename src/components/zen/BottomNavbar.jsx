@@ -1,7 +1,6 @@
-import { useState } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion } from 'framer-motion';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { Home, BookOpen, Plus, BarChart3, Settings, Mic, Type, Sparkles, X } from 'lucide-react';
+import { Home, BookOpen, Plus, BarChart3, Settings } from 'lucide-react';
 import { Haptics, ImpactStyle } from '@capacitor/haptics';
 import { Capacitor } from '@capacitor/core';
 
@@ -13,10 +12,9 @@ import { Capacitor } from '@capacitor/core';
  * @param {function} props.onTextEntry - Callback for text entry
  * @param {function} props.onQuickMood - Callback for quick mood log
  */
-const BottomNavbar = ({ onVoiceEntry, onTextEntry, onQuickMood }) => {
+const BottomNavbar = ({ onNewEntry }) => {
   const location = useLocation();
   const navigate = useNavigate();
-  const [fabExpanded, setFabExpanded] = useState(false);
 
   const triggerHaptic = async () => {
     if (Capacitor.isNativePlatform()) {
@@ -36,27 +34,9 @@ const BottomNavbar = ({ onVoiceEntry, onTextEntry, onQuickMood }) => {
     { path: '/settings', icon: Settings, label: 'Settings' },
   ];
 
-  const fabActions = [
-    { icon: Mic, label: 'Voice', color: 'bg-terra-500', action: onVoiceEntry },
-    { icon: Type, label: 'Text', color: 'bg-sage-500', action: onTextEntry },
-    { icon: Sparkles, label: 'Quick Mood', color: 'bg-honey-500', action: onQuickMood },
-  ];
-
   const handleFabClick = async () => {
     await triggerHaptic();
-    setFabExpanded(!fabExpanded);
-  };
-
-  const handleFabAction = async (action) => {
-    await triggerHaptic();
-    // Close FAB first, then trigger action after a small delay
-    // This prevents framer-motion animation from blocking the action
-    setFabExpanded(false);
-    setTimeout(() => {
-      if (action && typeof action === 'function') {
-        action();
-      }
-    }, 50);
+    onNewEntry?.();
   };
 
   const handleNavClick = async (path) => {
@@ -66,71 +46,11 @@ const BottomNavbar = ({ onVoiceEntry, onTextEntry, onQuickMood }) => {
 
   return (
     <>
-      {/* Backdrop when FAB is expanded */}
-      <AnimatePresence>
-        {fabExpanded && (
-          <motion.div
-            className="fixed inset-0 bg-black/20 backdrop-blur-sm z-40"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            onClick={() => setFabExpanded(false)}
-          />
-        )}
-      </AnimatePresence>
-
-      {/* FAB Expanded Actions */}
-      <AnimatePresence>
-        {fabExpanded && (
-          <motion.div
-            className="fixed bottom-28 left-1/2 -translate-x-1/2 z-50 flex flex-col items-center gap-3"
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: 20 }}
-          >
-            {fabActions.map((action, index) => (
-              <motion.button
-                key={action.label}
-                role="button"
-                tabIndex={0}
-                onTouchEnd={(e) => {
-                  e.preventDefault();
-                  handleFabAction(action.action);
-                }}
-                onClick={() => handleFabAction(action.action)}
-                className={`
-                  flex items-center gap-3 px-4 py-3
-                  ${action.color} text-white
-                  rounded-full shadow-glass-md
-                  font-medium text-sm
-                  cursor-pointer
-                  select-none
-                `}
-                style={{
-                  WebkitTapHighlightColor: 'transparent',
-                  touchAction: 'manipulation',
-                  WebkitUserSelect: 'none',
-                }}
-                initial={{ opacity: 0, y: 20, scale: 0.8 }}
-                animate={{ opacity: 1, y: 0, scale: 1 }}
-                exit={{ opacity: 0, y: 20, scale: 0.8 }}
-                transition={{ delay: index * 0.05 }}
-                whileHover={{ scale: 1.05 }}
-                whileTap={{ scale: 0.95 }}
-              >
-                <action.icon size={20} />
-                {action.label}
-              </motion.button>
-            ))}
-          </motion.div>
-        )}
-      </AnimatePresence>
-
       {/* Bottom Navigation Bar */}
       <motion.nav
         className="
           fixed bottom-0 left-0 right-0 z-50
-          bg-hearth-50/40 backdrop-blur-lg
+          bg-[var(--card)] border-t border-[var(--border)]
           px-2 py-2
           pb-[calc(env(safe-area-inset-bottom)+8px)]
           flex items-center justify-around
@@ -146,10 +66,11 @@ const BottomNavbar = ({ onVoiceEntry, onTextEntry, onQuickMood }) => {
               <motion.button
                 key="fab"
                 onClick={handleFabClick}
+                aria-label="New entry"
                 className={`
                   w-14 h-14 -mt-6
                   rounded-full
-                  ${fabExpanded ? 'bg-hearth-600' : 'bg-gradient-to-br from-honey-400 to-honey-600'}
+                  bg-[var(--primary)]
                   text-white
                   shadow-glass-lg
                   flex items-center justify-center
@@ -157,9 +78,8 @@ const BottomNavbar = ({ onVoiceEntry, onTextEntry, onQuickMood }) => {
                 `}
                 whileHover={{ scale: 1.05 }}
                 whileTap={{ scale: 0.95 }}
-                animate={fabExpanded ? { rotate: 45 } : { rotate: 0 }}
               >
-                {fabExpanded ? <X size={24} /> : <Plus size={28} />}
+                <Plus size={28} />
               </motion.button>
             );
           }
@@ -173,7 +93,7 @@ const BottomNavbar = ({ onVoiceEntry, onTextEntry, onQuickMood }) => {
               className={`
                 flex flex-col items-center gap-1 p-2
                 transition-colors duration-200
-                ${isActive ? 'text-honey-600' : 'text-hearth-500'}
+                ${isActive ? 'text-[var(--accent-deep)]' : 'text-[var(--muted-foreground)]'}
               `}
               whileHover={{ scale: 1.05 }}
               whileTap={{ scale: 0.95 }}

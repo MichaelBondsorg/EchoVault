@@ -12,24 +12,32 @@ import { audioVault } from '../../services/audio/audioVault';
  * whenever the vault reports a change (e.g. another tab/flow linked or
  * deleted a recording).
  */
-const PendingAudioBanner = ({ onRetry }) => {
+const PendingAudioBanner = ({ ownerUid, onRetry }) => {
   const [orphans, setOrphans] = useState([]);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    audioVault.listOrphans().then(setOrphans);
+    if (!ownerUid) {
+      setOrphans([]);
+      return undefined;
+    }
+    audioVault.listOrphans(ownerUid).then(setOrphans);
 
-    const refresh = () => audioVault.listOrphans().then(setOrphans);
+    const refresh = (event) => {
+      if (!event.detail?.ownerUid || event.detail.ownerUid === ownerUid) {
+        audioVault.listOrphans(ownerUid).then(setOrphans);
+      }
+    };
     window.addEventListener('engram:audio-vault-changed', refresh);
     return () => window.removeEventListener('engram:audio-vault-changed', refresh);
-  }, []);
+  }, [ownerUid]);
 
   if (orphans.length === 0) return null;
 
   const retryAll = async () => {
     setBusy(true);
     for (const { id } of orphans) {
-      const rec = await audioVault.getRecording(id);
+      const rec = await audioVault.getRecording(ownerUid, id);
       if (rec) {
         // Linking on success (and leaving unlinked on failure) is the
         // pipeline's responsibility now — we just drive the retry and
@@ -37,7 +45,7 @@ const PendingAudioBanner = ({ onRetry }) => {
         await onRetry(rec.base64, rec.mime, id);
       }
     }
-    setOrphans(await audioVault.listOrphans());
+    setOrphans(await audioVault.listOrphans(ownerUid));
     setBusy(false);
   };
 

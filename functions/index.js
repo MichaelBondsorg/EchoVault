@@ -14,7 +14,9 @@ import { initializeApp, getApps } from 'firebase-admin/app';
 import { getFirestore, FieldValue, Timestamp } from 'firebase-admin/firestore';
 import { getAuth } from 'firebase-admin/auth';
 import { createHash, timingSafeEqual } from 'node:crypto';
+import { OAuth2Client } from 'google-auth-library';
 import { verifyAppleIdentityToken } from './src/auth/appleToken.js';
+import { resolveProviderSubject } from './src/auth/providerSubjects.js';
 import { isCrisisText } from './src/safety/crisisKeywords.js';
 import { sendNotification } from './src/notifications/sender.js';
 import { getNotificationTemplate } from './src/notifications/templates.js';
@@ -40,6 +42,7 @@ if (getApps().length === 0) {
   initializeApp();
 }
 const db = getFirestore();
+const googleOAuthClient = new OAuth2Client();
 
 // Define secrets (set these with: firebase functions:secrets:set SECRET_NAME)
 const geminiApiKey = defineSecret('GEMINI_API_KEY');
@@ -497,7 +500,8 @@ async function analyzeEntry(apiKey, text, entryType = 'reflection', userLocalHou
         return {
           title: text.substring(0, 50) + (text.length > 50 ? '...' : ''),
           tags: [],
-          mood_score: 0.3,
+          mood_score: null,
+          analysisStatus: 'failed',
           framework: 'support',
           entry_type: 'vent'
         };
@@ -509,7 +513,10 @@ async function analyzeEntry(apiKey, text, entryType = 'reflection', userLocalHou
       return {
         title: parsed.title || text.substring(0, 50) + (text.length > 50 ? '...' : ''),
         tags: Array.isArray(parsed.tags) ? parsed.tags : [],
-        mood_score: typeof parsed.mood_score === 'number' ? parsed.mood_score : 0.3,
+        mood_score: typeof parsed.mood_score === 'number' ? parsed.mood_score : null,
+        analysisStatus: typeof parsed.mood_score === 'number' ? 'available' : 'partial',
+        moodModelVersion: 'gemini-analysis-v2',
+        moodPromptVersion: 'mood-anchored-v2',
         framework: 'support',
         entry_type: 'vent',
         vent_support: {
@@ -522,7 +529,8 @@ async function analyzeEntry(apiKey, text, entryType = 'reflection', userLocalHou
       return {
         title: text.substring(0, 50) + (text.length > 50 ? '...' : ''),
         tags: [],
-        mood_score: 0.3,
+        mood_score: null,
+        analysisStatus: 'failed',
         framework: 'support',
         entry_type: 'vent'
       };
@@ -570,11 +578,18 @@ async function analyzeEntry(apiKey, text, entryType = 'reflection', userLocalHou
     Score based on HOW they're expressing themselves, not WHAT topics they mention.
     Look for emotional language, tone, and context clues about their actual state.
 
+    ANCHORED EXAMPLES:
+    - Around 0.2: actively panicked, despairing, or unable to cope in the entry.
+    - Around 0.5: calmly processing mixed feelings without clear positive or negative dominance.
+    - Around 0.8: clearly joyful, energized, proud, hopeful, or savoring a meaningful win.
+    Use the full range when the language supports it. Do not default uncertain results to 0.5;
+    return null when the emotional state cannot be inferred reliably.
+
     Return JSON:
     {
       "title": "Short creative title (max 6 words)",
       "tags": ["Tag1", "Tag2"],
-      "mood_score": 0.5 (based on guidelines above),
+      "mood_score": null,
       "framework": "cbt" | "act" | "celebration" | "general",
 
       // INCLUDE IF FRAMEWORK == 'cbt'
@@ -619,7 +634,8 @@ async function analyzeEntry(apiKey, text, entryType = 'reflection', userLocalHou
       return {
         title: text.substring(0, 50) + (text.length > 50 ? '...' : ''),
         tags: [],
-        mood_score: 0.5,
+        mood_score: null,
+        analysisStatus: 'failed',
         framework: 'general',
         entry_type: entryType
       };
@@ -631,7 +647,10 @@ async function analyzeEntry(apiKey, text, entryType = 'reflection', userLocalHou
     const result = {
       title: parsed.title || text.substring(0, 50) + (text.length > 50 ? '...' : ''),
       tags: Array.isArray(parsed.tags) ? parsed.tags : [],
-      mood_score: typeof parsed.mood_score === 'number' ? parsed.mood_score : 0.5,
+      mood_score: typeof parsed.mood_score === 'number' ? parsed.mood_score : null,
+      analysisStatus: typeof parsed.mood_score === 'number' ? 'available' : 'partial',
+      moodModelVersion: 'gemini-analysis-v2',
+      moodPromptVersion: 'mood-anchored-v2',
       framework: parsed.framework || 'general',
       entry_type: entryType
     };
@@ -658,7 +677,8 @@ async function analyzeEntry(apiKey, text, entryType = 'reflection', userLocalHou
     return {
       title: text.substring(0, 50) + (text.length > 50 ? '...' : ''),
       tags: [],
-      mood_score: 0.5,
+      mood_score: null,
+      analysisStatus: 'failed',
       framework: 'general',
       entry_type: entryType
     };
@@ -1495,7 +1515,7 @@ export const transcribeEntry = onCall(
     }
 
     const userId = request.auth.uid;
-    const { base64, mimeType } = request.data;
+    const { base64, mimeType, properNouns = [] } = request.data;
 
     if (!base64 || !mimeType) {
       throw new HttpsError('invalid-argument', 'Audio data and mimeType are required');
@@ -1518,7 +1538,7 @@ export const transcribeEntry = onCall(
           {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(buildGeminiRequestBody(base64, mimeType)),
+            body: JSON.stringify(buildGeminiRequestBody(base64, mimeType, properNouns)),
             signal: AbortSignal.timeout(TRANSCRIBE_TIMEOUT_MS)
           }
         );
@@ -1528,7 +1548,12 @@ export const transcribeEntry = onCall(
         } else if (geminiRes.ok) {
           const parsed = parseFusedResponse(await geminiRes.json());
           if (parsed && parsed.transcript) {
-            return { transcript: parsed.transcript, toneAnalysis: parsed.toneAnalysis, engine: 'gemini' };
+            return {
+              rawTranscript: parsed.rawTranscript,
+              transcript: parsed.transcript,
+              toneAnalysis: parsed.toneAnalysis,
+              engine: 'gemini'
+            };
           }
           if (parsed && parsed.transcript === '') {
             return { error: 'API_NO_CONTENT' }; // model heard no speech
@@ -1565,7 +1590,7 @@ export const transcribeEntry = onCall(
 
       const transcript = whisperResult?.text?.trim();
       if (!transcript) return { error: 'API_NO_CONTENT' }; // call succeeded, no speech detected
-      return { transcript, toneAnalysis: null, engine: 'whisper' };
+      return { rawTranscript: transcript, transcript, toneAnalysis: null, engine: 'whisper' };
     } catch (error) {
       console.error('[transcribeEntry] both engines failed', {
         userId, audioBytes: base64?.length, mimeType, err: error?.message
@@ -2201,7 +2226,7 @@ export const onEntryCreate = onDocumentCreated(
       }
 
       // Step 0: Generate embedding if not present (OPTIMIZED: Background processing)
-      if (!entry.embedding && entry.text) {
+      if (entry.aiProcessingConsent !== false && !entry.embedding && entry.text) {
         console.time(`[Entry ${entryId}] Generate embedding`);
         try {
           const apiKey = geminiApiKey.value();
@@ -2807,6 +2832,10 @@ export const onEntryCreateMemoryExtraction = onDocumentCreated(
 
     const entryData = event.data.data();
     const entry = { id: entryId, ...entryData };
+
+    if (entry.aiProcessingConsent === false) {
+      return { skipped: true, reason: 'ai_processing_paused' };
+    }
 
     // Skip if no text
     if (!entry.text?.trim()) return null;
@@ -3961,22 +3990,8 @@ export const exchangeGoogleToken = onCall(
     console.log('Received Google ID token exchange request');
 
     try {
-      // Verify the Google ID token
-      // Use Google's tokeninfo endpoint for verification
-      const verifyUrl = `https://oauth2.googleapis.com/tokeninfo?id_token=${idToken}`;
-      const verifyResponse = await fetch(verifyUrl);
-
-      if (!verifyResponse.ok) {
-        const errorText = await verifyResponse.text();
-        console.error('Google token verification failed:', verifyResponse.status, errorText);
-        throw new HttpsError('unauthenticated', 'Invalid Google ID token');
-      }
-
-      const tokenInfo = await verifyResponse.json();
-      console.log('Token verified for:', tokenInfo.email);
-
-      // Verify the token is for our app (check audience)
-      // OAuth Client IDs should be set via environment variables in Firebase Functions
+      // Verify signature, issuer, expiry, and audience without placing the
+      // credential in a query string or relying on tokeninfo response parsing.
       const webClientId = process.env.GOOGLE_WEB_CLIENT_ID || '581319345416-9h59io8iev888kej6riag3tqnvik6na0.apps.googleusercontent.com';
       const iosClientId = process.env.GOOGLE_IOS_CLIENT_ID || '581319345416-sf58st9q2hvst5kakt4tn3sgulor6r7m.apps.googleusercontent.com';
       const validAudiences = [
@@ -3984,16 +3999,22 @@ export const exchangeGoogleToken = onCall(
         iosClientId, // iOS client (newer)
         '581319345416-oijg7nb3nus8fni8q5ia31u8slkfrmrs.apps.googleusercontent.com', // iOS client (original, in GoogleService-Info.plist)
       ];
-
-      if (!validAudiences.includes(tokenInfo.aud)) {
-        console.error('Invalid audience:', tokenInfo.aud);
+      let ticket;
+      try {
+        ticket = await googleOAuthClient.verifyIdToken({ idToken, audience: validAudiences });
+      } catch (verifyError) {
+        console.error('Google identity token verification failed:', verifyError.message);
+        throw new HttpsError('unauthenticated', 'Invalid Google ID token');
+      }
+      const tokenInfo = ticket.getPayload();
+      if (!tokenInfo?.sub) {
         throw new HttpsError('unauthenticated', 'Token has invalid audience');
       }
+      console.log('Google identity token verified');
 
-      // Check if email is verified
-      if (tokenInfo.email_verified !== 'true') {
-        console.warn('Email not verified for:', tokenInfo.email);
-        // Still allow sign-in, but log it
+      // Never link an unverified email to an existing Firebase identity.
+      if (tokenInfo.email_verified !== true || !tokenInfo.email) {
+        throw new HttpsError('unauthenticated', 'Google email must be verified');
       }
 
       // Get user info from Google token
@@ -4001,24 +4022,22 @@ export const exchangeGoogleToken = onCall(
       const name = tokenInfo.name;
       const picture = tokenInfo.picture;
 
-      // Look up existing Firebase user by email to preserve their data
-      // If they signed in via web before, they have a different UID than tokenInfo.sub
-      let uid;
       try {
-        const existingUser = await getAuth().getUserByEmail(email);
-        uid = existingUser.uid;
-        console.log('Found existing Firebase user:', uid, 'for email:', email);
-      } catch (userError) {
-        if (userError.code === 'auth/user-not-found') {
-          // No existing user - use Google sub as new UID
-          uid = tokenInfo.sub;
-          console.log('No existing user, creating with Google sub:', uid);
-        } else {
-          throw userError;
+        var uid = await resolveProviderSubject({
+          firestore: db,
+          auth: getAuth(),
+          provider: 'google',
+          subject: tokenInfo.sub,
+          email,
+        });
+      } catch (linkError) {
+        if (linkError.code === 'provider_link_requires_reauthentication') {
+          throw new HttpsError('already-exists', 'Sign in with your existing method, then link Google in Settings.');
         }
+        throw linkError;
       }
 
-      console.log('Creating custom token for uid:', uid);
+      console.log('Creating Google custom token');
 
       // Create a Firebase custom token
       const customToken = await getAuth().createCustomToken(uid, {
@@ -4029,7 +4048,7 @@ export const exchangeGoogleToken = onCall(
         provider: 'google'
       });
 
-      console.log('Custom token created successfully for:', email);
+      console.log('Google custom token created successfully');
 
       return {
         customToken,
@@ -4100,38 +4119,28 @@ export const exchangeAppleToken = onCall(
         ? `${user.name.firstName} ${user.name.lastName}`
         : user?.name?.firstName || null;
 
-      console.log('Apple user info:', { appleUserId, email, name });
+      console.log('Apple identity token verified');
 
-      // Look up existing Firebase user by email or Apple user ID
-      let uid;
       let existingEmail = email;
-
       try {
-        // First try to find by email (if we have it)
-        if (email) {
-          const existingUser = await getAuth().getUserByEmail(email);
-          uid = existingUser.uid;
-          existingEmail = existingUser.email;
-          console.log('Found existing Firebase user by email:', uid);
-        } else {
-          throw new Error('No email, try by provider');
+        var uid = await resolveProviderSubject({
+          firestore: db,
+          auth: getAuth(),
+          provider: 'apple',
+          subject: appleUserId,
+          email,
+        });
+        if (!existingEmail) {
+          try { existingEmail = (await getAuth().getUser(uid)).email; } catch { /* new identity */ }
         }
-      } catch (emailError) {
-        // Try to find user by Apple provider UID
-        try {
-          // Apple provider UIDs are stored as apple.com:sub
-          const existingUser = await getAuth().getUser(`apple_${appleUserId}`);
-          uid = existingUser.uid;
-          existingEmail = existingUser.email;
-          console.log('Found existing Firebase user by Apple ID:', uid);
-        } catch (providerError) {
-          // No existing user - create new UID based on Apple user ID
-          uid = `apple_${appleUserId}`;
-          console.log('Creating new user with Apple-based UID:', uid);
+      } catch (linkError) {
+        if (linkError.code === 'provider_link_requires_reauthentication') {
+          throw new HttpsError('already-exists', 'Sign in with your existing method, then link Apple in Settings.');
         }
+        throw linkError;
       }
 
-      console.log('Creating custom token for uid:', uid);
+      console.log('Creating Apple custom token');
 
       // Create a Firebase custom token
       const customToken = await getAuth().createCustomToken(uid, {
@@ -4142,7 +4151,7 @@ export const exchangeAppleToken = onCall(
         apple_sub: appleUserId
       });
 
-      console.log('Custom token created successfully for Apple user:', existingEmail || appleUserId);
+      console.log('Apple custom token created successfully');
 
       return {
         customToken,
@@ -4197,6 +4206,13 @@ export const deleteAccount = onCall(
         .collection('users')
         .doc(uid);
       await db.recursiveDelete(userDocRef);
+
+      // Remove provider-subject pointers so a deleted identity can never be
+      // resurrected into the old UID on a later sign-in.
+      const providerMappings = await db.collection('providerSubjects').where('uid', '==', uid).get();
+      const mappingWriter = db.bulkWriter();
+      providerMappings.docs.forEach((mapping) => mappingWriter.delete(mapping.ref));
+      await mappingWriter.close();
 
       // Finally remove the auth identity itself.
       await getAuth().deleteUser(uid);

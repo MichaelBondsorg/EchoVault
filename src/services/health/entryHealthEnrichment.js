@@ -17,6 +17,17 @@ import { doc, updateDoc } from 'firebase/firestore';
 import { APP_COLLECTION_ID } from '../../config/constants';
 import { getHealthSummary } from './healthDataService';
 
+export const resolveEntryDate = (value) => {
+  if (value?.toDate && typeof value.toDate === 'function') {
+    const converted = value.toDate();
+    if (converted instanceof Date && !Number.isNaN(converted.getTime())) return converted;
+  }
+  if (value instanceof Date && !Number.isNaN(value.getTime())) return value;
+  const converted = new Date(value);
+  if (Number.isNaN(converted.getTime())) throw new Error('entry_date_invalid');
+  return converted;
+};
+
 /**
  * Check if an entry needs health context enrichment
  * @param {Object} entry - The entry to check
@@ -80,9 +91,7 @@ export const enrichEntryWithHealth = async (entry) => {
 
   try {
     // Get the entry's creation date
-    const entryDate = entry.createdAt?.toDate?.() ||
-                      entry.createdAt instanceof Date ? entry.createdAt :
-                      new Date(entry.createdAt);
+    const entryDate = resolveEntryDate(entry.createdAt);
 
     // Fetch health data for that date
     const healthSummary = await getHealthSummary(entryDate);
@@ -122,6 +131,12 @@ export const enrichEntryWithHealth = async (entry) => {
       strain: healthSummary.strain || null,
 
       source: healthSummary.source || 'enrichment',
+      requestedLocalDate: healthSummary.requestedLocalDate || null,
+      timezone: healthSummary.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
+      queriedAt: healthSummary.queriedAt || new Date().toISOString(),
+      sourceRecordIds: healthSummary.sourceRecordIds || {},
+      observedIntervals: healthSummary.observedIntervals || {},
+      freshness: healthSummary.fromCache ? 'stale' : (healthSummary.freshness || 'fresh'),
       enrichedAt: new Date().toISOString(),
       enrichedOnPlatform: platform,
       originalEntryPlatform: entry.createdOnPlatform || 'unknown'
@@ -140,11 +155,15 @@ export const enrichEntryWithHealth = async (entry) => {
 
   } catch (error) {
     console.error(`[HealthEnrichment] Failed to enrich entry ${entry.id}:`, error);
-    // Mark as attempted to prevent infinite loops
-    try {
-      await markEnrichmentAttempted(user.uid, entry.id);
-    } catch {
-      // Ignore
+    // Permission/unsupported-platform errors are terminal. Transient provider,
+    // network, and invalid-date failures remain retryable instead of being
+    // permanently marked complete.
+    if (['permission_denied', 'not_supported'].includes(error?.code)) {
+      try {
+        await markEnrichmentAttempted(user.uid, entry.id);
+      } catch {
+        // Ignore
+      }
     }
     return null;
   }

@@ -18,8 +18,8 @@ const CompanionNudge = ({ onClick, hasNewInsight = false }) => {
       className="
         fixed bottom-24 right-4 z-40
         w-14 h-14
-        bg-white/30 dark:bg-warm-800/30 backdrop-blur-xl
-        border border-white/30 dark:border-warm-700/30
+        bg-[var(--card)]
+        border border-[var(--border)]
         rounded-full
         shadow-glass-md
         flex items-center justify-center
@@ -30,20 +30,11 @@ const CompanionNudge = ({ onClick, hasNewInsight = false }) => {
       transition={{ delay: 0.5, type: 'spring', damping: 15 }}
       whileHover={{ scale: 1.1 }}
       whileTap={{ scale: 0.95 }}
-      aria-label="Open AI Companion"
+      aria-label="Talk with Engram"
     >
       {/* Animated sparkle icon */}
       <motion.div
-        className="text-honey-600 dark:text-honey-400"
-        animate={{
-          scale: [1, 1.1, 1],
-          opacity: [0.8, 1, 0.8],
-        }}
-        transition={{
-          duration: 2,
-          repeat: Infinity,
-          ease: 'easeInOut',
-        }}
+        className="text-[var(--accent-deep)]"
       >
         <Sparkles size={24} />
       </motion.div>
@@ -63,23 +54,6 @@ const CompanionNudge = ({ onClick, hasNewInsight = false }) => {
         />
       )}
 
-      {/* Pulse ring animation */}
-      <motion.div
-        className="
-          absolute inset-0
-          rounded-full
-          border-2 border-honey-400/30 dark:border-honey-500/20
-        "
-        animate={{
-          scale: [1, 1.3],
-          opacity: [0.5, 0],
-        }}
-        transition={{
-          duration: 2,
-          repeat: Infinity,
-          ease: 'easeOut',
-        }}
-      />
     </motion.button>
   );
 };

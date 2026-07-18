@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { handleNetworkChange, triggerSync } from '../services/sync/syncOrchestrator';
-import { hasPendingEntries, addSyncListener } from '../services/offline/offlineManager';
+import { addSyncListener } from '../services/offline/offlineManager';
+import { getStats } from '../services/offline/offlineStore';
 
 /**
  * Hook to track network/online status with sync integration
@@ -15,7 +16,7 @@ import { hasPendingEntries, addSyncListener } from '../services/offline/offlineM
  * @param {boolean} options.autoSync - Auto-sync when coming online (default: true)
  * @returns {Object} Network status info
  */
-export const useNetworkStatus = ({ autoSync = true } = {}) => {
+export const useNetworkStatus = ({ autoSync = true, ownerUid = null } = {}) => {
   const [isOnline, setIsOnline] = useState(navigator.onLine);
   const [wasOffline, setWasOffline] = useState(false);
   const [pendingCount, setPendingCount] = useState(0);
@@ -26,10 +27,14 @@ export const useNetworkStatus = ({ autoSync = true } = {}) => {
 
   // Check for pending entries on mount and periodically
   useEffect(() => {
+    isMounted.current = true;
     const checkPending = async () => {
+      if (!ownerUid) {
+        if (isMounted.current) setPendingCount(0);
+        return;
+      }
       try {
-        const { hasPendingEntries: check } = await import('../services/offline/offlineManager');
-        const stats = await import('../services/offline/offlineStore').then(m => m.getStats());
+        const stats = await getStats(ownerUid);
         if (isMounted.current) {
           setPendingCount(stats.pending + stats.failed);
         }
@@ -47,12 +52,12 @@ export const useNetworkStatus = ({ autoSync = true } = {}) => {
       isMounted.current = false;
       clearInterval(interval);
     };
-  }, []);
+  }, [ownerUid]);
 
   // Listen for sync events
   useEffect(() => {
     const unsubscribe = addSyncListener((event) => {
-      if (!isMounted.current) return;
+      if (!isMounted.current || event.ownerUid !== ownerUid) return;
 
       switch (event.type) {
         case 'sync_started':
@@ -62,7 +67,7 @@ export const useNetworkStatus = ({ autoSync = true } = {}) => {
           setIsSyncing(false);
           setLastSyncResult(event.results);
           // Update pending count
-          import('../services/offline/offlineStore').then(m => m.getStats()).then(stats => {
+          getStats(ownerUid).then(stats => {
             if (isMounted.current) {
               setPendingCount(stats.pending + stats.failed);
             }
@@ -80,7 +85,7 @@ export const useNetworkStatus = ({ autoSync = true } = {}) => {
     });
 
     return unsubscribe;
-  }, []);
+  }, [ownerUid]);
 
   // Handle network status changes
   useEffect(() => {
