@@ -15,7 +15,37 @@ env:
   REGION: us-central1
 
 jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38  # v6
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: relay-server/package-lock.json
+
+      - name: Install relay dependencies
+        run: npm ci
+        working-directory: relay-server
+
+      - name: Test relay
+        run: npm test
+        working-directory: relay-server
+
+      - name: Typecheck relay
+        run: npm run typecheck
+        working-directory: relay-server
+
+      - name: Build relay
+        run: npm run build
+        working-directory: relay-server
+
   deploy:
+    needs: test
     runs-on: ubuntu-latest
 
     permissions:
@@ -24,7 +54,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6
 
       - name: Google Auth
         uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed  # v2
@@ -63,6 +93,12 @@ jobs:
             --tag candidate \
             --set-env-vars="NODE_ENV=production,WHOOP_REDIRECT_URI=https://echovault-voice-relay-581319345416.us-central1.run.app/auth/whoop/callback" \
             --set-secrets="OPENAI_API_KEY=OPENAI_API_KEY:latest,WHOOP_CLIENT_ID=WHOOP_CLIENT_ID:latest,WHOOP_CLIENT_SECRET=WHOOP_CLIENT_SECRET:latest,WHOOP_TOKEN_ENCRYPTION_KEY=WHOOP_TOKEN_ENCRYPTION_KEY:latest,GEMINI_API_KEY=GEMINI_API_KEY:latest"
+
+      - name: Verify candidate health
+        run: |
+          CANDIDATE_URL="$(gcloud run services describe ${{ env.SERVICE_NAME }} --region ${{ env.REGION }} --format=json | jq -r '.status.traffic[] | select(.tag == "candidate") | .url' | head -n 1)"
+          test -n "$CANDIDATE_URL"
+          curl --fail --silent --show-error --retry 5 --retry-all-errors --retry-delay 2 "$CANDIDATE_URL/health"
 
       # Promote the candidate revision to 100% traffic. Split into its own step
       # so it can be gated/paused later (canary) without touching the build.

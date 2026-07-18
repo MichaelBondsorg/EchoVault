@@ -5,6 +5,13 @@
  * These stores manage application state extracted from App.jsx.
  */
 
+import { useAuthStore } from './authStore';
+import { useUiStore } from './uiStore';
+import { useEntriesStore } from './entriesStore';
+import { useSafetyStore } from './safetyStore';
+import { useSignalsStore } from './signalsStore';
+import { useReportsStore } from './reportsStore';
+
 // Auth store - user authentication and login state
 export {
   useAuthStore,
@@ -59,13 +66,6 @@ export {
  * Reset all stores (called on logout)
  */
 export const resetAllStores = () => {
-  const { useAuthStore } = require('./authStore');
-  const { useUiStore } = require('./uiStore');
-  const { useEntriesStore } = require('./entriesStore');
-  const { useSafetyStore } = require('./safetyStore');
-  const { useSignalsStore } = require('./signalsStore');
-  const { useReportsStore } = require('./reportsStore');
-
   useAuthStore.getState().reset();
   useUiStore.getState().reset();
   useEntriesStore.getState().reset();

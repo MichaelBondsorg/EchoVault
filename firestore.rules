@@ -11,6 +11,14 @@ service cloud.firestore {
       return isAuthenticated() && request.auth.uid == userId;
     }
 
+    // Custom claims are optional. Guard access before dereferencing so a
+    // normal authenticated user never causes a rule evaluation error.
+    function isAdmin() {
+      return isAuthenticated()
+        && 'admin' in request.auth.token
+        && request.auth.token.admin == true;
+    }
+
     // Artifacts collection (main app data)
     match /artifacts/{appId}/users/{userId} {
       // Allow user to read/write their own user document
@@ -35,7 +43,7 @@ service cloud.firestore {
       // Writable by user OR by Cloud Functions (service account)
       match /day_summaries/{dateId} {
         allow read: if isOwner(userId);
-        allow write: if isOwner(userId) || request.auth.token.admin == true;
+        allow write: if isOwner(userId) || isAdmin();
       }
 
       // Goals subcollection
@@ -145,8 +153,9 @@ service cloud.firestore {
       // Report preferences subcollection (user-managed privacy settings)
       match /report_preferences/{reportId} {
         allow read: if isOwner(userId);
-        allow write: if isOwner(userId)
+        allow create, update: if isOwner(userId)
           && request.resource.data.keys().size() <= 10;
+        allow delete: if isOwner(userId);
       }
 
       // FCM tokens subcollection (write-only, no client reads or deletes)
@@ -159,7 +168,7 @@ service cloud.firestore {
 
     // Allow Cloud Functions to read/write with admin claims
     match /{document=**} {
-      allow read, write: if request.auth.token.admin == true;
+      allow read, write: if isAdmin();
     }
   }
 }

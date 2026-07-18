@@ -250,9 +250,10 @@ export const compareAnalysis = (localAnalysis, serverAnalysis) => {
   return {
     comparable: true,
     classificationMatch: localAnalysis.entry_type === serverAnalysis.entry_type,
-    moodScoreDiff: Math.abs(
-      (localAnalysis.mood_score ?? 0.5) - (serverAnalysis.mood_score ?? 0.5)
-    ),
+    moodScoreDiff:
+      Number.isFinite(localAnalysis.mood_score) && Number.isFinite(serverAnalysis.mood_score)
+        ? Math.abs(localAnalysis.mood_score - serverAnalysis.mood_score)
+        : null,
     localConfidence: localAnalysis.classification_confidence,
     tasksExtractedLocal: (localAnalysis.extracted_tasks || []).length,
     tasksExtractedServer: (serverAnalysis.extracted_tasks || []).length

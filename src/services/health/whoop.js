@@ -11,6 +11,7 @@
 import { auth } from '../../config/firebase';
 import { Preferences } from '@capacitor/preferences';
 import { cacheHealthData } from './platformHealth';
+import { normalizeWhoopSummary, requestedLocalDate } from './whoopTransforms';
 
 // Derive HTTP relay URL from WebSocket URL
 const getRelayHttpUrl = () => {
@@ -91,50 +92,27 @@ const relayFetch = async (endpoint, options = {}, timeoutMs = 10000) => {
  * Checks local cache first, then verifies with server
  */
 export const isWhoopLinked = async () => {
-  console.log('[Whoop] isWhoopLinked called');
-
-  // Quick check from local storage
-  try {
-    const { value } = await Preferences.get({ key: WHOOP_STATUS_KEY });
-    console.log('[Whoop] Local storage status:', value);
-    if (value === 'true') {
-      // Verify with server in background (don't block)
-      verifyWhoopStatus().catch(err =>
-        console.warn('[Whoop] Background verification failed:', err.message)
-      );
-      return true;
-    }
-  } catch (e) {
-    console.warn('[Whoop] Local storage check failed:', e.message);
-  }
-
-  // Check with server (with shorter timeout for status check)
-  return verifyWhoopStatus();
+  const status = await getWhoopConnectionStatus();
+  return status === 'connected';
 };
 
 /**
- * Verify Whoop status with server and update local cache
+ * Return a connection state that distinguishes provider linkage from relay
+ * reachability. Cached linkage is never treated as fresh provider access.
  */
-const verifyWhoopStatus = async () => {
+export const getWhoopConnectionStatus = async () => {
   try {
-    console.log('[Whoop] Verifying status with server...');
     const { linked } = await relayFetch('/auth/whoop/status', {}, 5000);
-    console.log('[Whoop] Server status:', linked);
     await setLocalWhoopStatus(linked);
-    return linked;
+    return linked ? 'connected' : 'disconnected';
   } catch (error) {
-    console.error('[Whoop] Failed to verify status:', error.message);
-    // On error, check if we have a cached "linked" status and trust it
+    console.warn('[Whoop] Status verification unavailable:', error.message);
     try {
       const { value } = await Preferences.get({ key: WHOOP_STATUS_KEY });
-      if (value === 'true') {
-        console.log('[Whoop] Using cached linked status due to server error');
-        return true;
-      }
+      return value === 'true' ? 'unreachable' : 'disconnected';
     } catch {
-      // Ignore
+      return 'disconnected';
     }
-    return false;
   }
 };
 
@@ -190,76 +168,13 @@ export const handleWhoopOAuthSuccess = async () => {
  * Returns data in Engram-compatible format
  */
 export const getWhoopSummary = async (date = new Date()) => {
+  const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+  const localDate = requestedLocalDate(date, timezone);
   try {
     const response = await relayFetch(
-      `/health/whoop/summary?date=${date.toISOString()}`
+      `/health/whoop/summary?date=${encodeURIComponent(localDate)}&timezone=${encodeURIComponent(timezone)}`
     );
-
-    // Transform response to match Engram nested health schema (same as HealthKit)
-    const workouts = response.workouts?.map(w => ({
-      type: w.type,
-      duration: w.duration,
-      calories: w.calories,
-      strain: w.strain,
-    })) || [];
-
-    const summary = {
-      available: response.available,
-      source: 'whoop',
-      date: response.date,
-
-      // Nested format matching HealthKit structure for UI compatibility
-      sleep: response.sleep ? {
-        totalHours: response.sleep.totalHours,
-        quality: response.sleep.quality,
-        score: response.sleep.score || null,
-        stages: null, // Whoop doesn't provide sleep stages breakdown
-        inBed: response.sleep.inBed,
-        asleep: response.sleep.asleep,
-      } : null,
-
-      heart: {
-        restingRate: response.heartRate?.resting || null,
-        currentRate: null, // Whoop doesn't provide current HR
-        hrv: response.hrv?.average || null,
-        hrvTrend: null,
-        stressIndicator: response.hrv?.stressIndicator || null,
-      },
-
-      activity: {
-        // Whoop doesn't track steps - estimate from strain calories
-        stepsToday: response.strain?.calories ? Math.round(response.strain.calories * 15) : null,
-        totalCaloriesBurned: response.strain?.calories || null,
-        activeCaloriesBurned: response.strain?.calories || null,
-        totalExerciseMinutes: workouts.reduce((sum, w) => sum + (w.duration || 0), 0),
-        hasWorkout: workouts.length > 0,
-        workouts: workouts,
-      },
-
-      // Whoop-specific fields (preserved for Whoop UI elements)
-      recovery: response.recovery ? {
-        score: response.recovery.score,
-        status: response.recovery.status,
-      } : null,
-      strain: response.strain ? {
-        score: response.strain.score,
-        calories: response.strain.calories,
-      } : null,
-
-      // Legacy flat fields for backward compatibility
-      hrv: response.hrv ? {
-        average: response.hrv.average,
-        stressIndicator: response.hrv.stressIndicator,
-      } : null,
-      heartRate: response.heartRate ? {
-        resting: response.heartRate.resting,
-      } : null,
-      workouts: workouts,
-      hasWorkout: workouts.length > 0,
-      steps: response.strain?.calories ? Math.round(response.strain.calories * 15) : null,
-
-      queriedAt: response.queriedAt || new Date().toISOString(),
-    };
+    const summary = normalizeWhoopSummary(response, localDate, timezone);
 
     // Cache for offline/web access
     await cacheHealthData(summary);
@@ -270,7 +185,7 @@ export const getWhoopSummary = async (date = new Date()) => {
     console.error('Error fetching Whoop summary:', error);
 
     // Try to return cached data on error
-    const cached = await getCachedWhoopSummary();
+    const cached = await getCachedWhoopSummary(localDate, timezone);
     if (cached) {
       return {
         ...cached,
@@ -282,6 +197,9 @@ export const getWhoopSummary = async (date = new Date()) => {
     return {
       available: false,
       source: 'whoop',
+      requestedLocalDate: localDate,
+      timezone,
+      queriedAt: new Date().toISOString(),
       error: error.message,
     };
   }
@@ -338,14 +256,18 @@ const cacheWhoopSummary = async (summary) => {
 /**
  * Get cached Whoop summary
  */
-const getCachedWhoopSummary = async () => {
+const getCachedWhoopSummary = async (requestedDate, timezone) => {
   try {
     const { value } = await Preferences.get({ key: 'whoop_cached_summary' });
     if (value) {
       const cached = JSON.parse(value);
       // Check if cache is fresh (within 1 hour)
       const cacheTime = new Date(cached.cachedAt).getTime();
-      if (Date.now() - cacheTime < 60 * 60 * 1000) {
+      if (
+        Date.now() - cacheTime < 60 * 60 * 1000 &&
+        cached.requestedLocalDate === requestedDate &&
+        cached.timezone === timezone
+      ) {
         return cached;
       }
     }
@@ -429,6 +351,7 @@ export const getWhoopStrainInsight = (strain, recovery) => {
 
 export default {
   isWhoopLinked,
+  getWhoopConnectionStatus,
   initiateWhoopOAuth,
   disconnectWhoop,
   handleWhoopOAuthSuccess,

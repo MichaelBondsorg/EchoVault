@@ -12,7 +12,8 @@ export const ENTRY_TYPES = {
   TASK: 'task',
   MIXED: 'mixed',
   REFLECTION: 'reflection',
-  VENT: 'vent'
+  VENT: 'vent',
+  UNKNOWN: 'unknown'
 };
 
 // ============================================
@@ -135,8 +136,8 @@ const RECURRENCE_PATTERNS = {
 export const classify = (text) => {
   if (!text || typeof text !== 'string') {
     return {
-      entry_type: ENTRY_TYPES.REFLECTION,
-      confidence: 0.3,
+      entry_type: ENTRY_TYPES.UNKNOWN,
+      confidence: 0,
       extracted_tasks: [],
       reasoning: 'empty_input'
     };
@@ -224,7 +225,7 @@ export const classify = (text) => {
   }
 
   // Determine classification
-  let entry_type = ENTRY_TYPES.REFLECTION;
+  let entry_type = ENTRY_TYPES.UNKNOWN;
   let confidence = 0.5;
   let reasoning = '';
 
@@ -232,9 +233,8 @@ export const classify = (text) => {
   const totalScore = scores.task + scores.vent + scores.reflection;
 
   if (totalScore === 0) {
-    // No clear patterns - default to reflection
-    entry_type = ENTRY_TYPES.REFLECTION;
-    confidence = 0.4;
+    entry_type = ENTRY_TYPES.UNKNOWN;
+    confidence = 0;
     reasoning = 'no_clear_patterns';
   } else if (scores.vent > scores.task && scores.vent > scores.reflection && scores.vent >= 5) {
     // Strong vent signals

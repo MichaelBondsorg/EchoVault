@@ -186,9 +186,9 @@ export default {
       // Typography
       // ============================================
       fontFamily: {
-        display: ['Fraunces', 'Georgia', 'serif'],
-        body:    ['DM Sans', 'system-ui', 'sans-serif'],
-        hand:    ['Caveat', 'cursive'],
+        display: ['Newsreader', 'Iowan Old Style', 'Charter', 'Georgia', 'serif'],
+        body:    ['Geist', 'Inter', 'system-ui', 'sans-serif'],
+        hand:    ['Newsreader', 'Georgia', 'serif'],
       },
 
       fontSize: {

@@ -6,10 +6,10 @@ import { Sparkles, ShieldCheck } from 'lucide-react';
  *
  * One-time, first-run disclosure + permission before any journal or health data
  * is sent to third-party AI providers (Apple App Review 5.1.2(i); also aligns
- * with WA My Health My Data and FTC guidance). The user must acknowledge before
- * using the app's AI features. Consent is recorded by the caller.
+ * with WA My Health My Data and FTC guidance). Users may continue with typed
+ * capture while AI features remain disabled. The preference is recorded by the caller.
  */
-const AiConsentModal = ({ onAgree, agreeing = false }) => {
+const AiConsentModal = ({ onAgree, onDecline, agreeing = false }) => {
   return (
     <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/70 p-4">
       <motion.div
@@ -41,9 +41,9 @@ const AiConsentModal = ({ onAgree, agreeing = false }) => {
           <div className="flex items-start gap-2">
             <ShieldCheck size={18} className="text-sage-600 dark:text-sage-300 mt-0.5 shrink-0" />
             <p className="text-xs text-warm-600 dark:text-warm-300 leading-relaxed">
-              These providers process your data only to return your result. They
-              do not use it to train their models and retain it only briefly.
-              We never sell your data or use it for advertising. See our{' '}
+              Engram uses provider API services only to return your result and
+              never sells your data or uses it for advertising. Provider handling
+              follows the configured service terms described in our{' '}
               <a href="/privacy-policy.html" target="_blank" rel="noreferrer" className="underline text-sage-700 dark:text-sage-300">Privacy Policy</a>.
             </p>
           </div>
@@ -61,6 +61,14 @@ const AiConsentModal = ({ onAgree, agreeing = false }) => {
           className="w-full py-3 rounded-xl bg-sage-600 text-white font-semibold hover:bg-sage-700 disabled:opacity-60 transition-colors"
         >
           {agreeing ? 'Saving…' : 'I understand and agree'}
+        </button>
+        <button
+          type="button"
+          onClick={onDecline}
+          disabled={agreeing}
+          className="mt-2 min-h-11 w-full rounded-xl font-semibold text-[var(--secondary-foreground)] disabled:opacity-60"
+        >
+          Continue without AI
         </button>
       </motion.div>
     </div>

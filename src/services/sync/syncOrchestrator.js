@@ -28,6 +28,7 @@ let onlineStatus = true;
 // Callbacks
 let saveEntryToServer = null;
 let onSyncComplete = null;
+let activeOwnerUid = null;
 
 /**
  * Initialize the sync orchestrator
@@ -37,7 +38,7 @@ let onSyncComplete = null;
  * @param {Function} options.onComplete - Callback when sync completes
  * @returns {Function} Cleanup function
  */
-export const initializeSyncOrchestrator = ({ saveEntry, onComplete }) => {
+export const initializeSyncOrchestrator = ({ ownerUid, saveEntry, onComplete }) => {
   if (isInitialized) {
     console.warn('[SyncOrchestrator] Already initialized');
     return () => {};
@@ -45,6 +46,7 @@ export const initializeSyncOrchestrator = ({ saveEntry, onComplete }) => {
 
   saveEntryToServer = saveEntry;
   onSyncComplete = onComplete;
+  activeOwnerUid = ownerUid;
   isInitialized = true;
 
   // Listen for sync events
@@ -58,10 +60,13 @@ export const initializeSyncOrchestrator = ({ saveEntry, onComplete }) => {
   console.log('[SyncOrchestrator] Initialized');
 
   return () => {
-    isInitialized = false;
-    saveEntryToServer = null;
-    onSyncComplete = null;
-    stopBackgroundSync();
+    if (activeOwnerUid === ownerUid) {
+      isInitialized = false;
+      activeOwnerUid = null;
+      saveEntryToServer = null;
+      onSyncComplete = null;
+      stopBackgroundSync();
+    }
     unsubscribe();
     console.log('[SyncOrchestrator] Cleaned up');
   };
@@ -96,7 +101,7 @@ export const handleNetworkChange = async (isOnline) => {
  * @returns {Promise<Object|null>} Sync results or null if debounced
  */
 export const triggerSync = async ({ force = false } = {}) => {
-  if (!isInitialized || !saveEntryToServer) {
+  if (!isInitialized || !saveEntryToServer || !activeOwnerUid) {
     console.warn('[SyncOrchestrator] Not initialized or missing saveEntry function');
     return null;
   }
@@ -116,14 +121,19 @@ export const triggerSync = async ({ force = false } = {}) => {
   lastSyncAttempt = now;
 
   // Check if there's anything to sync
-  const hasPending = await hasPendingEntries();
+  const ownerUid = activeOwnerUid;
+  const capturedSave = saveEntryToServer;
+  const hasPending = await hasPendingEntries(ownerUid);
   if (!hasPending) {
     console.log('[SyncOrchestrator] No pending entries to sync');
     return { skipped: true, reason: 'no_pending' };
   }
 
   // Perform sync
-  const results = await syncPendingEntries(syncEntryToServer);
+  const results = await syncPendingEntries(
+    ownerUid,
+    (entry) => syncEntryToServer(ownerUid, capturedSave, entry)
+  );
 
   return results;
 };
@@ -134,9 +144,12 @@ export const triggerSync = async ({ force = false } = {}) => {
  * @param {Object} offlineEntry - Offline entry to sync
  * @returns {Promise<Object>} Server response with id and analysis
  */
-const syncEntryToServer = async (offlineEntry) => {
-  if (!saveEntryToServer) {
+const syncEntryToServer = async (ownerUid, saveEntry, offlineEntry) => {
+  if (!saveEntry) {
     throw new Error('Save function not configured');
+  }
+  if (offlineEntry.ownerUid !== ownerUid) {
+    throw new Error('offline_owner_mismatch');
   }
 
   console.log('[SyncOrchestrator] Syncing entry:', offlineEntry.offlineId);
@@ -150,6 +163,8 @@ const syncEntryToServer = async (offlineEntry) => {
     healthContext: offlineEntry.healthContext,
     environmentContext: offlineEntry.environmentContext,
     voiceTone: offlineEntry.voiceTone,
+    transcription: offlineEntry.transcription,
+    aiProcessingConsent: offlineEntry.aiProcessingConsent !== false,
     safety_flagged: offlineEntry.safety_flagged,
     safety_user_response: offlineEntry.safety_user_response,
     has_warning_indicators: offlineEntry.has_warning_indicators,
@@ -161,7 +176,7 @@ const syncEntryToServer = async (offlineEntry) => {
   };
 
   // Call the provided save function
-  const result = await saveEntryToServer(entryData);
+  const result = await saveEntry(entryData);
 
   return result;
 };
@@ -172,6 +187,7 @@ const syncEntryToServer = async (offlineEntry) => {
  * @param {Object} event - Sync event
  */
 const handleSyncEvent = (event) => {
+  if (event.ownerUid !== activeOwnerUid) return;
   switch (event.type) {
     case 'sync_completed':
       console.log('[SyncOrchestrator] Sync completed:', event.results);
@@ -255,8 +271,8 @@ export const resolveConflict = (localEntry, serverEntry) => {
  * @returns {Promise<boolean>}
  */
 export const needsSync = async () => {
-  if (!onlineStatus) return false;
-  return await hasPendingEntries();
+  if (!onlineStatus || !activeOwnerUid) return false;
+  return await hasPendingEntries(activeOwnerUid);
 };
 
 /**
@@ -269,7 +285,8 @@ export const getOrchestratorStatus = () => {
     isInitialized,
     isOnline: onlineStatus,
     hasBackgroundSync: !!backgroundSyncTimer,
-    lastSyncAttempt: lastSyncAttempt ? new Date(lastSyncAttempt).toISOString() : null
+    lastSyncAttempt: lastSyncAttempt ? new Date(lastSyncAttempt).toISOString() : null,
+    ownerUid: activeOwnerUid
   };
 };
 

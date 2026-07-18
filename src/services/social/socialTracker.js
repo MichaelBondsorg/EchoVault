@@ -55,7 +55,9 @@ export const extractPersonMentions = (entries) => {
         entryDate: entry.createdAt?.toDate?.() || new Date(entry.createdAt),
         context: entry.content?.substring(0, 500) || '',
         sentiment: entry.analysis?.sentiment || 'neutral',
-        moodScore: entry.analysis?.mood_score || 0.5
+        moodScore: Number.isFinite(entry.analysis?.mood_score)
+          ? entry.analysis.mood_score
+          : null
       });
     }
   }

@@ -19,8 +19,9 @@ import { HomePage, JournalPage, InsightsPage, SettingsPage } from '../../pages';
 // Screens (modals that overlay the entire app)
 import { UnifiedConversationWithSuspense as UnifiedConversation } from '../lazy';
 
-// Entry components
-import EntryBar from '../dashboard/EntryBar';
+import EntryComposer from '../capture/EntryComposer';
+import CaptureReliabilityCenter from '../capture/CaptureReliabilityCenter';
+import PrivacyCenter from '../privacy/PrivacyCenter';
 
 /**
  * AppLayout - Main application shell with Zen & Bento navigation
@@ -57,6 +58,9 @@ const AppLayout = ({
   onShowReports,
   onRequestNotifications,
   onLogout,
+  aiProcessingEnabled,
+  onRequestAiConsent,
+  onRevokeAiConsent,
 
   // Entry bar context
   setEntryPreferredMode,
@@ -89,6 +93,8 @@ const AppLayout = ({
   const [showCompanion, setShowCompanion] = useState(false);
   const [showWalkthrough, setShowWalkthrough] = useState(false);
   const [showEntryModal, setShowEntryModal] = useState(false);
+  const [showReliabilityCenter, setShowReliabilityCenter] = useState(false);
+  const [showPrivacyCenter, setShowPrivacyCenter] = useState(false);
   const [entryMode, setEntryMode] = useState('text'); // 'voice' or 'text'
   const [isFreshEntry, setIsFreshEntry] = useState(true); // true = FAB entry, false = responding to prompt
   const [currentPrompt, setCurrentPrompt] = useState(null); // Track prompt being answered for auto-dismiss
@@ -191,6 +197,10 @@ const AppLayout = ({
   // Direct handlers for FAB actions - show modal immediately
   // NOTE: Don't set replyContext here - FAB entries are fresh, not responses to prompts
   const handleVoiceClick = () => {
+    if (!aiProcessingEnabled) {
+      onRequestAiConsent?.();
+      return;
+    }
     setEntryMode('voice');
     setIsFreshEntry(true); // Mark as fresh entry (not a response)
     setReplyContext?.(null); // Clear any existing reply context
@@ -204,9 +214,39 @@ const AppLayout = ({
     setShowEntryModal(true);
   };
 
+  // Home Screen quick actions, App Shortcuts, and deep links converge here.
+  useEffect(() => {
+    const openEntry = (event) => {
+      const requestedMode = event.detail?.mode === 'voice' ? 'voice' : 'text';
+      if (requestedMode === 'voice' && !aiProcessingEnabled) {
+        onRequestAiConsent?.();
+        return;
+      }
+      setEntryMode(requestedMode);
+      setIsFreshEntry(true);
+      setReplyContext?.(null);
+      setShowEntryModal(true);
+    };
+    window.addEventListener('engram:open-entry', openEntry);
+    return () => window.removeEventListener('engram:open-entry', openEntry);
+  }, [aiProcessingEnabled, onRequestAiConsent, setReplyContext]);
+
+  useEffect(() => {
+    const openCompanion = () => {
+      if (aiProcessingEnabled) setShowCompanion(true);
+      else onRequestAiConsent?.();
+    };
+    window.addEventListener('engram:open-companion', openCompanion);
+    return () => window.removeEventListener('engram:open-companion', openCompanion);
+  }, [aiProcessingEnabled, onRequestAiConsent]);
+
   // Handler for responding to a reflection prompt (from Reflect card)
   // This DOES use the replyContext and shows "[Replying to ...]"
   const handlePromptResponse = (prompt, mode = 'text') => {
+    if (mode === 'voice' && !aiProcessingEnabled) {
+      onRequestAiConsent?.();
+      return;
+    }
     setEntryMode(mode);
     setIsFreshEntry(false); // Mark as response to prompt
     setCurrentPrompt(prompt); // Track for auto-dismiss after submission
@@ -268,7 +308,7 @@ const AppLayout = ({
 
   // Calculate latest mood score from entries for background
   const latestMoodScore = useMemo(() => {
-    if (!entries || entries.length === 0) return 0.5;
+    if (!entries || entries.length === 0) return null;
 
     // Find the most recent entry with a mood score
     const recentWithMood = entries.find(e =>
@@ -276,7 +316,7 @@ const AppLayout = ({
       e.analysis?.mood_score !== null
     );
 
-    return recentWithMood?.analysis?.mood_score ?? 0.5;
+    return recentWithMood?.analysis?.mood_score ?? null;
   }, [entries]);
 
   // Filter entries by category
@@ -358,6 +398,8 @@ const AppLayout = ({
                 onOpenNexusSettings={onShowNexusSettings}
                 onOpenEntityManagement={onShowEntityManagement}
                 onOpenReports={onShowReports}
+                onOpenReliability={() => setShowReliabilityCenter(true)}
+                onOpenPrivacy={() => setShowPrivacyCenter(true)}
                 onOpenSafetyPlan={onShowSafetyPlan}
                 onOpenExport={onShowExport}
                 onRequestNotifications={onRequestNotifications}
@@ -377,15 +419,11 @@ const AppLayout = ({
       />
 
       <CompanionNudge
-        onClick={() => setShowCompanion(true)}
+        onClick={() => aiProcessingEnabled ? setShowCompanion(true) : onRequestAiConsent?.()}
         hasNewInsight={false}
       />
 
-      <BottomNavbar
-        onVoiceEntry={handleVoiceClick}
-        onTextEntry={handleTextClick}
-        onQuickMood={handleOpenQuickMood}
-      />
+      <BottomNavbar onNewEntry={handleTextClick} />
 
       {/* Quick Log Modal */}
       <QuickLogModal
@@ -394,95 +432,59 @@ const AppLayout = ({
         onSave={onQuickMoodSave}
       />
 
-      {/* Entry Modal (Voice/Text from FAB) */}
-      <AnimatePresence>
-        {showEntryModal && (
-          <>
-            {/* Backdrop */}
-            <motion.div
-              className="fixed inset-0 bg-black/30 backdrop-blur-sm z-[60]"
-              style={{ minHeight: '100dvh' }}
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onTouchEnd={handleCloseEntryModal}
-              onClick={handleCloseEntryModal}
-            />
-
-            {/* Entry Bar Modal - iOS safe positioning */}
-            <motion.div
-              className="fixed left-4 right-4 z-[60]"
-              style={{
-                bottom: 'calc(7rem + env(safe-area-inset-bottom, 0px))',
-                WebkitOverflowScrolling: 'touch',
-              }}
-              initial={{ opacity: 0, y: 50 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: 50 }}
-            >
-              <div className="bg-hearth-50/95 backdrop-blur-xl rounded-3xl shadow-soft-lg overflow-hidden">
-                {/* Reflection Prompts - shown when in fresh entry mode */}
-                {isFreshEntry && reflectionQuestions.length > 0 && (
-                  <div className="px-4 pt-4 pb-2 border-b border-warm-100">
-                    <div className="flex items-center justify-between mb-2">
-                      <div className="flex items-center gap-1.5 text-lavender-600">
-                        <MessageCircle size={14} />
-                        <span className="text-xs font-semibold uppercase tracking-wide">Reflect</span>
-                      </div>
-                      {reflectionQuestions.length > 1 && (
-                        <span className="text-xs text-warm-400">
-                          {reflectionIndex + 1} / {reflectionQuestions.length}
-                        </span>
-                      )}
-                    </div>
-
-                    <AnimatePresence mode="wait">
-                      <motion.p
-                        key={reflectionQuestions[reflectionIndex]?.question}
-                        initial={{ opacity: 0, x: 10 }}
-                        animate={{ opacity: 1, x: 0 }}
-                        exit={{ opacity: 0, x: -10 }}
-                        transition={{ duration: 0.15 }}
-                        className="text-sm text-warm-700 leading-relaxed mb-2"
-                      >
-                        {reflectionQuestions[reflectionIndex]?.question}
-                      </motion.p>
-                    </AnimatePresence>
-
-                    {/* Navigation arrows */}
-                    {reflectionQuestions.length > 1 && (
-                      <div className="flex items-center gap-1">
-                        <button
-                          onClick={(e) => { e.stopPropagation(); goPrevReflection(); }}
-                          className="p-1.5 rounded-full hover:bg-warm-100 transition-colors text-warm-400 hover:text-warm-600"
-                        >
-                          <ChevronLeft size={16} />
-                        </button>
-                        <button
-                          onClick={(e) => { e.stopPropagation(); goNextReflection(); }}
-                          className="p-1.5 rounded-full hover:bg-warm-100 transition-colors text-warm-400 hover:text-warm-600"
-                        >
-                          <ChevronRight size={16} />
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                <EntryBar
-                  embedded={true}
-                  onVoiceSave={(base64, mime) => handleEntrySubmitted(onAudioSubmit, base64, mime)}
-                  onTextSave={(text) => handleEntrySubmitted(onTextSubmit, text)}
-                  loading={processing}
-                  preferredMode={entryMode}
-                  promptContext={isFreshEntry ? null : replyContext}
-                  onClearPrompt={handleCloseEntryModal}
-                />
+      <EntryComposer
+        ownerUid={user?.uid}
+        isOpen={showEntryModal}
+        mode={entryMode}
+        onModeChange={setEntryMode}
+        onClose={handleCloseEntryModal}
+        onVoiceSave={(base64, mime, options) => handleEntrySubmitted(onAudioSubmit, base64, mime, options)}
+        onTextSave={(text) => handleEntrySubmitted(onTextSubmit, text)}
+        processing={processing}
+        aiProcessingEnabled={aiProcessingEnabled}
+        onRequestAiConsent={onRequestAiConsent}
+        promptContext={isFreshEntry ? null : replyContext}
+        reflection={isFreshEntry && reflectionQuestions.length > 0 ? (
+          <div className="mb-3 rounded-2xl bg-[var(--accent-wash)] p-3">
+            <div className="mb-1 flex items-center justify-between text-[var(--accent-deep)]">
+              <span className="inline-flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide">
+                <MessageCircle size={14} aria-hidden="true" /> Reflect
+              </span>
+              {reflectionQuestions.length > 1 && <span className="text-xs">{reflectionIndex + 1} / {reflectionQuestions.length}</span>}
+            </div>
+            <p className="text-sm leading-relaxed text-[var(--secondary-foreground)]">{reflectionQuestions[reflectionIndex]?.question}</p>
+            {reflectionQuestions.length > 1 && (
+              <div className="mt-1 flex gap-1">
+                <button type="button" aria-label="Previous reflection" className="cloud-icon-button" onClick={goPrevReflection}><ChevronLeft size={16} /></button>
+                <button type="button" aria-label="Next reflection" className="cloud-icon-button" onClick={goNextReflection}><ChevronRight size={16} /></button>
               </div>
-            </motion.div>
-          </>
-        )}
-      </AnimatePresence>
+            )}
+          </div>
+        ) : null}
+      />
+
+      {showReliabilityCenter && (
+        <CaptureReliabilityCenter
+          ownerUid={user?.uid}
+          onClose={() => setShowReliabilityCenter(false)}
+          onRetryAudio={(base64, mime, recordingId) => onAudioSubmit?.(base64, mime, { existingRecordingId: recordingId })}
+        />
+      )}
+
+      {showPrivacyCenter && (
+        <PrivacyCenter
+          entries={entries}
+          aiProcessingEnabled={aiProcessingEnabled}
+          onClose={() => setShowPrivacyCenter(false)}
+          onManageMemory={() => { setShowPrivacyCenter(false); onShowEntityManagement?.(); }}
+          onExport={() => { setShowPrivacyCenter(false); onShowExport?.(); }}
+          onToggleAi={async () => {
+            setShowPrivacyCenter(false);
+            if (aiProcessingEnabled) await onRevokeAiConsent?.();
+            else onRequestAiConsent?.();
+          }}
+        />
+      )}
 
       {/* AI Companion (full screen) */}
       <AnimatePresence>

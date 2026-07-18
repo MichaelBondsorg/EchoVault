@@ -1,313 +1,193 @@
-/**
- * Offline Store Service
- *
- * Persistent storage for offline entries using Capacitor Preferences.
- * Provides IndexedDB-like API for storing and retrieving entries
- * that haven't been synced to the server yet.
- */
-
+/** Owner-scoped persistent queue for offline journal entries. */
 import { Preferences } from '@capacitor/preferences';
+import { ownerStorageKey, requireOwner } from '../storage/ownerScopedStorage';
+import {
+  getLegacyQuarantineCount,
+  quarantineLegacyPreference,
+} from '../storage/legacyQuarantine';
 
-const OFFLINE_ENTRIES_KEY = 'offline_entries_queue';
-const OFFLINE_METADATA_KEY = 'offline_metadata';
+const LEGACY_ENTRIES_KEY = 'offline_entries_queue';
+const LEGACY_METADATA_KEY = 'offline_metadata';
+const ENTRIES_AREA = 'offline/entries';
+const METADATA_AREA = 'offline/metadata';
 
-/**
- * Get all offline entries from storage
- * @returns {Promise<Array>} Array of offline entries
- */
-export const getOfflineEntries = async () => {
+const entriesKey = (ownerUid) => ownerStorageKey(ownerUid, ENTRIES_AREA);
+const metadataKey = (ownerUid) => ownerStorageKey(ownerUid, METADATA_AREA);
+
+const quarantineLegacyData = async () => {
+  await quarantineLegacyPreference(LEGACY_ENTRIES_KEY, ENTRIES_AREA);
+  await quarantineLegacyPreference(LEGACY_METADATA_KEY, METADATA_AREA);
+};
+
+const writeEntries = async (ownerUid, entries) => {
+  await Preferences.set({ key: entriesKey(ownerUid), value: JSON.stringify(entries) });
+};
+
+export const getOfflineEntries = async (ownerUid) => {
+  const owner = requireOwner(ownerUid);
   try {
-    const { value } = await Preferences.get({ key: OFFLINE_ENTRIES_KEY });
+    await quarantineLegacyData();
+    const { value } = await Preferences.get({ key: entriesKey(owner) });
     if (!value) return [];
-    return JSON.parse(value);
+    const records = JSON.parse(value);
+    if (!Array.isArray(records)) return [];
+    return records.filter((entry) => entry?.ownerUid === owner);
   } catch (error) {
-    console.error('[OfflineStore] Error reading offline entries:', error);
+    console.error('[OfflineStore] Error reading owner queue:', error?.message);
     return [];
   }
 };
 
-/**
- * Save an entry to offline storage
- * @param {Object} entry - Entry to save
- * @returns {Promise<Object>} Saved entry with offline metadata
- */
-export const saveOfflineEntry = async (entry) => {
-  try {
-    const entries = await getOfflineEntries();
+export const saveOfflineEntry = async (ownerUid, entry) => {
+  const owner = requireOwner(ownerUid);
+  const entries = await getOfflineEntries(owner);
+  const offlineId = entry.offlineId || generateOfflineId();
+  const existing = entries.find((candidate) => candidate.offlineId === offlineId);
+  if (existing) return existing;
 
-    const offlineEntry = {
-      ...entry,
-      offlineId: entry.offlineId || generateOfflineId(),
-      syncStatus: 'pending',
-      retryCount: 0,
-      createdOfflineAt: new Date().toISOString(),
-      lastAttemptAt: null
-    };
-
-    entries.push(offlineEntry);
-
-    await Preferences.set({
-      key: OFFLINE_ENTRIES_KEY,
-      value: JSON.stringify(entries)
-    });
-
-    await updateMetadata({ lastSaved: new Date().toISOString() });
-
-    console.log('[OfflineStore] Saved entry:', offlineEntry.offlineId);
-    return offlineEntry;
-  } catch (error) {
-    console.error('[OfflineStore] Error saving offline entry:', error);
-    throw error;
-  }
+  const offlineEntry = {
+    ...entry,
+    ownerUid: owner,
+    offlineId,
+    syncStatus: 'pending',
+    retryCount: 0,
+    createdOfflineAt: new Date().toISOString(),
+    lastAttemptAt: null,
+  };
+  await writeEntries(owner, [...entries, offlineEntry]);
+  await updateMetadata(owner, { lastSaved: new Date().toISOString() });
+  console.log('[OfflineStore] Queued owner-scoped operation:', offlineId);
+  return offlineEntry;
 };
 
-/**
- * Update an existing offline entry
- * @param {string} offlineId - Offline ID of entry to update
- * @param {Object} updates - Fields to update
- * @returns {Promise<Object|null>} Updated entry or null if not found
- */
-export const updateOfflineEntry = async (offlineId, updates) => {
-  try {
-    const entries = await getOfflineEntries();
-    const index = entries.findIndex(e => e.offlineId === offlineId);
+export const updateOfflineEntry = async (ownerUid, offlineId, updates) => {
+  const owner = requireOwner(ownerUid);
+  const entries = await getOfflineEntries(owner);
+  const index = entries.findIndex((entry) => entry.offlineId === offlineId);
+  if (index === -1) return null;
 
-    if (index === -1) {
-      console.warn('[OfflineStore] Entry not found:', offlineId);
-      return null;
-    }
-
-    entries[index] = {
-      ...entries[index],
-      ...updates,
-      updatedAt: new Date().toISOString()
-    };
-
-    await Preferences.set({
-      key: OFFLINE_ENTRIES_KEY,
-      value: JSON.stringify(entries)
-    });
-
-    return entries[index];
-  } catch (error) {
-    console.error('[OfflineStore] Error updating offline entry:', error);
-    throw error;
-  }
+  entries[index] = {
+    ...entries[index],
+    ...updates,
+    ownerUid: owner,
+    offlineId,
+    updatedAt: new Date().toISOString(),
+  };
+  await writeEntries(owner, entries);
+  return entries[index];
 };
 
-/**
- * Remove an entry from offline storage (after successful sync)
- * @param {string} offlineId - Offline ID of entry to remove
- * @returns {Promise<boolean>} True if removed, false if not found
- */
-export const removeOfflineEntry = async (offlineId) => {
-  try {
-    const entries = await getOfflineEntries();
-    const filtered = entries.filter(e => e.offlineId !== offlineId);
-
-    if (filtered.length === entries.length) {
-      return false; // Entry not found
-    }
-
-    await Preferences.set({
-      key: OFFLINE_ENTRIES_KEY,
-      value: JSON.stringify(filtered)
-    });
-
-    console.log('[OfflineStore] Removed entry:', offlineId);
-    return true;
-  } catch (error) {
-    console.error('[OfflineStore] Error removing offline entry:', error);
-    throw error;
-  }
+export const removeOfflineEntry = async (ownerUid, offlineId) => {
+  const owner = requireOwner(ownerUid);
+  const entries = await getOfflineEntries(owner);
+  const filtered = entries.filter((entry) => entry.offlineId !== offlineId);
+  if (filtered.length === entries.length) return false;
+  await writeEntries(owner, filtered);
+  return true;
 };
 
-/**
- * Get entries that need to be synced
- * @param {Object} options - Filter options
- * @param {number} options.maxRetries - Maximum retry count (default: 3)
- * @returns {Promise<Array>} Entries pending sync
- */
-export const getPendingEntries = async ({ maxRetries = 3 } = {}) => {
-  const entries = await getOfflineEntries();
-  return entries.filter(e =>
-    e.syncStatus === 'pending' &&
-    e.retryCount < maxRetries
+export const getPendingEntries = async (ownerUid, { maxRetries = 3 } = {}) => {
+  const entries = await getOfflineEntries(ownerUid);
+  return entries.filter(
+    (entry) => entry.syncStatus === 'pending' && entry.retryCount < maxRetries
   );
 };
 
-/**
- * Get entries that failed to sync
- * @returns {Promise<Array>} Failed entries
- */
-export const getFailedEntries = async () => {
-  const entries = await getOfflineEntries();
-  return entries.filter(e => e.syncStatus === 'failed');
-};
+export const getFailedEntries = async (ownerUid) =>
+  (await getOfflineEntries(ownerUid)).filter((entry) => entry.syncStatus === 'failed');
 
-/**
- * Mark entry as syncing (in progress)
- * @param {string} offlineId - Offline ID
- * @returns {Promise<Object|null>} Updated entry
- */
-export const markSyncing = async (offlineId) => {
-  return updateOfflineEntry(offlineId, {
+export const markSyncing = async (ownerUid, offlineId) =>
+  updateOfflineEntry(ownerUid, offlineId, {
     syncStatus: 'syncing',
-    lastAttemptAt: new Date().toISOString()
+    lastAttemptAt: new Date().toISOString(),
   });
-};
 
-/**
- * Mark entry as synced (success)
- * @param {string} offlineId - Offline ID
- * @param {string} serverId - Server-assigned ID
- * @param {Object} serverAnalysis - Analysis from server
- * @returns {Promise<Object|null>} Updated entry
- */
-export const markSynced = async (offlineId, serverId, serverAnalysis = null) => {
-  return updateOfflineEntry(offlineId, {
+export const markSynced = async (ownerUid, offlineId, serverId, serverAnalysis = null) =>
+  updateOfflineEntry(ownerUid, offlineId, {
     syncStatus: 'synced',
     serverId,
     serverAnalysis,
-    syncedAt: new Date().toISOString()
+    syncedAt: new Date().toISOString(),
   });
-};
 
-/**
- * Mark entry sync as failed
- * @param {string} offlineId - Offline ID
- * @param {string} error - Error message
- * @returns {Promise<Object|null>} Updated entry
- */
-export const markFailed = async (offlineId, error) => {
-  const entries = await getOfflineEntries();
-  const entry = entries.find(e => e.offlineId === offlineId);
-
+export const markFailed = async (ownerUid, offlineId, error) => {
+  const entry = (await getOfflineEntries(ownerUid)).find(
+    (candidate) => candidate.offlineId === offlineId
+  );
   if (!entry) return null;
-
-  const newRetryCount = (entry.retryCount || 0) + 1;
-  const shouldMarkFailed = newRetryCount >= 3;
-
-  return updateOfflineEntry(offlineId, {
-    syncStatus: shouldMarkFailed ? 'failed' : 'pending',
-    retryCount: newRetryCount,
+  const retryCount = (entry.retryCount || 0) + 1;
+  return updateOfflineEntry(ownerUid, offlineId, {
+    syncStatus: retryCount >= 3 ? 'failed' : 'pending',
+    retryCount,
     lastError: error,
-    lastAttemptAt: new Date().toISOString()
+    lastAttemptAt: new Date().toISOString(),
   });
 };
 
-/**
- * Reset entries stranded in 'syncing' back to 'pending'.
- *
- * If the app is killed mid-sync, an entry can be left in 'syncing' forever —
- * getPendingEntries only returns 'pending', so it would never be retried and
- * never shown. Call this on startup so stranded entries re-enter the queue.
- *
- * @returns {Promise<number>} Number of entries reset
- */
-export const resetStuckSyncing = async () => {
-  const entries = await getOfflineEntries();
+export const resetStuckSyncing = async (ownerUid) => {
+  const owner = requireOwner(ownerUid);
+  const entries = await getOfflineEntries(owner);
   let reset = 0;
-  const repaired = entries.map(e => {
-    if (e.syncStatus === 'syncing') {
-      reset++;
-      return { ...e, syncStatus: 'pending' };
-    }
-    return e;
+  const repaired = entries.map((entry) => {
+    if (entry.syncStatus !== 'syncing') return entry;
+    reset += 1;
+    return { ...entry, syncStatus: 'pending' };
   });
-  if (reset > 0) {
-    await Preferences.set({
-      key: OFFLINE_ENTRIES_KEY,
-      value: JSON.stringify(repaired)
-    });
-    console.log('[OfflineStore] Reset', reset, 'stranded syncing entries to pending');
-  }
+  if (reset > 0) await writeEntries(owner, repaired);
   return reset;
 };
 
-/**
- * Clear all synced entries from storage
- * @returns {Promise<number>} Number of entries cleared
- */
-export const clearSyncedEntries = async () => {
-  const entries = await getOfflineEntries();
-  const pending = entries.filter(e => e.syncStatus !== 'synced');
-  const cleared = entries.length - pending.length;
-
-  await Preferences.set({
-    key: OFFLINE_ENTRIES_KEY,
-    value: JSON.stringify(pending)
-  });
-
-  console.log('[OfflineStore] Cleared', cleared, 'synced entries');
-  return cleared;
+export const clearSyncedEntries = async (ownerUid) => {
+  const owner = requireOwner(ownerUid);
+  const entries = await getOfflineEntries(owner);
+  const pending = entries.filter((entry) => entry.syncStatus !== 'synced');
+  await writeEntries(owner, pending);
+  return entries.length - pending.length;
 };
 
-/**
- * Get offline storage metadata
- * @returns {Promise<Object>} Metadata
- */
-export const getMetadata = async () => {
+export const getMetadata = async (ownerUid) => {
+  const owner = requireOwner(ownerUid);
+  await quarantineLegacyData();
   try {
-    const { value } = await Preferences.get({ key: OFFLINE_METADATA_KEY });
+    const { value } = await Preferences.get({ key: metadataKey(owner) });
     return value ? JSON.parse(value) : {};
   } catch {
     return {};
   }
 };
 
-/**
- * Update offline storage metadata
- * @param {Object} updates - Metadata updates
- * @returns {Promise<Object>} Updated metadata
- */
-export const updateMetadata = async (updates) => {
-  const metadata = await getMetadata();
-  const updated = { ...metadata, ...updates };
-
-  await Preferences.set({
-    key: OFFLINE_METADATA_KEY,
-    value: JSON.stringify(updated)
-  });
-
+export const updateMetadata = async (ownerUid, updates) => {
+  const owner = requireOwner(ownerUid);
+  const updated = { ...(await getMetadata(owner)), ...updates, ownerUid: owner };
+  await Preferences.set({ key: metadataKey(owner), value: JSON.stringify(updated) });
   return updated;
 };
 
-/**
- * Get statistics about offline storage
- * @returns {Promise<Object>} Statistics
- */
-export const getStats = async () => {
-  const entries = await getOfflineEntries();
-
+export const getStats = async (ownerUid) => {
+  const entries = await getOfflineEntries(ownerUid);
   return {
     total: entries.length,
-    pending: entries.filter(e => e.syncStatus === 'pending').length,
-    syncing: entries.filter(e => e.syncStatus === 'syncing').length,
-    synced: entries.filter(e => e.syncStatus === 'synced').length,
-    failed: entries.filter(e => e.syncStatus === 'failed').length,
-    oldestPending: entries
-      .filter(e => e.syncStatus === 'pending')
-      .sort((a, b) => new Date(a.createdOfflineAt) - new Date(b.createdOfflineAt))[0]?.createdOfflineAt || null
+    pending: entries.filter((entry) => entry.syncStatus === 'pending').length,
+    syncing: entries.filter((entry) => entry.syncStatus === 'syncing').length,
+    synced: entries.filter((entry) => entry.syncStatus === 'synced').length,
+    failed: entries.filter((entry) => entry.syncStatus === 'failed').length,
+    oldestPending:
+      entries
+        .filter((entry) => entry.syncStatus === 'pending')
+        .sort((a, b) => new Date(a.createdOfflineAt) - new Date(b.createdOfflineAt))[0]
+        ?.createdOfflineAt || null,
+    quarantinedLegacyRecords: await getLegacyQuarantineCount(ENTRIES_AREA),
   };
 };
 
-/**
- * Generate unique offline ID
- * @returns {string} UUID-like ID
- */
-const generateOfflineId = () => {
-  return 'offline_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
-};
+const generateOfflineId = () =>
+  `offline_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`;
 
-/**
- * Clear all offline data (use with caution)
- * @returns {Promise<void>}
- */
-export const clearAll = async () => {
-  await Preferences.remove({ key: OFFLINE_ENTRIES_KEY });
-  await Preferences.remove({ key: OFFLINE_METADATA_KEY });
-  console.log('[OfflineStore] Cleared all offline data');
+/** Remove only the requested owner's queue and metadata. */
+export const clearAll = async (ownerUid) => {
+  const owner = requireOwner(ownerUid);
+  await Preferences.remove({ key: entriesKey(owner) });
+  await Preferences.remove({ key: metadataKey(owner) });
 };
 
 export default {
@@ -325,5 +205,5 @@ export default {
   getMetadata,
   updateMetadata,
   getStats,
-  clearAll
+  clearAll,
 };

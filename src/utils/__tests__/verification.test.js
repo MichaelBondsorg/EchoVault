@@ -366,10 +366,11 @@ describe('Verification: Build Check', () => {
     });
   });
 
-  it('should verify Caveat font link is separate with display=optional', () => {
+  it('should verify Cloud avoids runtime font dependencies', () => {
     const html = fs.readFileSync(path.join(SRC_DIR, 'index.html'), 'utf-8');
 
-    expect(html).toMatch(/Caveat.*display=optional/s);
-    expect(html).toMatch(/DM\+Sans.*display=swap/s);
+    expect(html).not.toContain('fonts.googleapis.com');
+    expect(html).not.toContain('fonts.gstatic.com');
+    expect(html).toContain('font-family: Geist, Inter');
   });
 });

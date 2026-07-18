@@ -71,7 +71,7 @@ const buildSynthesisPrompt = (context) => {
 
   // Format threads
   const threadSummaries = (activeThreads || []).slice(0, 5).map(t => {
-    return `- ${t.displayName} (${t.category}): ${t.entryCount} entries, sentiment trajectory: ${t.sentimentTrajectory}, baseline: ${Math.round((t.sentimentBaseline || 0.5) * 100)}%`;
+    return `- ${t.displayName} (${t.category}): ${t.entryCount} entries, sentiment trajectory: ${t.sentimentTrajectory}, baseline: ${Number.isFinite(t.sentimentBaseline) ? `${Math.round(t.sentimentBaseline * 100)}%` : 'unknown'}`;
   }).join('\n');
 
   // Format current state
@@ -395,7 +395,7 @@ export const generateNarrativeArcInsight = async (userId, threadId) => {
     const prompt = `Analyze this narrative arc from a user's life:
 
 THREAD EVOLUTION:
-${arcData.map((t, i) => `${i + 1}. "${t.name}" - Sentiment: ${Math.round((t.sentiment || 0.5) * 100)}%, Entries: ${t.duration}`).join('\n')}
+${arcData.map((t, i) => `${i + 1}. "${t.name}" - Sentiment: ${Number.isFinite(t.sentiment) ? `${Math.round(t.sentiment * 100)}%` : 'unknown'}, Entries: ${t.duration}`).join('\n')}
 
 Generate a "Resilience Arc" insight that:
 1. Identifies how the user has grown through this sequence

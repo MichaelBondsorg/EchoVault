@@ -30,6 +30,25 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
 
     func applicationDidBecomeActive(_ application: UIApplication) {
         // Restart any tasks that were paused (or not yet started) while the application was inactive. If the application was previously in the background, optionally refresh the user interface.
+        NotificationCenter.default.post(name: .engramOpenPendingCapture, object: nil)
+    }
+
+    func application(
+        _ application: UIApplication,
+        performActionFor shortcutItem: UIApplicationShortcutItem,
+        completionHandler: @escaping (Bool) -> Void
+    ) {
+        let mode: String
+        switch shortcutItem.type {
+        case "com.echovault.engram.record": mode = "voice"
+        case "com.echovault.engram.write": mode = "text"
+        default:
+            completionHandler(false)
+            return
+        }
+        UserDefaults.standard.set(mode, forKey: "engram.pendingCaptureMode")
+        NotificationCenter.default.post(name: .engramOpenPendingCapture, object: nil)
+        completionHandler(true)
     }
 
     func applicationWillTerminate(_ application: UIApplication) {

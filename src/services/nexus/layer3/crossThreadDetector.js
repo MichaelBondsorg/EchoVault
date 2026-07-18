@@ -163,7 +163,7 @@ export const generateMetaPatternInsight = async (userId, metaPattern, context) =
 META-PATTERN: ${metaPattern.description}
 
 AFFECTED LIFE AREAS:
-${affectedThreads.map(t => `- ${t.displayName} (${t.category}): sentiment ${Math.round((t.sentimentBaseline || 0.5) * 100)}%`).join('\n')}
+${affectedThreads.map(t => `- ${t.displayName} (${t.category}): sentiment ${Number.isFinite(t.sentimentBaseline) ? `${Math.round(t.sentimentBaseline * 100)}%` : 'unknown'}`).join('\n')}
 
 EVIDENCE:
 ${metaPattern.evidence.map(e => `- ${e.type}: ${JSON.stringify(e.signals || e.categories)}`).join('\n')}

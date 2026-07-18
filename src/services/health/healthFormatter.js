@@ -9,6 +9,14 @@
  * - Nexus 2.0 pattern detection
  */
 
+export const sleepQualityFromScore = (score) => {
+  if (!Number.isFinite(score)) return null;
+  if (score >= 80) return 'excellent';
+  if (score >= 60) return 'good';
+  if (score >= 40) return 'fair';
+  return 'poor';
+};
+
 /**
  * Format health context for AI consumption (compact, single-line)
  * Used in entry context strings for chat and insights
@@ -24,9 +32,8 @@ export const formatHealthForAI = (healthContext) => {
   // Sleep summary
   if (healthContext.sleep?.totalHours) {
     const quality = healthContext.sleep.quality ||
-                    (healthContext.sleep.score >= 80 ? 'excellent' :
-                     healthContext.sleep.score >= 60 ? 'good' :
-                     healthContext.sleep.score >= 40 ? 'fair' : 'poor');
+                    sleepQualityFromScore(healthContext.sleep.score) ||
+                    'unknown';
     parts.push(`Sleep: ${healthContext.sleep.totalHours.toFixed(1)}h (${quality})`);
     if (healthContext.sleep.score) {
       parts.push(`score: ${healthContext.sleep.score}/100`);
@@ -63,7 +70,9 @@ export const formatHealthForAI = (healthContext) => {
   if (healthContext.activity?.hasWorkout && healthContext.activity?.workouts?.length) {
     const workout = healthContext.activity.workouts[0];
     const type = workout.type || workout.activityType || 'exercise';
-    const duration = workout.duration || workout.durationMinutes;
+    const duration = Number.isFinite(workout.durationSeconds)
+      ? workout.durationSeconds / 60
+      : workout.durationMinutes ?? workout.duration;
     if (duration) {
       parts.push(`Workout: ${type} (${Math.round(duration)}min)`);
     }
@@ -174,8 +183,8 @@ export const getHealthStatus = (healthContext) => {
     status.sleep = {
       hours: healthContext.sleep.totalHours,
       score: healthContext.sleep.score,
-      level: healthContext.sleep.score >= 80 ? 'good' :
-             healthContext.sleep.score >= 60 ? 'fair' : 'poor'
+      level: sleepQualityFromScore(healthContext.sleep.score) ||
+             healthContext.sleep.quality || 'unknown'
     };
   }
 
@@ -214,5 +223,6 @@ export default {
   formatHealthForAI,
   formatHealthDetailed,
   extractHealthSignals,
-  getHealthStatus
+  getHealthStatus,
+  sleepQualityFromScore
 };

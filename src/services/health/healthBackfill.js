@@ -16,6 +16,8 @@ import { auth, db } from '../../config/firebase';
 import { APP_COLLECTION_ID } from '../../config/constants';
 import { getHealthKitSummary, checkHealthKitPermissions } from './healthKit';
 import { getWhoopSummary, isWhoopLinked } from './whoop';
+import { requestedLocalDate } from './whoopTransforms';
+import { sleepQualityFromScore } from './healthFormatter';
 import { collection, query, orderBy, limit, getDocs, doc, writeBatch } from 'firebase/firestore';
 
 const BATCH_SIZE = 500; // Firestore limit
@@ -110,8 +112,14 @@ const detectAvailableSources = async () => {
 const fetchWhoopForDate = async (date) => {
   try {
     const summary = await getWhoopSummary(date);
+    const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+    const expectedDate = requestedLocalDate(date, timezone);
 
-    if (!summary.available) {
+    if (
+      !summary.available ||
+      summary.requestedLocalDate !== expectedDate ||
+      summary.timezone !== timezone
+    ) {
       return null;
     }
 
@@ -126,10 +134,10 @@ const fetchWhoopForDate = async (date) => {
 
     return {
       sleep: {
-        totalHours: summary.sleep?.totalHours || null,
-        quality: summary.sleep?.quality || null,
-        score: null, // Whoop doesn't have a sleep score
-        stages: null
+        totalHours: summary.sleep?.totalHours ?? null,
+        quality: summary.sleep?.quality || sleepQualityFromScore(summary.sleep?.score),
+        score: summary.sleep?.score ?? null,
+        stages: summary.sleep?.stages ?? null
       },
       recovery: summary.recovery ? {
         score: summary.recovery.score,
@@ -140,21 +148,27 @@ const fetchWhoopForDate = async (date) => {
         calories: summary.strain.calories
       } : null,
       heart: {
-        restingRate: summary.heart?.restingRate || null,
+        restingRate: summary.heart?.restingRate ?? null,
         currentRate: null,
-        hrv: summary.heart?.hrv || null,
-        hrvTrend: summary.heart?.hrvTrend || null,
-        stressIndicator: summary.heart?.stressIndicator || null
+        hrv: summary.heart?.hrv ?? null,
+        hrvTrend: summary.heart?.hrvTrend ?? null,
+        stressIndicator: summary.heart?.stressIndicator ?? null
       },
       activity: {
         stepsToday: null, // Whoop doesn't track steps natively
-        totalCaloriesBurned: summary.activity?.totalCaloriesBurned || null,
-        activeCaloriesBurned: summary.activity?.activeCaloriesBurned || null,
-        totalExerciseMinutes: summary.activity?.totalExerciseMinutes || null,
+        totalCaloriesBurned: summary.activity?.totalCaloriesBurned ?? null,
+        activeCaloriesBurned: summary.activity?.activeCaloriesBurned ?? null,
+        totalExerciseMinutes: summary.activity?.totalExerciseMinutes ?? null,
         hasWorkout: summary.activity?.hasWorkout || false,
         workouts: (summary.activity?.workouts || []).map(w => ({ ...w, source: 'whoop' }))
       },
       source: 'whoop',
+      requestedLocalDate: expectedDate,
+      timezone,
+      queriedAt: summary.queriedAt,
+      sourceRecordIds: summary.sourceRecordIds || {},
+      observedIntervals: summary.observedIntervals || {},
+      freshness: summary.fromCache ? 'stale' : 'fresh',
       backfilled: true,
       backfilledAt: new Date().toISOString(),
       originalDate: date.toISOString()
@@ -191,7 +205,7 @@ const fetchHealthKitForDate = async (date) => {
     return {
       sleep: {
         totalHours: summary.sleep?.totalHours || null,
-        quality: summary.sleep?.quality || null,
+        quality: summary.sleep?.quality || sleepQualityFromScore(summary.sleep?.score),
         score: summary.sleep?.score || null, // HealthKit sleep score
         stages: summary.sleep?.stages || null
       },
@@ -211,6 +225,13 @@ const fetchHealthKitForDate = async (date) => {
         workouts: (summary.activity?.workouts || []).map(w => ({ ...w, source: 'healthkit' }))
       },
       source: 'healthkit',
+      requestedLocalDate: requestedLocalDate(
+        date,
+        Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
+      ),
+      timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
+      queriedAt: summary.queriedAt || new Date().toISOString(),
+      freshness: 'fresh',
       backfilled: true,
       backfilledAt: new Date().toISOString(),
       originalDate: date.toISOString()
@@ -262,6 +283,21 @@ const mergeHealthSources = (whoopData, healthKitData) => {
     },
     source: 'merged',
     sources: ['whoop', 'healthkit'],
+    requestedLocalDate: whoopData.requestedLocalDate || healthKitData.requestedLocalDate,
+    timezone: whoopData.timezone || healthKitData.timezone,
+    queriedAt: new Date().toISOString(),
+    provenance: {
+      whoop: {
+        queriedAt: whoopData.queriedAt,
+        sourceRecordIds: whoopData.sourceRecordIds || {},
+        observedIntervals: whoopData.observedIntervals || {},
+        freshness: whoopData.freshness
+      },
+      healthkit: {
+        queriedAt: healthKitData.queriedAt,
+        freshness: healthKitData.freshness
+      }
+    },
     backfilled: true,
     backfilledAt: new Date().toISOString(),
     originalDate: whoopData.originalDate || healthKitData.originalDate

@@ -20,11 +20,15 @@ const IOS_ICONS = [
   { size: 120, name: 'AppIcon-60@2x.png' },   // iPhone @2x
   { size: 167, name: 'AppIcon-83.5@2x.png' }, // iPad Pro @2x
   { size: 152, name: 'AppIcon-76@2x.png' },   // iPad @2x
+  { size: 76, name: 'AppIcon-76@1x.png' },    // iPad @1x
   { size: 80, name: 'AppIcon-40@2x.png' },    // Spotlight @2x
+  { size: 40, name: 'AppIcon-40@1x.png' },    // iPad Spotlight @1x
   { size: 120, name: 'AppIcon-40@3x.png' },   // Spotlight @3x
   { size: 58, name: 'AppIcon-29@2x.png' },    // Settings @2x
+  { size: 29, name: 'AppIcon-29@1x.png' },    // iPad Settings @1x
   { size: 87, name: 'AppIcon-29@3x.png' },    // Settings @3x
   { size: 40, name: 'AppIcon-20@2x.png' },    // Notification @2x
+  { size: 20, name: 'AppIcon-20@1x.png' },    // iPad Notification @1x
   { size: 60, name: 'AppIcon-20@3x.png' },    // Notification @3x
 ];
 
@@ -110,13 +114,13 @@ async function main() {
       { size: "40x40", idiom: "iphone", scale: "3x", filename: "AppIcon-40@3x.png" },
       { size: "60x60", idiom: "iphone", scale: "2x", filename: "AppIcon-60@2x.png" },
       { size: "60x60", idiom: "iphone", scale: "3x", filename: "AppIcon-60@3x.png" },
-      { size: "20x20", idiom: "ipad", scale: "1x", filename: "AppIcon-20@2x.png" },
+      { size: "20x20", idiom: "ipad", scale: "1x", filename: "AppIcon-20@1x.png" },
       { size: "20x20", idiom: "ipad", scale: "2x", filename: "AppIcon-20@2x.png" },
-      { size: "29x29", idiom: "ipad", scale: "1x", filename: "AppIcon-29@2x.png" },
+      { size: "29x29", idiom: "ipad", scale: "1x", filename: "AppIcon-29@1x.png" },
       { size: "29x29", idiom: "ipad", scale: "2x", filename: "AppIcon-29@2x.png" },
-      { size: "40x40", idiom: "ipad", scale: "1x", filename: "AppIcon-40@2x.png" },
+      { size: "40x40", idiom: "ipad", scale: "1x", filename: "AppIcon-40@1x.png" },
       { size: "40x40", idiom: "ipad", scale: "2x", filename: "AppIcon-40@2x.png" },
-      { size: "76x76", idiom: "ipad", scale: "1x", filename: "AppIcon-76@2x.png" },
+      { size: "76x76", idiom: "ipad", scale: "1x", filename: "AppIcon-76@1x.png" },
       { size: "76x76", idiom: "ipad", scale: "2x", filename: "AppIcon-76@2x.png" },
       { size: "83.5x83.5", idiom: "ipad", scale: "2x", filename: "AppIcon-83.5@2x.png" },
       { size: "1024x1024", idiom: "ios-marketing", scale: "1x", filename: "AppIcon-512@2x.png" }

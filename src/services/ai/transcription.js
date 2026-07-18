@@ -137,7 +137,7 @@ export const transcribeAudioWithTone = async (base64, mimeType, maxRetries = 3) 
         continue;
       }
 
-      const { transcript, toneAnalysis } = result.data || {};
+      const { transcript, rawTranscript = transcript, toneAnalysis } = result.data || {};
 
       if (!transcript) {
         console.error('Transcription returned no content');
@@ -152,7 +152,7 @@ export const transcribeAudioWithTone = async (base64, mimeType, maxRetries = 3) 
         toneMood: toneAnalysis?.moodScore?.toFixed(2)
       });
 
-      return { transcript, toneAnalysis };
+      return { rawTranscript, transcript, toneAnalysis };
     } catch (e) {
       console.error(`Transcription+Tone API exception (attempt ${attempt + 1}):`, e);
       lastError = e;
@@ -173,7 +173,12 @@ export const transcribeAudioWithTone = async (base64, mimeType, maxRetries = 3) 
  * in one call, Whisper fallback server-side). Same return contract as
  * transcribeAudioWithTone: {transcript, toneAnalysis} or an error-code string.
  */
-export const transcribeEntryFused = async (base64, mimeType, maxRetries = 3) => {
+export const transcribeEntryFused = async (
+  base64,
+  mimeType,
+  maxRetries = 3,
+  properNouns = []
+) => {
   let lastError = null;
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
@@ -184,7 +189,7 @@ export const transcribeEntryFused = async (base64, mimeType, maxRetries = 3) => 
         await sleep(backoffMs);
       }
 
-      const result = await transcribeEntryFn({ base64, mimeType });
+      const result = await transcribeEntryFn({ base64, mimeType, properNouns });
 
       if (result.data?.error) {
         const errorCode = result.data.error;
@@ -195,7 +200,7 @@ export const transcribeEntryFused = async (base64, mimeType, maxRetries = 3) => 
         continue;
       }
 
-      const { transcript, toneAnalysis } = result.data || {};
+      const { transcript, rawTranscript = transcript, toneAnalysis } = result.data || {};
       if (!transcript) {
         // Terminal, not retryable: silent/near-silent audio produces the
         // same empty result on every attempt, so burning the retry budget
@@ -211,7 +216,7 @@ export const transcribeEntryFused = async (base64, mimeType, maxRetries = 3) => 
         engine: result.data?.engine,
         hasToneAnalysis: !!toneAnalysis
       });
-      return { transcript, toneAnalysis: toneAnalysis || null };
+      return { rawTranscript, transcript, toneAnalysis: toneAnalysis || null };
     } catch (e) {
       console.error(`Fused transcription exception (attempt ${attempt + 1}):`, e);
       lastError = e;

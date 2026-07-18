@@ -37,7 +37,7 @@ export const classifyEntry = async (text) => {
 
     if (!result?.classification) {
       return {
-        classification: { entry_type: 'reflection', confidence: 0.5, extracted_tasks: [] },
+        classification: { entry_type: 'unknown', confidence: 0, extracted_tasks: [] },
         entityResolution: null
       };
     }
@@ -50,7 +50,7 @@ export const classifyEntry = async (text) => {
   } catch (e) {
     console.error('classifyEntry error:', e);
     return {
-      classification: { entry_type: 'reflection', confidence: 0.5, extracted_tasks: [] },
+      classification: { entry_type: 'unknown', confidence: 0, extracted_tasks: [] },
       entityResolution: null
     };
   }
@@ -60,12 +60,13 @@ export const classifyEntry = async (text) => {
  * Analyze entry and route to appropriate therapeutic framework
  * Now uses Cloud Function
  */
-export const analyzeEntry = async (text, entryType = 'reflection') => {
+export const analyzeEntry = async (text, entryType = 'unknown') => {
   if (entryType === 'task') {
     return {
       title: text.substring(0, 50) + (text.length > 50 ? '...' : ''),
       tags: ['task'],
       mood_score: null,
+      analysisStatus: 'available',
       framework: 'general',
       entry_type: 'task'
     };
@@ -81,9 +82,10 @@ export const analyzeEntry = async (text, entryType = 'reflection') => {
       return {
         title: text.substring(0, 50) + (text.length > 50 ? '...' : ''),
         tags: [],
-        mood_score: 0.5,
+        mood_score: null,
+        analysisStatus: 'failed',
         framework: 'general',
-        entry_type: entryType
+        entry_type: entryType || 'unknown'
       };
     }
 
@@ -93,9 +95,10 @@ export const analyzeEntry = async (text, entryType = 'reflection') => {
     return {
       title: text.substring(0, 50) + (text.length > 50 ? '...' : ''),
       tags: [],
-      mood_score: 0.5,
+      mood_score: null,
+      analysisStatus: 'failed',
       framework: 'general',
-      entry_type: entryType
+      entry_type: entryType || 'unknown'
     };
   }
 };

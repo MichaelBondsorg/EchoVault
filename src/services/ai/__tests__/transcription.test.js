@@ -20,8 +20,16 @@ describe('transcribeEntryFused', () => {
       data: { transcript: 'hello world', toneAnalysis: { moodScore: 0.5 }, engine: 'gemini' }
     });
     const result = await transcribeEntryFused('QUJD', 'audio/webm');
-    expect(result).toEqual({ transcript: 'hello world', toneAnalysis: { moodScore: 0.5 } });
-    expect(mockTranscribeEntryFn).toHaveBeenCalledWith({ base64: 'QUJD', mimeType: 'audio/webm' });
+    expect(result).toEqual({
+      rawTranscript: 'hello world',
+      transcript: 'hello world',
+      toneAnalysis: { moodScore: 0.5 }
+    });
+    expect(mockTranscribeEntryFn).toHaveBeenCalledWith({
+      base64: 'QUJD',
+      mimeType: 'audio/webm',
+      properNouns: []
+    });
   });
 
   it('returns non-retryable error codes immediately without retrying', async () => {

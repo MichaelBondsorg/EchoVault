@@ -5,6 +5,7 @@
  * Storage key: 'engram-dark-mode'
  * Values: 'dark' | 'light' | 'system' (null treated as 'system')
  */
+import { StatusBar, Style } from '@capacitor/status-bar';
 
 const STORAGE_KEY = 'engram-dark-mode';
 const VALID_MODES = ['dark', 'light', 'system'];
@@ -15,8 +16,8 @@ let mediaQueryHandler = null;
 async function updateStatusBar(isDark) {
   try {
     if (window.Capacitor) {
-      const { StatusBar, Style } = await import('@capacitor/status-bar');
-      await StatusBar.setStyle({ style: isDark ? Style.Dark : Style.Light });
+      await StatusBar.setStyle({ style: isDark ? Style.Light : Style.Dark });
+      await StatusBar.setBackgroundColor({ color: isDark ? '#151618' : '#F7F6F2' });
     }
   } catch {
     // StatusBar not available (web or plugin not installed)

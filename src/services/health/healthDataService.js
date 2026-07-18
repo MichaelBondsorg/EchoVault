@@ -312,7 +312,11 @@ export const getEntryHealthContext = async () => {
       source: summary.source || 'healthkit',
       capturedAt: new Date().toISOString()
     };
-    console.log('[HealthDataService] Returning NEW format context:', JSON.stringify(context, null, 2));
+  console.log('[HealthDataService] Returning health context:', {
+    available: context.available,
+    source: context.source,
+    schemaVersion: context.schemaVersion,
+  });
     return context;
   }
 
