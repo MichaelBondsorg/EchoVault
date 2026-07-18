@@ -8,7 +8,7 @@ import {
 } from 'lucide-react';
 import { safeString, formatMentions } from '../../utils/string';
 import { formatDateForInput, getTodayForInput, parseDateInput, getDateString } from '../../utils/date';
-import { getEntryTypeColors, getEntityTypeColors, getTherapeuticColors } from '../../utils/colorMap';
+import { getEntryTypeColors, getEntityTypeColors } from '../../utils/colorMap';
 import ProvenanceDisclosure from '../ui/ProvenanceDisclosure';
 
 // Entity tag emoji lookup (hoisted for performance - used in tag rendering)
@@ -61,8 +61,8 @@ const PrimaryReadinessMetric = ({ healthContext }) => {
 
   // Whoop users (or merged): Recovery is primary
   if (hasWhoop && hasRecovery) {
-    const recoveryColor = recovery >= 67 ? 'bg-sage-100 text-sage-700 border-sage-200 dark:bg-sage-900/30 dark:text-sage-300 dark:border-sage-700' :
-                          recovery >= 34 ? 'bg-honey-100 text-honey-700 border-honey-200 dark:bg-honey-900/30 dark:text-honey-300 dark:border-honey-700' :
+    const recoveryColor = recovery >= 67 ? 'bg-accent-wash text-accent-deep border-border' :
+                          recovery >= 34 ? 'bg-divider text-secondary-foreground border-border' :
                           'bg-red-100 text-red-700 border-red-200 dark:bg-red-900/30 dark:text-red-300 dark:border-red-800'; /* @color-safe: health warning */
     return (
       <span className={`flex items-center gap-1 px-2 py-0.5 rounded-full border font-medium ${recoveryColor}`}>
@@ -75,9 +75,9 @@ const PrimaryReadinessMetric = ({ healthContext }) => {
 
   // HealthKit-only users: Sleep Score is primary
   if (hasSleepScore) {
-    const sleepColor = sleepScore >= 80 ? 'bg-sage-100 text-sage-700 border-sage-200 dark:bg-sage-900/30 dark:text-sage-300 dark:border-sage-700' :
-                       sleepScore >= 60 ? 'bg-lavender-100 text-lavender-700 border-lavender-200 dark:bg-lavender-900/30 dark:text-lavender-300 dark:border-lavender-700' :
-                       'bg-terra-100 text-terra-700 border-terra-200 dark:bg-terra-900/30 dark:text-terra-300 dark:border-terra-700';
+    const sleepColor = sleepScore >= 80 ? 'bg-accent-wash text-accent-deep border-border' :
+                       sleepScore >= 60 ? 'bg-divider text-secondary-foreground border-border' :
+                       'bg-red-100 text-red-700 border-red-200 dark:bg-red-900/30 dark:text-red-300 dark:border-red-800'; /* @color-safe: health warning */
     return (
       <span className={`flex items-center gap-1 px-2 py-0.5 rounded-full border font-medium ${sleepColor}`}>
         <BedDouble size={12} />
@@ -89,8 +89,8 @@ const PrimaryReadinessMetric = ({ healthContext }) => {
 
   // Fallback: Show sleep hours if available
   if (sleepHours && sleepHours > 0) {
-    const hoursColor = sleepHours >= 7 ? 'bg-sage-50 text-sage-700 dark:bg-sage-900/30 dark:text-sage-300' :
-                       sleepHours >= 5 ? 'bg-honey-50 text-honey-700 dark:bg-honey-900/30 dark:text-honey-300' :
+    const hoursColor = sleepHours >= 7 ? 'bg-accent-wash text-accent-deep' :
+                       sleepHours >= 5 ? 'bg-divider text-secondary-foreground' :
                        'bg-red-50 text-red-700 dark:bg-red-900/30 dark:text-red-300'; /* @color-safe: health warning */
     return (
       <span className={`flex items-center gap-1 px-1.5 py-0.5 rounded-full ${hoursColor}`}>
@@ -103,14 +103,15 @@ const PrimaryReadinessMetric = ({ healthContext }) => {
   return null;
 };
 
-// Mood color utility
-const getMoodColor = (score) => {
-  if (score === null || score === undefined) return 'border-warm-200';
-  if (score >= 0.75) return 'border-l-mood-great';
-  if (score >= 0.55) return 'border-l-mood-good';
-  if (score >= 0.35) return 'border-l-mood-neutral';
-  if (score >= 0.15) return 'border-l-mood-low';
-  return 'border-l-mood-struggling';
+// Mood dot color — CSS-var driven accent scale (mirrors the bucketing used
+// by MoodHeatmapWidget's `accentForMood`, CLOUD-DESIGN-SPEC.md §7 Journal
+// "mood dot per row"). No legacy `mood-*`/raw hex — accent tokens only.
+const getMoodDotColor = (score) => {
+  if (score === null || score === undefined) return 'var(--faint)';
+  if (score >= 0.75) return 'var(--accent)';
+  if (score >= 0.5) return 'var(--accent-4)';
+  if (score >= 0.25) return 'var(--accent-3)';
+  return 'var(--accent-2)';
 };
 
 const EntryCard = ({ entry, onDelete, onUpdate }) => {
@@ -150,29 +151,26 @@ const EntryCard = ({ entry, onDelete, onUpdate }) => {
   };
 
   const cardStyle = isTask
-    ? 'bg-honey-50 border-honey-200 dark:bg-honey-900/20 dark:border-honey-800'
-    : 'bg-white border-warm-100 dark:bg-hearth-900 dark:border-hearth-800';
+    ? 'bg-accent-wash border-border'
+    : 'bg-card border-border';
 
-  const moodBorderColor = getMoodColor(entry.analysis?.mood_score);
+  const moodDotColor = getMoodDotColor(entry.analysis?.mood_score);
 
   return (
     <motion.div
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
-      className={`rounded-2xl p-5 shadow-soft border hover:shadow-soft-lg transition-shadow mb-4 relative overflow-hidden border-l-4 ${cardStyle} ${moodBorderColor}`}
+      className={`rounded-2xl p-5 shadow-sm border transition-shadow relative overflow-hidden ${cardStyle}`}
     >
-      {isPending && <div className="absolute top-0 left-0 right-0 h-1 bg-warm-100"><div className="h-full bg-honey-500 animate-progress-indeterminate"></div></div>}
+      {isPending && <div className="absolute top-0 left-0 right-0 h-1 bg-divider"><div className="h-full bg-accent animate-progress-indeterminate"></div></div>}
 
       {/* Insight Box */}
       {entry.contextualInsight?.found && insightMsg && !isTask && (() => {
         const insightType = entry.contextualInsight.type;
-        const isPositive = ['progress', 'streak', 'absence', 'encouragement'].includes(insightType);
         const isWarning = insightType === 'warning';
         const colorClass = isWarning
           ? 'bg-red-50 border-red-100 text-red-800 dark:bg-red-900/30 dark:border-red-800 dark:text-red-200' /* @color-safe: warning insight */
-          : isPositive
-            ? 'bg-sage-50 border-sage-100 text-sage-800 dark:bg-sage-900/30 dark:border-sage-800 dark:text-sage-200'
-            : 'bg-honey-50 border-honey-100 text-honey-800 dark:bg-honey-900/30 dark:border-honey-800 dark:text-honey-200';
+          : 'bg-accent-wash border-border text-accent-deep';
         return (
           <motion.div
             initial={{ opacity: 0, x: -10 }}
@@ -184,7 +182,7 @@ const EntryCard = ({ entry, onDelete, onUpdate }) => {
               <div className="font-display font-bold text-[10px] uppercase opacity-75 tracking-wider mb-1">{safeString(insightType)}</div>
               {insightMsg}
               {cbt?.validation && (
-                <p className="mt-2 text-warm-600 italic border-t border-warm-200 pt-2">{cbt.validation}</p>
+                <p className="mt-2 text-secondary-foreground italic border-t border-border pt-2">{cbt.validation}</p>
               )}
             </div>
           </motion.div>
@@ -195,55 +193,48 @@ const EntryCard = ({ entry, onDelete, onUpdate }) => {
       {isVent && ventSupport && (
         <div className="mb-4 space-y-3">
           {ventSupport.validation && (
-            <p className="text-warm-500 italic text-sm">{ventSupport.validation}</p>
+            <p className="text-muted-foreground italic text-sm">{ventSupport.validation}</p>
           )}
           {ventSupport.cooldown && (
-            <div className="bg-sage-50 p-3 rounded-xl border border-sage-100">
-              <div className="flex items-center gap-2 text-sage-700 font-display font-semibold text-xs uppercase mb-2">
+            <div className="bg-accent-wash p-3 rounded-xl border border-border">
+              <div className="flex items-center gap-2 text-accent-deep font-display font-semibold text-xs uppercase mb-2">
                 <Wind size={14} /> {ventSupport.cooldown.technique || 'Grounding'}
               </div>
-              <p className="text-sm text-sage-800 font-body">{ventSupport.cooldown.instruction}</p>
+              <p className="text-sm text-secondary-foreground font-body">{ventSupport.cooldown.instruction}</p>
             </div>
           )}
         </div>
       )}
 
       {/* Celebration Display */}
-      {framework === 'celebration' && celebration && (() => {
-        const celebColors = getTherapeuticColors('celebration');
-        return (
+      {framework === 'celebration' && celebration && (
         <div className="mb-4 space-y-3">
           {celebration.affirmation && (
-            <div className={`bg-gradient-to-r from-sage-50 to-sage-100 p-3 rounded-xl border ${celebColors.border} dark:from-sage-900/30 dark:to-sage-800/20`}>
-              <div className={`flex items-center gap-2 ${celebColors.text} font-display font-semibold text-xs uppercase mb-2`}>
+            <div className="bg-accent-wash p-3 rounded-xl border border-border">
+              <div className="flex items-center gap-2 text-accent-deep font-display font-semibold text-xs uppercase mb-2">
                 <Sparkles size={14} /> Nice!
               </div>
-              <p className={`text-sm font-body ${celebColors.text}`}>{celebration.affirmation}</p>
+              <p className="text-sm font-body text-accent-deep">{celebration.affirmation}</p>
               {celebration.amplify && (
-                <p className="text-xs text-sage-600 dark:text-sage-400 mt-2 italic">{celebration.amplify}</p>
+                <p className="text-xs text-muted-foreground mt-2 italic">{celebration.amplify}</p>
               )}
             </div>
           )}
         </div>
-        );
-      })()}
+      )}
 
       {/* ACT (Acceptance & Commitment) Display */}
-      {framework === 'act' && actAnalysis && (() => {
-        const actColors = getTherapeuticColors('ACT');
-        const valuesColors = getTherapeuticColors('values');
-        const commitColors = getTherapeuticColors('committed_action');
-        return (
+      {framework === 'act' && actAnalysis && (
         <div className="mb-4 space-y-3">
-          <div className={`${actColors.bg} rounded-xl p-4 border ${actColors.border}`}>
+          <div className="bg-accent-wash rounded-xl p-4 border border-border">
             {/* Header with technique badge */}
             <div className="flex items-center justify-between mb-3">
               <div className="flex items-center gap-2">
-                <Wind className="text-sage-600 dark:text-sage-400" size={16} />
-                <span className="text-xs font-bold text-sage-700 dark:text-sage-300 uppercase">Defusion</span>
+                <Wind className="text-accent-deep" size={16} />
+                <span className="text-xs font-bold text-accent-deep uppercase">Defusion</span>
               </div>
               {actAnalysis.defusion_technique && (
-                <span className="text-[10px] font-semibold text-sage-600 dark:text-sage-300 bg-sage-200 dark:bg-sage-800/50 px-2 py-0.5 rounded-full">
+                <span className="text-[10px] font-semibold text-accent-deep bg-card px-2 py-0.5 rounded-full">
                   {actAnalysis.defusion_technique.replace('_', ' ')}
                 </span>
               )}
@@ -251,24 +242,24 @@ const EntryCard = ({ entry, onDelete, onUpdate }) => {
 
             {/* Fusion thought (the "hook") */}
             {actAnalysis.fusion_thought && (
-              <div className="text-sage-900 dark:text-sage-100 text-sm mb-2">
+              <div className="text-foreground text-sm mb-2">
                 <span className="opacity-75">Instead of: </span>
-                <span className="line-through decoration-sage-300 dark:decoration-sage-600">"{actAnalysis.fusion_thought}"</span>
+                <span className="line-through decoration-faint">"{actAnalysis.fusion_thought}"</span>
               </div>
             )}
 
             {/* Defusion phrase */}
             {actAnalysis.defusion_phrase && (
-              <div className="text-sage-800 dark:text-sage-200 font-medium text-sm bg-white/50 dark:bg-hearth-850/50 p-2 rounded-lg">
+              <div className="text-foreground font-medium text-sm bg-card p-2 rounded-lg">
                 Try: "{actAnalysis.defusion_phrase}"
               </div>
             )}
 
             {/* Values context */}
             {actAnalysis.values_context && (
-              <div className={`mt-3 pt-3 border-t ${actColors.border} flex items-center gap-2`}>
-                <Compass size={14} className={valuesColors.text} />
-                <span className={`text-xs ${valuesColors.text}`}>
+              <div className="mt-3 pt-3 border-t border-border flex items-center gap-2">
+                <Compass size={14} className="text-accent-deep" />
+                <span className="text-xs text-accent-deep">
                   <span className="font-semibold">Value:</span> {actAnalysis.values_context}
                 </span>
               </div>
@@ -277,28 +268,27 @@ const EntryCard = ({ entry, onDelete, onUpdate }) => {
 
           {/* Committed Action */}
           {actAnalysis.committed_action && (
-            <div className={`${commitColors.bg} p-3 rounded-xl border ${commitColors.border}`}>
-              <div className={`flex items-center gap-2 ${commitColors.text} font-display font-semibold text-xs uppercase mb-2`}>
+            <div className="bg-accent-wash p-3 rounded-xl border border-border">
+              <div className="flex items-center gap-2 text-accent-deep font-display font-semibold text-xs uppercase mb-2">
                 <Footprints size={14} /> Committed Action
               </div>
-              <p className={`text-sm font-medium font-body ${commitColors.text}`}>{actAnalysis.committed_action}</p>
-              <p className="text-xs text-honey-600 dark:text-honey-400 mt-1 italic">Do this regardless of how you feel right now.</p>
+              <p className="text-sm font-medium font-body text-accent-deep">{actAnalysis.committed_action}</p>
+              <p className="text-xs text-muted-foreground mt-1 italic">Do this regardless of how you feel right now.</p>
             </div>
           )}
         </div>
-        );
-      })()}
+      )}
 
       {/* Task Acknowledgment */}
       {isMixed && taskAcknowledgment && (
-        <p className="text-warm-500 italic text-sm mb-4">{taskAcknowledgment}</p>
+        <p className="text-muted-foreground italic text-sm mb-4">{taskAcknowledgment}</p>
       )}
 
       {/* Enhanced CBT Breakdown */}
       {framework === 'cbt' && cbt && (
         <div className="mb-4 space-y-3">
           {cbt.validation && !entry.contextualInsight?.found && (
-            <p className="text-warm-500 italic text-sm">{cbt.validation}</p>
+            <p className="text-muted-foreground italic text-sm">{cbt.validation}</p>
           )}
 
           {cbt.distortion && (
@@ -308,7 +298,7 @@ const EntryCard = ({ entry, onDelete, onUpdate }) => {
             )
           ) && (
             <div className="flex items-center gap-2">
-              <span className="bg-accent-light text-accent-dark px-2 py-1 rounded-full text-xs font-semibold flex items-center gap-1">
+              <span className="bg-accent-wash text-accent-deep px-2 py-1 rounded-full text-xs font-semibold flex items-center gap-1">
                 <Info size={12} />
                 {cbt.distortion}
               </span>
@@ -316,40 +306,40 @@ const EntryCard = ({ entry, onDelete, onUpdate }) => {
           )}
 
           {cbt.automatic_thought && (
-            <div className="text-sm text-warm-700 font-body">
+            <div className="text-sm text-secondary-foreground font-body">
               <span className="font-semibold">Thought:</span> {cbt.automatic_thought}
             </div>
           )}
 
           {cbt.perspective && (
-            <div className="bg-gradient-to-r from-sage-50 to-sage-100 p-3 rounded-xl border-l-4 border-sage-400">
-              <div className="text-xs font-display font-semibold text-sage-600 uppercase mb-1">Perspective</div>
-              <p className="text-sm text-warm-700 font-body">{cbt.perspective}</p>
+            <div className="bg-accent-wash p-3 rounded-xl border-l-4 border-accent">
+              <div className="text-xs font-display font-semibold text-accent-deep uppercase mb-1">Perspective</div>
+              <p className="text-sm text-secondary-foreground font-body">{cbt.perspective}</p>
             </div>
           )}
 
           {!cbt.perspective && cbt.socratic_question && (
-            <div className="bg-sage-50 p-3 rounded-xl border-l-4 border-sage-400">
-              <div className="text-xs font-display font-semibold text-sage-600 uppercase mb-1">Reflect:</div>
-              <p className="text-sm text-sage-800 font-body">{cbt.socratic_question}</p>
+            <div className="bg-accent-wash p-3 rounded-xl border-l-4 border-accent">
+              <div className="text-xs font-display font-semibold text-accent-deep uppercase mb-1">Reflect:</div>
+              <p className="text-sm text-secondary-foreground font-body">{cbt.socratic_question}</p>
             </div>
           )}
 
           {!cbt.perspective && (cbt.suggested_reframe || cbt.challenge) && (
             <div className="text-sm font-body">
-              <span className="text-sage-700 dark:text-sage-300 font-semibold">Try thinking:</span>{' '}
-              <span className="text-sage-800 dark:text-sage-200">{cbt.suggested_reframe || cbt.challenge}</span>
+              <span className="text-accent-deep font-semibold">Try thinking:</span>{' '}
+              <span className="text-secondary-foreground">{cbt.suggested_reframe || cbt.challenge}</span>
             </div>
           )}
 
           {cbt.behavioral_activation && (
-            <div className="bg-lavender-50 p-3 rounded-xl border border-lavender-100">
-              <div className="flex items-center gap-2 text-lavender-700 font-display font-semibold text-xs uppercase mb-2">
+            <div className="bg-divider p-3 rounded-xl border border-border">
+              <div className="flex items-center gap-2 text-secondary-foreground font-display font-semibold text-xs uppercase mb-2">
                 <Footprints size={14} /> Try This (Under 5 min)
               </div>
-              <p className="text-sm text-lavender-800 font-medium font-body">{cbt.behavioral_activation.activity}</p>
+              <p className="text-sm text-foreground font-medium font-body">{cbt.behavioral_activation.activity}</p>
               {cbt.behavioral_activation.rationale && (
-                <p className="text-xs text-lavender-600 mt-1">{cbt.behavioral_activation.rationale}</p>
+                <p className="text-xs text-muted-foreground mt-1">{cbt.behavioral_activation.rationale}</p>
               )}
             </div>
           )}
@@ -358,11 +348,11 @@ const EntryCard = ({ entry, onDelete, onUpdate }) => {
 
       {/* Legacy CBT Breakdown */}
       {framework === 'cbt' && cbt && !cbt.validation && !cbt.socratic_question && cbt.challenge && !cbt.suggested_reframe && (
-        <div className="mb-4 bg-sage-50 p-3 rounded-xl border border-sage-100 text-sm space-y-2">
-          <div className="flex items-center gap-2 text-sage-700 font-display font-bold text-xs uppercase"><Brain size={12}/> Cognitive Restructuring</div>
+        <div className="mb-4 bg-accent-wash p-3 rounded-xl border border-border text-sm space-y-2">
+          <div className="flex items-center gap-2 text-accent-deep font-display font-bold text-xs uppercase"><Brain size={12}/> Cognitive Restructuring</div>
           <div className="grid gap-2 font-body">
-            <div><span className="font-semibold text-sage-900">Thought:</span> {cbt.automatic_thought}</div>
-            <div className="bg-white dark:bg-hearth-850 p-2 rounded-lg border border-sage-100 dark:border-sage-800"><span className="font-semibold text-sage-700 dark:text-sage-300">Challenge:</span> {cbt.challenge}</div>
+            <div><span className="font-semibold text-foreground">Thought:</span> {cbt.automatic_thought}</div>
+            <div className="bg-card p-2 rounded-lg border border-border"><span className="font-semibold text-accent-deep">Challenge:</span> {cbt.challenge}</div>
           </div>
         </div>
       )}
@@ -371,7 +361,7 @@ const EntryCard = ({ entry, onDelete, onUpdate }) => {
         <div className="flex gap-2 flex-wrap items-center">
           <button
             onClick={toggleCategory}
-            className={`text-[10px] font-display font-bold px-2 py-0.5 rounded-full uppercase tracking-wide hover:opacity-80 transition-opacity flex items-center gap-1 ${entry.category === 'work' ? 'bg-warm-100 text-warm-600' : 'bg-accent-light text-accent-dark'}`}
+            className={`text-[10px] font-display font-bold px-2 py-0.5 rounded-full uppercase tracking-wide hover:opacity-80 transition-opacity flex items-center gap-1 ${entry.category === 'work' ? 'bg-divider text-secondary-foreground' : 'bg-accent-wash text-accent-deep'}`}
             title="Click to switch category"
           >
             {entry.category}
@@ -407,9 +397,9 @@ const EntryCard = ({ entry, onDelete, onUpdate }) => {
                     return <span key={i} className={`text-[10px] font-semibold ${colors.text} ${colors.bg} px-2 py-0.5 rounded-full`}>{ENTITY_EMOJIS[entityPrefix]} {formatName(entityPrefix)}</span>;
                   } else if (tag.startsWith('@')) {
                     // Unknown @ tag - show without prefix
-                    return <span key={i} className="text-[10px] font-semibold text-warm-600 bg-warm-50 px-2 py-0.5 rounded-full">{tag.split(':')[1]?.replace(/_/g, ' ') || tag}</span>;
+                    return <span key={i} className="text-[10px] font-semibold text-secondary-foreground bg-divider px-2 py-0.5 rounded-full">{tag.split(':')[1]?.replace(/_/g, ' ') || tag}</span>;
                   }
-                  return <span key={i} className="text-[10px] font-semibold text-sage-600 bg-sage-50 px-2 py-0.5 rounded-full">#{tag}</span>;
+                  return <span key={i} className="text-[10px] font-semibold text-accent-deep bg-accent-wash px-2 py-0.5 rounded-full">#{tag}</span>;
                 })}
                 {/* Show "+N more" button when tags are hidden */}
                 {hiddenCount > 0 && !showAllTags && (
@@ -418,7 +408,7 @@ const EntryCard = ({ entry, onDelete, onUpdate }) => {
                       e.stopPropagation();
                       setShowAllTags(true);
                     }}
-                    className="text-[10px] font-semibold text-warm-500 bg-warm-100 px-2 py-0.5 rounded-full hover:bg-warm-200 transition-colors"
+                    className="text-[10px] font-semibold text-muted-foreground bg-divider px-2 py-0.5 rounded-full hover:bg-border transition-colors"
                   >
                     +{hiddenCount} more
                   </button>
@@ -430,7 +420,7 @@ const EntryCard = ({ entry, onDelete, onUpdate }) => {
                       e.stopPropagation();
                       setShowAllTags(false);
                     }}
-                    className="text-[10px] font-semibold text-warm-500 bg-warm-100 px-2 py-0.5 rounded-full hover:bg-warm-200 transition-colors"
+                    className="text-[10px] font-semibold text-muted-foreground bg-divider px-2 py-0.5 rounded-full hover:bg-border transition-colors"
                   >
                     Show less
                   </button>
@@ -446,7 +436,7 @@ const EntryCard = ({ entry, onDelete, onUpdate }) => {
             </span>
           )}
           <button onClick={() => setShowCorrections((shown) => !shown)} className="min-h-11 px-2 text-xs font-semibold text-[var(--accent-deep)]">Correct AI</button>
-          <button aria-label="Delete entry" onClick={() => onDelete(entry.id)} className="cloud-icon-button text-warm-300 hover:text-red-400 transition-colors"><Trash2 size={16}/></button>
+          <button aria-label="Delete entry" onClick={() => onDelete(entry.id)} className="cloud-icon-button text-faint hover:text-red-400 transition-colors"><Trash2 size={16}/></button>
         </div>
       </div>
 
@@ -491,7 +481,7 @@ const EntryCard = ({ entry, onDelete, onUpdate }) => {
               <input
                 value={title}
                 onChange={e => setTitle(e.target.value)}
-                className="flex-1 font-display font-bold text-lg border-b-2 border-honey-500 focus:outline-none bg-transparent"
+                className="flex-1 font-display font-bold text-lg border-b-2 border-accent focus:outline-none bg-transparent"
                 placeholder="Entry title"
                 autoFocus
               />
@@ -499,7 +489,7 @@ const EntryCard = ({ entry, onDelete, onUpdate }) => {
             <div className="flex items-center gap-2">
               <label
                 htmlFor={`entry-date-${entry.id}`}
-                className="text-xs text-warm-500 font-medium flex items-center gap-1"
+                className="text-xs text-muted-foreground font-medium flex items-center gap-1"
               >
                 <Calendar size={12} />
                 Entry Date:
@@ -510,7 +500,7 @@ const EntryCard = ({ entry, onDelete, onUpdate }) => {
                 value={editDate}
                 onChange={e => setEditDate(e.target.value)}
                 max={getTodayForInput()}
-                className="text-sm border border-warm-200 rounded-lg px-2 py-1 focus:outline-none focus:border-honey-500"
+                className="text-sm border border-border rounded-lg px-2 py-1 bg-card text-foreground focus:outline-none focus:border-accent"
               />
               <button
                 onClick={() => {
@@ -540,7 +530,7 @@ const EntryCard = ({ entry, onDelete, onUpdate }) => {
                   onUpdate(entry.id, updates, options);
                   setEditing(false);
                 }}
-                className="text-sage-600 hover:text-sage-700 dark:text-sage-400 dark:hover:text-sage-300"
+                className="text-accent-deep hover:opacity-80"
               >
                 <Check size={18}/>
               </button>
@@ -550,7 +540,7 @@ const EntryCard = ({ entry, onDelete, onUpdate }) => {
                   setEditDate(formatDateForInput(entry.effectiveDate || entry.createdAt));
                   setEditing(false);
                 }}
-                className="text-warm-400 hover:text-warm-600"
+                className="text-muted-foreground hover:text-secondary-foreground"
               >
                 <X size={18}/>
               </button>
@@ -558,23 +548,33 @@ const EntryCard = ({ entry, onDelete, onUpdate }) => {
           </div>
         ) : (
           <div className="flex items-center gap-2">
-            <h3 className={`text-lg font-display font-bold text-warm-800 ${isPending ? 'animate-pulse' : ''}`}>{isPending ? "Processing..." : title}</h3>
-            {!isPending && <button onClick={() => setEditing(true)} className="text-warm-300 hover:text-honey-500 opacity-50 hover:opacity-100"><Edit2 size={14}/></button>}
+            <h3 className={`text-lg font-display font-bold text-foreground ${isPending ? 'animate-pulse' : ''}`}>{isPending ? "Processing..." : title}</h3>
+            {!isPending && <button onClick={() => setEditing(true)} className="text-faint hover:text-accent-deep opacity-50 hover:opacity-100"><Edit2 size={14}/></button>}
           </div>
         )}
       </div>
 
-      <div className="text-xs text-warm-400 mb-2 flex items-center gap-1 font-medium">
+      {/* Meta line (CLOUD-DESIGN-SPEC.md §7 Journal: "mood dot per row, meta
+          line") — mood dot + time + date, "(edited)" when effectiveDate was
+          corrected away from the original capture date. */}
+      <div className="text-xs text-faint mb-2 flex items-center gap-1.5 font-medium">
+        <span
+          className="h-2 w-2 flex-none rounded-full"
+          style={{ background: moodDotColor }}
+          aria-hidden="true"
+        />
         <Calendar size={12}/>
+        {(entry.effectiveDate || entry.createdAt).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
+        {' · '}
         {(entry.effectiveDate || entry.createdAt).toLocaleDateString()}
         {entry.effectiveDate && getDateString(entry.effectiveDate) !== getDateString(entry.createdAt) && (
-          <span className="text-warm-300 ml-1">(edited)</span>
+          <span className="text-faint ml-1">(edited)</span>
         )}
       </div>
 
       {/* Environment & Health Context Strip */}
       {(entry.environmentContext || entry.healthContext) && (
-        <div className="flex flex-wrap items-center gap-2 text-[10px] text-warm-500 mb-3 pb-2 border-b border-warm-100">
+        <div className="flex flex-wrap items-center gap-2 text-[10px] text-muted-foreground mb-3 pb-2 border-b border-divider">
           {/* Weather Context */}
           {entry.environmentContext && (() => {
             const env = entry.environmentContext;
@@ -584,7 +584,7 @@ const EntryCard = ({ entry, onDelete, onUpdate }) => {
 
             return (
               <>
-                <span className="flex items-center gap-1 bg-lavender-50 text-lavender-700 dark:bg-lavender-900/30 dark:text-lavender-300 px-1.5 py-0.5 rounded-full">
+                <span className="flex items-center gap-1 bg-divider text-secondary-foreground px-1.5 py-0.5 rounded-full">
                   <WeatherIcon size={10} />
                   {env.temperature !== null && (
                     <span>{Math.round(env.temperature)}°</span>
@@ -595,7 +595,7 @@ const EntryCard = ({ entry, onDelete, onUpdate }) => {
                 </span>
                 {/* Day summary if different from point-in-time */}
                 {showDaySummary && (
-                  <span className="flex items-center gap-1 bg-warm-50 text-warm-600 dark:bg-warm-900/30 dark:text-warm-300 px-1.5 py-0.5 rounded-full">
+                  <span className="flex items-center gap-1 bg-divider text-secondary-foreground px-1.5 py-0.5 rounded-full">
                     {(() => {
                       const DayIcon = getWeatherIcon(dayCondition, true);
                       return <DayIcon size={10} />;
@@ -610,7 +610,7 @@ const EntryCard = ({ entry, onDelete, onUpdate }) => {
                 )}
                 {/* Sunshine percent for low-light days */}
                 {env.daySummary?.isLowSunshine && env.daySummary?.sunshinePercent !== undefined && (
-                  <span className="text-honey-600 dark:text-honey-400 hidden sm:inline">
+                  <span className="text-accent-deep hidden sm:inline">
                     {env.daySummary.sunshinePercent}% sunshine
                   </span>
                 )}
@@ -632,7 +632,7 @@ const EntryCard = ({ entry, onDelete, onUpdate }) => {
                 {/* Secondary metrics shown on larger screens */}
                 {/* Sleep hours (if primary is recovery, show hours as secondary) */}
                 {hasWhoop && health.recovery?.score > 0 && health.sleep?.totalHours > 0 && (
-                  <span className="hidden md:flex items-center gap-1 bg-lavender-50 text-lavender-700 dark:bg-lavender-900/30 dark:text-lavender-300 px-1.5 py-0.5 rounded-full text-[10px]">
+                  <span className="hidden md:flex items-center gap-1 bg-divider text-secondary-foreground px-1.5 py-0.5 rounded-full text-[10px]">
                     <BedDouble size={10} />
                     {health.sleep.totalHours.toFixed(1)}h
                   </span>
@@ -641,9 +641,8 @@ const EntryCard = ({ entry, onDelete, onUpdate }) => {
                 {/* HRV */}
                 {health.heart?.hrv > 0 && (
                   <span className={`hidden sm:flex items-center gap-1 px-1.5 py-0.5 rounded-full ${
-                    health.heart.hrvTrend === 'improving' ? 'bg-sage-50 text-sage-700 dark:bg-sage-900/30 dark:text-sage-300' :
-                    health.heart.hrvTrend === 'declining' ? 'bg-terra-50 text-terra-700 dark:bg-terra-900/30 dark:text-terra-300' :
-                    'bg-warm-50 text-warm-600 dark:bg-warm-900/30 dark:text-warm-300'
+                    health.heart.hrvTrend === 'improving' ? 'bg-accent-wash text-accent-deep' :
+                    'bg-divider text-secondary-foreground'
                   }`}>
                     <Activity size={10} />
                     HRV {health.heart.hrv}ms
@@ -654,8 +653,7 @@ const EntryCard = ({ entry, onDelete, onUpdate }) => {
                 {hasWhoop && health.strain?.score > 0 && (
                   <span className={`hidden md:flex items-center gap-1 px-1.5 py-0.5 rounded-full ${
                     health.strain.score >= 15 ? 'bg-red-50 text-red-700 dark:bg-red-900/30 dark:text-red-300' /* @color-safe: high strain warning */ :
-                    health.strain.score >= 10 ? 'bg-terra-50 text-terra-700 dark:bg-terra-900/30 dark:text-terra-300' :
-                    'bg-lavender-50 text-lavender-700 dark:bg-lavender-900/30 dark:text-lavender-300'
+                    'bg-divider text-secondary-foreground'
                   }`}>
                     <Zap size={10} />
                     {health.strain.score.toFixed(1)} strain
@@ -664,7 +662,7 @@ const EntryCard = ({ entry, onDelete, onUpdate }) => {
 
                 {/* Steps - always show on larger screens */}
                 {health.activity?.stepsToday > 0 && (
-                  <span className="hidden sm:flex items-center gap-1 bg-sage-50 text-sage-700 dark:bg-sage-900/30 dark:text-sage-300 px-1.5 py-0.5 rounded-full">
+                  <span className="hidden sm:flex items-center gap-1 bg-accent-wash text-accent-deep px-1.5 py-0.5 rounded-full">
                     <Footprints size={10} />
                     {health.activity.stepsToday.toLocaleString()}
                   </span>
@@ -677,7 +675,7 @@ const EntryCard = ({ entry, onDelete, onUpdate }) => {
 
       {/* TXT-002: Added max-w-prose for optimal line length (50-75 characters) */}
       {/* TXT-003: Improved line-height and paragraph spacing for readability */}
-      <div className="text-warm-600 text-sm whitespace-pre-wrap leading-7 font-body max-w-prose [&>*]:mb-3">
+      <div className="text-secondary-foreground text-sm whitespace-pre-wrap leading-7 font-body max-w-prose [&>*]:mb-3">
         {entry.text?.split(/\n\n+/).map((paragraph, i) => (
           <p key={i} className={i > 0 ? 'mt-4' : ''}>{paragraph}</p>
         )) || entry.text}
@@ -685,8 +683,8 @@ const EntryCard = ({ entry, onDelete, onUpdate }) => {
 
       {/* Extracted Tasks for mixed entries */}
       {isMixed && entry.extracted_tasks && entry.extracted_tasks.length > 0 && (
-        <div className="mt-4 pt-3 border-t border-warm-100">
-          <div className="text-xs font-display font-semibold text-warm-500 uppercase mb-2 flex items-center gap-1">
+        <div className="mt-4 pt-3 border-t border-divider">
+          <div className="text-xs font-display font-semibold text-muted-foreground uppercase mb-2 flex items-center gap-1">
             <Clipboard size={12} /> Tasks
           </div>
           <div className="space-y-1">
@@ -746,9 +744,9 @@ const EntryCard = ({ entry, onDelete, onUpdate }) => {
                       }
                       onUpdate(entry.id, { extracted_tasks: updatedTasks });
                     }}
-                    className="rounded border-warm-300 text-honey-600 focus:ring-honey-500"
+                    className="rounded border-border text-accent focus:ring-accent"
                   />
-                  <span className={displayAsCompleted ? 'line-through text-warm-400' : 'text-warm-700'}>
+                  <span className={displayAsCompleted ? 'line-through text-faint' : 'text-secondary-foreground'}>
                     {taskText}
                   </span>
                   {task?.recurrence && (

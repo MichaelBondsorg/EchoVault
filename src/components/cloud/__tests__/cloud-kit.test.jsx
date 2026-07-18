@@ -155,6 +155,18 @@ describe('Chip', () => {
     fireEvent.click(screen.getByText('All'));
     expect(onClick).toHaveBeenCalledTimes(1);
   });
+
+  it('pads the tap target to 44px via a ::before overlay without growing the visual pill (A4 known issue, fixed in C4)', () => {
+    render(<Chip>Voice</Chip>);
+    const chip = screen.getByText('Voice');
+    // Visual pill stays the compact §5 size...
+    expect(chip.className).toContain('min-h-[28px]');
+    // ...while an invisible relative/before overlay pads the hit area out to
+    // ~44px (28px + 8px inset on each side) for interactive consumers.
+    expect(chip.className).toContain('relative');
+    expect(chip.className).toMatch(/before:-inset-2\b/);
+    expect(chip.className).toContain("before:content-['']");
+  });
 });
 
 describe('Checkbox', () => {
