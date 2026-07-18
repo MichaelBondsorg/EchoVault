@@ -50,14 +50,14 @@
     line-height: 1.625;
   }
 
-  /* Focus styles — warm amber ring */
+  /* Focus styles — accent ring */
   :focus-visible {
     outline: none;
-    box-shadow: 0 0 0 2px #FAF5EF, 0 0 0 4px rgba(232, 168, 76, 0.6);
+    box-shadow: 0 0 0 2px #FAF5EF, 0 0 0 4px var(--accent);
     border-radius: 0.5rem;
   }
   html.dark :focus-visible {
-    box-shadow: 0 0 0 2px #1C1916, 0 0 0 4px rgba(232, 168, 76, 0.4);
+    box-shadow: 0 0 0 2px #1C1916, 0 0 0 4px var(--accent);
   }
 
   /* Selection color — honey amber */

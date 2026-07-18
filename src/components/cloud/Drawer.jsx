@@ -11,7 +11,7 @@ export const DrawerClose = VaulDrawer.Close;
 export const DrawerPortal = VaulDrawer.Portal;
 
 export const DrawerOverlay = forwardRef(({ className, ...props }, ref) => (
-  <VaulDrawer.Overlay ref={ref} className={cn('fixed inset-0 z-50 bg-foreground/40', className)} {...props} />
+  <VaulDrawer.Overlay ref={ref} className={cn('fixed inset-0 z-50 bg-black/40', className)} {...props} />
 ));
 DrawerOverlay.displayName = 'DrawerOverlay';
 
