@@ -7,6 +7,7 @@
 
 import { create } from 'zustand';
 import { devtools } from 'zustand/middleware';
+import { getBackgroundMotion, setBackgroundMotion as persistBackgroundMotion } from '../utils/backgroundMotion';
 
 /**
  * @typedef {'feed' | 'dashboard' | 'insights' | 'settings' | 'reports' | 'report-detail'} ViewType
@@ -30,7 +31,13 @@ const initialState = {
 
   // Complex modal data
   dailySummaryModal: null,
-  entryInsightsPopup: null
+  entryInsightsPopup: null,
+
+  // Cloud redesign — "Background motion" preference (spec §6.1). This store
+  // doesn't use zustand's `persist` middleware, so persistence is delegated
+  // to src/utils/backgroundMotion.js (localStorage 'engram-background-motion',
+  // default true), mirroring how accent.js/darkMode.js persist outside React.
+  backgroundMotion: getBackgroundMotion()
 };
 
 export const useUiStore = create(
@@ -148,6 +155,28 @@ export const useUiStore = create(
       ),
 
       // ============================================
+      // BACKGROUND MOTION PREFERENCE
+      // ============================================
+
+      /**
+       * Set the "Background motion" preference explicitly, persisting via
+       * src/utils/backgroundMotion.js.
+       */
+      setBackgroundMotion: (enabled) => {
+        const value = persistBackgroundMotion(enabled);
+        set({ backgroundMotion: value }, false, 'ui/setBackgroundMotion');
+      },
+
+      /**
+       * Toggle the "Background motion" preference, persisting the new value.
+       */
+      toggleBackgroundMotion: () => set(
+        (state) => ({ backgroundMotion: persistBackgroundMotion(!state.backgroundMotion) }),
+        false,
+        'ui/toggleBackgroundMotion'
+      ),
+
+      // ============================================
       // COMPLEX MODAL DATA ACTIONS
       // ============================================
 
@@ -205,7 +234,7 @@ export const useUiStore = create(
       /**
        * Reset UI state
        */
-      reset: () => set(initialState, false, 'ui/reset')
+      reset: () => set({ ...initialState, backgroundMotion: getBackgroundMotion() }, false, 'ui/reset')
     }),
     { name: 'ui-store' }
   )
@@ -214,3 +243,4 @@ export const useUiStore = create(
 // Selector hooks for common patterns
 export const useView = () => useUiStore((state) => state.view);
 export const useCategory = () => useUiStore((state) => state.category);
+export const useBackgroundMotion = () => useUiStore((state) => state.backgroundMotion);

@@ -215,30 +215,11 @@ describe('Verification: Typography Audit', () => {
   });
 });
 
-// ─── WCAG Contrast Checks ──────────────────────────────────────────
-
-describe('Verification: WCAG Contrast Checks', () => {
-  it('should document primary text/background color pairs for manual contrast audit', () => {
-    const pairings = [
-      { context: 'Primary body text (light)', text: 'text-hearth-800', bg: 'bg-warm-50' },
-      { context: 'Primary body text (dark)', text: 'text-hearth-100', bg: 'bg-hearth-950' },
-      { context: 'Entry badge task (light)', text: 'text-honey-700', bg: 'bg-honey-100' },
-      { context: 'Entry badge task (dark)', text: 'text-honey-300', bg: 'bg-honey-900/30' },
-      { context: 'Pattern positive (light)', text: 'text-sage-700', bg: 'bg-sage-100' },
-      { context: 'Pattern positive (dark)', text: 'text-sage-300', bg: 'bg-sage-900/30' },
-      { context: 'Pattern negative (light)', text: 'text-terra-700', bg: 'bg-terra-100' },
-      { context: 'Pattern negative (dark)', text: 'text-terra-300', bg: 'bg-terra-900/30' },
-      { context: 'Pattern reflective (light)', text: 'text-lavender-700', bg: 'bg-lavender-100' },
-      { context: 'Pattern reflective (dark)', text: 'text-lavender-300', bg: 'bg-lavender-900/30' },
-    ];
-
-    expect(pairings.length).toBe(10);
-    pairings.forEach(p => {
-      expect(p.text).toBeTruthy();
-      expect(p.bg).toBeTruthy();
-    });
-  });
-});
+// Note: a "WCAG Contrast Checks" block previously lived here. It only asserted that a
+// hardcoded array of Hearthside-palette class-name strings (text-honey-700/bg-honey-100,
+// etc.) was non-empty — it never read any source file, so it verified nothing about the
+// actual codebase. Its only content was legacy-palette documentation, which the Cloud
+// migration ratchet (cloudMigration.test.js) supersedes. Removed under task A5.
 
 // ─── Dark Mode Infrastructure ──────────────────────────────────────
 
@@ -371,6 +352,6 @@ describe('Verification: Build Check', () => {
 
     expect(html).not.toContain('fonts.googleapis.com');
     expect(html).not.toContain('fonts.gstatic.com');
-    expect(html).toContain('font-family: Geist, Inter');
+    expect(html).toContain("font-family: 'Geist Sans', Geist, Inter");
   });
 });

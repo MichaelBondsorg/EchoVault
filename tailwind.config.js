@@ -18,6 +18,24 @@ export default {
       // Hearthside Design System — Color Palette
       // ============================================
       colors: {
+        // ============================================
+        // Cloud Design System — semantic tokens (CSS vars)
+        // See docs/design/cloud/CLOUD-DESIGN-SPEC.md §2-3.
+        // Bridge period: legacy Hearthside palette below is preserved
+        // unchanged so un-migrated screens keep rendering; these semantic
+        // names let migrated screens use `bg-card`, `text-muted-foreground`,
+        // `border-divider`, etc. against the live Cloud accent theme.
+        // ============================================
+        background: 'var(--background)',
+        card: 'var(--card)',
+        border: 'var(--border)',
+        divider: 'var(--divider)',
+        foreground: 'var(--foreground)',
+        'secondary-foreground': 'var(--secondary-foreground)',
+        'muted-foreground': 'var(--muted-foreground)',
+        faint: 'var(--faint)',
+        destructive: 'var(--destructive)',
+
         // Core Surface Colors
         // Dark mode uses warm-tinted surfaces, NOT pure black.
         // hearth-950 is the darkest background. Do not add #000000.
@@ -136,15 +154,22 @@ export default {
           },
         },
 
-        // Accent — Sunset Rose (gentle emphasis)
+        // Accent — Cloud user-selectable accent (blue/mauve/terracotta via
+        // data-accent + CSS vars). DEFAULT/deep/wash drive new `bg-accent`,
+        // `bg-accent-deep`, `bg-accent-wash` utilities; light/dark below are
+        // the legacy Hearthside "Sunset Rose" shades, kept for un-migrated
+        // screens during the bridge period.
         accent: {
-          DEFAULT: '#D4918C',
+          DEFAULT: 'var(--accent)',
+          deep:    'var(--accent-deep)',
+          wash:    'var(--accent-wash)',
           light:   '#F0D0CC',
           dark:    '#B8706A',
         },
 
         // Legacy compatibility aliases
         primary: {
+          DEFAULT: 'var(--primary)',
           50:  '#F2F7F3',
           100: '#E0ECE2',
           200: '#C1D9C5',
@@ -156,6 +181,7 @@ export default {
           800: '#253527',
           900: '#1A241B',
         },
+        'primary-foreground': 'var(--primary-foreground)',
         secondary: {
           50:  '#F5F3F9',
           100: '#E8E3F2',
@@ -187,7 +213,7 @@ export default {
       // ============================================
       fontFamily: {
         display: ['Newsreader', 'Iowan Old Style', 'Charter', 'Georgia', 'serif'],
-        body:    ['Geist', 'Inter', 'system-ui', 'sans-serif'],
+        body:    ['Geist Sans', 'Geist', 'Inter', 'system-ui', 'sans-serif'],
         hand:    ['Newsreader', 'Georgia', 'serif'],
       },
 

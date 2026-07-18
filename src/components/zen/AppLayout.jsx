@@ -4,9 +4,9 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { ChevronLeft, ChevronRight, MessageCircle } from 'lucide-react';
 
 // Zen components
-import MoodBackgroundProvider from './MoodBackgroundProvider';
 import TopBar from './TopBar';
 import BottomNavbar from './BottomNavbar';
+import { LinenWaveBackground } from '../cloud';
 import CompanionNudge from './CompanionNudge';
 import QuickLogModal from './QuickLogModal';
 import DaySummaryModal from './DaySummaryModal';
@@ -333,13 +333,16 @@ const AppLayout = ({
   };
 
   return (
-    <MoodBackgroundProvider moodScore={latestMoodScore}>
+    <>
+      {/* Cloud canvas: linen + wave ambient background, mounted once behind all pages. */}
+      <LinenWaveBackground />
+
       {/* Main content area - scrollable with padding for fixed bars */}
       {/* LAY-002: Increased bottom padding to prevent nav overlap */}
       <main
         className="
           min-h-screen
-          dark:bg-hearth-950
+          text-foreground
           pt-[calc(env(safe-area-inset-top)+60px)]
           pb-[calc(env(safe-area-inset-bottom)+100px)]
           overflow-y-auto
@@ -524,7 +527,7 @@ const AppLayout = ({
 
       {/* Additional modals passed from App.jsx */}
       {children}
-    </MoodBackgroundProvider>
+    </>
   );
 };
 

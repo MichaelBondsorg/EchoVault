@@ -1,12 +1,19 @@
-import { useMemo, useState } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
-import { Calendar } from 'lucide-react';
-import GlassCard from '../GlassCard';
+import { useMemo } from 'react';
+import { motion } from 'framer-motion';
+import { Card, SectionLabel } from '../../cloud';
 
 /**
- * MoodHeatmapWidget - 30-day mood calendar for Bento dashboard
+ * MoodHeatmapWidget - "Mood trend" bar card for the Home screen
+ * (CLOUD-DESIGN-SPEC.md §7 Home: "mood-trend bar card"; bars use the
+ * accent-1..4 scale, today = full accent - mirrors the Insights "Mood
+ * trend" chart in the mockups).
  *
- * Shows a compact heatmap of mood scores over the last 30 days
+ * Restyle only: the underlying 30-day per-day mood aggregation (`days`)
+ * is unchanged from the pre-Cloud dot-grid widget (still backs
+ * onDayClick / the Day Summary modal) - this component now renders the
+ * most recent 7 of those already-computed days as bars instead of all
+ * 30 as a dot grid, and adds a small derived week-over-week momentum
+ * caption from the same data.
  */
 const MoodHeatmapWidget = ({
   entries = [],
@@ -14,14 +21,11 @@ const MoodHeatmapWidget = ({
   onDayClick,
   isEditing = false,
   onDelete,
-  size = '2x1',
 }) => {
-  // Build 30-day data
-  const { days, stats } = useMemo(() => {
+  // Build 30-day data (unchanged aggregation from the pre-Cloud widget)
+  const { days } = useMemo(() => {
     const now = new Date();
     const daysArray = [];
-    let totalMood = 0;
-    let moodCount = 0;
 
     // Filter entries by category
     const categoryEntries = entries.filter(e => e.category === category);
@@ -47,8 +51,6 @@ const MoodHeatmapWidget = ({
           .map(e => e.analysis.mood_score);
         if (moods.length > 0) {
           avgMood = moods.reduce((a, b) => a + b, 0) / moods.length;
-          totalMood += avgMood;
-          moodCount++;
         }
       }
 
@@ -61,175 +63,89 @@ const MoodHeatmapWidget = ({
       });
     }
 
-    return {
-      days: daysArray,
-      stats: {
-        avgMood: moodCount > 0 ? totalMood / moodCount : null,
-        daysLogged: moodCount,
-      },
-    };
+    return { days: daysArray };
   }, [entries, category]);
 
-  // Get color based on mood score
-  const getMoodColor = (mood) => {
-    if (mood === null) return 'bg-warm-100';
-    if (mood >= 0.7) return 'bg-mood-great';
-    if (mood >= 0.5) return 'bg-mood-good';
-    if (mood >= 0.3) return 'bg-mood-neutral';
-    if (mood >= 0.15) return 'bg-mood-low';
-    return 'bg-mood-struggling';
+  // Last 7 days as bars, plus a week-over-week momentum caption derived
+  // from the same 30-day array (previous 7 vs. most recent 7).
+  const { week, momentumPercent } = useMemo(() => {
+    const last7 = days.slice(-7);
+    const prev7 = days.slice(-14, -7);
+
+    const avgOf = (arr) => {
+      const moods = arr.map(d => d.mood).filter(m => m !== null);
+      return moods.length > 0 ? moods.reduce((a, b) => a + b, 0) / moods.length : null;
+    };
+
+    const lastAvg = avgOf(last7);
+    const prevAvg = avgOf(prev7);
+    const percent = (lastAvg !== null && prevAvg !== null)
+      ? Math.round((lastAvg - prevAvg) * 100)
+      : null;
+
+    return { week: last7, momentumPercent: percent };
+  }, [days]);
+
+  // Bucket a mood score (0-1) into the accent-1..4 scale used across Cloud
+  const accentForMood = (mood) => {
+    if (mood === null) return 'var(--divider)';
+    if (mood >= 0.75) return 'var(--accent-4)';
+    if (mood >= 0.5) return 'var(--accent-3)';
+    if (mood >= 0.25) return 'var(--accent-2)';
+    return 'var(--accent-1)';
   };
 
-  const getMoodLabel = (score) => {
-    if (score === null) return 'No data';
-    if (score >= 0.7) return 'Great';
-    if (score >= 0.5) return 'Good';
-    if (score >= 0.3) return 'Okay';
-    return 'Low';
-  };
-
-  // Tooltip state for desktop hover
-  const [hoveredDay, setHoveredDay] = useState(null);
-  const [tooltipPos, setTooltipPos] = useState({ x: 0, y: 0 });
-
-  const handleMouseEnter = (e, day) => {
-    if (isEditing) return;
-    const rect = e.currentTarget.getBoundingClientRect();
-    setTooltipPos({ x: rect.left + rect.width / 2, y: rect.top });
-    setHoveredDay(day);
-  };
-
-  const handleMouseLeave = () => {
-    setHoveredDay(null);
-  };
-
-  // Get theme summary for a day
-  const getDayTheme = (day) => {
-    if (day.count === 0) return null;
-    const themes = [];
-    day.entries?.forEach(entry => {
-      if (entry.contextualInsight?.briefSummary) {
-        themes.push(entry.contextualInsight.briefSummary);
-      } else if (entry.analysis?.themes?.[0]) {
-        themes.push(entry.analysis.themes[0]);
-      }
-    });
-    return themes[0] || null;
-  };
+  const todayIndex = week.length - 1;
 
   return (
-    <GlassCard
-      size={size}
-      isEditing={isEditing}
-      onDelete={onDelete}
-    >
-      <div className="h-full flex flex-col">
-        {/* Header */}
-        <div className="flex items-center justify-between mb-2">
-          <div className="flex items-center gap-2 text-warm-500">
-            <Calendar size={14} />
-            <span className="text-xs font-medium">30-Day Journey</span>
-          </div>
-          {stats.avgMood !== null && (
-            <span className="text-xs text-warm-400">
-              Avg: {getMoodLabel(stats.avgMood)}
-            </span>
-          )}
-        </div>
-
-        {/* DAT-004: Date labels for timeline context */}
-        <div className="flex justify-between text-[10px] text-warm-400 mb-1 px-0.5">
-          <span>{days[0]?.date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</span>
-          <span>Today</span>
-        </div>
-
-        {/* Heatmap Grid - 3 rows x 10 columns */}
-        <div className="flex-1 grid grid-cols-10 gap-1 relative">
-          {days.map((day, i) => (
-            <motion.button
-              key={day.dateStr}
-              onClick={() => !isEditing && day.count > 0 && onDayClick?.(day.date, day)}
-              onMouseEnter={(e) => handleMouseEnter(e, day)}
-              onMouseLeave={handleMouseLeave}
-              onTouchStart={() => {}} // Prevent hover on touch
-              disabled={isEditing || day.count === 0}
-              className={`
-                aspect-square rounded-sm
-                ${getMoodColor(day.mood)}
-                ${day.count > 0 ? 'cursor-pointer hover:ring-2 hover:ring-honey-400' : 'cursor-default'}
-                ${day.date.toDateString() === new Date().toDateString() ? 'ring-2 ring-honey-500' : ''}
-                transition-all
-              `}
-              style={{
-                WebkitTapHighlightColor: 'transparent',
-                touchAction: 'manipulation',
-              }}
-              initial={{ opacity: 0, scale: 0.8 }}
-              animate={{ opacity: 1, scale: 1 }}
-              transition={{ delay: i * 0.01 }}
-              whileHover={day.count > 0 ? { scale: 1.3, zIndex: 10 } : {}}
-            />
-          ))}
-
-          {/* Hover Tooltip (desktop only) */}
-          <AnimatePresence>
-            {hoveredDay && (
-              <motion.div
-                className="
-                  fixed z-[100] px-3 py-2
-                  bg-warm-800 text-white text-xs
-                  rounded-lg shadow-lg
-                  pointer-events-none
-                  max-w-[200px]
-                "
-                style={{
-                  left: tooltipPos.x,
-                  top: tooltipPos.y - 8,
-                  transform: 'translate(-50%, -100%)',
-                }}
-                initial={{ opacity: 0, y: 5 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: 5 }}
-              >
-                <div className="font-medium">
-                  {hoveredDay.date.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
-                </div>
-                <div className="text-warm-300">
-                  {hoveredDay.count} {hoveredDay.count === 1 ? 'entry' : 'entries'}
-                  {hoveredDay.mood !== null && ` - ${getMoodLabel(hoveredDay.mood)}`}
-                </div>
-                {getDayTheme(hoveredDay) && (
-                  <div className="text-warm-400 mt-1 line-clamp-2">
-                    {getDayTheme(hoveredDay)}
-                  </div>
-                )}
-                {hoveredDay.count > 0 && (
-                  <div className="text-honey-300 mt-1 text-[10px]">
-                    Click to view details
-                  </div>
-                )}
-              </motion.div>
-            )}
-          </AnimatePresence>
-        </div>
-
-        {/* DAT-003: Legend with visible text labels for accessibility */}
-        <div className="flex items-center justify-between mt-2 pt-2 border-t border-white/10">
-          <span className="text-xs text-warm-400">
-            {stats.daysLogged} days logged
+    <Card className={`w-full p-4 ${isEditing ? 'animate-shake' : ''}`}>
+      <div className="mb-3 flex items-center justify-between">
+        <span className="text-[13px] font-semibold text-foreground">Mood trend</span>
+        {momentumPercent !== null && (
+          <span className="text-xs text-accent">
+            {momentumPercent > 0 ? `+${momentumPercent}% ↗` : momentumPercent < 0 ? `${momentumPercent}%` : 'Steady'}
           </span>
-          <div className="flex items-center gap-0.5">
-            <span className="text-[10px] text-warm-400 mr-1">Low</span>
-            <div className="w-2.5 h-2.5 rounded-sm bg-mood-struggling" title="Struggling" />
-            <div className="w-2.5 h-2.5 rounded-sm bg-mood-low" title="Low" />
-            <div className="w-2.5 h-2.5 rounded-sm bg-mood-neutral" title="Okay" />
-            <div className="w-2.5 h-2.5 rounded-sm bg-mood-good" title="Good" />
-            <div className="w-2.5 h-2.5 rounded-sm bg-mood-great" title="Great" />
-            <span className="text-[10px] text-warm-400 ml-1">Great</span>
-          </div>
-        </div>
+        )}
       </div>
-    </GlassCard>
+
+      <div className="grid grid-cols-7 gap-2">
+        {week.map((day, i) => {
+          const isToday = i === todayIndex;
+          // Bar height: min 22% for no-data days, scaled by mood otherwise
+          const heightPercent = day.mood === null ? 22 : Math.round(22 + day.mood * 78);
+          const color = isToday ? 'var(--accent)' : accentForMood(day.mood);
+          return (
+            <button
+              key={day.dateStr}
+              type="button"
+              disabled={isEditing || day.count === 0}
+              onClick={() => !isEditing && day.count > 0 && onDayClick?.(day.date, day)}
+              className="flex h-16 flex-col items-center justify-end disabled:cursor-default"
+              style={{ WebkitTapHighlightColor: 'transparent', touchAction: 'manipulation' }}
+              aria-label={day.date.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' })}
+            >
+              <motion.span
+                className="w-full rounded-[5px]"
+                style={{ height: `${heightPercent}%`, background: color }}
+                initial={{ scaleY: 0 }}
+                animate={{ scaleY: 1 }}
+                transition={{ delay: i * 0.03, duration: 0.25 }}
+              />
+            </button>
+          );
+        })}
+      </div>
+      <div className="mt-1 grid grid-cols-7 gap-2">
+        {week.map((day, i) => (
+          <span
+            key={day.dateStr}
+            className={`text-center text-[10px] ${i === todayIndex ? 'font-medium text-accent' : 'text-faint'}`}
+          >
+            {day.date.toLocaleDateString('en-US', { weekday: 'narrow' })}
+          </span>
+        ))}
+      </div>
+    </Card>
   );
 };
 

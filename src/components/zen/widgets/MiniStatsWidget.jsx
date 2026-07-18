@@ -1,19 +1,18 @@
 import { useMemo } from 'react';
-import { motion } from 'framer-motion';
-import { TrendingUp, TrendingDown, Minus, Flame, BarChart3 } from 'lucide-react';
-import GlassCard from '../GlassCard';
+import { Card, RisingTide } from '../../cloud';
 
 /**
- * MiniStatsWidget - Compact stats card for Bento dashboard
- *
- * Shows 7-day mood trend, streak, and entry count
+ * MiniStatsWidget - 3 stat cells for the Home screen (CLOUD-DESIGN-SPEC.md
+ * §7 Home: "3 stat cells (Avg mood / Streak / Rising tide)", §6.2 for the
+ * Rising tide widget). Restyle only — the underlying 7-day mood/streak
+ * aggregation below is unchanged from the pre-Cloud widget; the only
+ * addition is exposing the already-computed first/second-half averages as
+ * a momentum percentage for the Rising tide cell.
  */
 const MiniStatsWidget = ({
   entries = [],
-  category,
   isEditing = false,
   onDelete,
-  size = '2x1',
 }) => {
   // Calculate stats
   const stats = useMemo(() => {
@@ -33,8 +32,8 @@ const MiniStatsWidget = ({
       ? entriesWithMood.reduce((sum, e) => sum + e.analysis.mood_score, 0) / entriesWithMood.length
       : 0.5;
 
-    // Calculate mood trend (compare first half vs second half)
-    let trend = 'neutral';
+    // Calculate mood momentum (compare first half vs second half of the week)
+    let momentumPercent = 0;
     if (entriesWithMood.length >= 4) {
       const mid = Math.floor(entriesWithMood.length / 2);
       const firstHalf = entriesWithMood.slice(mid);
@@ -43,8 +42,7 @@ const MiniStatsWidget = ({
       const firstAvg = firstHalf.reduce((s, e) => s + e.analysis.mood_score, 0) / firstHalf.length;
       const secondAvg = secondHalf.reduce((s, e) => s + e.analysis.mood_score, 0) / secondHalf.length;
 
-      if (secondAvg - firstAvg > 0.1) trend = 'up';
-      else if (firstAvg - secondAvg > 0.1) trend = 'down';
+      momentumPercent = Math.round((secondAvg - firstAvg) * 100);
     }
 
     // Calculate streak (consecutive days with entries)
@@ -72,96 +70,42 @@ const MiniStatsWidget = ({
 
     return {
       avgMood,
-      trend,
+      momentumPercent,
       streak,
-      entryCount: recentEntries.length,
     };
   }, [entries]);
 
-  // DAT-002: Trend icon and color with clearer labels
-  const getTrendInfo = (trend) => {
-    if (trend === 'up') return { icon: TrendingUp, color: 'text-mood-great', label: 'Improving', sublabel: 'Mood Trend' };
-    if (trend === 'down') return { icon: TrendingDown, color: 'text-mood-low', label: 'Declining', sublabel: 'Mood Trend' };
-    return { icon: Minus, color: 'text-warm-400', label: 'Steady', sublabel: 'Mood Trend' };
-  };
-
-  const trendInfo = getTrendInfo(stats.trend);
-  const TrendIcon = trendInfo.icon;
-
-  // Mood label
-  const getMoodLabel = (score) => {
-    if (score >= 0.7) return 'Great';
-    if (score >= 0.5) return 'Good';
-    if (score >= 0.3) return 'Okay';
-    return 'Low';
-  };
+  const isRising = stats.momentumPercent > 0;
 
   return (
-    <GlassCard
-      size={size}
-      isEditing={isEditing}
-      onDelete={onDelete}
-    >
-      <div className="h-full flex flex-col">
-        {/* Header */}
-        <div className="flex items-center gap-2 text-warm-500 mb-3">
-          <BarChart3 size={16} />
-          <span className="text-xs font-medium">7-Day Stats</span>
+    <div className={`grid w-full grid-cols-3 gap-2 ${isEditing ? 'animate-shake' : ''}`}>
+      {/* Avg mood (0-10 scale, matches Insights' formatting) */}
+      <Card className="p-3 text-center">
+        <div className="text-[19px] font-semibold tracking-[-0.02em] text-foreground">
+          {(stats.avgMood * 10).toFixed(1)}
         </div>
+        <div className="mt-0.5 text-[11.5px] text-muted-foreground">Avg mood</div>
+      </Card>
 
-        {/* Stats Grid */}
-        <div className="flex-1 grid grid-cols-3 gap-2">
-          {/* Mood */}
-          <motion.div
-            className="flex flex-col items-center justify-center p-2 bg-white/30 rounded-xl"
-            initial={{ opacity: 0, scale: 0.9 }}
-            animate={{ opacity: 1, scale: 1 }}
-            transition={{ delay: 0.1 }}
-          >
-            <span className="text-lg font-bold text-warm-700">
-              {getMoodLabel(stats.avgMood)}
-            </span>
-            <span className="text-xs text-warm-400">Avg Mood</span>
-          </motion.div>
-
-          {/* Trend - DAT-002: Clearer labeling */}
-          <motion.div
-            className="flex flex-col items-center justify-center p-2 bg-white/30 rounded-xl"
-            initial={{ opacity: 0, scale: 0.9 }}
-            animate={{ opacity: 1, scale: 1 }}
-            transition={{ delay: 0.15 }}
-          >
-            <TrendIcon size={20} className={trendInfo.color} />
-            <span className="text-xs text-warm-600 mt-1 font-medium">{trendInfo.label}</span>
-            <span className="text-[10px] text-warm-400">{trendInfo.sublabel}</span>
-          </motion.div>
-
-          {/* Streak */}
-          <motion.div
-            className="flex flex-col items-center justify-center p-2 bg-white/30 rounded-xl"
-            initial={{ opacity: 0, scale: 0.9 }}
-            animate={{ opacity: 1, scale: 1 }}
-            transition={{ delay: 0.2 }}
-          >
-            <div className="flex items-center gap-1">
-              <Flame size={16} className={stats.streak > 0 ? 'text-accent' : 'text-warm-300'} />
-              <span className="text-lg font-bold text-warm-700">{stats.streak}</span>
-            </div>
-            <span className="text-xs text-warm-400">Streak</span>
-          </motion.div>
+      {/* Streak */}
+      <Card className="p-3 text-center">
+        <div className="text-[19px] font-semibold tracking-[-0.02em] text-foreground">
+          {stats.streak}
+          <span className="text-xs font-normal text-muted-foreground"> days</span>
         </div>
+        <div className="mt-0.5 text-[11.5px] text-muted-foreground">Streak</div>
+      </Card>
 
-        {/* Entry count footer */}
-        <motion.div
-          className="mt-2 text-center text-xs text-warm-400"
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ delay: 0.25 }}
-        >
-          {stats.entryCount} entries this week
-        </motion.div>
-      </div>
-    </GlassCard>
+      {/* Rising tide momentum widget (§6.2) */}
+      <RisingTide className="p-3 text-center">
+        <div className="text-[19px] font-semibold tracking-[-0.02em] text-foreground">
+          {isRising ? `+${stats.momentumPercent}%` : stats.momentumPercent === 0 ? '—' : `${stats.momentumPercent}%`}
+        </div>
+        <div className="mt-0.5 text-[11.5px] text-accent-deep">
+          {isRising ? 'Rising' : 'Steady'}
+        </div>
+      </RisingTide>
+    </div>
   );
 };
 

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Plus, Sun, Sparkles, BarChart3, Target, CheckSquare, Calendar, GitBranch, Brain } from 'lucide-react';
+import { X, Plus, Sun, Sparkles, BarChart3, Target, CheckSquare, Calendar, GitBranch, Brain, Clock } from 'lucide-react';
 import { WIDGET_DEFINITIONS } from '../../hooks/useDashboardLayout';
 
 // Map widget IDs to icons
@@ -13,6 +13,7 @@ const WIDGET_ICONS = {
   goals: Target,
   tasks: CheckSquare,
   nexus_insights: Brain,
+  recent_entries: Clock,
 };
 
 /**

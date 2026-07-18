@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Sun, Moon } from 'lucide-react';
 import { motion, AnimatePresence, useReducedMotion } from 'framer-motion';
 import { isDarkMode, toggleDarkMode, initDarkMode, cleanupDarkMode } from '../../utils/darkMode';
+import { initAccent } from '../../utils/accent';
 
 export default function DarkModeToggle({ className = '' }) {
   const [dark, setDark] = useState(() => isDarkMode());
@@ -9,6 +10,7 @@ export default function DarkModeToggle({ className = '' }) {
 
   useEffect(() => {
     initDarkMode();
+    initAccent();
     setDark(isDarkMode());
     return () => cleanupDarkMode();
   }, []);

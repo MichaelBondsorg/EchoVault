@@ -72,15 +72,27 @@ export const WIDGET_DEFINITIONS = {
     defaultSize: '2x1',
     icon: 'Sparkles',
   },
+  recent_entries: {
+    id: 'recent_entries',
+    type: 'recent',
+    name: 'Recent Entries',
+    description: 'Your most recent journal entries',
+    defaultSize: '2x1',
+    icon: 'Clock',
+  },
 };
 
 /**
- * Default layout for new users (minimalist Zen approach)
- * Only shows Hero and Prompts cards by default
+ * Default layout for new users (CLOUD-DESIGN-SPEC.md §7 Home composition:
+ * greeting -> Reflect card -> 3 stat cells -> mood-trend bar card ->
+ * Recent list).
  */
 export const DEFAULT_DASHBOARD_LAYOUT = [
   { id: 'hero_card', type: 'hero', size: '2x1' },
   { id: 'prompt_card', type: 'prompt', size: '2x1' },
+  { id: 'quick_stats', type: 'stats', size: '2x1' },
+  { id: 'mood_heatmap', type: 'heatmap', size: '2x1' },
+  { id: 'recent_entries', type: 'recent', size: '2x1' },
 ];
 
 /**

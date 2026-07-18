@@ -1,3 +1,16 @@
+/* Self-hosted fonts (privacy invariant: no remote/Google Fonts requests).
+   Weights per Cloud Design Spec §4. */
+@import '@fontsource/geist-sans/400.css';
+@import '@fontsource/geist-sans/500.css';
+@import '@fontsource/geist-sans/600.css';
+@import '@fontsource/geist-sans/700.css';
+@import '@fontsource/newsreader/400.css';
+@import '@fontsource/newsreader/500.css';
+@import '@fontsource/newsreader/600.css';
+@import '@fontsource/newsreader/400-italic.css';
+@import '@fontsource/newsreader/500-italic.css';
+@import '@fontsource/newsreader/600-italic.css';
+
 @import './styles/cloud-tokens.css';
 @import './styles/cloud-motion.css';
 
@@ -33,18 +46,18 @@
   h4 { font-size: 1.25rem; line-height: 1.3; font-weight: 500; }
 
   p {
-    font-family: Geist, Inter, system-ui, sans-serif;
+    font-family: 'Geist Sans', Geist, Inter, system-ui, sans-serif;
     line-height: 1.625;
   }
 
-  /* Focus styles — warm amber ring */
+  /* Focus styles — accent ring */
   :focus-visible {
     outline: none;
-    box-shadow: 0 0 0 2px #FAF5EF, 0 0 0 4px rgba(232, 168, 76, 0.6);
+    box-shadow: 0 0 0 2px #FAF5EF, 0 0 0 4px var(--accent);
     border-radius: 0.5rem;
   }
   html.dark :focus-visible {
-    box-shadow: 0 0 0 2px #1C1916, 0 0 0 4px rgba(232, 168, 76, 0.4);
+    box-shadow: 0 0 0 2px #1C1916, 0 0 0 4px var(--accent);
   }
 
   /* Selection color — honey amber */
