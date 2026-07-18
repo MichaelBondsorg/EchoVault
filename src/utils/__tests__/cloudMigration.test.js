@@ -24,7 +24,7 @@ const REPO_ROOT = resolve(__dirname, '../../..');
 // Global constraint from the Cloud redesign plan: zero honey|terra|sage|lavender|hearth|
 // warm|amber|mood-<n> Tailwind classes in migrated files.
 const LEGACY_CLASS_RE =
-  /\b(bg|text|border|from|to|ring|fill|stroke)-(honey|terra|sage|lavender|hearth|warm|amber|mood)-\d+/;
+  /\b(bg|text|border|from|via|to|ring|fill|stroke)-(honey|terra|sage|lavender|hearth|warm|amber|mood)-\d+/;
 
 // Legacy palette also leaned on gray-* directly in a few spots; Cloud uses semantic
 // tokens (bg-card, text-muted-foreground, etc.) instead, so gray-* is banned outright
@@ -170,6 +170,7 @@ describe('Legacy palette migration ratchet', () => {
       }
     }
 
+    offenders.sort();
     if (offenders.length > LEGACY_BUDGET) {
       // eslint-disable-next-line no-console
       console.error(
