@@ -10,7 +10,30 @@
   --primary: #1e1d19;
   --primary-foreground: #f7f6f2;
   --destructive: #b0665a;
+  /* Soft destructive background (analogous to --accent-wash) and modal
+     scrim. Added as real tokens rather than Tailwind opacity modifiers
+     (e.g. `bg-destructive/10`) because Tailwind 3.4's opacity-modifier
+     machinery can't compute alpha for colors declared as plain
+     `var(--x)` strings in tailwind.config.js (no `rgb(var(...) /
+     <alpha-value>)` wrapper) — those classes silently compile to nothing.
+     Verified: `bg-foreground/40`, `bg-destructive/10` etc. produce no
+     `color-mix()`/rgba output at all in the built CSS. */
+  --destructive-wash: #f5e9e7;
+  --overlay: rgba(30, 29, 25, 0.4);
   --radius: 1rem;
+
+  /* Theme-invariant swatch preview colors for the Settings accent picker
+     (CLOUD-DESIGN-SPEC.md §7 Settings / §5 "Accent picker"). These are
+     always the same three hex values regardless of which accent is
+     currently active or whether dark mode is on — mockups 5f (light) and
+     6f (dark) render identical swatch fills in both screenshots, since the
+     picker needs to show all three *options*, not the live theme. Defined
+     once here so SettingsPage.jsx can reference `var(--swatch-*)` instead
+     of baking hex into JSX (banned for MIGRATED files by
+     cloudMigration.test.js). */
+  --swatch-blue: #667fa8;
+  --swatch-mauve: #8e7ba8;
+  --swatch-terracotta: #b87355;
 }
 
 :root[data-accent='blue'] {
@@ -57,6 +80,8 @@
   --faint: #6a6b6e;
   --primary: var(--accent-btn);
   --primary-foreground: var(--accent-btn-fg);
+  --destructive-wash: #2a1c1a;
+  --overlay: rgba(0, 0, 0, 0.55);
 }
 
 :root.dark[data-accent='blue'] {

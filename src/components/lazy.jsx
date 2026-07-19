@@ -61,6 +61,12 @@ export const LazyDecompressionScreen = lazy(() =>
   }))
 );
 
+export const LazyStreakCelebration = lazy(() =>
+  import('./screens/StreakCelebration').then(module => ({
+    default: module.default || module.StreakCelebration
+  }))
+);
+
 // ============================================
 // Lazy-loaded Pages
 // ============================================
@@ -137,6 +143,7 @@ export const TherapistExportScreenWithSuspense = withSuspense(LazyTherapistExpor
 export const SafetyPlanScreenWithSuspense = withSuspense(LazySafetyPlanScreen);
 export const CrisisResourcesScreenWithSuspense = withSuspense(LazyCrisisResourcesScreen);
 export const DecompressionScreenWithSuspense = withSuspense(LazyDecompressionScreen);
+export const StreakCelebrationWithSuspense = withSuspense(LazyStreakCelebration);
 export const EntityManagementPageWithSuspense = withSuspense(LazyEntityManagementPage);
 export const NexusSettingsWithSuspense = withSuspense(LazyNexusSettings);
 export const WeeklyReportWithSuspense = withSuspense(LazyWeeklyReport);

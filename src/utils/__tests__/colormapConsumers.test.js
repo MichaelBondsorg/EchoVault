@@ -6,8 +6,12 @@ import path from 'path';
  * Section 07: colorMap Consumer Verification Tests
  *
  * These tests verify that EntryCard, InsightsPanel, and DailySummaryModal
- * have been migrated from off-palette Tailwind color classes to the
- * centralized colorMap.js semantic color system.
+ * have been migrated from off-palette (rainbow) Tailwind color classes.
+ * InsightsPanel and DailySummaryModal still route through the centralized
+ * colorMap.js semantic color system. EntryCard.jsx was further migrated
+ * (Cloud redesign C4) off colorMap.js entirely — its entry-type/entity
+ * badges use local Cloud-token styling instead — see the note on its
+ * "no longer imports colorMap.js" test below.
  */
 
 const readComponent = (relativePath) => {
@@ -147,8 +151,21 @@ describe('Section 07: colorMap Consumer Verification', () => {
       expect(violations).toEqual([]);
     });
 
-    it('should import colorMap functions', () => {
-      expect(source).toMatch(/import\s+.*from\s+['"].*colorMap['"]/);
+    // NOTE (Cloud redesign C4, 2026-07-18): EntryCard.jsx's entry-type badge
+    // and @entity tag chips used to render via colorMap.js's
+    // getEntryTypeColors()/getEntityTypeColors(), which is why this suite
+    // originally asserted the colorMap import. Those two call sites were
+    // found to inject legacy-palette classes (bg-honey-100/bg-terra-100/
+    // bg-sage-100/etc.) at runtime — invisible to the migration ratchet's
+    // static scan because the classes are dynamically injected, not literal
+    // text in EntryCard.jsx. They were replaced with local Cloud-token
+    // badge styling (single neutral bg-divider/text-secondary-foreground
+    // treatment; emoji/icons still differentiate entity/entry types), so
+    // EntryCard.jsx no longer imports colorMap.js at all. colorMap.js
+    // itself, and its other consumers (InsightsPanel, DailySummaryModal
+    // below), are unchanged.
+    it('no longer imports colorMap.js (entry-type/entity badges migrated to Cloud tokens)', () => {
+      expect(source).not.toMatch(/from\s+['"].*colorMap['"]/);
     });
   });
 

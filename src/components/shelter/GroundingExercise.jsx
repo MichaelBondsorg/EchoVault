@@ -10,6 +10,35 @@
  * - 1 thing they can TASTE
  *
  * Helps anchor to the present moment and reduce anxiety.
+ *
+ * Restyle only (Task D4b, CLOUD-DESIGN-SPEC.md §7 "Grounding"/mockup 7j).
+ * The 5-step state machine (currentStepIndex, completedItems, handleAddItem/
+ * handleSkipItem/handleReset, the auto-advance-on-step-complete timeout, and
+ * the onComplete/onSkip callbacks) is byte-identical to the pre-Cloud
+ * version — only className output changed.
+ *
+ * The five senses' distinct blue/green/purple/amber/rose colors collapsed
+ * onto the single Cloud accent scale (each sense is still visually
+ * distinguished by its own lucide icon), matching the same "ONE
+ * user-selectable accent" precedent used for BreathingExercise (this task)
+ * and InsightsPage/UnifiedConversation (C5/D1). `getColorClasses`'s `color`
+ * parameter is kept (each step config still carries its `color` field
+ * unchanged) even though every branch now resolves to the same accent
+ * classes, to keep the per-step config data shape byte-identical.
+ *
+ * Note: this component has no live consumer as of this task — the
+ * Mindfulness mode inside UnifiedConversation.jsx (already Cloud-migrated
+ * in D1) uses its own local `GroundingExerciseUI`, a separate
+ * implementation, for the grounding flow. `shelter/GroundingExercise.jsx`
+ * is exported from `shelter/index.js` but nothing imports it, the same
+ * "wired to nothing" status as the dead `celebrate()` helper referenced in
+ * this task's brief. It's restyled anyway per the brief's explicit file
+ * list and the migration ratchet, flagged here for visibility.
+ *
+ * No Pebble mascot was added: unlike Breathing (mockup 7i) and
+ * Decompression (§6.3 resting), the Grounding mockup (7j) doesn't feature
+ * Pebble at all — just a back arrow, serif headline, and step cards — so
+ * none was invented here.
  */
 
 import React, { useState } from 'react';
@@ -136,16 +165,15 @@ const GroundingExercise = ({
     setCompleted(false);
   };
 
-  const getColorClasses = (color) => {
-    const colors = {
-      blue: { bg: 'bg-lavender-500 dark:bg-lavender-600', text: 'text-lavender-400 dark:text-lavender-300', ring: 'ring-lavender-500', focusBorder: 'focus:border-lavender-500 dark:focus:border-lavender-400' },
-      green: { bg: 'bg-sage-500 dark:bg-sage-600', text: 'text-sage-400 dark:text-sage-300', ring: 'ring-sage-500', focusBorder: 'focus:border-sage-500 dark:focus:border-sage-400' },
-      purple: { bg: 'bg-lavender-600 dark:bg-lavender-700', text: 'text-lavender-400 dark:text-lavender-300', ring: 'ring-lavender-600', focusBorder: 'focus:border-lavender-600 dark:focus:border-lavender-500' },
-      amber: { bg: 'bg-honey-500 dark:bg-honey-600', text: 'text-honey-400 dark:text-honey-300', ring: 'ring-honey-500', focusBorder: 'focus:border-honey-500 dark:focus:border-honey-400' },
-      rose: { bg: 'bg-terra-500 dark:bg-terra-600', text: 'text-terra-400 dark:text-terra-300', ring: 'ring-terra-500', focusBorder: 'focus:border-terra-500 dark:focus:border-terra-400' }
-    };
-    return colors[color] || colors.blue;
-  };
+  // Every sense now resolves to the same Cloud accent scale (§ file header)
+  // — `color` is accepted (and each step config still carries one) purely
+  // to keep the per-step data shape unchanged.
+  const getColorClasses = () => ({
+    bg: 'bg-accent',
+    text: 'text-accent-deep',
+    ring: 'ring-accent',
+    focusBorder: 'focus:border-accent'
+  });
 
   const colorClasses = getColorClasses(currentStep.color);
   const IconComponent = currentStep.icon;
@@ -157,13 +185,13 @@ const GroundingExercise = ({
         animate={{ opacity: 1 }}
         className="flex flex-col items-center p-6 text-center"
       >
-        <div className="w-20 h-20 rounded-full bg-sage-500 flex items-center justify-center mb-4">
-          <Check size={40} className="text-white" />
+        <div className="w-20 h-20 rounded-full bg-accent flex items-center justify-center mb-4">
+          <Check size={40} className="text-foreground dark:text-background" />
         </div>
-        <h3 className="text-xl font-semibold text-white mb-2">
+        <h3 className="text-xl font-display font-medium text-foreground mb-2">
           You're Grounded
         </h3>
-        <p className="text-white/70 mb-6 max-w-xs">
+        <p className="text-muted-foreground mb-6 max-w-xs">
           Great job anchoring yourself to the present moment.
           Your nervous system is more regulated now.
         </p>
@@ -175,8 +203,8 @@ const GroundingExercise = ({
             return (
               <div key={step.sense} className="flex items-center gap-2 text-sm">
                 <step.icon size={16} className={getColorClasses(step.color).text} />
-                <span className="text-white/60">{step.count} {step.sense}:</span>
-                <span className="text-white/80 truncate">
+                <span className="text-muted-foreground">{step.count} {step.sense}:</span>
+                <span className="text-foreground truncate">
                   {items.join(', ')}
                 </span>
               </div>
@@ -187,7 +215,7 @@ const GroundingExercise = ({
         <div className="flex gap-3">
           <button
             onClick={handleReset}
-            className="flex items-center gap-2 px-6 py-3 bg-white hover:bg-white/90 rounded-full text-hearth-900 font-medium transition-colors"
+            className="flex items-center gap-2 px-6 py-3 bg-primary hover:opacity-90 rounded-full text-primary-foreground font-medium transition-colors"
           >
             <RotateCcw size={18} />
             Do Again
@@ -208,10 +236,10 @@ const GroundingExercise = ({
               w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium
               transition-all duration-300
               ${idx < currentStepIndex
-                ? 'bg-sage-500 text-white'
+                ? 'bg-accent text-foreground dark:text-background'
                 : idx === currentStepIndex
-                ? `${getColorClasses(step.color).bg} text-white ring-2 ${getColorClasses(step.color).ring} ring-offset-2 ring-offset-hearth-900`
-                : 'bg-white/10 text-white/40'
+                ? `${getColorClasses(step.color).bg} text-foreground dark:text-background ring-2 ${getColorClasses(step.color).ring} ring-offset-2 ring-offset-background`
+                : 'bg-divider text-muted-foreground'
               }
             `}
           >
@@ -231,14 +259,14 @@ const GroundingExercise = ({
         >
           {/* Icon */}
           <div className={`w-16 h-16 rounded-full ${colorClasses.bg} flex items-center justify-center mb-4`}>
-            <IconComponent size={32} className="text-white" />
+            <IconComponent size={32} className="text-foreground dark:text-background" />
           </div>
 
           {/* Prompt */}
-          <h3 className="text-xl font-semibold text-white text-center mb-2">
+          <h3 className="text-xl font-display font-medium text-foreground text-center mb-2">
             {currentStep.prompt}
           </h3>
-          <p className="text-white/60 text-sm text-center mb-6 max-w-xs">
+          <p className="text-muted-foreground text-sm text-center mb-6 max-w-xs">
             {currentStep.description}
           </p>
 
@@ -250,7 +278,7 @@ const GroundingExercise = ({
                   key={idx}
                   initial={{ opacity: 0, scale: 0.8 }}
                   animate={{ opacity: 1, scale: 1 }}
-                  className={`px-3 py-1 ${colorClasses.bg}/20 ${colorClasses.text} rounded-full text-sm`}
+                  className={`px-3 py-1 bg-accent-wash ${colorClasses.text} rounded-full text-sm`}
                 >
                   {item}
                 </motion.span>
@@ -259,7 +287,7 @@ const GroundingExercise = ({
           )}
 
           {/* Progress within step */}
-          <div className="text-white/40 text-sm mb-4">
+          <div className="text-faint text-sm mb-4">
             {stepItems.length} of {currentStep.count}
           </div>
 
@@ -274,9 +302,9 @@ const GroundingExercise = ({
                   onKeyPress={handleKeyPress}
                   placeholder={`I can ${currentStep.sense}...`}
                   className={`
-                    flex-1 px-4 py-3 bg-white/10 border-2 border-white/20
-                    rounded-xl text-white placeholder-white/40
-                    focus:outline-none ${getColorClasses(currentStep.color).focusBorder || 'focus:border-lavender-500'}
+                    flex-1 px-4 py-3 bg-card border-2 border-border
+                    rounded-xl text-foreground placeholder-faint
+                    focus:outline-none ${colorClasses.focusBorder}
                     transition-colors
                   `}
                   autoFocus
@@ -287,8 +315,8 @@ const GroundingExercise = ({
                   className={`
                     p-3 rounded-xl transition-colors
                     ${inputValue.trim()
-                      ? `${colorClasses.bg} text-white hover:opacity-90`
-                      : 'bg-white/10 text-white/30'
+                      ? `${colorClasses.bg} text-foreground dark:text-background hover:opacity-90`
+                      : 'bg-divider text-faint'
                     }
                   `}
                 >
@@ -297,7 +325,7 @@ const GroundingExercise = ({
               </div>
 
               {/* Examples hint */}
-              <p className="text-white/30 text-xs mt-2 text-center">
+              <p className="text-faint text-xs mt-2 text-center">
                 Examples: {currentStep.examples.slice(0, 2).join(', ')}...
               </p>
             </div>
@@ -310,14 +338,14 @@ const GroundingExercise = ({
         {onSkip && (
           <button
             onClick={onSkip}
-            className="px-4 py-2 text-white/50 hover:text-white/70 text-sm transition-colors"
+            className="flex min-h-[44px] items-center px-4 text-muted-foreground hover:text-foreground text-sm transition-colors"
           >
             Skip Exercise
           </button>
         )}
         <button
           onClick={handleSkipItem}
-          className="px-4 py-2 text-white/50 hover:text-white/70 text-sm transition-colors"
+          className="flex min-h-[44px] items-center px-4 text-muted-foreground hover:text-foreground text-sm transition-colors"
         >
           Skip to Next Sense
         </button>
@@ -330,16 +358,19 @@ const GroundingExercise = ({
 export const GroundingExerciseCompact = ({ onStart }) => (
   <button
     onClick={onStart}
-    className="flex items-center gap-4 p-4 bg-white/5 hover:bg-white/10 rounded-xl w-full text-left transition-colors"
+    className="flex items-center gap-4 p-4 bg-card border border-border hover:bg-divider rounded-xl w-full text-left transition-colors"
   >
-    <div className="w-12 h-12 rounded-full bg-gradient-to-br from-lavender-500 to-lavender-700 flex items-center justify-center flex-shrink-0">
-      <Hand size={24} className="text-white" />
+    <div
+      className="w-12 h-12 rounded-full flex items-center justify-center flex-shrink-0"
+      style={{ background: 'linear-gradient(160deg, var(--accent-3), var(--accent))' }}
+    >
+      <Hand size={24} className="text-foreground dark:text-background" />
     </div>
     <div>
-      <div className="text-white font-medium">5-4-3-2-1 Grounding</div>
-      <div className="text-white/60 text-sm">Anchor to present moment using your senses</div>
+      <div className="text-foreground font-medium">5-4-3-2-1 Grounding</div>
+      <div className="text-muted-foreground text-sm">Anchor to present moment using your senses</div>
     </div>
-    <ChevronRight className="text-white/40 ml-auto" size={20} />
+    <ChevronRight className="text-faint ml-auto" size={20} />
   </button>
 );
 

@@ -62,6 +62,7 @@ import {
 import MarkdownLite from '../ui/MarkdownLite';
 import VoiceRecorder from '../input/VoiceRecorder';
 import BreathingExercise from '../shelter/BreathingExercise';
+import { SectionLabel, Button } from '../cloud';
 
 // Audio synthesis
 import { synthesizeSpeech } from '../../utils/audio';
@@ -452,49 +453,52 @@ const UnifiedConversation = ({
       <div className="flex-1 overflow-y-auto p-4 space-y-6">
         {/* Chat options */}
         <div className="space-y-3">
-          <h3 className="text-white/60 text-sm font-medium px-2">Talk</h3>
+          <SectionLabel className="px-2">Talk</SectionLabel>
 
+          {/* Primary entry point: filled accent-wash surface + accent-deep
+              icon well distinguishes "Chat" as the highlighted option
+              (was a lavender gradient highlight pre-migration). */}
           <button
             onClick={() => setMode(MODES.CHAT)}
-            className="w-full p-4 bg-gradient-to-br from-lavender-500/20 to-lavender-600/20 dark:from-lavender-900/30 dark:to-lavender-800/30 rounded-xl flex items-center gap-4 hover:from-lavender-500/30 hover:to-lavender-600/30 dark:hover:from-lavender-900/40 dark:hover:to-lavender-800/40 transition-colors"
+            className="w-full p-4 rounded-2xl border border-border bg-accent-wash flex items-center gap-4 transition-colors hover:bg-divider"
           >
-            <div className="w-12 h-12 rounded-lg bg-white/10 flex items-center justify-center">
-              <MessageCircle size={24} className="text-white" />
+            <div className="w-12 h-12 rounded-lg bg-accent-deep flex items-center justify-center flex-none">
+              <MessageCircle size={24} className="text-background" aria-hidden="true" />
             </div>
             <div className="flex-1 text-left">
-              <h4 className="text-white font-medium">Chat</h4>
-              <p className="text-white/60 text-sm">Type or speak freely</p>
+              <h4 className="font-medium text-foreground">Chat</h4>
+              <p className="text-sm text-muted-foreground">Type or speak freely</p>
             </div>
           </button>
 
           <button
             onClick={() => setMode(MODES.VOICE)}
-            className="w-full p-4 bg-white/5 rounded-xl flex items-center gap-4 hover:bg-white/10 transition-colors"
+            className="w-full p-4 rounded-2xl border border-border bg-card shadow-sm flex items-center gap-4 transition-colors hover:bg-divider"
           >
-            <div className="w-12 h-12 rounded-lg bg-white/10 flex items-center justify-center">
-              <Mic size={24} className="text-white" />
+            <div className="w-12 h-12 rounded-lg bg-accent-wash flex items-center justify-center flex-none">
+              <Mic size={24} className="text-accent-deep" aria-hidden="true" />
             </div>
             <div className="flex-1 text-left">
-              <h4 className="text-white font-medium">Voice Conversation</h4>
-              <p className="text-white/60 text-sm">Natural turn-taking, like a real conversation</p>
+              <h4 className="font-medium text-foreground">Voice Conversation</h4>
+              <p className="text-sm text-muted-foreground">Natural turn-taking, like a real conversation</p>
             </div>
           </button>
         </div>
 
         {/* Guided sessions */}
         <div className="space-y-3">
-          <h3 className="text-white/60 text-sm font-medium px-2">Guided Sessions</h3>
+          <SectionLabel className="px-2">Guided Sessions</SectionLabel>
 
           {recommendedSessions.slice(0, 4).map(session => {
             const IconMap = {
               sunrise: () => <span className="text-2xl">🌅</span>,
               moon: () => <span className="text-2xl">🌙</span>,
               'pen-tool': () => <span className="text-2xl">✏️</span>,
-              compass: () => <Compass size={24} className="text-white" />,
+              compass: () => <Compass size={24} className="text-accent-deep" aria-hidden="true" />,
               calendar: () => <span className="text-2xl">📅</span>,
-              wind: () => <Wind size={24} className="text-white" />
+              wind: () => <Wind size={24} className="text-accent-deep" aria-hidden="true" />
             };
-            const Icon = IconMap[session.icon] || (() => <Sparkles size={24} className="text-white" />);
+            const Icon = IconMap[session.icon] || (() => <Sparkles size={24} className="text-accent-deep" aria-hidden="true" />);
 
             return (
               <button
@@ -505,16 +509,16 @@ const UnifiedConversation = ({
                   setSessionStep(0);
                   setSessionResponses({});
                 }}
-                className="w-full p-4 bg-white/5 rounded-xl flex items-center gap-4 hover:bg-white/10 transition-colors"
+                className="w-full p-4 rounded-2xl border border-border bg-card shadow-sm flex items-center gap-4 transition-colors hover:bg-divider"
               >
-                <div className="w-12 h-12 rounded-lg bg-white/10 flex items-center justify-center">
+                <div className="w-12 h-12 rounded-lg bg-accent-wash flex items-center justify-center flex-none">
                   <Icon />
                 </div>
                 <div className="flex-1 text-left">
-                  <h4 className="text-white font-medium">{session.name}</h4>
-                  <p className="text-white/60 text-sm">{session.description}</p>
+                  <h4 className="font-medium text-foreground">{session.name}</h4>
+                  <p className="text-sm text-muted-foreground">{session.description}</p>
                 </div>
-                <span className="text-white/40 text-xs">{session.duration}</span>
+                <span className="text-xs text-faint">{session.duration}</span>
               </button>
             );
           })}
@@ -522,7 +526,7 @@ const UnifiedConversation = ({
 
         {/* Mindfulness */}
         <div className="space-y-3">
-          <h3 className="text-white/60 text-sm font-medium px-2">Mindfulness</h3>
+          <SectionLabel className="px-2">Mindfulness</SectionLabel>
 
           {recommendedExercises.slice(0, 3).map(exercise => (
             <button
@@ -534,16 +538,16 @@ const UnifiedConversation = ({
                 setSelectedExercise(personalized);
                 setMode(MODES.MINDFULNESS);
               }}
-              className="w-full p-4 bg-white/5 rounded-xl flex items-center gap-4 hover:bg-white/10 transition-colors"
+              className="w-full p-4 rounded-2xl border border-border bg-card shadow-sm flex items-center gap-4 transition-colors hover:bg-divider"
             >
-              <div className="w-12 h-12 rounded-lg bg-gradient-to-br from-sage-500/30 to-accent-500/30 dark:from-sage-700/30 dark:to-accent-700/30 flex items-center justify-center">
-                <Wind size={24} className="text-white" />
+              <div className="w-12 h-12 rounded-lg bg-accent-wash flex items-center justify-center flex-none">
+                <Wind size={24} className="text-accent-deep" aria-hidden="true" />
               </div>
               <div className="flex-1 text-left">
-                <h4 className="text-white font-medium">{exercise.name}</h4>
-                <p className="text-white/60 text-sm">{exercise.description}</p>
+                <h4 className="font-medium text-foreground">{exercise.name}</h4>
+                <p className="text-sm text-muted-foreground">{exercise.description}</p>
               </div>
-              <span className="text-white/40 text-xs">{exercise.duration}</span>
+              <span className="text-xs text-faint">{exercise.duration}</span>
             </button>
           ))}
         </div>
@@ -556,7 +560,15 @@ const UnifiedConversation = ({
    */
   const renderChat = () => (
     <div className="flex flex-col h-full">
-      {/* Messages */}
+      {/* Messages. CLOUD-DESIGN-SPEC.md §7 AI chat: companion bubble = bg-card
+          radius 16 with a 6px corner on the speaker (bottom-left) side; user
+          bubble = accent-deep with a 6px corner on its speaker (bottom-right)
+          side. MarkdownLite (shared, cross-screen, out of D1's target-file
+          scope) still injects its own hardcoded legacy text-color utilities
+          per line/node — the `[&_*]:!text-*` wrapper below is a local,
+          !important override (same pattern as the EntryCard colorMap.js
+          precedent) so those runtime-injected classes never render, without
+          touching MarkdownLite.jsx itself. */}
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
         {messages.map((msg, idx) => (
           <motion.div
@@ -566,23 +578,33 @@ const UnifiedConversation = ({
             className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
           >
             <div
-              className={`max-w-[80%] p-3 rounded-2xl ${
+              className={`max-w-[82%] p-3 ${
                 msg.role === 'user'
-                  ? 'bg-lavender-500 dark:bg-lavender-600 text-white'
+                  ? 'rounded-2xl rounded-br-[6px] bg-accent-deep'
                   : msg.role === 'system'
-                  ? 'bg-honey-500/20 dark:bg-honey-900/30 text-honey-200 dark:text-honey-300'
-                  : 'bg-white/10 text-white'
+                  ? 'rounded-2xl rounded-bl-[6px] border border-border bg-accent-wash'
+                  : 'rounded-2xl rounded-bl-[6px] border border-border bg-card shadow-sm'
               }`}
             >
-              <MarkdownLite text={msg.content} variant="light" />
+              <div
+                className={
+                  msg.role === 'user'
+                    ? '[&_*]:!text-background'
+                    : msg.role === 'system'
+                    ? '[&_*]:!text-accent-deep'
+                    : '[&_*]:!text-foreground'
+                }
+              >
+                <MarkdownLite text={msg.content} variant="default" />
+              </div>
             </div>
           </motion.div>
         ))}
 
         {isLoading && (
           <div className="flex justify-start">
-            <div className="bg-white/10 p-3 rounded-2xl">
-              <Loader2 size={20} className="text-white animate-spin" />
+            <div className="rounded-2xl rounded-bl-[6px] border border-border bg-card shadow-sm p-3">
+              <Loader2 size={20} className="text-accent-deep animate-spin" aria-hidden="true" />
             </div>
           </div>
         )}
@@ -590,8 +612,15 @@ const UnifiedConversation = ({
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Input */}
-      <div className="p-4 border-t border-white/10">
+      {/* Input. Spec: "pill input + accent mic button". This component keeps
+          Mic (open voice overlay) and Send (submit typed text) as two
+          always-visible, independently-functioning buttons (unlike the
+          mockup's single icon, which morphs mic<->send around one action) —
+          collapsing them would be a behavior change, out of scope for a
+          restyle. Send carries the accent-deep primary treatment since it is
+          this row's actual submit action; Mic stays a secondary bg-card
+          control, matching EntryBar's idle mic/keyboard treatment. */}
+      <div className="p-4 border-t border-border">
         <div className="flex items-center gap-2">
           <input
             ref={inputRef}
@@ -599,23 +628,25 @@ const UnifiedConversation = ({
             value={inputText}
             onChange={e => setInputText(e.target.value)}
             onKeyDown={e => e.key === 'Enter' && !e.shiftKey && handleSendMessage()}
-            placeholder="Type a message..."
-            className="flex-1 bg-white/10 rounded-xl px-4 py-3 text-white placeholder-white/50 focus:outline-none focus:ring-2 focus:ring-white/20"
+            placeholder="Message your companion…"
+            className="flex-1 min-h-[44px] bg-card border border-border rounded-full px-[18px] py-3 text-[13.5px] text-foreground placeholder:text-faint focus:outline-none focus:ring-2 focus:ring-accent"
           />
 
           <button
             onClick={() => setIsRecording(true)}
-            className="p-3 bg-white/10 rounded-xl hover:bg-white/20 transition-colors"
+            aria-label="Record voice message"
+            className="w-11 h-11 rounded-full bg-card border border-border flex items-center justify-center hover:bg-divider transition-colors flex-none"
           >
-            <Mic size={20} className="text-white" />
+            <Mic size={18} className="text-accent-deep" aria-hidden="true" />
           </button>
 
           <button
             onClick={() => handleSendMessage()}
             disabled={!inputText.trim() || isLoading}
-            className="p-3 bg-lavender-500 dark:bg-lavender-600 rounded-xl hover:bg-lavender-600 dark:hover:bg-lavender-500 transition-colors disabled:opacity-50"
+            aria-label="Send message"
+            className="w-11 h-11 rounded-full bg-accent-deep text-background flex items-center justify-center shadow-soft hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed flex-none"
           >
-            <Send size={20} className="text-white" />
+            <Send size={18} aria-hidden="true" />
           </button>
         </div>
       </div>
@@ -634,12 +665,17 @@ const UnifiedConversation = ({
    * Render voice conversation interface using natural voice relay
    */
   const renderVoice = () => {
+    // Voice session's dedicated Cloud restyle (Pebble mascot, LISTENING caps,
+    // Equalizer) is a separate task (D2, `RealtimeConversation.jsx`). This
+    // in-modal voice mode is a distinct code path (useVoiceRelay) — tokenized
+    // onto the same Cloud palette for consistency, without inventing D2's
+    // spec-specific signature elements.
     const statusColors = {
-      disconnected: 'bg-gray-400',
-      connecting: 'bg-honey-400 dark:bg-honey-500 animate-pulse',
-      connected: 'bg-sage-400 dark:bg-sage-500',
-      speaking: 'bg-lavender-500 dark:bg-lavender-600 animate-pulse',
-      listening: 'bg-sage-500 dark:bg-sage-400 animate-pulse'
+      disconnected: 'bg-faint',
+      connecting: 'bg-accent animate-pulse',
+      connected: 'bg-accent',
+      speaking: 'bg-accent-deep animate-pulse',
+      listening: 'bg-accent-deep animate-pulse'
     };
 
     const statusLabels = {
@@ -655,7 +691,7 @@ const UnifiedConversation = ({
         {/* Status bar */}
         <div className="px-6 py-3 flex items-center gap-3">
           <div className={`w-3 h-3 rounded-full ${statusColors[voiceStatus]}`} />
-          <span className="text-white/80 text-sm">{statusLabels[voiceStatus]}</span>
+          <span className="text-sm text-secondary-foreground">{statusLabels[voiceStatus]}</span>
         </div>
 
         {/* Conversation transcript */}
@@ -666,10 +702,10 @@ const UnifiedConversation = ({
               className={`mb-4 ${msg.role === 'user' ? 'text-right' : 'text-left'}`}
             >
               <div
-                className={`inline-block max-w-[85%] px-4 py-3 rounded-2xl ${
+                className={`inline-block max-w-[85%] px-4 py-3 ${
                   msg.role === 'user'
-                    ? 'bg-white/20 text-white rounded-br-none'
-                    : 'bg-white/10 text-white/90 rounded-bl-none'
+                    ? 'rounded-2xl rounded-br-[6px] bg-accent-deep text-background'
+                    : 'rounded-2xl rounded-bl-[6px] border border-border bg-card shadow-sm text-foreground'
                 }`}
               >
                 {/* RES-002: break-words for text reflow on small screens */}
@@ -684,7 +720,7 @@ const UnifiedConversation = ({
                 {[...Array(3)].map((_, i) => (
                   <div
                     key={i}
-                    className="w-2 h-8 bg-white/60 rounded-full animate-pulse"
+                    className="w-2 h-8 bg-accent rounded-full animate-pulse"
                     style={{ animationDelay: `${i * 150}ms` }}
                   />
                 ))}
@@ -695,11 +731,11 @@ const UnifiedConversation = ({
 
         {/* Error display */}
         {voiceError && (
-          <div className="mx-6 mb-4 p-3 bg-red-500/20 border border-red-400/30 rounded-lg">
-            <p className="text-red-200 text-sm">{voiceError}</p>
+          <div className="mx-6 mb-4 p-3 rounded-lg border border-destructive bg-[var(--destructive-wash)]">
+            <p className="text-sm text-destructive">{voiceError}</p>
             <button
               onClick={voiceClearError}
-              className="text-red-300 text-xs mt-1 underline"
+              className="mt-1 text-xs text-destructive underline"
             >
               Dismiss
             </button>
@@ -709,17 +745,23 @@ const UnifiedConversation = ({
         {/* Main controls */}
         <div className="p-6 pb-[max(2rem,env(safe-area-inset-bottom))] flex flex-col items-center">
           {voiceStatus === 'connecting' ? (
-            <div className="w-24 h-24 rounded-full bg-gradient-to-br from-honey-500 to-terra-600 dark:from-honey-600 dark:to-terra-700 shadow-lg flex items-center justify-center animate-pulse">
-              <div className="w-8 h-8 border-4 border-white/30 border-t-white rounded-full animate-spin" />
+            <div className="w-24 h-24 rounded-full bg-accent-wash shadow-soft flex items-center justify-center animate-pulse">
+              <div className="w-8 h-8 border-4 border-border border-t-accent-deep rounded-full animate-spin" />
             </div>
           ) : voiceStatus !== 'disconnected' ? (
             <div className="flex items-center gap-6">
-              {/* End call button */}
+              {/* End call button. bg-destructive (not literal red-*) — same
+                  fixed, non-alarming terracotta token as SettingsPage's
+                  "Delete everything" — this is a standard hang-up affordance,
+                  not crisis/safety UI. text-white is intentional: --destructive
+                  doesn't flip polarity between themes like accent-deep does,
+                  so text-background would fail contrast in dark mode. */}
               <button
                 onClick={handleEndVoice}
-                className="w-16 h-16 rounded-full bg-red-500 shadow-lg shadow-red-500/30 flex items-center justify-center hover:scale-105 transition-transform" /* @color-safe */
+                aria-label="End voice session"
+                className="w-16 h-16 rounded-full bg-destructive shadow-soft-lg flex items-center justify-center hover:scale-105 transition-transform"
               >
-                <Phone size={24} className="text-white rotate-[135deg]" />
+                <Phone size={24} className="text-white rotate-[135deg]" aria-hidden="true" />
               </button>
 
               {/* Push-to-talk button */}
@@ -740,25 +782,28 @@ const UnifiedConversation = ({
                 }}
                 onContextMenu={(e) => e.preventDefault()}
                 disabled={voiceStatus === 'speaking'}
+                aria-label={voiceIsRecording ? 'Release to send' : 'Hold to speak'}
                 style={{ touchAction: 'none', userSelect: 'none', WebkitUserSelect: 'none' }}
-                className={`w-24 h-24 rounded-full shadow-lg flex items-center justify-center transition-all select-none ${
+                className={`w-24 h-24 rounded-full shadow-soft-lg flex items-center justify-center transition-all select-none ${
                   voiceIsRecording
-                    ? 'bg-sage-500 dark:bg-sage-600 shadow-sage-500/30 scale-110'
+                    ? 'bg-accent-deep scale-110'
                     : voiceStatus === 'speaking'
-                    ? 'bg-gray-500 opacity-50 cursor-not-allowed'
-                    : 'bg-gradient-to-br from-lavender-500 to-lavender-700 dark:from-lavender-600 dark:to-lavender-800 shadow-lavender-500/30 hover:scale-105'
+                    ? 'bg-divider opacity-60 cursor-not-allowed'
+                    : 'bg-accent-deep hover:scale-105'
                 }`}
               >
                 {voiceIsRecording ? (
-                  <MicOff size={36} className="text-white animate-pulse" />
+                  <MicOff size={36} className="text-background animate-pulse" aria-hidden="true" />
+                ) : voiceStatus === 'speaking' ? (
+                  <Mic size={36} className="text-faint" aria-hidden="true" />
                 ) : (
-                  <Mic size={36} className="text-white" />
+                  <Mic size={36} className="text-background" aria-hidden="true" />
                 )}
               </button>
             </div>
           ) : null}
 
-          <p className="text-white/60 text-sm mt-4">
+          <p className="text-sm text-muted-foreground mt-4">
             {voiceStatus === 'connecting'
               ? 'Connecting to voice service...'
               : voiceStatus === 'speaking'
@@ -777,7 +822,7 @@ const UnifiedConversation = ({
               }
               setMode(MODES.CHAT);
             }}
-            className="mt-4 text-white/40 hover:text-white/60 transition-colors text-sm"
+            className="mt-4 text-sm text-faint hover:text-muted-foreground transition-colors"
           >
             Switch to text chat
           </button>
@@ -799,13 +844,13 @@ const UnifiedConversation = ({
       <div className="flex flex-col h-full p-6">
         {/* Progress */}
         <div className="mb-6">
-          <div className="flex justify-between text-white/60 text-sm mb-2">
+          <div className="flex justify-between text-sm text-muted-foreground mb-2">
             <span>{selectedSession.name}</span>
             <span>{sessionStep + 1} / {selectedSession.prompts.length}</span>
           </div>
-          <div className="h-1 bg-white/10 rounded-full overflow-hidden">
+          <div className="h-1 bg-divider rounded-full overflow-hidden">
             <motion.div
-              className="h-full bg-white"
+              className="h-full bg-accent-deep"
               animate={{ width: `${progress * 100}%` }}
             />
           </div>
@@ -813,12 +858,12 @@ const UnifiedConversation = ({
 
         {/* Current prompt */}
         <div className="flex-1 flex flex-col items-center justify-center">
-          <h2 className="text-2xl text-white font-medium text-center mb-4">
+          <h2 className="text-2xl font-medium text-center text-foreground mb-4">
             {currentPrompt.question || currentPrompt.instruction}
           </h2>
 
           {currentPrompt.subtext && (
-            <p className="text-white/60 text-center mb-8">
+            <p className="text-center text-muted-foreground mb-8">
               {currentPrompt.subtext}
             </p>
           )}
@@ -865,20 +910,20 @@ const UnifiedConversation = ({
 
       return (
         <div className="flex flex-col h-full">
-          <div className="p-4 border-b border-white/10">
+          <div className="p-4 border-b border-border">
             <button
               onClick={() => {
                 setSelectedExercise(null);
                 setMode(MODES.PICKER);
               }}
-              className="flex items-center gap-2 text-white/60 hover:text-white transition-colors"
+              className="flex min-h-[44px] items-center gap-2 text-muted-foreground hover:text-foreground transition-colors"
             >
-              <ChevronLeft size={20} />
+              <ChevronLeft size={20} aria-hidden="true" />
               Back
             </button>
           </div>
 
-          <div className="flex-1 flex items-center justify-center bg-gradient-to-b from-gray-900 to-gray-950">
+          <div className="flex-1 flex items-center justify-center bg-background">
             <BreathingExercise
               exerciseType={exerciseMap[selectedExercise.id] || 'box'}
               onComplete={() => {
@@ -915,17 +960,17 @@ const UnifiedConversation = ({
     // Body scan / meditation placeholder
     return (
       <div className="flex flex-col h-full items-center justify-center p-8">
-        <h2 className="text-2xl text-white font-medium mb-4">{selectedExercise.name}</h2>
-        <p className="text-white/60 text-center mb-8">{selectedExercise.intro}</p>
-        <button
+        <h2 className="text-2xl font-medium text-foreground mb-4">{selectedExercise.name}</h2>
+        <p className="text-center text-muted-foreground mb-8">{selectedExercise.intro}</p>
+        <Button
           onClick={() => {
             setSelectedExercise(null);
             setMode(MODES.PICKER);
           }}
-          className="px-6 py-3 bg-white/20 rounded-full text-white hover:bg-white/30 transition-colors"
+          variant="outline"
         >
           Close
-        </button>
+        </Button>
       </div>
     );
   };
@@ -935,10 +980,10 @@ const UnifiedConversation = ({
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
-      className="fixed inset-0 bg-gray-900 z-50 flex flex-col"
+      className="fixed inset-0 bg-background z-50 flex flex-col"
     >
       {/* Header */}
-      <div className="flex items-center justify-between p-4 border-b border-white/10">
+      <div className="flex items-center justify-between p-4 border-b border-border">
         <div className="flex items-center gap-3">
           {mode !== MODES.PICKER && (
             <button
@@ -953,30 +998,37 @@ const UnifiedConversation = ({
                 }
                 setMode(MODES.PICKER);
               }}
-              className="p-2 hover:bg-white/10 rounded-lg transition-colors"
+              aria-label="Back to companion menu"
+              className="cloud-icon-button"
             >
-              <ChevronLeft size={24} className="text-white" />
+              <ChevronLeft size={22} aria-hidden="true" />
             </button>
           )}
           <div>
-            <h1 className="text-white font-semibold">
+            <h1 className="font-semibold text-[15px] text-foreground">
               {mode === MODES.PICKER ? 'Your Companion' :
-               mode === MODES.CHAT ? 'Chat' :
+               mode === MODES.CHAT ? 'Companion' :
                mode === MODES.VOICE ? 'Voice' :
                mode === MODES.GUIDED ? selectedSession?.name :
                selectedExercise?.name}
             </h1>
+            {/* CLOUD-DESIGN-SPEC.md §7 AI chat: "here with you" subtitle under
+                the Companion header, chat mode only (matches mockup 5c/6c). */}
+            {mode === MODES.CHAT && (
+              <p className="text-[11px] text-accent-deep">here with you</p>
+            )}
             {memoryLoading && (
-              <p className="text-white/40 text-xs">Loading memories...</p>
+              <p className="text-[11px] text-faint">Loading memories...</p>
             )}
           </div>
         </div>
 
         <button
           onClick={onClose}
-          className="p-2 hover:bg-white/10 rounded-lg transition-colors"
+          aria-label="Close companion"
+          className="cloud-icon-button"
         >
-          <X size={24} className="text-white" />
+          <X size={22} aria-hidden="true" />
         </button>
       </div>
 
@@ -1000,7 +1052,7 @@ const ScaleInput = ({ min, max, labels, onSubmit }) => {
 
   return (
     <div className="w-full max-w-sm">
-      <div className="flex justify-between text-white/60 text-sm mb-2">
+      <div className="flex justify-between text-sm text-muted-foreground mb-2">
         <span>{labels?.[min] || min}</span>
         <span>{labels?.[max] || max}</span>
       </div>
@@ -1011,19 +1063,16 @@ const ScaleInput = ({ min, max, labels, onSubmit }) => {
         max={max}
         value={value}
         onChange={e => setValue(Number(e.target.value))}
-        className="w-full h-2 bg-white/20 rounded-full appearance-none cursor-pointer"
+        className="w-full h-2 bg-divider rounded-full appearance-none cursor-pointer"
       />
 
       <div className="text-center mt-4">
-        <span className="text-4xl text-white font-bold">{value}</span>
+        <span className="text-4xl font-bold text-foreground">{value}</span>
       </div>
 
-      <button
-        onClick={() => onSubmit(value)}
-        className="w-full mt-6 px-6 py-3 bg-white rounded-xl text-gray-900 font-medium hover:bg-white/90 transition-colors"
-      >
+      <Button onClick={() => onSubmit(value)} className="w-full mt-6">
         Continue
-      </button>
+      </Button>
     </div>
   );
 };
@@ -1052,23 +1101,23 @@ const MultipleChoiceInput = ({ options, multiSelect, onSubmit }) => {
         <button
           key={option.value}
           onClick={() => handleSelect(option.value)}
-          className={`w-full p-4 rounded-xl text-left transition-colors ${
+          className={`w-full min-h-[44px] p-4 rounded-xl text-left border transition-colors ${
             (multiSelect ? selected.includes(option.value) : selected === option.value)
-              ? 'bg-white text-gray-900'
-              : 'bg-white/10 text-white hover:bg-white/20'
+              ? 'border-accent-deep bg-accent-deep text-background'
+              : 'border-border bg-card text-foreground hover:bg-divider'
           }`}
         >
           {option.label}
         </button>
       ))}
 
-      <button
+      <Button
         onClick={() => onSubmit(selected)}
         disabled={multiSelect ? selected.length === 0 : !selected}
-        className="w-full mt-4 px-6 py-3 bg-lavender-500 dark:bg-lavender-600 rounded-xl text-white font-medium hover:bg-lavender-600 dark:hover:bg-lavender-500 transition-colors disabled:opacity-50"
+        className="w-full mt-4"
       >
         Continue
-      </button>
+      </Button>
     </div>
   );
 };
@@ -1086,25 +1135,22 @@ const TextInputForSession = ({ placeholder, onSubmit, optional }) => {
         onChange={e => setText(e.target.value)}
         placeholder={placeholder}
         rows={4}
-        className="w-full bg-white/10 rounded-xl px-4 py-3 text-white placeholder-white/50 focus:outline-none focus:ring-2 focus:ring-white/20 resize-none"
+        className="w-full bg-card border border-border rounded-xl px-4 py-3 text-foreground placeholder:text-faint focus:outline-none focus:ring-2 focus:ring-accent resize-none"
       />
 
       <div className="flex gap-3 mt-4">
         {optional && (
-          <button
-            onClick={() => onSubmit(null)}
-            className="flex-1 px-6 py-3 bg-white/10 rounded-xl text-white font-medium hover:bg-white/20 transition-colors"
-          >
+          <Button onClick={() => onSubmit(null)} variant="outline" className="flex-1">
             Skip
-          </button>
+          </Button>
         )}
-        <button
+        <Button
           onClick={() => onSubmit(text)}
           disabled={!text.trim() && !optional}
-          className="flex-1 px-6 py-3 bg-white rounded-xl text-gray-900 font-medium hover:bg-white/90 transition-colors disabled:opacity-50"
+          className="flex-1"
         >
           Continue
-        </button>
+        </Button>
       </div>
     </div>
   );
@@ -1118,20 +1164,22 @@ const VoiceInputOverlay = ({ onSave, onCancel }) => (
     initial={{ opacity: 0 }}
     animate={{ opacity: 1 }}
     exit={{ opacity: 0 }}
-    className="absolute inset-0 bg-black/80 flex flex-col items-center justify-center z-10"
+    className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-[var(--overlay)] p-4"
   >
-    <p className="text-white/60 mb-6">Tap to record your message</p>
-    <VoiceRecorder
-      onSave={onSave}
-      onSwitch={onCancel}
-      minimal
-    />
-    <button
-      onClick={onCancel}
-      className="mt-6 text-white/60 hover:text-white transition-colors"
-    >
-      Cancel
-    </button>
+    <div className="w-full max-w-xs rounded-2xl border border-border bg-card shadow-soft-lg p-6 flex flex-col items-center">
+      <p className="mb-6 text-secondary-foreground">Tap to record your message</p>
+      <VoiceRecorder
+        onSave={onSave}
+        onSwitch={onCancel}
+        minimal
+      />
+      <button
+        onClick={onCancel}
+        className="mt-6 min-h-[44px] px-2 text-muted-foreground hover:text-foreground transition-colors"
+      >
+        Cancel
+      </button>
+    </div>
   </motion.div>
 );
 
@@ -1155,22 +1203,22 @@ const GroundingExerciseUI = ({ exercise, onComplete, onBack }) => {
 
   return (
     <div className="flex flex-col h-full">
-      <div className="p-4 border-b border-white/10">
+      <div className="p-4 border-b border-border">
         <button
           onClick={onBack}
-          className="flex items-center gap-2 text-white/60 hover:text-white transition-colors"
+          className="flex min-h-[44px] items-center gap-2 text-muted-foreground hover:text-foreground transition-colors"
         >
-          <ChevronLeft size={20} />
+          <ChevronLeft size={20} aria-hidden="true" />
           Back
         </button>
       </div>
 
       <div className="flex-1 flex flex-col items-center justify-center p-8">
-        <div className="text-6xl mb-6">{currentStep.count}</div>
-        <h2 className="text-2xl text-white font-medium text-center mb-4">
+        <div className="text-6xl mb-6 text-accent-deep">{currentStep.count}</div>
+        <h2 className="text-2xl font-medium text-center text-foreground mb-4">
           {currentStep.prompt}
         </h2>
-        <p className="text-white/60 text-center mb-8">
+        <p className="text-center text-muted-foreground mb-8">
           {currentStep.instruction}
         </p>
 
@@ -1184,7 +1232,7 @@ const GroundingExerciseUI = ({ exercise, onComplete, onBack }) => {
             <div
               key={idx}
               className={`w-2 h-2 rounded-full ${
-                idx <= step ? 'bg-white' : 'bg-white/20'
+                idx <= step ? 'bg-accent-deep' : 'bg-divider'
               }`}
             />
           ))}

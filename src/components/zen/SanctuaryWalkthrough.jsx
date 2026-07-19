@@ -1,14 +1,25 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Sparkles, ArrowRight, Home, BarChart3, BookOpen, Settings2, Plus, Check } from 'lucide-react';
+import { ArrowRight, Home, BarChart3, BookOpen, Settings2, Plus, Check } from 'lucide-react';
+import { Pebble } from '../cloud';
 
 /**
- * SanctuaryWalkthrough - 3-screen welcome modal for new Zen & Bento UI
+ * SanctuaryWalkthrough (CLOUD-DESIGN-SPEC.md §6.3 Pebble states + §7
+ * "Welcome" — mockup 7o): 3-screen welcome modal for new Zen & Bento UI.
  *
  * Appears on first launch after the update to guide users through:
- * 1. The Vision - Welcome to a quieter space
+ * 1. The Vision - Welcome to a quieter space (calm Pebble, §6.3: "calm...
+ *    used in: home, welcome")
  * 2. The Migration - Where things moved
  * 3. Your Bento - How to customize
+ *
+ * Restyle only — step flow, Back/Skip/Next/onComplete logic unchanged.
+ * Mockup 7o is a distinct pre-auth first-run screen (Pebble + "A quiet
+ * place for loud days." + Begin/"I already have an account") with no
+ * equivalent in this post-update 3-step tour's props (no auth state, no
+ * feature-bullet copy passed in) — only the calm Pebble mascot and the
+ * Cloud token vocabulary are pulled from it; the tour's own 3-screen
+ * content/copy is preserved as-is.
  */
 const SanctuaryWalkthrough = ({ isOpen, onComplete, onSkip }) => {
   const [currentScreen, setCurrentScreen] = useState(0);
@@ -19,26 +30,8 @@ const SanctuaryWalkthrough = ({ isOpen, onComplete, onSkip }) => {
       title: 'Welcome to a quieter space',
       description: "We've redesigned Engram to focus on the present moment. Your sanctuary is now calmer, cleaner, and completely yours to shape.",
       visual: (
-        <div className="relative w-48 h-48 mx-auto">
-          {/* Zen-style animated circles */}
-          <motion.div
-            className="absolute inset-0 rounded-full bg-gradient-to-br from-honey-200 to-lavender-200 opacity-30"
-            animate={{ scale: [1, 1.1, 1] }}
-            transition={{ duration: 4, repeat: Infinity, ease: 'easeInOut' }}
-          />
-          <motion.div
-            className="absolute inset-4 rounded-full bg-gradient-to-br from-honey-100 to-lavender-100 opacity-50"
-            animate={{ scale: [1, 1.05, 1] }}
-            transition={{ duration: 3, repeat: Infinity, ease: 'easeInOut', delay: 0.5 }}
-          />
-          <motion.div
-            className="absolute inset-8 rounded-full bg-white/80 backdrop-blur-sm flex items-center justify-center"
-            initial={{ scale: 0 }}
-            animate={{ scale: 1 }}
-            transition={{ delay: 0.3, type: 'spring' }}
-          >
-            <Sparkles size={48} className="text-honey-500" />
-          </motion.div>
+        <div className="mx-auto flex h-48 w-48 items-center justify-center">
+          <Pebble state="calm" size={120} />
         </div>
       ),
     },
@@ -47,7 +40,7 @@ const SanctuaryWalkthrough = ({ isOpen, onComplete, onSkip }) => {
       title: "Your data hasn't moved far",
       description: "Your stats and stories are now organized in the navigation below. Everything you've captured is still here, just a tap away.",
       visual: (
-        <div className="space-y-3 w-full max-w-xs mx-auto">
+        <div className="mx-auto w-full max-w-xs space-y-3">
           {[
             { icon: Home, label: 'Home', desc: 'Your customizable dashboard', active: true },
             { icon: BookOpen, label: 'Journal', desc: 'All your entries & timeline' },
@@ -56,17 +49,23 @@ const SanctuaryWalkthrough = ({ isOpen, onComplete, onSkip }) => {
           ].map((item, i) => (
             <motion.div
               key={item.label}
-              className={`flex items-center gap-3 p-3 rounded-xl ${item.active ? 'bg-honey-100 border border-honey-200' : 'bg-white/50'}`}
+              className={`flex items-center gap-3 rounded-xl p-3 ${
+                item.active ? 'border border-accent bg-accent-wash' : 'bg-card'
+              }`}
               initial={{ opacity: 0, x: -20 }}
               animate={{ opacity: 1, x: 0 }}
               transition={{ delay: 0.2 + i * 0.1 }}
             >
-              <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${item.active ? 'bg-honey-500 text-white' : 'bg-warm-100 text-warm-500'}`}>
-                <item.icon size={20} />
+              <div
+                className={`flex h-10 w-10 items-center justify-center rounded-lg ${
+                  item.active ? 'bg-accent-deep text-background' : 'bg-divider text-muted-foreground'
+                }`}
+              >
+                <item.icon size={20} aria-hidden="true" />
               </div>
               <div>
-                <p className={`font-medium text-sm ${item.active ? 'text-honey-700' : 'text-warm-700'}`}>{item.label}</p>
-                <p className="text-xs text-warm-400">{item.desc}</p>
+                <p className={`text-sm font-medium ${item.active ? 'text-accent-deep' : 'text-foreground'}`}>{item.label}</p>
+                <p className="text-xs text-muted-foreground">{item.desc}</p>
               </div>
             </motion.div>
           ))}
@@ -78,33 +77,33 @@ const SanctuaryWalkthrough = ({ isOpen, onComplete, onSkip }) => {
       title: 'This is your vault',
       description: 'Make it as simple or as detailed as you need. Tap "Customize" at the bottom of your feed to add, remove, or rearrange widgets.',
       visual: (
-        <div className="w-full max-w-xs mx-auto">
+        <div className="mx-auto w-full max-w-xs">
           {/* Animated Bento grid preview */}
           <div className="grid grid-cols-2 gap-2">
             {[
-              { label: 'Greeting', size: 'col-span-2', color: 'from-honey-100 to-terra-100 dark:from-honey-900/30 dark:to-terra-900/30' },
-              { label: 'Prompts', size: 'col-span-2', color: 'from-lavender-100 to-terra-100 dark:from-lavender-900/30 dark:to-terra-900/30' },
+              { label: 'Greeting', size: 'col-span-2' },
+              { label: 'Prompts', size: 'col-span-2' },
             ].map((widget, i) => (
               <motion.div
                 key={widget.label}
-                className={`${widget.size} p-3 rounded-xl bg-gradient-to-br ${widget.color} border border-white/50`}
+                className={`${widget.size} rounded-xl border border-border bg-accent-wash p-3`}
                 initial={{ opacity: 0, scale: 0.8 }}
                 animate={{ opacity: 1, scale: 1 }}
                 transition={{ delay: 0.3 + i * 0.15 }}
               >
-                <p className="text-xs font-medium text-warm-600">{widget.label}</p>
+                <p className="text-xs font-medium text-secondary-foreground">{widget.label}</p>
               </motion.div>
             ))}
           </div>
 
           {/* Add widget animation */}
           <motion.div
-            className="mt-3 p-2 rounded-xl border-2 border-dashed border-honey-300 bg-honey-50/50 flex items-center justify-center gap-2 text-honey-600"
+            className="mt-3 flex items-center justify-center gap-2 rounded-xl border-2 border-dashed border-accent bg-accent-wash p-2 text-accent-deep"
             initial={{ opacity: 0 }}
             animate={{ opacity: [0, 1, 1, 0.5, 1] }}
             transition={{ delay: 0.8, duration: 2, repeat: Infinity }}
           >
-            <Plus size={16} />
+            <Plus size={16} aria-hidden="true" />
             <span className="text-xs font-medium">Add Widget</span>
           </motion.div>
         </div>
@@ -141,14 +140,14 @@ const SanctuaryWalkthrough = ({ isOpen, onComplete, onSkip }) => {
       >
         {/* Backdrop */}
         <motion.div
-          className="absolute inset-0 bg-gradient-to-br from-warm-900/80 to-warm-800/80 backdrop-blur-md"
+          className="absolute inset-0 bg-[var(--overlay)] backdrop-blur-md"
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
         />
 
         {/* Modal */}
         <motion.div
-          className="relative w-full max-w-sm bg-white rounded-3xl shadow-2xl overflow-hidden"
+          className="relative w-full max-w-sm overflow-hidden rounded-3xl border border-border bg-card shadow-soft-xl"
           initial={{ scale: 0.9, y: 20 }}
           animate={{ scale: 1, y: 0 }}
           transition={{ type: 'spring', damping: 20 }}
@@ -158,7 +157,7 @@ const SanctuaryWalkthrough = ({ isOpen, onComplete, onSkip }) => {
             {screens.map((_, i) => (
               <motion.div
                 key={i}
-                className={`w-2 h-2 rounded-full transition-colors ${i === currentScreen ? 'bg-honey-500' : 'bg-warm-200'}`}
+                className={`h-2 w-2 rounded-full transition-colors ${i === currentScreen ? 'bg-accent-deep' : 'bg-divider'}`}
                 animate={{ scale: i === currentScreen ? 1.2 : 1 }}
               />
             ))}
@@ -180,11 +179,11 @@ const SanctuaryWalkthrough = ({ isOpen, onComplete, onSkip }) => {
               </div>
 
               {/* Text */}
-              <div className="text-center mb-6">
-                <h2 className="font-display font-bold text-xl text-warm-800 mb-2">
+              <div className="mb-6 text-center">
+                <h2 className="cloud-title mb-2 text-xl text-foreground">
                   {currentData.title}
                 </h2>
-                <p className="text-warm-500 text-sm leading-relaxed">
+                <p className="text-sm leading-relaxed text-muted-foreground">
                   {currentData.description}
                 </p>
               </div>
@@ -192,37 +191,40 @@ const SanctuaryWalkthrough = ({ isOpen, onComplete, onSkip }) => {
           </AnimatePresence>
 
           {/* Actions */}
-          <div className="px-6 pb-6 flex gap-3">
+          <div className="flex gap-3 px-6 pb-6">
             {currentScreen > 0 ? (
               <button
+                type="button"
                 onClick={handleBack}
-                className="flex-1 py-3 px-4 text-warm-500 font-medium rounded-xl hover:bg-warm-100 transition-colors"
+                className="min-h-[44px] flex-1 rounded-full px-4 py-3 font-medium text-muted-foreground transition-colors hover:bg-divider"
               >
                 Back
               </button>
             ) : (
               <button
+                type="button"
                 onClick={onSkip}
-                className="flex-1 py-3 px-4 text-warm-400 font-medium rounded-xl hover:bg-warm-100 transition-colors"
+                className="min-h-[44px] flex-1 rounded-full px-4 py-3 font-medium text-faint transition-colors hover:bg-divider"
               >
                 Skip
               </button>
             )}
             <motion.button
+              type="button"
               onClick={handleNext}
-              className="flex-1 py-3 px-4 bg-honey-500 hover:bg-honey-600 text-white font-medium rounded-xl flex items-center justify-center gap-2 transition-colors"
+              className="flex min-h-[44px] flex-1 items-center justify-center gap-2 rounded-full bg-accent-deep px-4 py-3 font-medium text-background transition-opacity hover:opacity-90"
               whileHover={{ scale: 1.02 }}
               whileTap={{ scale: 0.98 }}
             >
               {isLastScreen ? (
                 <>
-                  <Check size={18} />
+                  <Check size={18} aria-hidden="true" />
                   Get Started
                 </>
               ) : (
                 <>
                   Next
-                  <ArrowRight size={18} />
+                  <ArrowRight size={18} aria-hidden="true" />
                 </>
               )}
             </motion.button>

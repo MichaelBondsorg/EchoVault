@@ -1,15 +1,24 @@
 import { useMemo, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Search, Calendar, ChevronLeft, ChevronRight, X } from 'lucide-react';
+import { Card, Chip, SectionLabel } from '../components/cloud';
 import EntryCard from '../components/entries/EntryCard';
 
 /**
  * JournalPage - Full journal with entry feed and search
+ * (CLOUD-DESIGN-SPEC.md §7 Journal: "search icon, filter chips, day-grouped
+ * Card lists, mood dot per row, meta line").
  *
  * Contains:
  * - Search functionality
  * - Date navigation
  * - Grouped entry feed
+ *
+ * Restyle only: entry loading, day-grouping, search/date filter semantics,
+ * and the onDelete/onUpdate store callbacks are unchanged. The date
+ * quick-select (All/Today/Yesterday) and the active-filter pills are the
+ * page's existing interactive filters, reskinned onto the cloud `Chip`
+ * primitive per spec — no new filter dimensions were introduced.
  */
 const JournalPage = ({
   entries,
@@ -109,111 +118,128 @@ const JournalPage = ({
     >
       {/* Page Title */}
       <div className="pt-2 mb-4">
-        <h2 className="font-display font-bold text-xl text-warm-800">
-          Your Journal
+        <h2 className="font-display font-medium text-[27px] leading-[1.2] tracking-[-0.01em] text-foreground">
+          Journal
         </h2>
       </div>
 
       {/* Search Bar */}
       <div className="relative mb-3">
-        <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-warm-400" />
+        <Search
+          size={16}
+          className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-muted-foreground"
+          aria-hidden="true"
+        />
         <input
           type="text"
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
           placeholder="Search entries..."
-          className="w-full pl-10 pr-4 py-2.5 bg-white/50 backdrop-blur-sm border border-white/30 rounded-xl text-sm text-warm-800 placeholder-warm-400 focus:outline-none focus:ring-2 focus:ring-honey-400"
+          className="min-h-11 w-full rounded-full border border-border bg-card py-2.5 pl-10 pr-4 text-sm text-foreground placeholder-faint focus:outline-none focus:ring-2 focus:ring-accent"
         />
       </div>
 
       {/* Date Navigation */}
-      <div className="flex items-center justify-between mb-4 bg-white/30 backdrop-blur-sm rounded-xl p-2">
-        <motion.button
+      <div className="mb-3 flex items-center justify-between rounded-full border border-border bg-card p-1">
+        <button
+          type="button"
           onClick={() => navigateDate(-1)}
-          className="p-2 text-warm-500 hover:text-warm-700 hover:bg-white/50 rounded-full"
-          whileHover={{ scale: 1.05 }}
-          whileTap={{ scale: 0.95 }}
+          aria-label="Previous day"
+          className="cloud-icon-button text-secondary-foreground hover:text-foreground"
         >
           <ChevronLeft size={20} />
-        </motion.button>
+        </button>
 
-        <motion.button
+        <button
+          type="button"
           onClick={() => setShowDatePicker(!showDatePicker)}
-          className="flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-warm-700 hover:bg-white/50 rounded-lg"
-          whileHover={{ scale: 1.02 }}
-          whileTap={{ scale: 0.98 }}
+          className="flex min-h-11 items-center gap-2 rounded-full px-3 text-sm font-medium text-secondary-foreground hover:bg-divider"
         >
-          <Calendar size={16} />
+          <Calendar size={15} aria-hidden="true" />
           {selectedDate
             ? selectedDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
-            : 'All Dates'
+            : 'All dates'
           }
-        </motion.button>
+        </button>
 
-        <motion.button
+        <button
+          type="button"
           onClick={() => navigateDate(1)}
-          className="p-2 text-warm-500 hover:text-warm-700 hover:bg-white/50 rounded-full"
-          whileHover={{ scale: 1.05 }}
-          whileTap={{ scale: 0.95 }}
+          aria-label="Next day"
+          className="cloud-icon-button text-secondary-foreground hover:text-foreground"
         >
           <ChevronRight size={20} />
-        </motion.button>
+        </button>
       </div>
 
-      {/* Date Picker */}
+      {/* Date quick-select filter chips */}
       <AnimatePresence>
         {showDatePicker && (
           <motion.div
-            className="mb-4 flex gap-2 flex-wrap"
+            className="mb-3 flex flex-wrap gap-2"
             initial={{ height: 0, opacity: 0 }}
             animate={{ height: 'auto', opacity: 1 }}
             exit={{ height: 0, opacity: 0 }}
           >
-            <button
+            <Chip
+              as="button"
+              type="button"
+              selected={!selectedDate}
               onClick={() => { setSelectedDate(null); setShowDatePicker(false); }}
-              className={`px-3 py-1 text-xs rounded-full ${!selectedDate ? 'bg-honey-600 text-white' : 'bg-white/50 text-warm-600 hover:bg-white/70'}`}
             >
               All
-            </button>
-            <button
+            </Chip>
+            <Chip
+              as="button"
+              type="button"
               onClick={() => { setSelectedDate(new Date()); setShowDatePicker(false); }}
-              className="px-3 py-1 text-xs rounded-full bg-white/50 text-warm-600 hover:bg-white/70"
             >
               Today
-            </button>
-            <button
+            </Chip>
+            <Chip
+              as="button"
+              type="button"
               onClick={() => {
                 const yesterday = new Date();
                 yesterday.setDate(yesterday.getDate() - 1);
                 setSelectedDate(yesterday);
                 setShowDatePicker(false);
               }}
-              className="px-3 py-1 text-xs rounded-full bg-white/50 text-warm-600 hover:bg-white/70"
             >
               Yesterday
-            </button>
+            </Chip>
           </motion.div>
         )}
       </AnimatePresence>
 
       {/* Active Filters */}
       {(searchQuery || selectedDate) && (
-        <div className="mb-4 flex gap-2 flex-wrap">
+        <div className="mb-4 flex flex-wrap gap-2">
           {searchQuery && (
-            <span className="inline-flex items-center gap-1 px-2 py-1 bg-honey-100 text-honey-700 rounded-full text-xs">
+            <Chip>
               Search: "{searchQuery}"
-              <button onClick={() => setSearchQuery('')} className="hover:text-honey-900">
-                <X size={12} />
+              <button
+                type="button"
+                onClick={() => setSearchQuery('')}
+                aria-label="Clear search filter"
+                className="relative -mr-1 inline-flex h-4 w-4 items-center justify-center text-accent-deep hover:opacity-70 before:absolute before:-inset-3.5 before:content-['']"
+              >
+                <X size={11} />
               </button>
-            </span>
+            </Chip>
           )}
           {selectedDate && (
-            <span className="inline-flex items-center gap-1 px-2 py-1 bg-honey-100 text-honey-700 rounded-full text-xs">
+            <Chip>
               {selectedDate.toLocaleDateString()}
-              <button onClick={() => setSelectedDate(null)} className="hover:text-honey-900">
-                <X size={12} />
+              <button
+                type="button"
+                onClick={() => setSelectedDate(null)}
+                aria-label="Clear date filter"
+                className="relative -mr-1 inline-flex h-4 w-4 items-center justify-center text-accent-deep hover:opacity-70 before:absolute before:-inset-3.5 before:content-['']"
+              >
+                <X size={11} />
               </button>
-            </span>
+            </Chip>
           )}
         </div>
       )}
@@ -221,27 +247,28 @@ const JournalPage = ({
       {/* Entry Feed */}
       {groupedEntries.length === 0 ? (
         <motion.div
-          className="p-8 text-center bg-white/30 backdrop-blur-sm border border-white/20 rounded-3xl"
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
         >
-          <p className="text-warm-600 font-medium">
-            {searchQuery || selectedDate ? 'No entries match your filters' : 'No entries yet'}
-          </p>
-          <p className="text-warm-400 text-sm mt-2">
-            {searchQuery || selectedDate
-              ? 'Try adjusting your search or date filter'
-              : 'Start journaling to see your entries here'
-            }
-          </p>
+          <Card className="p-8 text-center">
+            <p className="text-foreground font-medium">
+              {searchQuery || selectedDate ? 'No entries match your filters' : 'No entries yet'}
+            </p>
+            <p className="text-muted-foreground text-sm mt-2">
+              {searchQuery || selectedDate
+                ? 'Try adjusting your search or date filter'
+                : 'Start journaling to see your entries here'
+              }
+            </p>
+          </Card>
         </motion.div>
       ) : (
         <div className="space-y-6">
           {groupedEntries.map(group => (
             <div key={group.date.toDateString()}>
-              <h3 className="text-sm font-display font-semibold text-warm-500 mb-3 sticky top-0 bg-transparent py-1 backdrop-blur-sm">
+              <SectionLabel className="mb-3 sticky top-0 bg-transparent py-1">
                 {formatDateHeader(group.date)}
-              </h3>
+              </SectionLabel>
               <div className="space-y-3">
                 {group.entries.map(entry => (
                   <EntryCard

@@ -32,6 +32,10 @@ const initialState = {
   // Complex modal data
   dailySummaryModal: null,
   entryInsightsPopup: null,
+  // Cloud redesign (D4b) — post-save streak celebration. Data shape:
+  // { currentStreak, previousBest } | null, mirroring dailySummaryModal's
+  // "null when closed, object when open" convention.
+  streakCelebration: null,
 
   // Cloud redesign — "Background motion" preference (spec §6.1). This store
   // doesn't use zustand's `persist` middleware, so persistence is delegated
@@ -192,6 +196,13 @@ export const useUiStore = create(
       openEntryInsights: (data) => set({ entryInsightsPopup: data }, false, 'ui/openEntryInsights'),
       closeEntryInsights: () => set({ entryInsightsPopup: null }, false, 'ui/closeEntryInsights'),
 
+      /**
+       * Show/hide the post-save streak celebration (D4b). data shape:
+       * { currentStreak, previousBest }.
+       */
+      openStreakCelebration: (data) => set({ streakCelebration: data }, false, 'ui/openStreakCelebration'),
+      closeStreakCelebration: () => set({ streakCelebration: null }, false, 'ui/closeStreakCelebration'),
+
       // ============================================
       // UTILITY ACTIONS
       // ============================================
@@ -210,7 +221,8 @@ export const useUiStore = create(
         showEntityManagement: false,
         showQuickLog: false,
         dailySummaryModal: null,
-        entryInsightsPopup: null
+        entryInsightsPopup: null,
+        streakCelebration: null
       }, false, 'ui/closeAllModals'),
 
       /**
@@ -228,7 +240,8 @@ export const useUiStore = create(
           state.showEntityManagement ||
           state.showQuickLog ||
           state.dailySummaryModal !== null ||
-          state.entryInsightsPopup !== null;
+          state.entryInsightsPopup !== null ||
+          state.streakCelebration !== null;
       },
 
       /**

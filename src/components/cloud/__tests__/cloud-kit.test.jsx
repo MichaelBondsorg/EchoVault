@@ -129,6 +129,28 @@ describe('Tabs', () => {
     expect(screen.getByText('Week').getAttribute('data-state')).toBe('active');
     expect(screen.getByText('Month').getAttribute('data-state')).toBe('inactive');
   });
+
+  it('pads each trigger to a 44px-tall tap area via a vertical-only ::before overlay (C5b: InsightsPage is the first real consumer)', () => {
+    render(
+      <Tabs defaultValue="week">
+        <TabsList>
+          <TabsTrigger value="week">Week</TabsTrigger>
+          <TabsTrigger value="month">Month</TabsTrigger>
+        </TabsList>
+      </Tabs>
+    );
+    const week = screen.getByText('Week');
+    // Visual pill stays the compact 32px mockup size...
+    expect(week.className).toContain('min-h-[32px]');
+    // ...while a vertical-only overlay (-6px top/bottom => 32+12=44px)
+    // pads the tap area, without any horizontal inset that could make
+    // adjacent triggers' hit-boxes overlap.
+    expect(week.className).toContain('relative');
+    expect(week.className).toContain('before:inset-x-0');
+    expect(week.className).toContain('before:-top-1.5');
+    expect(week.className).toContain('before:-bottom-1.5');
+    expect(week.className).toContain("before:content-['']");
+  });
 });
 
 describe('Chip', () => {
@@ -154,6 +176,18 @@ describe('Chip', () => {
     );
     fireEvent.click(screen.getByText('All'));
     expect(onClick).toHaveBeenCalledTimes(1);
+  });
+
+  it('pads the tap target to 44px via a ::before overlay without growing the visual pill (A4 known issue, fixed in C4)', () => {
+    render(<Chip>Voice</Chip>);
+    const chip = screen.getByText('Voice');
+    // Visual pill stays the compact §5 size...
+    expect(chip.className).toContain('min-h-[28px]');
+    // ...while an invisible relative/before overlay pads the hit area out to
+    // ~44px (28px + 8px inset on each side) for interactive consumers.
+    expect(chip.className).toContain('relative');
+    expect(chip.className).toMatch(/before:-inset-2\b/);
+    expect(chip.className).toContain("before:content-['']");
   });
 });
 
@@ -196,6 +230,22 @@ describe('Dialog', () => {
     fireEvent.click(screen.getByLabelText('Close'));
     expect(screen.queryByText('Quick mood')).toBeNull();
   });
+
+  it('overlay uses the --overlay CSS-var token, not a Tailwind /NN opacity modifier (D4a fix)', () => {
+    render(
+      <Dialog open>
+        <DialogContent>
+          <DialogTitle>Quick mood</DialogTitle>
+        </DialogContent>
+      </Dialog>
+    );
+    const overlay = screen.getByTestId('dialog-overlay');
+    expect(overlay.className).toContain('bg-[var(--overlay)]');
+    // Guards against regressing to a `/NN` opacity modifier on a CSS-var
+    // color (bg-black/40, bg-foreground/40, etc.) — those silently no-op
+    // under this project's Tailwind config (see Dialog.jsx comment).
+    expect(overlay.className).not.toMatch(/bg-(black|white|foreground|primary|card)\/\d+/);
+  });
 });
 
 describe('Drawer', () => {
@@ -229,5 +279,18 @@ describe('Drawer', () => {
     );
     const dialog = screen.getByRole('dialog');
     expect(within(dialog).getByText('New entry')).toBeTruthy();
+  });
+
+  it('overlay uses the --overlay CSS-var token, not a Tailwind /NN opacity modifier (D4a fix)', () => {
+    render(
+      <Drawer open>
+        <DrawerContent>
+          <DrawerTitle>New entry</DrawerTitle>
+        </DrawerContent>
+      </Drawer>
+    );
+    const overlay = screen.getByTestId('drawer-overlay');
+    expect(overlay.className).toContain('bg-[var(--overlay)]');
+    expect(overlay.className).not.toMatch(/bg-(black|white|foreground|primary|card)\/\d+/);
   });
 });

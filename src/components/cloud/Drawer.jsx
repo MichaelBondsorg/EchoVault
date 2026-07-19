@@ -10,14 +10,19 @@ export const DrawerTrigger = VaulDrawer.Trigger;
 export const DrawerClose = VaulDrawer.Close;
 export const DrawerPortal = VaulDrawer.Portal;
 
+// D4a fix: same `bg-[var(--overlay)]` scrim-token swap as Dialog.jsx (see
+// its comment for why a Tailwind opacity-modifier suffix on a CSS-var color
+// no-ops under this project's Tailwind config) — the previous flat-black
+// scrim hardcoded a single color for both themes instead of using the
+// per-theme --overlay value.
 export const DrawerOverlay = forwardRef(({ className, ...props }, ref) => (
-  <VaulDrawer.Overlay ref={ref} className={cn('fixed inset-0 z-50 bg-black/40', className)} {...props} />
+  <VaulDrawer.Overlay ref={ref} className={cn('fixed inset-0 z-50 bg-[var(--overlay)]', className)} {...props} />
 ));
 DrawerOverlay.displayName = 'DrawerOverlay';
 
 export const DrawerContent = forwardRef(({ className, children, ...props }, ref) => (
   <VaulDrawer.Portal>
-    <DrawerOverlay />
+    <DrawerOverlay data-testid="drawer-overlay" />
     <VaulDrawer.Content
       ref={ref}
       className={cn(
