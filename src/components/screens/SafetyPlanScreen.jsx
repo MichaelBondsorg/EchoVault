@@ -2,7 +2,28 @@ import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, Shield, AlertTriangle, Wind, Heart, Phone, Plus } from 'lucide-react';
 import { DEFAULT_SAFETY_PLAN } from '../../config/constants';
+import { Card, Button, LinenWaveBackground } from '../cloud';
 
+/**
+ * SafetyPlanScreen — restyle only (Task D3). CLOUD-DESIGN-SPEC.md §7 does
+ * not carry an explicit prose bullet for this screen (only "Crisis
+ * resources" is quoted); the mockup (7f) is a simplified illustration
+ * (3 groups, no add/remove chrome) of the same underlying screen this
+ * component already implements. Per "spec-silent copy stays as-is," no
+ * copy in this file was changed from the original — only tokens/layout.
+ *
+ * Behavior is unchanged: props (plan, onUpdate, onClose); `addItem`/
+ * `removeItem` logic is byte-identical; every onClick handler
+ * (edit-section toggle, add, remove, close) is unchanged; the
+ * `professionalContacts` fallback and the `contact.phone.length <= 3 ?
+ * tel: : sms:` link-target logic are unchanged.
+ *
+ * The "Crisis Lines (Always Available)" card previously used red styling
+ * (bg-red-50, text-red-600/800) for the same 988/Crisis-Text-Line numbers
+ * shown calmly on CrisisResourcesScreen. Per the safety-critical "never
+ * red/alarming" rule, it's now the same accent-deep filled treatment as
+ * that screen's 988 card (flip-polarity `text-background`), not red.
+ */
 const SafetyPlanScreen = ({ plan, onUpdate, onClose }) => {
   const [editingSection, setEditingSection] = useState(null);
   const [newItem, setNewItem] = useState('');
@@ -29,42 +50,41 @@ const SafetyPlanScreen = ({ plan, onUpdate, onClose }) => {
   };
 
   const SectionCard = ({ title, icon: Icon, section, items, renderItem }) => (
-    <motion.div
-      initial={{ opacity: 0, y: 10 }}
-      animate={{ opacity: 1, y: 0 }}
-      className="bg-white rounded-2xl p-4 border border-warm-100 shadow-soft"
-    >
-      <div className="flex items-center justify-between mb-3">
+    <Card className="p-4">
+      <div className="mb-3 flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <Icon size={18} className="text-honey-600" />
-          <h3 className="font-display font-semibold text-warm-800">{title}</h3>
+          <Icon size={18} className="text-accent-deep" aria-hidden="true" />
+          <h3 className="font-display font-semibold text-foreground">{title}</h3>
         </div>
-        <motion.button
+        <button
+          type="button"
           onClick={() => setEditingSection(editingSection === section ? null : section)}
-          whileHover={{ scale: 1.1 }}
-          whileTap={{ scale: 0.9 }}
-          className="text-honey-600 hover:text-honey-700"
+          aria-label={`Add to ${title}`}
+          className="cloud-icon-button text-accent-deep"
         >
-          <Plus size={18} />
-        </motion.button>
+          <Plus size={18} aria-hidden="true" />
+        </button>
       </div>
 
       {items.length === 0 ? (
-        <p className="text-sm text-warm-400 italic font-body">No items yet - tap + to add</p>
+        <p className="text-sm italic text-muted-foreground">No items yet - tap + to add</p>
       ) : (
         <div className="space-y-2">
           {items.map((item, i) => (
-            <motion.div
+            <div
               key={i}
-              initial={{ opacity: 0, x: -10 }}
-              animate={{ opacity: 1, x: 0 }}
-              className="flex items-center justify-between bg-warm-50 rounded-xl p-2"
+              className="flex items-center justify-between gap-2 rounded-xl bg-divider py-1 pl-3 pr-1"
             >
-              <span className="text-sm text-warm-700 font-body">{renderItem(item)}</span>
-              <button onClick={() => removeItem(section, i)} className="text-warm-400 hover:text-red-500">
-                <X size={14} />
+              <span className="text-sm text-secondary-foreground">{renderItem(item)}</span>
+              <button
+                type="button"
+                onClick={() => removeItem(section, i)}
+                aria-label="Remove item"
+                className="cloud-icon-button text-faint hover:text-foreground"
+              >
+                <X size={14} aria-hidden="true" />
               </button>
-            </motion.div>
+            </div>
           ))}
         </div>
       )}
@@ -82,54 +102,47 @@ const SafetyPlanScreen = ({ plan, onUpdate, onClose }) => {
               value={newItem}
               onChange={(e) => setNewItem(e.target.value)}
               placeholder="Add new item..."
-              className="flex-1 px-3 py-2 border border-warm-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-honey-500 font-body"
+              className="flex-1 rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-faint focus:border-accent focus:outline-none"
               autoFocus
             />
-            <motion.button
-              onClick={() => addItem(section)}
-              whileHover={{ scale: 1.02 }}
-              whileTap={{ scale: 0.98 }}
-              className="px-3 py-2 bg-honey-600 text-white rounded-xl text-sm font-display font-medium"
-            >
+            <Button onClick={() => addItem(section)} className="px-4">
               Add
-            </motion.button>
+            </Button>
           </motion.div>
         )}
       </AnimatePresence>
-    </motion.div>
+    </Card>
   );
 
   return (
     <motion.div
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
-      className="fixed inset-0 bg-warm-50 z-50 overflow-y-auto"
+      className="fixed inset-0 z-50 overflow-y-auto bg-background"
     >
-      <div className="sticky top-0 bg-white border-b border-warm-100 p-4 flex items-center justify-between z-10 shadow-soft">
+      <LinenWaveBackground />
+
+      <div className="sticky top-0 z-10 flex items-center justify-between border-b border-border bg-card p-4 shadow-sm">
         <div className="flex items-center gap-3">
-          <Shield className="text-honey-600" size={24} />
-          <h1 className="text-lg font-display font-bold text-warm-900">My Safety Plan</h1>
+          <Shield className="text-accent-deep" size={24} aria-hidden="true" />
+          <h1 className="font-display text-lg font-bold text-foreground">My Safety Plan</h1>
         </div>
-        <motion.button
+        <button
+          type="button"
           onClick={onClose}
-          whileHover={{ scale: 1.1 }}
-          whileTap={{ scale: 0.9 }}
-          className="p-2 hover:bg-warm-100 rounded-full"
+          aria-label="Close safety plan"
+          className="cloud-icon-button"
         >
-          <X size={20} />
-        </motion.button>
+          <X size={20} aria-hidden="true" />
+        </button>
       </div>
 
-      <div className="max-w-md mx-auto p-4 space-y-4 pb-20">
-        <motion.div
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="bg-honey-50 rounded-2xl p-4 border border-honey-100"
-        >
-          <p className="text-sm text-honey-800 font-body">
+      <div className="relative z-10 mx-auto max-w-md space-y-4 p-4 pb-20">
+        <Card className="border-accent-wash bg-accent-wash p-4">
+          <p className="text-sm text-accent-deep">
             Your safety plan is here for difficult moments. Customize it during calm times so it's ready when you need it.
           </p>
-        </motion.div>
+        </Card>
 
         <SectionCard
           title="Warning Signs"
@@ -163,28 +176,24 @@ const SafetyPlanScreen = ({ plan, onUpdate, onClose }) => {
           renderItem={(item) => item.name}
         />
 
-        <motion.div
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="bg-white rounded-2xl p-4 border border-warm-100 shadow-soft"
-        >
-          <div className="flex items-center gap-2 mb-3">
-            <Phone size={18} className="text-red-600" />
-            <h3 className="font-display font-semibold text-warm-800">Crisis Lines (Always Available)</h3>
+        <Card className="p-4">
+          <div className="mb-3 flex items-center gap-2">
+            <Phone size={18} className="text-accent-deep" aria-hidden="true" />
+            <h3 className="font-display font-semibold text-foreground">Crisis Lines (Always Available)</h3>
           </div>
           <div className="space-y-2">
             {(plan.professionalContacts || DEFAULT_SAFETY_PLAN.professionalContacts).map((contact, i) => (
               <a
                 key={i}
                 href={contact.phone.length <= 3 ? `tel:${contact.phone}` : `sms:${contact.phone}`}
-                className="flex items-center justify-between bg-red-50 rounded-xl p-3 hover:bg-red-100 transition-colors"
+                className="flex min-h-[44px] items-center justify-between rounded-xl bg-accent-deep p-3 transition-opacity hover:opacity-90"
               >
-                <span className="text-sm font-medium text-red-800 font-body">{contact.name}</span>
-                <span className="text-sm text-red-600">{contact.phone}</span>
+                <span className="text-sm font-medium text-background">{contact.name}</span>
+                <span className="text-sm text-background">{contact.phone}</span>
               </a>
             ))}
           </div>
-        </motion.div>
+        </Card>
       </div>
     </motion.div>
   );

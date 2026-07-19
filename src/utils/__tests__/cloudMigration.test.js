@@ -224,6 +224,28 @@ export const MIGRATED = [
   // including the same terra/honey/sage -> single-accent-ramp collapse used
   // by InsightsPage (C5). Budget drops 64 -> 63.
   'src/components/chat/RealtimeConversation.jsx',
+  // D3 (2026-07-18): CrisisResourcesScreen.jsx, SafetyPlanScreen.jsx,
+  // CrisisSoftBlockModal.jsx — the safety/crisis path (highest-stakes task
+  // in the plan). CrisisResourcesScreen gained the spec §7 empathy Pebble +
+  // serif "You're not alone right now." headline + accent-deep 988 call
+  // card (flip-polarity text-background); the mockup's grounding-link and
+  // safety-plan-link have no backing prop on this component (level/
+  // onClose/onContinue only) and are deliberately NOT invented — see
+  // task-D3-report.md, same "flag, don't invent" precedent as D2's missing
+  // mute/switch-to-text controls. SafetyPlanScreen restyled onto Card/
+  // Button/LinenWaveBackground, add/remove/edit-section logic untouched.
+  // CrisisSoftBlockModal restyled in place (NOT moved onto the Dialog
+  // primitive per the brief — its overlay-opacity bug is a D4 fix), scrim
+  // via bg-[var(--overlay)]; "I'm in crisis" is now the accent-deep FILLED
+  // option instead of red. Every handler/prop/callback/tel:/sms: link/
+  // conditional gate across all three files verified byte-identical
+  // against the originals (task-D3-report.md inventory table); the only
+  // copy changed anywhere is the one CrisisResourcesScreen headline quoted
+  // above — every other string is character-for-character unchanged.
+  // Budget drops 63 -> 60.
+  'src/components/screens/CrisisResourcesScreen.jsx',
+  'src/components/screens/SafetyPlanScreen.jsx',
+  'src/components/modals/CrisisSoftBlockModal.jsx',
 ];
 
 // --- Ratchet: how many non-migrated .jsx files still use legacy palette classes ---
@@ -261,7 +283,11 @@ export const MIGRATED = [
 // (hearth/honey/sage/lavender/terra classes throughout its status colors,
 // full-screen gradient, transcript bubbles, save-prompt modal, and
 // controls); fully cleaned and moved to MIGRATED. Budget drops 64 -> 63.
-export const LEGACY_BUDGET = 63;
+// D3 (2026-07-18): CrisisResourcesScreen.jsx, SafetyPlanScreen.jsx,
+// CrisisSoftBlockModal.jsx were 3 of the 63 offenders (honey/warm/red-*
+// classes on the crisis path); all fully cleaned and moved to MIGRATED.
+// Budget drops 63 -> 60.
+export const LEGACY_BUDGET = 60;
 
 function collectJsxFiles(dir) {
   const out = [];
