@@ -5,8 +5,20 @@
  * uncapped `calculateStreak()` at streak lengths >= 31. Both now read from
  * the same `calculateStreak()` helper (services/dashboard/index.js).
  */
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
+
+// MiniStatsWidget imports calculateStreak from services/dashboard, whose
+// index imports the real firebase config at module scope — that throws in
+// CI where VITE_FIREBASE_API_KEY isn't set. Stub the config module out.
+vi.mock('../../../../config/firebase', () => ({
+  db: {},
+  doc: vi.fn(),
+  setDoc: vi.fn(),
+  Timestamp: { now: vi.fn(), fromDate: vi.fn() },
+  deleteDoc: vi.fn(),
+}));
+
 import MiniStatsWidget from '../MiniStatsWidget';
 
 // Build `count` consecutive daily entries ending today (local calendar

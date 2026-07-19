@@ -9,7 +9,19 @@
  *    MiniStatsWidget inline calc, which was capped at 30 days), so streaks
  *    beyond 30 days compute correctly.
  */
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
+
+// services/dashboard/index.js imports the real firebase config at module
+// scope, which throws in CI where VITE_FIREBASE_API_KEY isn't set. The
+// streak helpers under test are pure, so stub the config module out.
+vi.mock('../../../config/firebase', () => ({
+  db: {},
+  doc: vi.fn(),
+  setDoc: vi.fn(),
+  Timestamp: { now: vi.fn(), fromDate: vi.fn() },
+  deleteDoc: vi.fn(),
+}));
+
 import { calculateStreak, shouldCelebrateNewStreak } from '../index';
 
 function daysAgo(n) {
