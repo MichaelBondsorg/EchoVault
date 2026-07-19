@@ -18,7 +18,7 @@ const TopBar = ({ greeting, onMoodOrbClick, latestMoodScore = null }) => {
     <motion.header
       className="
         fixed top-0 left-0 right-0 z-50
-        bg-background/75 backdrop-blur-md
+        bg-[color-mix(in_srgb,var(--background)_82%,transparent)] backdrop-blur-md
         px-4 py-3
         pt-[calc(env(safe-area-inset-top)+12px)]
         flex items-center justify-between

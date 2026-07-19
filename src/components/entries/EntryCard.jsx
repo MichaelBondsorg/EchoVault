@@ -357,10 +357,12 @@ const EntryCard = ({ entry, onDelete, onUpdate }) => {
         </div>
       )}
 
-      {/* Header: tags wrap in their own flexible region; actions are a
-          fixed-width group that can never be squeezed into wrapping. */}
-      <div className="flex justify-between items-start gap-3 mb-3">
-        <div className="flex gap-2 flex-wrap items-center flex-1 min-w-0">
+      {/* Header row 1: category/type metadata on the left, actions
+          (mood pill / Correct AI / delete) as a fixed-width group on the
+          right that can never be squeezed into wrapping. Tags live in
+          their own full-width wrapping region below. */}
+      <div className="flex justify-between items-center gap-3 mb-2">
+        <div className="flex flex-wrap items-center gap-2 min-w-0">
           <button
             onClick={toggleCategory}
             className={`text-[10px] font-display font-bold px-2 py-0.5 rounded-full uppercase tracking-wide hover:opacity-80 transition-opacity flex items-center gap-1 ${entry.category === 'work' ? 'bg-divider text-secondary-foreground' : 'bg-accent-wash text-accent-deep'}`}
@@ -379,6 +381,22 @@ const EntryCard = ({ entry, onDelete, onUpdate }) => {
               {entryType}
             </span>
           )}
+        </div>
+        <div className="flex items-center gap-1 flex-none">
+          {typeof entry.analysis?.mood_score === 'number' && entry.analysis.mood_score !== null && (
+            <span className="rounded-full bg-[var(--accent-wash)] px-2 py-1 text-[10px] font-bold text-[var(--accent-deep)] whitespace-nowrap">
+              {entry.analysis.mood_score >= 0.7 ? 'Lighter' : entry.analysis.mood_score >= 0.4 ? 'Steady' : 'Heavy'}
+            </span>
+          )}
+          <button onClick={() => setShowCorrections((shown) => !shown)} className="min-h-11 px-2 text-xs font-semibold text-[var(--accent-deep)] whitespace-nowrap">Correct AI</button>
+          <button aria-label="Delete entry" onClick={() => onDelete(entry.id)} className="cloud-icon-button text-muted-foreground hover:text-red-400 transition-colors"><Trash2 size={16}/></button>
+        </div>
+      </div>
+
+      {/* Header row 2: tags in their own full-width wrapping region so they
+          never compete with the action controls for width. */}
+      {tags.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2 mb-3">
           {/* LAY-001: Limit visible tags to prevent overflow */}
           {(() => {
             const MAX_VISIBLE_TAGS = 5;
@@ -400,12 +418,12 @@ const EntryCard = ({ entry, onDelete, onUpdate }) => {
                     // @place/@goal/etc., so no hue coding via colorMap.js's
                     // getEntityTypeColors() is needed (spec §4/§5: minimal
                     // surfaces, ONE accent).
-                    return <span key={i} className="text-[10px] font-semibold text-secondary-foreground bg-divider px-2 py-0.5 rounded-full">{ENTITY_EMOJIS[entityPrefix]} {formatName(entityPrefix)}</span>;
+                    return <span key={i} className="text-[10px] font-semibold text-secondary-foreground bg-divider px-2 py-0.5 rounded-full inline-block max-w-full truncate whitespace-nowrap align-middle">{ENTITY_EMOJIS[entityPrefix]} {formatName(entityPrefix)}</span>;
                   } else if (tag.startsWith('@')) {
                     // Unknown @ tag - show without prefix
-                    return <span key={i} className="text-[10px] font-semibold text-secondary-foreground bg-divider px-2 py-0.5 rounded-full">{tag.split(':')[1]?.replace(/_/g, ' ') || tag}</span>;
+                    return <span key={i} className="text-[10px] font-semibold text-secondary-foreground bg-divider px-2 py-0.5 rounded-full inline-block max-w-full truncate whitespace-nowrap align-middle">{tag.split(':')[1]?.replace(/_/g, ' ') || tag}</span>;
                   }
-                  return <span key={i} className="text-[10px] font-semibold text-accent-deep bg-accent-wash px-2 py-0.5 rounded-full">#{tag}</span>;
+                  return <span key={i} className="text-[10px] font-semibold text-accent-deep bg-accent-wash px-2 py-0.5 rounded-full inline-block max-w-full truncate whitespace-nowrap align-middle">#{tag}</span>;
                 })}
                 {/* Show "+N more" button when tags are hidden */}
                 {hiddenCount > 0 && !showAllTags && (
@@ -435,16 +453,7 @@ const EntryCard = ({ entry, onDelete, onUpdate }) => {
             );
           })()}
         </div>
-        <div className="flex items-center gap-1 flex-none">
-          {typeof entry.analysis?.mood_score === 'number' && entry.analysis.mood_score !== null && (
-            <span className="rounded-full bg-[var(--accent-wash)] px-2 py-1 text-[10px] font-bold text-[var(--accent-deep)] whitespace-nowrap">
-              {entry.analysis.mood_score >= 0.7 ? 'Lighter' : entry.analysis.mood_score >= 0.4 ? 'Steady' : 'Heavy'}
-            </span>
-          )}
-          <button onClick={() => setShowCorrections((shown) => !shown)} className="min-h-11 px-2 text-xs font-semibold text-[var(--accent-deep)] whitespace-nowrap">Correct AI</button>
-          <button aria-label="Delete entry" onClick={() => onDelete(entry.id)} className="cloud-icon-button text-muted-foreground hover:text-red-400 transition-colors"><Trash2 size={16}/></button>
-        </div>
-      </div>
+      )}
 
       {showCorrections && (
         <div className="mb-4 grid gap-3 rounded-2xl border border-[var(--border)] bg-[var(--card)] p-3 sm:grid-cols-2">
