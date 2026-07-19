@@ -16,7 +16,10 @@ const config: CapacitorConfig = {
     androidScheme: 'https',
   },
   ios: {
-    contentInset: 'automatic',
+    // 'never' + viewport-fit=cover: the web layer owns safe-area spacing via
+    // env(safe-area-inset-*); 'automatic' would stack native scroll insets on
+    // top of the CSS padding and skew fixed-bar positioning.
+    contentInset: 'never',
     backgroundColor: '#1a1a2e',
     preferredContentMode: 'mobile',
   },
@@ -39,7 +42,11 @@ const config: CapacitorConfig = {
       backgroundColor: '#1a1a2e',
     },
     Keyboard: {
-      resize: 'body',
+      // 'native' resizes the whole webview frame, so fixed/inset-0 surfaces
+      // (chat, drawers, bottom bars) track the visible area above the
+      // keyboard. 'body' left the frame full-height and WKWebView auto-
+      // scrolled instead, detaching composers and opening blank gaps.
+      resize: 'native',
       resizeOnFullScreen: true,
     },
     SocialLogin: {

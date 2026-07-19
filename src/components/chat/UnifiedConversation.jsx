@@ -620,7 +620,7 @@ const UnifiedConversation = ({
           restyle. Send carries the accent-deep primary treatment since it is
           this row's actual submit action; Mic stays a secondary bg-card
           control, matching EntryBar's idle mic/keyboard treatment. */}
-      <div className="p-4 border-t border-border">
+      <div className="p-4 pb-[max(1rem,env(safe-area-inset-bottom))] border-t border-border">
         <div className="flex items-center gap-2">
           <input
             ref={inputRef}
@@ -628,6 +628,11 @@ const UnifiedConversation = ({
             value={inputText}
             onChange={e => setInputText(e.target.value)}
             onKeyDown={e => e.key === 'Enter' && !e.shiftKey && handleSendMessage()}
+            onFocus={() => {
+              // Keep the latest messages visible once the keyboard finishes
+              // resizing the webview (Keyboard resize: 'native').
+              setTimeout(() => messagesEndRef.current?.scrollIntoView({ block: 'end' }), 350);
+            }}
             placeholder="Message your companion…"
             className="flex-1 min-h-[44px] bg-card border border-border rounded-full px-[18px] py-3 text-[13.5px] text-foreground placeholder:text-faint focus:outline-none focus:ring-2 focus:ring-accent"
           />
@@ -980,7 +985,7 @@ const UnifiedConversation = ({
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
-      className="fixed inset-0 bg-background z-50 flex flex-col"
+      className="fixed inset-0 bg-background z-50 flex flex-col pt-[env(safe-area-inset-top)]"
     >
       {/* Header */}
       <div className="flex items-center justify-between p-4 border-b border-border">

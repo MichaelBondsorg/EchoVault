@@ -357,8 +357,10 @@ const EntryCard = ({ entry, onDelete, onUpdate }) => {
         </div>
       )}
 
-      <div className="flex justify-between items-start mb-3">
-        <div className="flex gap-2 flex-wrap items-center">
+      {/* Header: tags wrap in their own flexible region; actions are a
+          fixed-width group that can never be squeezed into wrapping. */}
+      <div className="flex justify-between items-start gap-3 mb-3">
+        <div className="flex gap-2 flex-wrap items-center flex-1 min-w-0">
           <button
             onClick={toggleCategory}
             className={`text-[10px] font-display font-bold px-2 py-0.5 rounded-full uppercase tracking-wide hover:opacity-80 transition-opacity flex items-center gap-1 ${entry.category === 'work' ? 'bg-divider text-secondary-foreground' : 'bg-accent-wash text-accent-deep'}`}
@@ -433,14 +435,14 @@ const EntryCard = ({ entry, onDelete, onUpdate }) => {
             );
           })()}
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1 flex-none">
           {typeof entry.analysis?.mood_score === 'number' && entry.analysis.mood_score !== null && (
-            <span className="rounded-full bg-[var(--accent-wash)] px-2 py-1 text-[10px] font-bold text-[var(--accent-deep)]">
+            <span className="rounded-full bg-[var(--accent-wash)] px-2 py-1 text-[10px] font-bold text-[var(--accent-deep)] whitespace-nowrap">
               {entry.analysis.mood_score >= 0.7 ? 'Lighter' : entry.analysis.mood_score >= 0.4 ? 'Steady' : 'Heavy'}
             </span>
           )}
-          <button onClick={() => setShowCorrections((shown) => !shown)} className="min-h-11 px-2 text-xs font-semibold text-[var(--accent-deep)]">Correct AI</button>
-          <button aria-label="Delete entry" onClick={() => onDelete(entry.id)} className="cloud-icon-button text-faint hover:text-red-400 transition-colors"><Trash2 size={16}/></button>
+          <button onClick={() => setShowCorrections((shown) => !shown)} className="min-h-11 px-2 text-xs font-semibold text-[var(--accent-deep)] whitespace-nowrap">Correct AI</button>
+          <button aria-label="Delete entry" onClick={() => onDelete(entry.id)} className="cloud-icon-button text-muted-foreground hover:text-red-400 transition-colors"><Trash2 size={16}/></button>
         </div>
       </div>
 
@@ -553,7 +555,7 @@ const EntryCard = ({ entry, onDelete, onUpdate }) => {
         ) : (
           <div className="flex items-center gap-2">
             <h3 className={`text-lg font-display font-bold text-foreground ${isPending ? 'animate-pulse' : ''}`}>{isPending ? "Processing..." : title}</h3>
-            {!isPending && <button onClick={() => setEditing(true)} className="text-faint hover:text-accent-deep opacity-50 hover:opacity-100"><Edit2 size={14}/></button>}
+            {!isPending && <button aria-label="Edit entry title" onClick={() => setEditing(true)} className="cloud-icon-button -my-2 text-muted-foreground hover:text-accent-deep"><Edit2 size={14}/></button>}
           </div>
         )}
       </div>
@@ -561,7 +563,7 @@ const EntryCard = ({ entry, onDelete, onUpdate }) => {
       {/* Meta line (CLOUD-DESIGN-SPEC.md §7 Journal: "mood dot per row, meta
           line") — mood dot + time + date, "(edited)" when effectiveDate was
           corrected away from the original capture date. */}
-      <div className="text-xs text-faint mb-2 flex items-center gap-1.5 font-medium">
+      <div className="text-xs text-muted-foreground mb-2 flex items-center gap-1.5 font-medium">
         <span
           className="h-2 w-2 flex-none rounded-full"
           style={{ background: moodDotColor }}

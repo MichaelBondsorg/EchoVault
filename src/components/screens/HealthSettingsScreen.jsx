@@ -406,7 +406,7 @@ const HealthSettingsScreen = ({ onClose }) => {
         transition={{ duration: 0.25, ease: 'easeOut' }}
       >
         {/* Header */}
-        <div className="sticky top-0 bg-white dark:bg-hearth-900 border-b border-warm-100 dark:border-hearth-800 px-4 py-4 flex items-center justify-between z-10">
+        <div className="sticky top-0 bg-white dark:bg-hearth-900 border-b border-warm-100 dark:border-hearth-800 px-4 py-4 pt-[calc(env(safe-area-inset-top)+16px)] flex items-center justify-between z-10">
           <div className="flex items-center gap-3">
             {/* Fixed header icon color (CLR-001) - changed from pink to teal to match app palette */}
             <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-honey-400 to-sage-500 flex items-center justify-center">

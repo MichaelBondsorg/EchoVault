@@ -343,8 +343,8 @@ const AppLayout = ({
         className="
           min-h-screen
           text-foreground
-          pt-[calc(env(safe-area-inset-top)+60px)]
-          pb-[calc(env(safe-area-inset-bottom)+100px)]
+          pt-[calc(env(safe-area-inset-top)+72px)]
+          pb-[calc(env(safe-area-inset-bottom)+112px)]
           overflow-y-auto
         "
       >

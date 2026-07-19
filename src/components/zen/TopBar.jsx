@@ -1,8 +1,9 @@
 import { motion } from 'framer-motion';
 
 /**
- * TopBar - Cloud top bar: transparent canvas (LinenWaveBackground shows
- * through from AppLayout) with a serif brand mark and a mood-log shortcut.
+ * TopBar - Cloud top bar: frosted linen (blurred background tint so page
+ * titles scrolling beneath never collide with the brand mark) with a serif
+ * brand mark and a mood-log shortcut.
  *
  * LAY-004: Shows "Engram" brand instead of greeting to avoid redundancy
  * (HeroWidget already shows time-based greeting on home page)
@@ -17,7 +18,7 @@ const TopBar = ({ greeting, onMoodOrbClick, latestMoodScore = null }) => {
     <motion.header
       className="
         fixed top-0 left-0 right-0 z-50
-        bg-transparent
+        bg-background/75 backdrop-blur-md
         px-4 py-3
         pt-[calc(env(safe-area-inset-top)+12px)]
         flex items-center justify-between

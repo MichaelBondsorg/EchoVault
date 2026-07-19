@@ -122,7 +122,7 @@ const SafetyPlanScreen = ({ plan, onUpdate, onClose }) => {
     >
       <LinenWaveBackground />
 
-      <div className="sticky top-0 z-10 flex items-center justify-between border-b border-border bg-card p-4 shadow-sm">
+      <div className="sticky top-0 z-10 flex items-center justify-between border-b border-border bg-card p-4 pt-[calc(env(safe-area-inset-top)+16px)] shadow-sm">
         <div className="flex items-center gap-3">
           <Shield className="text-accent-deep" size={24} aria-hidden="true" />
           <h1 className="font-display text-lg font-bold text-foreground">My Safety Plan</h1>
