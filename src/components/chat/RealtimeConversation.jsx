@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { X, Phone, Mic, MicOff, Save, ChevronLeft, Smile, Frown, Meh, Zap, Battery, BatteryLow } from 'lucide-react';
 import { useVoiceRelay } from '../../hooks/useVoiceRelay';
 import GuidedSessionPicker from './GuidedSessionPicker';
+import { Pebble, Equalizer, LinenWaveBackground, Button, SectionLabel, Chip } from '../cloud';
 
 const RealtimeConversation = ({ entries, onClose, category, onSaveEntry }) => {
   const [selectedSessionType, setSelectedSessionType] = useState(null);
@@ -169,12 +170,15 @@ const RealtimeConversation = ({ entries, onClose, category, onSaveEntry }) => {
     };
   }, []);
 
+  // Cloud tokens (CLOUD-DESIGN-SPEC.md §7 Voice session). Mirrors the exact
+  // statusColors mapping already established for the identical
+  // useVoiceRelay status set in UnifiedConversation.jsx's renderVoice() (D1).
   const statusColors = {
-    disconnected: 'bg-hearth-400',
-    connecting: 'bg-honey-400 animate-pulse',
-    connected: 'bg-sage-400',
-    speaking: 'bg-lavender-500 animate-pulse',
-    listening: 'bg-sage-500 animate-pulse',
+    disconnected: 'bg-faint',
+    connecting: 'bg-accent animate-pulse',
+    connected: 'bg-accent',
+    speaking: 'bg-accent-deep animate-pulse',
+    listening: 'bg-accent-deep animate-pulse',
   };
 
   const statusLabels = {
@@ -197,37 +201,51 @@ const RealtimeConversation = ({ entries, onClose, category, onSaveEntry }) => {
   };
 
   return (
-    <div className="fixed inset-0 bg-gradient-to-b from-hearth-900 via-lavender-900/80 to-hearth-950 z-50 flex flex-col pt-[env(safe-area-inset-top)]">
-      {/* Header */}
-      <div className="p-4 flex justify-between items-center">
+    <div className="fixed inset-0 z-50 flex flex-col bg-background pt-[env(safe-area-inset-top)]">
+      {/* Ambient linen + wave canvas (spec §6.1 / §7 "Voice session" mockups
+          5d/6d both render this same accent-wash gradient + grain + gated
+          wave treatment behind the session). LinenWaveBackground is `fixed
+          inset-0 -z-10`; nesting it inside this modal's own `fixed z-50`
+          stacking context keeps it painted behind this screen's content
+          without touching the app-wide instance mounted by AppLayout.
+          Gates Background-motion pref + prefers-reduced-motion internally
+          — no duplicate guard needed here. */}
+      <LinenWaveBackground />
+
+      {/* Header. Both icon buttons use .cloud-icon-button (44x44, defined in
+          cloud-tokens.css) and sit at opposite ends of a justify-between
+          row, so their hit targets are naturally non-overlapping. */}
+      <div className="relative z-10 flex items-center justify-between p-4">
         <div className="flex items-center gap-3">
           {!showPicker && status === 'disconnected' && (
             <button
               onClick={() => setShowPicker(true)}
-              className="text-white/60 hover:text-white p-1"
+              aria-label="Back to session picker"
+              className="cloud-icon-button -ml-2"
             >
-              <ChevronLeft size={20} />
+              <ChevronLeft size={20} aria-hidden="true" />
             </button>
           )}
-          <div className={`w-3 h-3 rounded-full ${statusColors[status]}`} />
-          <span className="text-white/80 text-sm">{statusLabels[status]}</span>
+          <div className={`h-3 w-3 rounded-full ${statusColors[status]}`} />
+          <span className="text-sm text-secondary-foreground">{statusLabels[status]}</span>
           {mode && (
-            <span className="text-white/40 text-xs px-2 py-0.5 bg-white/10 rounded">
+            <span className="rounded-full border border-border bg-card px-2.5 py-1 text-xs text-muted-foreground">
               {mode === 'realtime' ? 'Interactive' : 'Guided'}
             </span>
           )}
         </div>
         <button
           onClick={showPicker ? onClose : handleEndConversation}
-          className="text-white/60 hover:text-white p-2"
+          aria-label="Close voice session"
+          className="cloud-icon-button"
         >
-          <X size={24} />
+          <X size={24} aria-hidden="true" />
         </button>
       </div>
 
       {/* Session Picker */}
       {showPicker && status === 'disconnected' && (
-        <div className="flex-1 overflow-y-auto">
+        <div className="relative z-10 flex-1 overflow-y-auto">
           <GuidedSessionPicker
             onSelectSession={handleSelectSession}
             onOpenChat={handleOpenChat}
@@ -237,8 +255,8 @@ const RealtimeConversation = ({ entries, onClose, category, onSaveEntry }) => {
 
       {/* Guided session progress indicator */}
       {guidedState && !showPicker && (
-        <div className="px-6 pb-2">
-          <div className="flex items-center justify-between text-white/60 text-sm mb-2">
+        <div className="relative z-10 px-6 pb-2">
+          <div className="mb-2 flex items-center justify-between text-sm text-muted-foreground">
             <span>{sessionLabels[selectedSessionType] || 'Guided Session'}</span>
             {!guidedState.isOpening && !guidedState.isClosing && (
               <span>
@@ -247,9 +265,9 @@ const RealtimeConversation = ({ entries, onClose, category, onSaveEntry }) => {
             )}
           </div>
           {!guidedState.isOpening && !guidedState.isClosing && guidedState.totalPrompts > 0 && (
-            <div className="h-1 bg-white/10 rounded-full overflow-hidden">
+            <div className="h-1 overflow-hidden rounded-full bg-divider">
               <div
-                className="h-full bg-white/40 rounded-full transition-all duration-300"
+                className="h-full rounded-full bg-accent-deep transition-all duration-300"
                 style={{
                   width: `${((guidedState.promptIndex + 1) / guidedState.totalPrompts) * 100}%`,
                 }}
@@ -259,32 +277,52 @@ const RealtimeConversation = ({ entries, onClose, category, onSaveEntry }) => {
         </div>
       )}
 
-      {/* Conversation display */}
+      {/* Listening Pebble + LISTENING caps label + 12-bar Equalizer (spec §7:
+          "listening Pebble -> LISTENING caps -> 12-bar equalizer (staggered
+          eq)"). Pebble/Equalizer both consumed as-is (B2/B3) — reduced-motion
+          and the Background-motion pref are handled internally by their own
+          CSS (cloud-motion.css), not duplicated here. The LISTENING caption
+          is the one element that must stay perceivable with motion off, so
+          it's a plain always-rendered text node, not tied to any animation. */}
       {!showPicker && (
-        <div className="flex-1 overflow-y-auto px-6 py-4">
-          {transcript.map((msg, i) => (
-            <div
-              key={i}
-              className={`mb-4 ${msg.role === 'user' ? 'text-right' : 'text-left'}`}
-            >
-              <div
-                className={`inline-block max-w-[85%] px-4 py-3 rounded-2xl ${
-                  msg.role === 'user'
-                    ? 'bg-white/20 text-white rounded-br-none'
-                    : 'bg-white/10 text-white/90 rounded-bl-none'
-                }`}
-              >
-                <p className="text-sm">{msg.text}</p>
-              </div>
-            </div>
-          ))}
+        <div className="relative z-10 flex flex-col items-center pt-11">
+          <Pebble state={status === 'listening' ? 'listening' : 'calm'} size={88} />
+          {status === 'listening' && (
+            <p className="mt-[18px] text-[13px] font-medium uppercase tracking-[0.08em] text-accent">
+              Listening
+            </p>
+          )}
+          {status === 'listening' && <Equalizer bars={12} height={44} className="mt-4" />}
+        </div>
+      )}
+
+      {/* Conversation display. Per spec §7: "live transcript (user grey /
+          companion serif quote)". Unlike the mockup's single static
+          exchange, this transcript can grow arbitrarily long across a real
+          session, so it stays independently scrollable below the fixed
+          Pebble block above (mockup has no scroll affordance to draw from). */}
+      {!showPicker && (
+        <div className="relative z-10 flex-1 overflow-y-auto px-6 py-4">
+          <div className="mx-auto flex max-w-[280px] flex-col gap-4 text-center">
+            {transcript.map((msg, i) =>
+              msg.role === 'user' ? (
+                <p key={i} className="text-[13px] leading-[1.6] text-faint">
+                  {msg.text}
+                </p>
+              ) : (
+                <p key={i} className="font-display text-[15px] leading-[1.6] text-foreground">
+                  &ldquo;{msg.text}&rdquo;
+                </p>
+              )
+            )}
+          </div>
           {status === 'speaking' && (
-            <div className="flex justify-center">
+            <div className="mt-4 flex justify-center">
               <div className="flex gap-1">
                 {[...Array(3)].map((_, i) => (
                   <div
                     key={i}
-                    className="w-2 h-8 bg-white/60 rounded-full animate-pulse"
+                    className="h-8 w-2 animate-pulse rounded-full bg-accent"
                     style={{ animationDelay: `${i * 150}ms` }}
                   />
                 ))}
@@ -296,11 +334,11 @@ const RealtimeConversation = ({ entries, onClose, category, onSaveEntry }) => {
 
       {/* Error display */}
       {error && (
-        <div className="mx-6 mb-4 p-3 bg-red-500/20 border border-red-400/30 rounded-lg">
-          <p className="text-red-200 text-sm">{error}</p>
+        <div className="relative z-10 mx-6 mb-4 rounded-lg border border-destructive bg-[var(--destructive-wash)] p-3">
+          <p className="text-sm text-destructive">{error}</p>
           <button
             onClick={clearError}
-            className="text-red-300 text-xs mt-1 underline"
+            className="mt-1 text-xs text-destructive underline"
           >
             Dismiss
           </button>
@@ -309,12 +347,12 @@ const RealtimeConversation = ({ entries, onClose, category, onSaveEntry }) => {
 
       {/* Save prompt modal */}
       {showSavePrompt && (
-        <div className="absolute inset-0 bg-black/50 flex items-center justify-center p-6">
-          <div className="bg-hearth-800 rounded-2xl p-6 max-w-sm w-full max-h-[90vh] overflow-y-auto">
-            <h3 className="text-white text-lg font-medium mb-2">
+        <div className="absolute inset-0 z-20 flex items-center justify-center bg-[var(--overlay)] p-6">
+          <div className="max-h-[90vh] w-full max-w-sm overflow-y-auto rounded-2xl border border-border bg-card p-6 shadow-soft-lg">
+            <h3 className="mb-2 text-lg font-medium text-foreground">
               {guidedComplete ? 'Session Complete!' : 'Save as Entry?'}
             </h3>
-            <p className="text-white/60 text-sm mb-4">
+            <p className="mb-4 text-sm text-muted-foreground">
               {guidedComplete
                 ? 'Would you like to save your responses as a journal entry?'
                 : 'Would you like to save this conversation as a journal entry?'}
@@ -323,57 +361,60 @@ const RealtimeConversation = ({ entries, onClose, category, onSaveEntry }) => {
             {/* Title input */}
             {(sessionAnalysis?.suggestedTitle || editableTitle) && (
               <div className="mb-4">
-                <label className="text-white/60 text-xs mb-1 block">Title</label>
+                <SectionLabel className="mb-1">Title</SectionLabel>
                 <input
                   type="text"
                   value={editableTitle}
                   onChange={(e) => setEditableTitle(e.target.value)}
                   placeholder="Entry title..."
-                  className="w-full bg-white/10 text-white text-sm rounded-lg px-3 py-2 border border-white/10 focus:border-lavender-500 focus:outline-none"
+                  className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-faint focus:border-accent focus:outline-none"
                 />
               </div>
             )}
 
             {/* Mood analysis display */}
             {sessionAnalysis?.voiceTone && (
-              <div className="mb-4 p-3 bg-white/5 rounded-lg">
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-white/60 text-xs">Detected Mood</span>
+              <div className="mb-4 rounded-lg bg-divider p-3">
+                <div className="mb-2 flex items-center justify-between">
+                  <SectionLabel>Detected Mood</SectionLabel>
                   <div className="flex items-center gap-1">
-                    {sessionAnalysis.voiceTone.energy === 'high' && <Zap size={14} className="text-honey-400" />}
-                    {sessionAnalysis.voiceTone.energy === 'medium' && <Battery size={14} className="text-sage-400" />}
-                    {sessionAnalysis.voiceTone.energy === 'low' && <BatteryLow size={14} className="text-lavender-400" />}
-                    <span className="text-white/40 text-xs capitalize">{sessionAnalysis.voiceTone.energy} energy</span>
+                    {sessionAnalysis.voiceTone.energy === 'high' && <Zap size={14} className="text-accent-deep" aria-hidden="true" />}
+                    {sessionAnalysis.voiceTone.energy === 'medium' && <Battery size={14} className="text-accent-deep" aria-hidden="true" />}
+                    {sessionAnalysis.voiceTone.energy === 'low' && <BatteryLow size={14} className="text-accent-deep" aria-hidden="true" />}
+                    <span className="text-xs capitalize text-muted-foreground">{sessionAnalysis.voiceTone.energy} energy</span>
                   </div>
                 </div>
 
-                {/* Mood slider */}
-                <div className="flex items-center gap-3 mb-2">
-                  <Frown size={18} className="text-terra-400" />
+                {/* Mood slider. Cloud collapses the legacy terra/honey/sage
+                    tri-hue gradient to a single accent-scale ramp (same
+                    "ONE accent" precedent as InsightsPage/C5). */}
+                <div className="mb-2 flex items-center gap-3">
+                  <Frown size={18} className="text-faint" aria-hidden="true" />
                   <input
                     type="range"
                     min="0"
                     max="10"
                     value={editableMood ?? 5}
                     onChange={(e) => setEditableMood(parseInt(e.target.value))}
-                    className="flex-1 h-2 bg-gradient-to-r from-terra-500 via-honey-500 to-sage-500 rounded-full appearance-none cursor-pointer"
+                    aria-label="Mood score"
+                    className="h-2 flex-1 cursor-pointer appearance-none rounded-full bg-gradient-to-r from-accent-wash via-accent to-accent-deep"
                     style={{
                       WebkitAppearance: 'none',
                     }}
                   />
-                  <Smile size={18} className="text-sage-400" />
+                  <Smile size={18} className="text-accent-deep" aria-hidden="true" />
                 </div>
-                <div className="text-center text-white/80 text-sm font-medium">
+                <div className="text-center text-sm font-medium text-secondary-foreground">
                   {editableMood ?? 5}/10
                 </div>
 
                 {/* Emotions */}
                 {sessionAnalysis.voiceTone.emotions?.length > 0 && (
-                  <div className="flex flex-wrap gap-1 mt-2">
+                  <div className="mt-2 flex flex-wrap gap-1">
                     {sessionAnalysis.voiceTone.emotions.slice(0, 4).map((emotion, i) => (
                       <span
                         key={i}
-                        className="px-2 py-0.5 bg-white/10 text-white/70 text-xs rounded-full"
+                        className="rounded-full bg-divider px-2 py-0.5 text-xs text-secondary-foreground"
                       >
                         {emotion}
                       </span>
@@ -386,62 +427,73 @@ const RealtimeConversation = ({ entries, onClose, category, onSaveEntry }) => {
             {/* Suggested tags */}
             {sessionAnalysis?.suggestedTags?.length > 0 && (
               <div className="mb-4">
-                <label className="text-white/60 text-xs mb-1 block">Suggested Tags</label>
+                <SectionLabel className="mb-1">Suggested Tags</SectionLabel>
                 <div className="flex flex-wrap gap-1">
                   {sessionAnalysis.suggestedTags.map((tag, i) => (
-                    <span
-                      key={i}
-                      className="px-2 py-1 bg-lavender-500/20 text-lavender-300 text-xs rounded-full"
-                    >
-                      #{tag}
-                    </span>
+                    <Chip key={i}>#{tag}</Chip>
                   ))}
                 </div>
               </div>
             )}
 
             {guidedComplete && (
-              <div className="bg-white/5 rounded-lg p-3 mb-4 max-h-32 overflow-y-auto">
-                <p className="text-white/70 text-sm">{guidedComplete.summary}</p>
+              <div className="mb-4 max-h-32 overflow-y-auto rounded-lg bg-divider p-3">
+                <p className="text-sm text-secondary-foreground">{guidedComplete.summary}</p>
               </div>
             )}
             <div className="flex gap-3">
-              <button
+              <Button
+                variant="outline"
                 onClick={() => handleSaveDecision(false)}
-                className="flex-1 py-2 px-4 rounded-lg bg-hearth-700 text-white/80 hover:bg-hearth-600"
+                className="flex-1"
               >
                 Discard
-              </button>
-              <button
+              </Button>
+              <Button
                 onClick={() => handleSaveDecision(true)}
-                className="flex-1 py-2 px-4 rounded-lg bg-lavender-600 text-white hover:bg-lavender-500 flex items-center justify-center gap-2"
+                className="flex-1 gap-2"
               >
-                <Save size={16} />
+                <Save size={16} aria-hidden="true" />
                 Save
-              </button>
+              </Button>
             </div>
           </div>
         </div>
       )}
 
-      {/* Main controls */}
+      {/* Main controls. Spec §7 calls for "mute, End session (dark pill),
+          switch-to-text" — this hold-to-talk component only has the two
+          controls it's always had (End call / push-to-talk Mic), so the End
+          call button is restyled onto the spec's literal "dark pill" (the
+          standard Button `primary` CTA — ink in light mode, accent-btn in
+          dark, per §3) with an "End session" label added. There is no
+          separate mute toggle or text-mode affordance backed by state in
+          this component (push-to-talk already owns the Mic/MicOff
+          iconography, and RealtimeConversation has no text-chat mode to
+          switch to) — see task report for this flagged as a concern rather
+          than invented. The two controls are laid out with a 24px flex gap
+          at 52-96px each, well clear of the 44px minimum and not
+          overlapping. */}
       {!showPicker && (
-        <div className="p-6 pb-[max(2rem,env(safe-area-inset-bottom))] flex flex-col items-center">
+        <div className="relative z-10 flex flex-col items-center p-6 pb-[max(2rem,env(safe-area-inset-bottom))]">
           {status === 'connecting' ? (
             // Connecting indicator
-            <div className="w-24 h-24 rounded-full bg-gradient-to-br from-honey-500 to-terra-500 shadow-lg flex items-center justify-center animate-pulse">
-              <div className="w-8 h-8 border-4 border-white/30 border-t-white rounded-full animate-spin" />
+            <div className="flex h-24 w-24 animate-pulse items-center justify-center rounded-full bg-accent-wash shadow-soft">
+              <div className="h-8 w-8 animate-spin rounded-full border-4 border-border border-t-accent-deep" />
             </div>
           ) : status !== 'disconnected' ? (
             // Recording controls
             <div className="flex items-center gap-6">
-              {/* End call button */}
-              <button
+              {/* End session pill */}
+              <Button
                 onClick={handleEndConversation}
-                className="w-16 h-16 rounded-full bg-red-500 shadow-lg shadow-red-500/30 flex items-center justify-center hover:scale-105 transition-transform"
+                aria-label="End voice session"
+                size="lg"
+                className="gap-2 shadow-soft-lg"
               >
-                <Phone size={24} className="text-white rotate-[135deg]" />
-              </button>
+                <Phone size={20} className="rotate-[135deg]" aria-hidden="true" />
+                End session
+              </Button>
 
               {/* Push-to-talk button */}
               <button
@@ -461,26 +513,29 @@ const RealtimeConversation = ({ entries, onClose, category, onSaveEntry }) => {
                 }}
                 onContextMenu={(e) => e.preventDefault()}
                 disabled={status === 'speaking'}
+                aria-label={isRecording ? 'Release to send' : 'Hold to speak'}
                 style={{ touchAction: 'none', userSelect: 'none', WebkitUserSelect: 'none' }}
-                className={`w-24 h-24 rounded-full shadow-lg flex items-center justify-center transition-all select-none ${
+                className={`flex h-24 w-24 select-none items-center justify-center rounded-full shadow-soft-lg transition-all ${
                   isRecording
-                    ? 'bg-sage-500 shadow-sage-500/30 scale-110'
+                    ? 'scale-110 bg-accent-deep'
                     : status === 'speaking'
-                    ? 'bg-hearth-500 opacity-50 cursor-not-allowed'
-                    : 'bg-gradient-to-br from-lavender-500 to-lavender-700 shadow-lavender-500/30 hover:scale-105'
+                    ? 'cursor-not-allowed bg-divider opacity-60'
+                    : 'bg-accent-deep hover:scale-105'
                 }`}
               >
                 {isRecording ? (
-                  <MicOff size={36} className="text-white animate-pulse" />
+                  <MicOff size={36} className="animate-pulse text-background" aria-hidden="true" />
+                ) : status === 'speaking' ? (
+                  <Mic size={36} className="text-faint" aria-hidden="true" />
                 ) : (
-                  <Mic size={36} className="text-white" />
+                  <Mic size={36} className="text-background" aria-hidden="true" />
                 )}
               </button>
             </div>
           ) : null}
 
           {!showPicker && (
-            <p className="text-white/60 text-sm mt-4">
+            <p className="mt-4 text-sm text-muted-foreground">
               {status === 'connecting'
                 ? 'Connecting to voice service...'
                 : status === 'speaking'

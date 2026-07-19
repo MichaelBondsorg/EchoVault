@@ -204,6 +204,26 @@ export const MIGRATED = [
   // same "override locally, don't touch cross-app infra" precedent as
   // EntryCard's colorMap.js badges (C4). Budget drops 65 -> 64.
   'src/components/chat/UnifiedConversation.jsx',
+  // D2 (2026-07-18): RealtimeConversation.jsx — the dedicated "Voice
+  // session" screen (spec §7): listening Pebble (state swaps calm<->
+  // listening off the existing `status` value, no new state), LISTENING
+  // caps label (shown only while status === 'listening', so it doesn't
+  // duplicate the header's existing status text), 12-bar Equalizer, and a
+  // plain-text transcript (user = --faint Geist, companion = font-display
+  // serif quote) replacing the old chat-bubble treatment. LinenWaveBackground
+  // is nested inside this modal's own `fixed z-50` stacking context to
+  // reproduce the mockup's grain+wave canvas locally (Pebble/Equalizer/
+  // LinenWaveBackground all handle prefers-reduced-motion and the
+  // Background-motion pref internally — no guards duplicated here). The
+  // End-call button is reskinned onto the standard Button `primary` pill
+  // with an "End session" label (spec's literal "dark pill"); the mockup's
+  // separate mute icon and switch-to-text icon have no backing state in
+  // this hold-to-talk-only component (no mute toggle, no text mode) and are
+  // not invented — see task-D2-report.md. Save-prompt modal (title input,
+  // mood slider, tags, guided summary) fully cleaned onto Cloud tokens too,
+  // including the same terra/honey/sage -> single-accent-ramp collapse used
+  // by InsightsPage (C5). Budget drops 64 -> 63.
+  'src/components/chat/RealtimeConversation.jsx',
 ];
 
 // --- Ratchet: how many non-migrated .jsx files still use legacy palette classes ---
@@ -237,7 +257,11 @@ export const MIGRATED = [
 // (lavender/honey/sage/terra/gray classes across its picker/chat/voice/
 // guided/mindfulness modes); fully cleaned and moved to MIGRATED. Budget
 // drops 65 -> 64.
-export const LEGACY_BUDGET = 64;
+// D2 (2026-07-18): RealtimeConversation.jsx was 1 of the 64 offenders
+// (hearth/honey/sage/lavender/terra classes throughout its status colors,
+// full-screen gradient, transcript bubbles, save-prompt modal, and
+// controls); fully cleaned and moved to MIGRATED. Budget drops 64 -> 63.
+export const LEGACY_BUDGET = 63;
 
 function collectJsxFiles(dir) {
   const out = [];
