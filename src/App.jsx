@@ -52,7 +52,7 @@ import { deleteNativeDraft, recoverNativeDrafts } from './services/capture/nativ
 import { inferCategory } from './services/prompts';
 import { getActiveReflectionPrompts, dismissReflectionPrompt } from './services/prompts/activePrompts';
 import { detectTemporalContext, needsConfirmation, formatEffectiveDate } from './services/temporal';
-import { handleEntryDateChange, calculateStreak } from './services/dashboard';
+import { handleEntryDateChange, calculateStreak, shouldCelebrateNewStreak } from './services/dashboard';
 import { processEntrySignals } from './services/signals/processEntrySignals';
 import { updateSignalStatus, batchUpdateSignalStatus } from './services/signals';
 import { runEntryPostProcessing } from './services/background';
@@ -1210,14 +1210,25 @@ export default function App() {
       // populates it hasn't fired), so diff a "before" streak (current
       // `entries`) against an "after" streak (`entries` + the just-built
       // entryData) using the shared calculateStreak() helper — the same one
-      // MiniStatsWidget's streak cell is meant to read from, per the plan.
-      // Full-screen only on a new personal best (current streak overtakes
-      // the prior longest), and only past a 1-day streak so saving your
-      // very first entry ever (0 -> 1) doesn't trigger a "personal best".
+      // MiniStatsWidget's streak cell reads from, per the plan.
+      //
+      // shouldCelebrateNewStreak() (services/dashboard/index.js) owns the
+      // "is this actually a new personal best, and is it safe to celebrate"
+      // decision — pulled out to a pure function so the safety-adjacency
+      // gate (2026-07-18 reviewer fix, CRITICAL C1 / IMPORTANT I1) has real
+      // unit-test coverage without mounting this untested save flow. It
+      // gates off entirely when `safetyFlagged` (this save came through the
+      // crisis flow) or `hasWarning` (checkWarningIndicators(finalTex),
+      // computed synchronously above — the best *available-at-save-time*
+      // proxy for "heavy entry," NOT the same signal as the
+      // DecompressionScreen trigger a few lines down, which is mood-score-
+      // based and only resolves later in the async analysis pipeline; see
+      // that function's doc comment and task-D4b-report.md for the full
+      // caveat on this residual, narrower gap).
       try {
         const prevStreak = calculateStreak(entries);
         const nextStreak = calculateStreak([...entries, entryData]);
-        if (nextStreak.currentStreak > 1 && nextStreak.currentStreak > prevStreak.longestStreak) {
+        if (shouldCelebrateNewStreak(prevStreak, nextStreak, { safetyFlagged, hasWarning })) {
           openStreakCelebration({
             currentStreak: nextStreak.currentStreak,
             previousBest: prevStreak.longestStreak

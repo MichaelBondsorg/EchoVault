@@ -1,13 +1,25 @@
 import { useMemo } from 'react';
 import { Card, RisingTide } from '../../cloud';
+import { calculateStreak } from '../../../services/dashboard';
 
 /**
  * MiniStatsWidget - 3 stat cells for the Home screen (CLOUD-DESIGN-SPEC.md
  * §7 Home: "3 stat cells (Avg mood / Streak / Rising tide)", §6.2 for the
- * Rising tide widget). Restyle only — the underlying 7-day mood/streak
+ * Rising tide widget). Restyle only — the underlying 7-day mood
  * aggregation below is unchanged from the pre-Cloud widget; the only
  * addition is exposing the already-computed first/second-half averages as
  * a momentum percentage for the Rising tide cell.
+ *
+ * D4b follow-up: the Streak cell used to run its own inline day-by-day walk
+ * capped at 30 days, which disagreed with StreakCelebration's uncapped
+ * `calculateStreak()` (services/dashboard/index.js) at streak >= 31 (Home
+ * would show 30 while the celebration showed the real, larger number). Both
+ * used equivalent local-calendar-day boundary logic (`toDateString()` here
+ * vs. `calculateStreak`'s `getDateString()`/`formatDateForInput`, both
+ * local getFullYear/Month/Date — no timezone/UTC discrepancy), so the cap
+ * was the only semantic difference. Swapped to the same single-source-of-
+ * truth `calculateStreak()` StreakCelebration already uses; the cell's
+ * displayed shape/format is unchanged.
  */
 const MiniStatsWidget = ({
   entries = [],
@@ -45,28 +57,11 @@ const MiniStatsWidget = ({
       momentumPercent = Math.round((secondAvg - firstAvg) * 100);
     }
 
-    // Calculate streak (consecutive days with entries)
-    let streak = 0;
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-
-    for (let i = 0; i < 30; i++) {
-      const checkDate = new Date(today);
-      checkDate.setDate(checkDate.getDate() - i);
-      const dateStr = checkDate.toDateString();
-
-      const hasEntry = entries.some(e => {
-        const date = e.effectiveDate || e.createdAt;
-        const entryDate = date?.toDate?.() || new Date(date);
-        return entryDate.toDateString() === dateStr;
-      });
-
-      if (hasEntry) {
-        streak++;
-      } else if (i > 0) {
-        break;
-      }
-    }
+    // Calculate streak (consecutive days with entries) — single source of
+    // truth via calculateStreak() (services/dashboard/index.js), the same
+    // helper StreakCelebration (D4b) reads from, so this cell and the
+    // celebration never disagree.
+    const streak = calculateStreak(entries).currentStreak;
 
     return {
       avgMood,

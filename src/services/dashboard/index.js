@@ -490,3 +490,34 @@ export const calculateStreak = (entries) => {
     lastEntryDate: mostRecentDate
   };
 };
+
+/**
+ * Decide whether a just-saved entry should trigger the full-screen
+ * StreakCelebration (D4b, CLOUD-DESIGN-SPEC.md §7). Pulled out as a pure,
+ * unit-testable function (2026-07-18 reviewer fix, CRITICAL C1 / IMPORTANT
+ * I1) so the safety-adjacency gate has real regression coverage without
+ * mounting App.jsx's untested save flow.
+ *
+ * A new personal best never celebrates on an entry the app itself flagged
+ * as heavy:
+ *  - `safetyFlagged` — true whenever this save came through the crisis
+ *    flow (persistPendingEntry/handleCrisisResponse in App.jsx). Without
+ *    this gate, a record-day crisis save could mount the celebration
+ *    under/over CrisisResourcesScreen (both fixed z-50).
+ *  - `hasWarning` — the synchronous, keyword-based heaviness proxy
+ *    (checkWarningIndicators) available at save time. It is NOT the same
+ *    signal as the DecompressionScreen trigger (mood-score-based,
+ *    resolved later in App.jsx's async analysis pipeline) — see the call
+ *    site in App.jsx for the full caveat.
+ *
+ * @param {{currentStreak:number, longestStreak:number}} prevStreak - calculateStreak() over entries BEFORE the new save
+ * @param {{currentStreak:number, longestStreak:number}} nextStreak - calculateStreak() over entries AFTER the new save (entries + the just-built entry)
+ * @param {{safetyFlagged?:boolean, hasWarning?:boolean}} [flags]
+ * @returns {boolean}
+ */
+export const shouldCelebrateNewStreak = (prevStreak, nextStreak, flags = {}) => {
+  const { safetyFlagged = false, hasWarning = false } = flags;
+  if (safetyFlagged || hasWarning) return false;
+  if (!prevStreak || !nextStreak) return false;
+  return nextStreak.currentStreak > 1 && nextStreak.currentStreak > prevStreak.longestStreak;
+};
