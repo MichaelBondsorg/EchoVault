@@ -246,6 +246,38 @@ export const MIGRATED = [
   'src/components/screens/CrisisResourcesScreen.jsx',
   'src/components/screens/SafetyPlanScreen.jsx',
   'src/components/modals/CrisisSoftBlockModal.jsx',
+  // D4a (2026-07-18): first half of task D4, split for size (D4b covers
+  // wellness screens + StreakCelebration separately). Also fixed the
+  // cloud kit's Dialog/Drawer overlay: both had regressed onto a hardcoded
+  // `bg-black/40` (commit 3565183's workaround for Tailwind 3.4's inability
+  // to compute alpha for CSS-var-backed colors, e.g. the original
+  // `bg-foreground/40`) instead of the theme-aware `bg-[var(--overlay)]`
+  // token C6/D3 already established — swept the whole src/components/cloud/
+  // kit for other `/NN`-on-CSS-var offenders and found none beyond those
+  // two. QuickLogModal.jsx moved onto the cloud `Dialog` (first Dialog
+  // consumer — DialogDescription + aria-labelledby wired); its mood slider
+  // + vibe-tag interaction is kept as-is (mockup 7l's discrete 5-circle
+  // picker has no backing state here) with the mood-color scale aligned to
+  // EntryCard's accent-1..4 convention. DaySummaryModal.jsx and
+  // EntryInsightsPopup.jsx both moved onto the cloud `Drawer`; neither
+  // called colorMap.js (that caveat applies to the *other*,
+  // out-of-scope `src/components/modals/DailySummaryModal.jsx`, App.jsx's
+  // separate legacy day-summary flow — see task-D4a-report.md), so no
+  // local override was needed. EntryInsightsPopup's per-insight-type
+  // gradient styling collapsed onto the single accent-wash/accent-deep
+  // scale (InsightsPage/C5 precedent), keeping `warning` as semantic red;
+  // mockup 7n's quoted-entry/tag-pill/tomorrow's-reflection elements have
+  // no backing props on this component and were not invented. SanctuaryWalk
+  // through.jsx (3-step post-update tour, not the mockup 7o pre-auth
+  // welcome screen — no auth state or bullet copy props exist here) had its
+  // first screen's visual swapped for `<Pebble state="calm" />` (§6.3: calm
+  // is used in "home, welcome") and all three steps' chrome restyled onto
+  // Cloud tokens; step flow (Back/Skip/Next/onComplete) is untouched. All
+  // four files were 4 of the 60 offenders; budget drops 60 -> 56.
+  'src/components/zen/QuickLogModal.jsx',
+  'src/components/zen/DaySummaryModal.jsx',
+  'src/components/modals/EntryInsightsPopup.jsx',
+  'src/components/zen/SanctuaryWalkthrough.jsx',
 ];
 
 // --- Ratchet: how many non-migrated .jsx files still use legacy palette classes ---
@@ -287,7 +319,12 @@ export const MIGRATED = [
 // CrisisSoftBlockModal.jsx were 3 of the 63 offenders (honey/warm/red-*
 // classes on the crisis path); all fully cleaned and moved to MIGRATED.
 // Budget drops 63 -> 60.
-export const LEGACY_BUDGET = 60;
+// D4a (2026-07-18): QuickLogModal.jsx, DaySummaryModal.jsx,
+// EntryInsightsPopup.jsx, SanctuaryWalkthrough.jsx were 4 of the 60
+// offenders (honey/warm/lavender/sage/terra classes across the quick-mood,
+// day-summary, entry-insights, and welcome-tour surfaces); all fully
+// cleaned and moved to MIGRATED. Budget drops 60 -> 56.
+export const LEGACY_BUDGET = 56;
 
 function collectJsxFiles(dir) {
   const out = [];

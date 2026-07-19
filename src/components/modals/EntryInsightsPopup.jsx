@@ -1,18 +1,25 @@
-import React from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
 import {
   X, Heart, TrendingUp, Sparkles, AlertTriangle,
   RefreshCw, Target, Calendar, Brain, Wind, Footprints
 } from 'lucide-react';
 import { safeString, formatMentions } from '../../utils/string';
+import { Drawer, DrawerContent, DrawerDescription } from '../cloud';
 
 /**
- * EntryInsightsPopup - Shows validation and insights after entry submission
+ * EntryInsightsPopup (CLOUD-DESIGN-SPEC.md §5/§7 "Entry insights" — mockup
+ * 7n): cloud `Drawer` bottom sheet. Shows validation and insights after
+ * entry submission.
  *
  * PRIORITY ORDER:
  * 1. Validation first (empathetic acknowledgment)
  * 2. Therapeutic tools (perspective, defusion) - only if helpful
  * 3. Pattern insights last (only meaningful ones, skip generic encouragement)
+ *
+ * The mockup's quoted entry excerpt, mood/tag pill row, and "TOMORROW'S
+ * REFLECTION" prompt card have no backing prop on this component
+ * (contextualInsight/analysis/entryType only — no raw entry text, no tags,
+ * no next-day prompt is ever passed in) and are deliberately NOT invented,
+ * per the same "flag, don't invent" precedent as D2/D3 — see task-D4a-report.md.
  */
 const EntryInsightsPopup = ({
   isOpen,
@@ -21,8 +28,6 @@ const EntryInsightsPopup = ({
   analysis,
   entryType = 'reflection'
 }) => {
-  if (!isOpen) return null;
-
   const insight = contextualInsight;
   const cbt = analysis?.cbt_breakdown;
   const actAnalysis = analysis?.act_analysis;
@@ -67,8 +72,6 @@ const EntryInsightsPopup = ({
   const hasContent = hasValidation || hasCelebration || hasTherapeutic || hasVentCooldown ||
                      showPatternInsight || showEncouragementAsFallback;
 
-  if (!hasContent) return null;
-
   // Dynamic header based on content type
   const getHeaderTitle = () => {
     if (hasValidation || hasCelebration) return 'Heard';
@@ -79,272 +82,195 @@ const EntryInsightsPopup = ({
     return 'Reflection';
   };
 
-  // Icon and color based on insight type (for pattern insights only)
+  // Icon + color per insight type (pattern insights only). Cloud tokens
+  // only: every type collapses onto the single accent scale (bg-accent-wash
+  // / text-accent-deep, differentiated by icon + label), matching the
+  // InsightsPage (C5) precedent — except `warning`, which keeps semantic
+  // red (@color-safe, same as EntryCard/InsightsPage/DaySummaryModal).
   const getInsightStyle = (type) => {
+    const accentStyle = {
+      bg: 'bg-accent-wash',
+      border: 'border-border',
+      iconColor: 'text-accent-deep',
+      textColor: 'text-accent-deep',
+    };
     const styles = {
-      progress: {
-        icon: TrendingUp,
-        bg: 'bg-gradient-to-br from-sage-50 to-sage-100 dark:from-sage-900/30 dark:to-sage-900/20',
-        border: 'border-sage-200 dark:border-sage-800',
-        iconColor: 'text-sage-600 dark:text-sage-400',
-        textColor: 'text-sage-800 dark:text-sage-200'
-      },
-      streak: {
-        icon: RefreshCw,
-        bg: 'bg-gradient-to-br from-honey-50 to-honey-100 dark:from-honey-900/30 dark:to-honey-900/20',
-        border: 'border-honey-200 dark:border-honey-800',
-        iconColor: 'text-honey-600 dark:text-honey-400',
-        textColor: 'text-honey-800 dark:text-honey-200'
-      },
-      absence: {
-        icon: Target,
-        bg: 'bg-gradient-to-br from-lavender-50 to-lavender-100 dark:from-lavender-900/30 dark:to-lavender-900/20',
-        border: 'border-lavender-200 dark:border-lavender-800',
-        iconColor: 'text-lavender-600 dark:text-lavender-400',
-        textColor: 'text-lavender-800 dark:text-lavender-200'
-      },
+      progress: { icon: TrendingUp, ...accentStyle },
+      streak: { icon: RefreshCw, ...accentStyle },
+      absence: { icon: Target, ...accentStyle },
+      cyclical: { icon: Calendar, ...accentStyle },
       warning: {
         icon: AlertTriangle,
-        bg: 'bg-gradient-to-br from-red-50 to-terra-50 dark:from-red-900/30 dark:to-terra-900/20',
+        bg: 'bg-red-50 dark:bg-red-900/20',
         border: 'border-red-200 dark:border-red-800',
         iconColor: 'text-red-600 dark:text-red-400',
-        textColor: 'text-red-800 dark:text-red-200'
+        textColor: 'text-red-700 dark:text-red-300',
       },
-      cyclical: {
-        icon: Calendar,
-        bg: 'bg-gradient-to-br from-lavender-100 to-lavender-200 dark:from-lavender-900/40 dark:to-lavender-900/30',
-        border: 'border-lavender-300 dark:border-lavender-700',
-        iconColor: 'text-lavender-700 dark:text-lavender-300',
-        textColor: 'text-lavender-900 dark:text-lavender-100'
-      },
-      default: {
-        icon: Brain,
-        bg: 'bg-gradient-to-br from-warm-50 to-warm-100',
-        border: 'border-warm-200',
-        iconColor: 'text-warm-600',
-        textColor: 'text-warm-700'
-      }
+      default: { icon: Brain, ...accentStyle },
     };
     return styles[type] || styles.default;
   };
 
   return (
-    <AnimatePresence>
-      <motion.div
-        className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4"
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        exit={{ opacity: 0 }}
-      >
-        {/* Subtle backdrop */}
-        <motion.div
-          className="absolute inset-0 bg-black/30 backdrop-blur-sm"
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          onClick={onClose}
-        />
+    <Drawer open={isOpen && hasContent} onOpenChange={(open) => { if (!open) onClose(); }}>
+      <DrawerContent aria-labelledby="entry-insights-title" className="sm:mx-auto sm:max-w-xl">
+        <DrawerDescription className="sr-only">
+          Insights and reflections about the journal entry you just saved.
+        </DrawerDescription>
 
-        {/* Content card */}
-        <motion.div
-          className="relative bg-white dark:bg-hearth-900 rounded-3xl shadow-soft-xl w-full max-w-sm overflow-hidden max-h-[75vh] flex flex-col"
-          initial={{ opacity: 0, y: 50, scale: 0.95 }}
-          animate={{ opacity: 1, y: 0, scale: 1 }}
-          exit={{ opacity: 0, y: 50, scale: 0.95 }}
-          transition={{ type: 'spring', damping: 25, stiffness: 300 }}
-        >
-          {/* Header */}
-          <div className="flex items-center justify-between p-4 pb-0">
-            <div className="flex items-center gap-2 text-warm-600">
-              <Heart size={18} className="text-honey-500" />
-              <span className="font-display font-semibold text-sm">{getHeaderTitle()}</span>
+        {/* Header */}
+        <div className="mb-3 flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2 text-secondary-foreground">
+            <Heart size={18} className="text-accent-deep" aria-hidden="true" />
+            <span id="entry-insights-title" className="cloud-title text-sm font-semibold text-foreground">
+              {getHeaderTitle()}
+            </span>
+          </div>
+          <button
+            type="button"
+            className="cloud-icon-button"
+            aria-label="Close insights"
+            onClick={onClose}
+          >
+            <X size={18} aria-hidden="true" />
+          </button>
+        </div>
+
+        {/* Main content - PRIORITY ORDER (scrollable) */}
+        <div className="max-h-[60vh] space-y-4 overflow-y-auto">
+
+          {/* 1. VALIDATION FIRST - Empathetic acknowledgment */}
+          {validation && (
+            <div className="rounded-2xl border border-border bg-accent-wash p-4">
+              <p className="font-body text-sm italic leading-relaxed text-secondary-foreground">
+                {validation}
+              </p>
             </div>
-            <motion.button
-              onClick={onClose}
-              className="p-2 rounded-xl text-warm-400 hover:text-warm-600 hover:bg-warm-100 transition-colors"
-              whileHover={{ scale: 1.1 }}
-              whileTap={{ scale: 0.9 }}
-            >
-              <X size={18} />
-            </motion.button>
-          </div>
+          )}
 
-          {/* Main content - PRIORITY ORDER (scrollable) */}
-          <div className="p-4 pt-3 space-y-4 overflow-y-auto flex-1">
+          {/* 2. CELEBRATION - For positive entries */}
+          {hasCelebration && (
+            <div className="rounded-2xl border border-border bg-accent-wash p-4">
+              <div className="mb-2 flex items-center gap-2 font-display text-xs font-semibold uppercase text-accent-deep">
+                <Sparkles size={14} aria-hidden="true" /> Nice!
+              </div>
+              <p className="font-body text-sm text-accent-deep">{celebration.affirmation}</p>
+              {celebration.amplify && (
+                <p className="mt-2 font-body text-xs italic text-secondary-foreground">{celebration.amplify}</p>
+              )}
+            </div>
+          )}
 
-            {/* 1. VALIDATION FIRST - Empathetic acknowledgment */}
-            {validation && (
-              <motion.div
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                className="bg-gradient-to-br from-honey-50 to-warm-50 p-4 rounded-2xl border border-honey-100"
-              >
-                <p className="text-sm text-warm-700 font-body leading-relaxed italic">
-                  {validation}
-                </p>
-              </motion.div>
-            )}
+          {/* 3. THERAPEUTIC TOOLS - Only if mood warrants it */}
 
-            {/* 2. CELEBRATION - For positive entries */}
-            {hasCelebration && (
-              <motion.div
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: validation ? 0.1 : 0 }}
-                className="bg-gradient-to-r from-sage-50 to-sage-100 dark:from-sage-900/30 dark:to-sage-900/20 p-4 rounded-2xl border border-sage-100 dark:border-sage-800"
-              >
-                <div className="flex items-center gap-2 text-sage-700 dark:text-sage-300 font-display font-semibold text-xs uppercase mb-2">
-                  <Sparkles size={14} /> Nice!
+          {/* CBT Perspective - cognitive reframe */}
+          {framework === 'cbt' && cbt?.perspective && (
+            <div className="rounded-2xl border-l-4 border-accent bg-accent-wash p-4">
+              <div className="mb-2 flex items-center gap-2 font-display text-xs font-semibold uppercase text-accent-deep">
+                <Brain size={14} aria-hidden="true" /> Another way to see it
+              </div>
+              <p className="font-body text-sm text-secondary-foreground">{cbt.perspective}</p>
+            </div>
+          )}
+
+          {/* ACT Defusion - unhooking from thoughts */}
+          {framework === 'act' && actAnalysis?.defusion_phrase && (
+            <div className="rounded-2xl border border-border bg-accent-wash p-4">
+              {actAnalysis.fusion_thought && (
+                <div className="mb-3 text-sm text-accent-deep">
+                  <span className="opacity-75">The thought: </span>
+                  <span className="italic">"{actAnalysis.fusion_thought}"</span>
                 </div>
-                <p className="text-sm text-sage-800 dark:text-sage-200 font-body">{celebration.affirmation}</p>
-                {celebration.amplify && (
-                  <p className="text-xs text-sage-600 dark:text-sage-400 mt-2 italic">{celebration.amplify}</p>
-                )}
-              </motion.div>
-            )}
+              )}
 
-            {/* 3. THERAPEUTIC TOOLS - Only if mood warrants it */}
+              <div className="rounded-lg bg-card p-3 text-sm font-medium text-accent-deep">
+                <span className="mb-1 block text-xs font-semibold uppercase text-muted-foreground">Try saying:</span>
+                "{actAnalysis.defusion_phrase}"
+              </div>
+            </div>
+          )}
 
-            {/* CBT Perspective - cognitive reframe */}
-            {framework === 'cbt' && cbt?.perspective && (
-              <motion.div
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.15 }}
-                className="bg-gradient-to-r from-lavender-50 to-lavender-100 dark:from-lavender-900/30 dark:to-lavender-900/20 p-4 rounded-2xl border-l-4 border-lavender-400 dark:border-lavender-600"
-              >
-                <div className="flex items-center gap-2 text-lavender-600 dark:text-lavender-400 font-display font-semibold text-xs uppercase mb-2">
-                  <Brain size={14} /> Another way to see it
-                </div>
-                <p className="text-sm text-warm-700 font-body">{cbt.perspective}</p>
-              </motion.div>
-            )}
+          {/* Behavioral activation - only for low mood */}
+          {framework === 'cbt' && cbt?.behavioral_activation && (
+            <div className="rounded-2xl border border-border bg-accent-wash p-4">
+              <div className="mb-2 flex items-center gap-2 font-display text-xs font-semibold uppercase text-accent-deep">
+                <Footprints size={14} aria-hidden="true" /> Something small you could try
+              </div>
+              <p className="font-body text-sm font-medium text-accent-deep">{cbt.behavioral_activation.activity}</p>
+              {cbt.behavioral_activation.rationale && (
+                <p className="mt-1 text-xs text-secondary-foreground">{cbt.behavioral_activation.rationale}</p>
+              )}
+            </div>
+          )}
 
-            {/* ACT Defusion - unhooking from thoughts */}
-            {framework === 'act' && actAnalysis?.defusion_phrase && (
-              <motion.div
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.15 }}
-                className="bg-sage-50 dark:bg-sage-900/30 rounded-2xl p-4 border border-sage-100 dark:border-sage-800"
-              >
-                {actAnalysis.fusion_thought && (
-                  <div className="text-sage-900 dark:text-sage-100 text-sm mb-3">
-                    <span className="opacity-75">The thought: </span>
-                    <span className="italic">"{actAnalysis.fusion_thought}"</span>
-                  </div>
-                )}
+          {/* ACT Committed Action */}
+          {framework === 'act' && actAnalysis?.committed_action && (
+            <div className="rounded-xl border border-border bg-accent-wash p-3">
+              <div className="mb-2 flex items-center gap-2 font-display text-xs font-semibold uppercase text-accent-deep">
+                <Footprints size={14} aria-hidden="true" /> A values-aligned step
+              </div>
+              <p className="font-body text-sm font-medium text-accent-deep">{actAnalysis.committed_action}</p>
+            </div>
+          )}
 
-                <div className="text-sage-800 dark:text-sage-200 font-medium text-sm bg-white/50 dark:bg-hearth-850/50 p-3 rounded-lg">
-                  <span className="text-sage-600 dark:text-sage-400 text-xs uppercase font-semibold block mb-1">Try saying:</span>
-                  "{actAnalysis.defusion_phrase}"
-                </div>
-              </motion.div>
-            )}
+          {/* Vent cooldown technique */}
+          {framework === 'support' && ventSupport?.cooldown && (
+            <div className="rounded-2xl border border-border bg-accent-wash p-4">
+              <div className="mb-2 flex items-center gap-2 font-display text-xs font-semibold uppercase text-accent-deep">
+                <Wind size={14} aria-hidden="true" /> {ventSupport.cooldown.technique || 'Grounding'}
+              </div>
+              <p className="font-body text-sm text-accent-deep">{ventSupport.cooldown.instruction}</p>
+            </div>
+          )}
 
-            {/* Behavioral activation - only for low mood */}
-            {framework === 'cbt' && cbt?.behavioral_activation && (
-              <motion.div
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.2 }}
-                className="bg-lavender-50 p-4 rounded-2xl border border-lavender-100"
-              >
-                <div className="flex items-center gap-2 text-lavender-700 font-display font-semibold text-xs uppercase mb-2">
-                  <Footprints size={14} /> Something small you could try
-                </div>
-                <p className="text-sm text-lavender-800 font-medium font-body">{cbt.behavioral_activation.activity}</p>
-                {cbt.behavioral_activation.rationale && (
-                  <p className="text-xs text-lavender-600 mt-1">{cbt.behavioral_activation.rationale}</p>
-                )}
-              </motion.div>
-            )}
-
-            {/* ACT Committed Action */}
-            {framework === 'act' && actAnalysis?.committed_action && (
-              <motion.div
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.2 }}
-                className="bg-honey-50 dark:bg-honey-900/30 p-3 rounded-xl border border-honey-100 dark:border-honey-800"
-              >
-                <div className="flex items-center gap-2 text-honey-700 dark:text-honey-300 font-display font-semibold text-xs uppercase mb-2">
-                  <Footprints size={14} /> A values-aligned step
-                </div>
-                <p className="text-sm text-honey-800 dark:text-honey-200 font-medium font-body">{actAnalysis.committed_action}</p>
-              </motion.div>
-            )}
-
-            {/* Vent cooldown technique */}
-            {framework === 'support' && ventSupport?.cooldown && (
-              <motion.div
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.15 }}
-                className="bg-honey-50 p-4 rounded-2xl border border-honey-100"
-              >
-                <div className="flex items-center gap-2 text-honey-700 font-display font-semibold text-xs uppercase mb-2">
-                  <Wind size={14} /> {ventSupport.cooldown.technique || 'Grounding'}
-                </div>
-                <p className="text-sm text-honey-800 font-body">{ventSupport.cooldown.instruction}</p>
-              </motion.div>
-            )}
-
-            {/* 4. PATTERN INSIGHT - Only if genuinely useful */}
-            {showPatternInsight && (() => {
-              const style = getInsightStyle(insight.type);
-              const InsightIcon = style.icon;
-              return (
-                <motion.div
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: 0.25 }}
-                  className={`p-4 rounded-2xl border ${style.bg} ${style.border}`}
-                >
-                  <div className="flex gap-3">
-                    <InsightIcon size={18} className={`shrink-0 mt-0.5 ${style.iconColor}`} />
-                    <div className="flex-1">
-                      <div className={`text-[10px] font-display font-bold uppercase tracking-wider mb-1 ${style.iconColor}`}>
-                        {safeString(insight.type).replace('_', ' ')}
-                      </div>
-                      <p className={`text-sm font-body leading-relaxed ${style.textColor}`}>
-                        {formatMentions(safeString(insight.message))}
-                      </p>
+          {/* 4. PATTERN INSIGHT - Only if genuinely useful */}
+          {showPatternInsight && (() => {
+            const style = getInsightStyle(insight.type);
+            const InsightIcon = style.icon;
+            return (
+              <div className={`rounded-2xl border p-4 ${style.bg} ${style.border}`}>
+                <div className="flex gap-3">
+                  <InsightIcon size={18} className={`mt-0.5 shrink-0 ${style.iconColor}`} aria-hidden="true" />
+                  <div className="flex-1">
+                    <div className={`mb-1 font-display text-[10px] font-bold uppercase tracking-wider ${style.iconColor}`}>
+                      {safeString(insight.type).replace('_', ' ')}
                     </div>
+                    <p className={`font-body text-sm leading-relaxed ${style.textColor}`}>
+                      {formatMentions(safeString(insight.message))}
+                    </p>
                   </div>
-                </motion.div>
-              );
-            })()}
+                </div>
+              </div>
+            );
+          })()}
 
-            {/* 5. FALLBACK - Encouragement when nothing else is available */}
-            {/* Styled more subtly since it's not primary content */}
-            {showEncouragementAsFallback && (
-              <motion.div
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                className="bg-warm-50 p-4 rounded-2xl border border-warm-100"
-              >
-                <p className="text-sm text-warm-600 font-body leading-relaxed">
-                  {formatMentions(safeString(insight.message))}
-                </p>
-              </motion.div>
-            )}
-          </div>
+          {/* 5. FALLBACK - Encouragement when nothing else is available */}
+          {/* Styled more subtly since it's not primary content */}
+          {showEncouragementAsFallback && (
+            <div className="rounded-2xl border border-border bg-card p-4">
+              <p className="font-body text-sm leading-relaxed text-secondary-foreground">
+                {formatMentions(safeString(insight.message))}
+              </p>
+            </div>
+          )}
+        </div>
 
-          {/* Dismiss button (fixed at bottom) */}
-          <div className="p-4 pt-2 flex-shrink-0">
-            <motion.button
-              onClick={onClose}
-              className="w-full py-3 rounded-2xl bg-warm-100 text-warm-600 font-semibold text-sm hover:bg-warm-200 transition-colors"
-              whileHover={{ scale: 1.01 }}
-              whileTap={{ scale: 0.99 }}
-            >
-              Got it
-            </motion.button>
-          </div>
-        </motion.div>
-      </motion.div>
-    </AnimatePresence>
+        {/* Dismiss button (fixed at bottom). Mockup 7n's "Done" CTA is an
+            accent-deep filled pill (vs. the original's neutral legacy
+            treatment) — adopted here for consistency with the other
+            migrated modals' primary dismiss/submit pill (QuickLogModal's
+            "Save Check-in", the mockup's "Log it"/"Done"). */}
+        <div className="pt-4">
+          <button
+            type="button"
+            onClick={onClose}
+            className="w-full min-h-[44px] rounded-full bg-accent-deep py-3 text-sm font-semibold text-background transition-opacity hover:opacity-90"
+          >
+            Got it
+          </button>
+        </div>
+      </DrawerContent>
+    </Drawer>
   );
 };
 

@@ -208,6 +208,22 @@ describe('Dialog', () => {
     fireEvent.click(screen.getByLabelText('Close'));
     expect(screen.queryByText('Quick mood')).toBeNull();
   });
+
+  it('overlay uses the --overlay CSS-var token, not a Tailwind /NN opacity modifier (D4a fix)', () => {
+    render(
+      <Dialog open>
+        <DialogContent>
+          <DialogTitle>Quick mood</DialogTitle>
+        </DialogContent>
+      </Dialog>
+    );
+    const overlay = screen.getByTestId('dialog-overlay');
+    expect(overlay.className).toContain('bg-[var(--overlay)]');
+    // Guards against regressing to a `/NN` opacity modifier on a CSS-var
+    // color (bg-black/40, bg-foreground/40, etc.) — those silently no-op
+    // under this project's Tailwind config (see Dialog.jsx comment).
+    expect(overlay.className).not.toMatch(/bg-(black|white|foreground|primary|card)\/\d+/);
+  });
 });
 
 describe('Drawer', () => {
@@ -241,5 +257,18 @@ describe('Drawer', () => {
     );
     const dialog = screen.getByRole('dialog');
     expect(within(dialog).getByText('New entry')).toBeTruthy();
+  });
+
+  it('overlay uses the --overlay CSS-var token, not a Tailwind /NN opacity modifier (D4a fix)', () => {
+    render(
+      <Drawer open>
+        <DrawerContent>
+          <DrawerTitle>New entry</DrawerTitle>
+        </DrawerContent>
+      </Drawer>
+    );
+    const overlay = screen.getByTestId('drawer-overlay');
+    expect(overlay.className).toContain('bg-[var(--overlay)]');
+    expect(overlay.className).not.toMatch(/bg-(black|white|foreground|primary|card)\/\d+/);
   });
 });
