@@ -129,6 +129,28 @@ describe('Tabs', () => {
     expect(screen.getByText('Week').getAttribute('data-state')).toBe('active');
     expect(screen.getByText('Month').getAttribute('data-state')).toBe('inactive');
   });
+
+  it('pads each trigger to a 44px-tall tap area via a vertical-only ::before overlay (C5b: InsightsPage is the first real consumer)', () => {
+    render(
+      <Tabs defaultValue="week">
+        <TabsList>
+          <TabsTrigger value="week">Week</TabsTrigger>
+          <TabsTrigger value="month">Month</TabsTrigger>
+        </TabsList>
+      </Tabs>
+    );
+    const week = screen.getByText('Week');
+    // Visual pill stays the compact 32px mockup size...
+    expect(week.className).toContain('min-h-[32px]');
+    // ...while a vertical-only overlay (-6px top/bottom => 32+12=44px)
+    // pads the tap area, without any horizontal inset that could make
+    // adjacent triggers' hit-boxes overlap.
+    expect(week.className).toContain('relative');
+    expect(week.className).toContain('before:inset-x-0');
+    expect(week.className).toContain('before:-top-1.5');
+    expect(week.className).toContain('before:-bottom-1.5');
+    expect(week.className).toContain("before:content-['']");
+  });
 });
 
 describe('Chip', () => {

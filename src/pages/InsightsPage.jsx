@@ -22,6 +22,9 @@ import {
   checkEnvironmentDataSufficiency
 } from '../services/environment/environmentCorrelations';
 import { getTodayRecommendations } from '../services/nexus/insightIntegration';
+import { Tabs, TabsList, TabsTrigger, RisingTide, SectionLabel, MoodTrendBars } from '../components/cloud';
+import { calculateStreak } from '../services/dashboard';
+import { getMoodTrendDays, getMoodMomentum, getEntryFillMetric } from '../utils/moodTrend';
 
 /**
  * InsightsPage - Nexus 2.0 AI Insights View
@@ -219,6 +222,9 @@ const InsightsPage = ({
         </button>
       </div>
 
+      {/* Mood trend — Week/Month tabs, accent bars, tide+streak (C5b) */}
+      <InsightsMoodTrendSection entries={entries} />
+
       {/* Disclaimer Note */}
       <div className="bg-card border border-border rounded-xl px-4 py-3">
         <p className="text-xs text-muted-foreground leading-relaxed">
@@ -327,6 +333,111 @@ const InsightsPage = ({
         </motion.div>
       )}
     </motion.div>
+  );
+};
+
+/**
+ * InsightsMoodTrendSection - Week/Month mood-trend bars + tide/streak
+ * stat cells (task C5b, CLOUD-DESIGN-SPEC.md §7 Insights / mockup "5b").
+ *
+ * FEATURE ADDITION (user-approved 2026-07-18): the spec's Insights trend
+ * composition had no counterpart in the real page before this — C5 only
+ * restyled the existing Nexus/correlations/recommendations feature set.
+ * Everything here is derived from the `entries` prop InsightsPage
+ * already receives (useMemo only) — no new Firestore reads, services,
+ * or props.
+ *
+ * Reuse, not reinvention:
+ *  - Mood bucketing + day aggregation: `getMoodTrendDays`/`getMoodMomentum`/
+ *    `getEntryFillMetric` (src/utils/moodTrend.js) — the same
+ *    accentForMood bucket->token mapping EntryCard.getMoodDotColor and
+ *    Home's MoodHeatmapWidget use (C4-aligned), not a third mapping.
+ *  - Bar rendering: shared `MoodTrendBars` (cloud kit) — the same
+ *    component Home's mood-trend card renders through, not a second
+ *    copy of the bar JSX.
+ *  - Streak: `calculateStreak()` from services/dashboard — the single
+ *    streak source D4b consolidated onto (StreakCelebration/MiniStats
+ *    both already read from it too).
+ *  - Week/Month segment: cloud `Tabs` primitive — first real (non-test)
+ *    consumer, so the shared `TabsTrigger` picked up a 44px-tall hit-box
+ *    (`::before`, vertical-only inset — the pill's text+padding already
+ *    exceeds 44px wide, so no horizontal inset is needed and adjacent
+ *    triggers' hit-boxes can't overlap).
+ *  - Tide stat cell: `RisingTide` (cloud kit) — first real consumer of
+ *    this component *on this page* (Home's MiniStatsWidget already uses
+ *    it). Fed with the entries-per-period "fill" metric (days logged /
+ *    days in window) per the task brief — a distinct metric from the
+ *    trend card's own mood-momentum caption above it, so the two don't
+ *    just repeat each other.
+ *
+ * Flagged interpretation (mockup only shows the 7-bar Week state): for
+ * Month (~30 bars), MoodTrendBars omits per-bar weekday labels (a label
+ * under every one of 30 bars would be illegible on a phone width) and
+ * tightens the bar gap/radius — see MoodTrendBars' own doc comment.
+ */
+const InsightsMoodTrendSection = ({ entries }) => {
+  const [period, setPeriod] = useState('week');
+  const windowDays = period === 'week' ? 7 : 30;
+
+  const { days, todayDateStr, momentumPercent } = useMemo(() => {
+    const result = getMoodTrendDays(entries, { windowDays });
+    return { ...result, momentumPercent: getMoodMomentum(result.days) };
+  }, [entries, windowDays]);
+
+  const fill = useMemo(() => getEntryFillMetric(days), [days]);
+  const streak = useMemo(() => calculateStreak(entries), [entries]);
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between">
+        <SectionLabel>Trends</SectionLabel>
+        <Tabs value={period} onValueChange={setPeriod}>
+          <TabsList>
+            <TabsTrigger value="week">Week</TabsTrigger>
+            <TabsTrigger value="month">Month</TabsTrigger>
+          </TabsList>
+        </Tabs>
+      </div>
+
+      <div className="bg-card border border-border rounded-2xl p-4">
+        <div className="mb-3 flex items-center justify-between">
+          <span className="text-[13px] font-semibold text-foreground">Mood trend</span>
+          {momentumPercent !== null && (
+            <span className="text-xs text-accent">
+              {momentumPercent > 0 ? `+${momentumPercent}% ↗` : momentumPercent < 0 ? `${momentumPercent}%` : 'Steady'}
+            </span>
+          )}
+        </div>
+        <MoodTrendBars days={days} todayDateStr={todayDateStr} animate={false} />
+      </div>
+
+      <div className="grid grid-cols-2 gap-2">
+        <RisingTide className="p-3.5">
+          <div className="text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+            Momentum
+          </div>
+          <div className="mt-1.5 text-2xl font-semibold tracking-[-0.02em] text-foreground">
+            {fill.fillPercent}%
+          </div>
+          <div className="mt-0.5 text-[11px] text-accent-deep">
+            {fill.filledDays}/{fill.totalDays} days logged
+          </div>
+        </RisingTide>
+
+        <div className="bg-card border border-border rounded-2xl p-3.5 shadow-sm">
+          <div className="text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+            Streak
+          </div>
+          <div className="mt-1.5 text-2xl font-semibold tracking-[-0.02em] text-foreground">
+            {streak.currentStreak}
+            <span className="text-xs font-normal text-muted-foreground"> days</span>
+          </div>
+          <div className="mt-0.5 text-[11px] text-muted-foreground">
+            best: {streak.longestStreak}
+          </div>
+        </div>
+      </div>
+    </div>
   );
 };
 

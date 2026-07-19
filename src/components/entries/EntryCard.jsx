@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import { safeString, formatMentions } from '../../utils/string';
 import { formatDateForInput, getTodayForInput, parseDateInput, getDateString } from '../../utils/date';
+import { accentForMood } from '../../utils/moodTrend';
 import ProvenanceDisclosure from '../ui/ProvenanceDisclosure';
 
 // Entity tag emoji lookup (hoisted for performance - used in tag rendering)
@@ -107,13 +108,11 @@ const PrimaryReadinessMetric = ({ healthContext }) => {
 // Journal "mood dot per row" / §7 Home "mood-trend bar card") so the same
 // mood_score renders the same intensity on both Home and Journal. No
 // legacy `mood-*` classes, no raw hex — accent tokens only.
-const getMoodDotColor = (score) => {
-  if (score === null || score === undefined) return 'var(--divider)';
-  if (score >= 0.75) return 'var(--accent-4)';
-  if (score >= 0.5) return 'var(--accent-3)';
-  if (score >= 0.25) return 'var(--accent-2)';
-  return 'var(--accent-1)';
-};
+// Mood bucket -> CSS-var mapping now lives in src/utils/moodTrend.js
+// (accentForMood) as the single source of truth (C5b) - kept named
+// getMoodDotColor here since it's referenced by that name below/in
+// tests, but it's just a re-export, not a second copy of the mapping.
+const getMoodDotColor = accentForMood;
 
 const EntryCard = ({ entry, onDelete, onUpdate }) => {
   const [editing, setEditing] = useState(false);

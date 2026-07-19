@@ -28,5 +28,6 @@ export { SectionLabel } from './SectionLabel';
 export { LinenWaveBackground } from './LinenWaveBackground';
 export { Pebble } from './Pebble';
 export { RisingTide } from './RisingTide';
+export { MoodTrendBars } from './MoodTrendBars';
 export { Equalizer } from './Equalizer';
 export { ConfettiPips } from './ConfettiPips';
