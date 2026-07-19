@@ -278,6 +278,40 @@ export const MIGRATED = [
   'src/components/zen/DaySummaryModal.jsx',
   'src/components/modals/EntryInsightsPopup.jsx',
   'src/components/zen/SanctuaryWalkthrough.jsx',
+  // D4b (2026-07-18): second half of task D4 — wellness screens restyle +
+  // new StreakCelebration. DecompressionScreen.jsx (the short, unskippable,
+  // safety-reachable 12s breathing beat shown after a heavy entry) swapped
+  // its dark warm-800/900 gradient + Brain icon for the Cloud canvas +
+  // resting Pebble (§6.3), keeping its phase timeline/onClose callback
+  // byte-identical — extra care per the brief given its crisis adjacency.
+  // BreathingExercise.jsx (the live Mindfulness-mode breathing flow,
+  // imported by UnifiedConversation.jsx) and GroundingExercise.jsx (no live
+  // consumer — UnifiedConversation's Mindfulness mode uses its own local
+  // GroundingExerciseUI instead, the same "wired to nothing" status as this
+  // task's dead `celebrate()` helper, flagged in task-D4b-report.md) both
+  // collapsed their per-exercise/per-sense lavender/sage/purple/amber/rose
+  // hues onto the single Cloud accent scale (icons still differentiate each
+  // one), the same "ONE user-selectable accent" precedent as C5/D1. All
+  // three files' timers/step state machines/completion callbacks are
+  // unchanged — restyle only. BreathingExercise's growing/shrinking circle
+  // (the mockup's core visual pacing cue) is now gated behind framer-
+  // motion's `useReducedMotion()` per spec §1's unconditional "motion is
+  // always optional"; the countdown number + phase-name text next to it are
+  // static and always visible, so there was no ambiguity to escalate.
+  // StreakCelebration.jsx (new, src/components/screens/) is the full-screen
+  // post-save "new personal best" experience (§7): celebrating Pebble (its
+  // confetti is built into that Pebble state, not canvas-confetti or the
+  // dead `celebrate` helper), a dot tracker sized to the actual streak
+  // length with the record dot ringed, and a "Keep it going" CTA + "Share
+  // with my therapist" link wired to the existing Therapist Export screen
+  // (setShowExport(true) in App.jsx) — no new export/share path invented.
+  // These three files were 3 of the 56 offenders; all fully cleaned and
+  // moved to MIGRATED (StreakCelebration.jsx is a new file, already clean,
+  // so it doesn't change the offender count). Budget drops 56 -> 53.
+  'src/components/screens/DecompressionScreen.jsx',
+  'src/components/shelter/BreathingExercise.jsx',
+  'src/components/shelter/GroundingExercise.jsx',
+  'src/components/screens/StreakCelebration.jsx',
 ];
 
 // --- Ratchet: how many non-migrated .jsx files still use legacy palette classes ---
@@ -324,7 +358,13 @@ export const MIGRATED = [
 // offenders (honey/warm/lavender/sage/terra classes across the quick-mood,
 // day-summary, entry-insights, and welcome-tour surfaces); all fully
 // cleaned and moved to MIGRATED. Budget drops 60 -> 56.
-export const LEGACY_BUDGET = 56;
+// D4b (2026-07-18): DecompressionScreen.jsx, BreathingExercise.jsx,
+// GroundingExercise.jsx were 3 of the 56 offenders (warm/sage/lavender/
+// hearth classes across the three wellness/breathing/grounding surfaces);
+// all fully cleaned and moved to MIGRATED. StreakCelebration.jsx is a new
+// file (already clean), so it doesn't change the offender count. Budget
+// drops 56 -> 53.
+export const LEGACY_BUDGET = 53;
 
 function collectJsxFiles(dir) {
   const out = [];

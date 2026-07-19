@@ -98,6 +98,7 @@ import {
   CrisisResourcesScreenWithSuspense as CrisisResourcesScreen,
   SafetyPlanScreenWithSuspense as SafetyPlanScreen,
   DecompressionScreenWithSuspense as DecompressionScreen,
+  StreakCelebrationWithSuspense as StreakCelebration,
   TherapistExportScreenWithSuspense as TherapistExportScreen,
   HealthSettingsScreenWithSuspense as HealthSettingsScreen,
 } from './components/lazy';
@@ -296,7 +297,8 @@ export default function App() {
     showEntityManagement, showEntityManagementScreen, hideEntityManagementScreen,
     showQuickLog, showQuickLogModal, hideQuickLogModal,
     dailySummaryModal, openDailySummary, closeDailySummary,
-    entryInsightsPopup, openEntryInsights, closeEntryInsights
+    entryInsightsPopup, openEntryInsights, closeEntryInsights,
+    streakCelebration, openStreakCelebration, closeStreakCelebration
   } = useUiStore();
 
   // Compatibility setters for UI store
@@ -1202,6 +1204,28 @@ export default function App() {
       const ref = await addDoc(collection(db, 'artifacts', APP_COLLECTION_ID, 'users', user.uid, 'entries'), entryData);
       console.timeEnd('⏱️ Firestore save');
       console.timeEnd('⏱️ TOTAL: Save entry to Firestore');
+
+      // Streak celebration (D4b, CLOUD-DESIGN-SPEC.md §7): the just-saved
+      // entry isn't in `entries` yet (the Firestore onSnapshot listener that
+      // populates it hasn't fired), so diff a "before" streak (current
+      // `entries`) against an "after" streak (`entries` + the just-built
+      // entryData) using the shared calculateStreak() helper — the same one
+      // MiniStatsWidget's streak cell is meant to read from, per the plan.
+      // Full-screen only on a new personal best (current streak overtakes
+      // the prior longest), and only past a 1-day streak so saving your
+      // very first entry ever (0 -> 1) doesn't trigger a "personal best".
+      try {
+        const prevStreak = calculateStreak(entries);
+        const nextStreak = calculateStreak([...entries, entryData]);
+        if (nextStreak.currentStreak > 1 && nextStreak.currentStreak > prevStreak.longestStreak) {
+          openStreakCelebration({
+            currentStreak: nextStreak.currentStreak,
+            previousBest: prevStreak.longestStreak
+          });
+        }
+      } catch (streakError) {
+        console.warn('[StreakCelebration] Streak computation failed:', streakError);
+      }
 
       setProcessing(false);
       setReplyContext(null);
@@ -2618,6 +2642,23 @@ export default function App() {
       {/* Decompression Screen */}
       <AnimatePresence>
         {showDecompression && <DecompressionScreen onClose={() => setShowDecompression(false)} />}
+      </AnimatePresence>
+
+      {/* Streak Celebration (D4b) — mounted whenever the post-save streak
+          check in doSaveEntry finds a new personal best; "Share with my
+          therapist" reuses the existing Therapist Export screen. */}
+      <AnimatePresence>
+        {streakCelebration && (
+          <StreakCelebration
+            currentStreak={streakCelebration.currentStreak}
+            previousBest={streakCelebration.previousBest}
+            onClose={closeStreakCelebration}
+            onShareWithTherapist={() => {
+              closeStreakCelebration();
+              setShowExport(true);
+            }}
+          />
+        )}
       </AnimatePresence>
 
       {/* Retrofit Progress Indicator */}

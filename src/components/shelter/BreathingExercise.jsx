@@ -7,10 +7,36 @@
  * - Simple Deep Breathing
  *
  * Features animated circle that expands/contracts with breath phases.
+ *
+ * Restyle only (Task D4b, CLOUD-DESIGN-SPEC.md §7 "Breathing"/mockup 7i:
+ * "circle grows & shrinks with the breath"). The phase/cycle state machine
+ * (BREATHING_EXERCISES config, the countdown interval effect, handleStart/
+ * handlePause/handleReset, and the onComplete/onSkip callbacks) is
+ * byte-identical to the pre-Cloud version — only className/style output
+ * changed.
+ *
+ * Functional-breathing-animation decision: the mockup's growing/shrinking
+ * circle is the visual pacing cue, but this component's actual functional
+ * pacing signal is the numeric `{countdown}` + phase-name text rendered
+ * inside it — those stay static text, always visible, animation or not.
+ * Per spec §1 ("Motion is ... always optional (prefers-reduced-motion)"),
+ * the scale animation itself is gated off via framer-motion's
+ * `useReducedMotion()` (already used elsewhere in the app, e.g.
+ * DarkModeToggle.jsx) rather than left unconditional — with the countdown
+ * number already providing an exact, fully static fallback, there's no
+ * ambiguity here to escalate.
+ *
+ * The three exercises' distinct lavender/purple/sage colors collapsed onto
+ * the single Cloud accent scale (accent-3 -> accent gradient, matching
+ * Pebble's own blob recipe), consistent with the "ONE user-selectable
+ * accent" precedent already applied to InsightsPage (C5) and
+ * UnifiedConversation (D1). The `color` field on each exercise config is
+ * left in place (unused by rendering now, but part of the untouched data
+ * shape) rather than deleted, to keep the config object byte-identical.
  */
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion, AnimatePresence, useReducedMotion } from 'framer-motion';
 import { Play, Pause, RotateCcw, Wind, Check } from 'lucide-react';
 
 // Breathing exercise configurations
@@ -50,6 +76,10 @@ const BREATHING_EXERCISES = {
   }
 };
 
+// Cloud blob recipe (matches Pebble.jsx §6.3) — every exercise shares the
+// single accent scale rather than a per-exercise hue.
+const CIRCLE_GRADIENT_STYLE = { background: 'linear-gradient(160deg, var(--accent-3), var(--accent))' };
+
 const BreathingExercise = ({
   exerciseType = 'box',
   onComplete,
@@ -57,6 +87,7 @@ const BreathingExercise = ({
   compact = false
 }) => {
   const exercise = BREATHING_EXERCISES[exerciseType] || BREATHING_EXERCISES.box;
+  const prefersReducedMotion = useReducedMotion();
 
   const [isRunning, setIsRunning] = useState(false);
   const [currentPhaseIndex, setCurrentPhaseIndex] = useState(0);
@@ -113,19 +144,11 @@ const BreathingExercise = ({
   };
 
   const getCircleScale = () => {
+    if (prefersReducedMotion) return 1;
     if (!isRunning) return 1;
     if (currentPhase.action === 'expand') return 1.4;
     if (currentPhase.action === 'contract') return 0.7;
     return 1; // hold
-  };
-
-  const getCircleColor = () => {
-    const colors = {
-      blue: 'from-lavender-500 to-lavender-700 dark:from-lavender-600 dark:to-lavender-800',
-      purple: 'from-lavender-600 to-lavender-800 dark:from-lavender-700 dark:to-lavender-900',
-      teal: 'from-sage-500 to-sage-700 dark:from-sage-600 dark:to-sage-800'
-    };
-    return colors[exercise.color] || colors.blue;
   };
 
   if (compact) {
@@ -142,7 +165,6 @@ const BreathingExercise = ({
         onReset={handleReset}
         onSkip={onSkip}
         getCircleScale={getCircleScale}
-        getCircleColor={getCircleColor}
       />
     );
   }
@@ -151,14 +173,14 @@ const BreathingExercise = ({
     <div className="flex flex-col items-center p-6">
       {/* Exercise Info */}
       <div className="text-center mb-6">
-        <h3 className="text-xl font-semibold text-white">{exercise.name}</h3>
-        <p className="text-white/60 text-sm mt-1 max-w-xs">{exercise.description}</p>
+        <h3 className="text-xl font-display font-medium text-foreground">{exercise.name}</h3>
+        <p className="text-muted-foreground text-sm mt-1 max-w-xs">{exercise.description}</p>
       </div>
 
       {/* Breathing Circle */}
       <div className="relative w-64 h-64 flex items-center justify-center mb-8">
         {/* Outer ring */}
-        <div className="absolute inset-0 rounded-full border-2 border-white/10" />
+        <div className="absolute inset-0 rounded-full border-2 border-border" />
 
         {/* Progress ring */}
         <svg className="absolute inset-0 -rotate-90" viewBox="0 0 100 100">
@@ -170,7 +192,7 @@ const BreathingExercise = ({
             stroke="currentColor"
             strokeWidth="2"
             strokeDasharray={`${progress * 301.59} 301.59`}
-            className="text-white/30"
+            className="text-border"
           />
         </svg>
 
@@ -180,17 +202,15 @@ const BreathingExercise = ({
             scale: getCircleScale(),
             transition: { duration: currentPhase?.duration || 4, ease: 'easeInOut' }
           }}
-          className={`
-            w-40 h-40 rounded-full bg-gradient-to-br ${getCircleColor()}
-            flex items-center justify-center shadow-lg
-          `}
+          className="w-40 h-40 rounded-full flex items-center justify-center shadow-soft-lg"
+          style={CIRCLE_GRADIENT_STYLE}
         >
           {completed ? (
-            <Check size={48} className="text-white" />
+            <Check size={48} className="text-foreground dark:text-background" />
           ) : (
             <div className="text-center">
-              <div className="text-4xl font-bold text-white">{countdown}</div>
-              <div className="text-white/80 text-sm mt-1">
+              <div className="text-4xl font-semibold text-foreground dark:text-background">{countdown}</div>
+              <div className="text-foreground dark:text-background text-sm mt-1">
                 {currentPhase?.name}
               </div>
             </div>
@@ -204,7 +224,7 @@ const BreathingExercise = ({
           <div
             key={idx}
             className={`w-2 h-2 rounded-full transition-colors ${
-              idx < currentCycle ? 'bg-white' : 'bg-white/20'
+              idx < currentCycle ? 'bg-accent' : 'bg-divider'
             }`}
           />
         ))}
@@ -217,7 +237,7 @@ const BreathingExercise = ({
             {isRunning ? (
               <button
                 onClick={handlePause}
-                className="flex items-center gap-2 px-6 py-3 bg-white/20 hover:bg-white/30 rounded-full text-white transition-colors"
+                className="flex items-center gap-2 px-6 py-3 bg-card border border-border hover:bg-divider rounded-full text-foreground transition-colors"
               >
                 <Pause size={20} />
                 Pause
@@ -225,7 +245,7 @@ const BreathingExercise = ({
             ) : (
               <button
                 onClick={handleStart}
-                className="flex items-center gap-2 px-6 py-3 bg-white hover:bg-white/90 rounded-full text-hearth-900 font-medium transition-colors"
+                className="flex items-center gap-2 px-6 py-3 bg-primary hover:opacity-90 rounded-full text-primary-foreground font-medium transition-colors"
               >
                 <Play size={20} />
                 {currentPhaseIndex === 0 && currentCycle === 1 ? 'Start' : 'Resume'}
@@ -234,7 +254,7 @@ const BreathingExercise = ({
 
             <button
               onClick={handleReset}
-              className="flex items-center gap-2 px-4 py-3 bg-white/10 hover:bg-white/20 rounded-full text-white/70 transition-colors"
+              className="flex min-h-[44px] min-w-[44px] items-center justify-center gap-2 px-4 py-3 bg-card border border-border hover:bg-divider rounded-full text-muted-foreground transition-colors"
             >
               <RotateCcw size={18} />
             </button>
@@ -244,7 +264,7 @@ const BreathingExercise = ({
         {completed && (
           <button
             onClick={handleReset}
-            className="flex items-center gap-2 px-6 py-3 bg-white hover:bg-white/90 rounded-full text-hearth-900 font-medium transition-colors"
+            className="flex items-center gap-2 px-6 py-3 bg-primary hover:opacity-90 rounded-full text-primary-foreground font-medium transition-colors"
           >
             <RotateCcw size={20} />
             Do Another Round
@@ -254,7 +274,7 @@ const BreathingExercise = ({
         {onSkip && !completed && (
           <button
             onClick={onSkip}
-            className="px-4 py-3 text-white/50 hover:text-white/70 text-sm transition-colors"
+            className="px-4 py-3 text-muted-foreground hover:text-foreground text-sm transition-colors"
           >
             Skip
           </button>
@@ -266,7 +286,7 @@ const BreathingExercise = ({
         <motion.p
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
-          className="text-white/80 text-center mt-6"
+          className="text-muted-foreground text-center mt-6"
         >
           Great job! You completed {exercise.cycles} cycles of {exercise.name}.
         </motion.p>
@@ -287,30 +307,27 @@ const CompactBreathingExercise = ({
   onPause,
   onReset,
   onSkip,
-  getCircleScale,
-  getCircleColor
+  getCircleScale
 }) => (
-  <div className="flex items-center gap-4 p-4 bg-white/5 rounded-xl">
+  <div className="flex items-center gap-4 p-4 bg-card border border-border rounded-xl">
     <motion.div
       animate={{
         scale: isRunning ? getCircleScale() : 1,
         transition: { duration: currentPhase?.duration || 4, ease: 'easeInOut' }
       }}
-      className={`
-        w-16 h-16 rounded-full bg-gradient-to-br ${getCircleColor()}
-        flex items-center justify-center flex-shrink-0
-      `}
+      className="w-16 h-16 rounded-full flex items-center justify-center flex-shrink-0"
+      style={CIRCLE_GRADIENT_STYLE}
     >
       {completed ? (
-        <Check size={24} className="text-white" />
+        <Check size={24} className="text-foreground dark:text-background" />
       ) : (
-        <span className="text-xl font-bold text-white">{countdown}</span>
+        <span className="text-xl font-semibold text-foreground dark:text-background">{countdown}</span>
       )}
     </motion.div>
 
     <div className="flex-1">
-      <div className="text-white font-medium">{exercise.name}</div>
-      <div className="text-white/60 text-sm">
+      <div className="text-foreground font-medium">{exercise.name}</div>
+      <div className="text-muted-foreground text-sm">
         {completed ? 'Complete!' : `${currentPhase?.name} - Cycle ${currentCycle}/${exercise.cycles}`}
       </div>
     </div>
@@ -319,14 +336,14 @@ const CompactBreathingExercise = ({
       {!completed && (
         <button
           onClick={isRunning ? onPause : onStart}
-          className="p-2 bg-white/20 hover:bg-white/30 rounded-full text-white transition-colors"
+          className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-full bg-card border border-border hover:bg-divider text-foreground transition-colors"
         >
           {isRunning ? <Pause size={18} /> : <Play size={18} />}
         </button>
       )}
       <button
         onClick={onReset}
-        className="p-2 bg-white/10 hover:bg-white/20 rounded-full text-white/70 transition-colors"
+        className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-full bg-card border border-border hover:bg-divider text-muted-foreground transition-colors"
       >
         <RotateCcw size={18} />
       </button>
@@ -344,15 +361,15 @@ export const BreathingExerciseSelector = ({ onSelect, selected }) => (
         className={`
           flex items-center gap-3 p-4 rounded-xl text-left transition-all
           ${selected === key
-            ? 'bg-white/20 border-2 border-white/40'
-            : 'bg-white/5 border-2 border-transparent hover:bg-white/10'
+            ? 'bg-accent-wash border-2 border-accent'
+            : 'bg-card border-2 border-border hover:bg-divider'
           }
         `}
       >
-        <Wind className={exercise.color === 'blue' ? 'text-lavender-400' : exercise.color === 'purple' ? 'text-lavender-500' : 'text-sage-400'} size={24} />
+        <Wind className="text-accent-deep" size={24} />
         <div>
-          <div className="text-white font-medium">{exercise.name}</div>
-          <div className="text-white/60 text-sm">{exercise.description}</div>
+          <div className="text-foreground font-medium">{exercise.name}</div>
+          <div className="text-muted-foreground text-sm">{exercise.description}</div>
         </div>
       </button>
     ))}
