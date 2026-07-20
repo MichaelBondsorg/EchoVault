@@ -4,9 +4,14 @@
  * regex + separate Gemini tone call. Cleanup philosophy ported from Cosmo:
  * the model hears the audio, removes disfluencies, never restructures.
  */
+import { transcribeWithWhisper } from '../shared/openai.js';
 
 // Verify against the live models list before changing (see plan Task 2 Step 1).
 export const GEMINI_TRANSCRIBE_MODEL = 'gemini-2.5-flash';
+
+// Bound the Gemini/Whisper network call so a hung API can't consume the whole
+// function budget. Mirrors TRANSCRIBE_TIMEOUT_MS in functions/index.js.
+export const FUSED_TRANSCRIBE_TIMEOUT_MS = 120_000;
 
 export const TRANSCRIPTION_PROMPT = `Transcribe this audio with light cleanup:
 
@@ -106,4 +111,99 @@ export function parseFusedResponse(geminiJson) {
   }
 
   return { rawTranscript, transcript, toneAnalysis };
+}
+
+/**
+ * Run the SAME fused transcription flow the `transcribeEntry` callable uses,
+ * but from a raw audio buffer (base64) rather than an HTTPS request. Primary
+ * is one fused Gemini audio-in call (transcript + tone); on any Gemini failure
+ * (rate limit, HTTP error, unparseable body, network) it falls back to a raw
+ * Whisper transcript with NO filler-word stripping (that regex corrupts
+ * meaning). Reuses buildGeminiRequestBody / parseFusedResponse / the shared
+ * Whisper helper so the server-triggered path and the callable stay in lockstep.
+ *
+ * @returns {Promise<{rawTranscript:string, transcript:string, toneAnalysis:object|null, engine:'gemini'|'whisper'}|{error:string}>}
+ *   Same response contract as the callable: a success object or `{ error }`
+ *   ('API_NO_CONTENT' = call succeeded but no intelligible speech).
+ * @param {object} args
+ * @param {string} args.base64            Audio bytes, base64-encoded.
+ * @param {string} args.mimeType          Audio MIME type (audio/mp4, audio/webm, ...).
+ * @param {string[]} [args.properNouns]   Known proper-noun spellings.
+ * @param {string|null} [args.gemKey]     Gemini API key (primary engine).
+ * @param {string|null} [args.oaiKey]     OpenAI API key (Whisper fallback).
+ * @param {number} [args.timeoutMs]       Per-call network timeout.
+ * @param {Function} [args.fetchImpl]     Injectable fetch (tests); defaults to global fetch.
+ */
+export async function runFusedTranscription({
+  base64,
+  mimeType,
+  properNouns = [],
+  gemKey = null,
+  oaiKey = null,
+  timeoutMs = FUSED_TRANSCRIBE_TIMEOUT_MS,
+  fetchImpl = fetch,
+} = {}) {
+  if (!gemKey && !oaiKey) {
+    return { error: 'API_ERROR' };
+  }
+
+  // 1. Primary: fused Gemini call (transcript + tone in one pass).
+  if (gemKey) {
+    try {
+      const geminiRes = await fetchImpl(
+        `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_TRANSCRIBE_MODEL}:generateContent?key=${gemKey}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(buildGeminiRequestBody(base64, mimeType, properNouns)),
+          signal: AbortSignal.timeout(timeoutMs),
+        }
+      );
+
+      if (geminiRes.status === 429) {
+        // rate limited — fall through to Whisper
+      } else if (geminiRes.ok) {
+        const parsed = parseFusedResponse(await geminiRes.json());
+        if (parsed && parsed.transcript) {
+          return {
+            rawTranscript: parsed.rawTranscript,
+            transcript: parsed.transcript,
+            toneAnalysis: parsed.toneAnalysis,
+            engine: 'gemini',
+          };
+        }
+        if (parsed && parsed.transcript === '') {
+          return { error: 'API_NO_CONTENT' }; // model heard no speech
+        }
+        // unparseable — fall through to Whisper
+      }
+      // non-429 HTTP error — fall through to Whisper
+    } catch (geminiError) {
+      // network/timeout — fall through to Whisper
+    }
+  }
+
+  // 2. Fallback: Whisper raw transcript (NO filler-word regex — it corrupts meaning).
+  if (!oaiKey) {
+    return { error: 'API_ERROR' };
+  }
+  try {
+    const buffer = Buffer.from(base64, 'base64');
+    const fileExt = mimeType.includes('webm') ? 'webm' : mimeType.includes('mp4') ? 'mp4' : 'wav';
+    const whisperResult = await transcribeWithWhisper(oaiKey, buffer, {
+      filename: `audio.${fileExt}`,
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+
+    if (whisperResult === null) {
+      return { error: 'API_ERROR' };
+    }
+    const transcript = whisperResult?.text?.trim();
+    if (!transcript) {
+      return { error: 'API_NO_CONTENT' }; // call succeeded, no speech detected
+    }
+    return { rawTranscript: transcript, transcript, toneAnalysis: null, engine: 'whisper' };
+  } catch (error) {
+    return { error: 'API_EXCEPTION' };
+  }
 }

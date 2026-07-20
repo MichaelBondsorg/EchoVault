@@ -6,7 +6,7 @@
  * grep/queryable in Cloud Logging without ever including journal content.
  *
  * Whitelist mirrors the client (src/services/telemetry/captureTelemetry.js)
- * plus `modelId`, `uidHash`, and raw `uid` — functions logs elsewhere
+ * plus `modelId`, `uidHash`, `uid`, and `count` — functions logs elsewhere
  * already include raw uid (e.g. consent-denied logs in
  * src/consent/consentGate.js's callers), so it's allowed here too;
  * content fields (transcript, text, etc.) are never whitelisted.
@@ -14,7 +14,7 @@
 
 // KEEP IN SYNC with src/services/telemetry/captureTelemetry.js's
 // META_WHITELIST — the first 7 entries below must match that client-side
-// list exactly; modelId/uidHash/uid are server-only additions with no
+// list exactly; modelId/uidHash/uid/count are server-only additions with no
 // client-side equivalent. Adding a shared (non-server-only) field here
 // should also be added there.
 const META_WHITELIST = [
@@ -28,6 +28,9 @@ const META_WHITELIST = [
   'modelId',
   'uidHash',
   'uid',
+  // Server-only: number of objects a sweep/batch acted on (e.g. capture-upload
+  // retention deletions). No client-side equivalent.
+  'count',
 ];
 
 function pickWhitelisted(meta) {

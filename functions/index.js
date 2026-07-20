@@ -12,6 +12,7 @@ import { onSchedule } from 'firebase-functions/v2/scheduler';
 import { defineSecret } from 'firebase-functions/params';
 import { initializeApp, getApps } from 'firebase-admin/app';
 import { getFirestore, FieldValue, Timestamp } from 'firebase-admin/firestore';
+import { getStorage } from 'firebase-admin/storage';
 import { getAuth } from 'firebase-admin/auth';
 import { createHash, timingSafeEqual } from 'node:crypto';
 import { OAuth2Client } from 'google-auth-library';
@@ -32,6 +33,10 @@ import { shouldWatchdogSkipEditedEntry } from './src/triggers/watchdogGuards.js'
 import { callGemini, classifyEntry, analyzeEntry, extractEnhancedContext, generateInsight } from './src/analysis/analysisHelpers.js';
 import { getServerFlag } from './src/shared/flags.js';
 import { runEntryAnalysis } from './src/analysis/orchestrator.js';
+import { issueCaptureUploadTicketCore } from './src/capture/uploadTicket.js';
+import { processCaptureAudioObject, sweepCaptureUploads } from './src/capture/onAudioUploaded.js';
+import { runFusedTranscription } from './src/transcription/fusedTranscription.js';
+import { onObjectFinalized } from 'firebase-functions/v2/storage';
 import { randomUUID } from 'node:crypto';
 
 /**
@@ -1075,6 +1080,86 @@ export const transcribeEntry = onCall(
     }
   }
 );
+
+/**
+ * Cloud Function: issueCaptureUploadTicket
+ *
+ * Mints a short-lived V4 signed URL so the iOS background URLSession can PUT a
+ * captured .m4a directly to Cloud Storage (native background-upload path, task
+ * B5) — no base64 through the WebView bridge. The finalized object triggers
+ * onCaptureAudioUploaded, which owns transcription + entry creation.
+ *
+ * Ownership is bound to the object PATH (the uid segment written server-side
+ * here from request.auth), NOT to any client-supplied custom object metadata —
+ * clients can set metadata freely, so the finalize trigger trusts only the path.
+ */
+export const issueCaptureUploadTicket = onCall(
+  { cors: true, maxInstances: 10 },
+  async (request) => {
+    if (!request.auth) {
+      throw new HttpsError('unauthenticated', 'User must be authenticated');
+    }
+    const userId = request.auth.uid;
+    await assertAiConsent(db, userId);
+
+    const { operationId, mimeType } = request.data || {};
+
+    const ticket = await issueCaptureUploadTicketCore(
+      { uid: userId, operationId, mimeType },
+      { storage: getStorage() }
+    );
+
+    logStage(operationId, 'uploading', {});
+    return ticket;
+  }
+);
+
+/**
+ * Storage trigger: onCaptureAudioUploaded (task B5).
+ *
+ * Fires on every finalized object in the default bucket; the core handler
+ * ignores anything that is not `capture-uploads/{uid}/{opId}.m4a`. Owns the
+ * transcription commit for the native background-upload path. Gated by the
+ * default-off `nativeBackgroundUpload` server flag (fail safe: deletes the
+ * object when the flag is off). Core logic + guard chain live in
+ * src/capture/onAudioUploaded.js; this wrapper only wires real dependencies.
+ */
+export const onCaptureAudioUploaded = onObjectFinalized(
+  {
+    secrets: [geminiApiKey, openaiApiKey],
+    memory: '1GiB',
+    timeoutSeconds: 540,
+    maxInstances: 5,
+  },
+  async (event) => {
+    await processCaptureAudioObject(event.data, {
+      db,
+      storage: getStorage(),
+      FieldValue,
+      getFlag: (name, def) => getServerFlag(db, name, def),
+      isAllowed: isAiAllowed,
+      log: logStage,
+      transcribe: ({ base64, mimeType }) =>
+        runFusedTranscription({
+          base64,
+          mimeType,
+          gemKey: geminiApiKey.value(),
+          oaiKey: openaiApiKey.value(),
+        }),
+    });
+  }
+);
+
+/**
+ * Scheduled sweeper: captureUploadsRetention (task B5).
+ *
+ * Backstop for raw audio the trigger left behind (transcription failures).
+ * Deletes pending capture uploads older than 24h. Successful transcriptions
+ * already delete their object immediately.
+ */
+export const captureUploadsRetention = onSchedule('every 6 hours', async () => {
+  await sweepCaptureUploads({ storage: getStorage(), log: logStage });
+});
 
 // ============================================
 // PATTERN COMPUTATION FUNCTIONS
