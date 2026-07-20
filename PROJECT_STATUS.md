@@ -1,6 +1,6 @@
 # Engram Project Status
 
-> **Last Updated:** 2026-02-20 (Hearthside Visual Overhaul complete)
+> **Last Updated:** 2026-07-20 (Trustworthy Capture Sprint — Batch 1 security hardening shipped)
 > **Updated By:** Claude (via conversation with Michael)
 
 ---
@@ -17,7 +17,8 @@
 
 | Item | Status | Notes |
 |------|--------|-------|
-| **Phase 1: Fused Transcription + Durable Audio Vault** (branch: `feat/fused-transcription`) | 🔄 In Progress | Gemini fused transcription replaces whisper+regex+tone pipeline. Raw audio kept 7 days in vault. Removed dormant sw-audio.js. Ready for final branch review & merge. |
+| **Trustworthy Capture Sprint + Intelligence PRD** | 🔄 In Progress | Plan: `docs/superpowers/plans/2026-07-20-trustworthy-capture-and-intelligence.md`. Batch 1 (WS-A security) DONE: server-authoritative fail-closed AI consent on all AI jobs, revocation cancels queued work, owner-scoped WHOOP/embedding caches, CI bundle-endpoint guard, trigger idempotency + watchdog lease. Next: flags/telemetry → core-first save → capture durability → model hygiene → intent system. |
+| **Phase 1: Fused Transcription + Durable Audio Vault** | ✅ Complete | Merged as PR #145; superseded by Cloud capture release #149. |
 | **Nexus 2.0 Insights Engine** | ✅ Complete | All 4 layers implemented (pattern detection, baselines, LLM synthesis, interventions) |
 | **Multi-Provider Authentication** | ✅ Complete | Google, Apple (iOS only), Email/Password with MFA support |
 | **App Store Readiness** | ✅ Complete | Crashlytics, Fastlane, testing, accessibility, performance optimization |
@@ -55,6 +56,9 @@
 
 | Date | Decision | Why | Revisit If |
 |------|----------|-----|------------|
+| 2026-07-20 | AI consent is server-authoritative + fail-closed: settings/consent doc is the single authority; entry fields can only deny, never grant; consent-read failure denies the job; missing doc = legacy default-on | Client-writable entry fields were the trust boundary (spoofable); legacy default avoids breaking pre-consent-doc users | After a consent-doc backfill migration, flip missing-doc to deny |
+| 2026-07-20 | CI hosting builds default VITE_VOICE_RELAY_URL to the public prod wss URL (secret overrides); build fails if any bundle contains ws:// or localhost:8080 | Secret was never set; CI-built bundles would have shipped ws://localhost. URL is public, not a credential | Relay endpoint changes or becomes environment-split |
+| 2026-07-20 | Model migrations (PRD 0A) go through a server-owned registry behind flags; gpt-5.6-terra NOT adopted (limited preview); embedding v2 = dual-field, never mixed vector spaces | text-embedding-004 + gemini-2.0-flash are past shutdown dates; registry makes rollback a data change, not a deploy | Terra reaches GA with favorable pricing |
 | 2026-01-13 | Replace entire insights system with Nexus 2.0 | Current system produces correlation-level insights ("X boosts mood 30%") not causal insights with mechanisms. Fundamental architecture limitation, not fixable incrementally. | Implementation takes >3 weeks |
 | 2026-01-13 | Belief dissonance feature ON by default | Core differentiator. Surfaces gaps between stated beliefs and behavioral data. Opt-out sufficient protection. | Multiple users complain it feels judgmental |
 | 2026-01-13 | Mood gate at 50% for challenging insights | Don't surface belief dissonance when user is already struggling | Users want it lower/higher |
