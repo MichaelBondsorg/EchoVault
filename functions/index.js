@@ -32,6 +32,7 @@ import { maybeReanalyzeOnEntryUpdate } from './src/triggers/entryUpdateAnalysis.
 import { shouldWatchdogSkipEditedEntry } from './src/triggers/watchdogGuards.js';
 import { callGemini, classifyEntry, analyzeEntry, extractEnhancedContext, generateInsight } from './src/analysis/analysisHelpers.js';
 import { getServerFlag } from './src/shared/flags.js';
+import { getModelSync } from './src/models/registry.js';
 import { runEntryAnalysis } from './src/analysis/orchestrator.js';
 import { issueCaptureUploadTicketCore } from './src/capture/uploadTicket.js';
 import { processCaptureAudioObject, sweepCaptureUploads } from './src/capture/onAudioUploaded.js';
@@ -77,13 +78,16 @@ const DAILY_QUOTA = {
   transcribe: 100     // transcribeAudio / transcribeWithTone
 };
 
-// AI Model Configuration
+// AI Model Configuration.
+// DEPRECATED shape — model ids now come from the server-owned registry
+// (src/models/registry.js). Retained as a thin re-export so untouched call
+// sites keep working; new call sites use getModel/getModelSync directly.
 const AI_CONFIG = {
-  classification: { primary: 'gemini-3-flash-preview', fallback: 'gpt-4o-mini' },
-  analysis: { primary: 'gemini-3-flash-preview', fallback: 'gpt-4o' },
-  chat: { primary: 'gpt-4o-mini', fallback: 'gemini-3-flash-preview' },
-  embedding: { primary: 'text-embedding-004', fallback: null },
-  transcription: { primary: 'whisper-1', fallback: null }
+  classification: { primary: getModelSync('classify'), fallback: getModelSync('chat') },
+  analysis: { primary: getModelSync('analyze'), fallback: getModelSync('chatFallback') },
+  chat: { primary: getModelSync('chat'), fallback: getModelSync('classify') },
+  embedding: { primary: getModelSync('embedding'), fallback: null },
+  transcription: { primary: getModelSync('transcriptionFallback'), fallback: null }
 };
 
 // Bound every LLM/network call so a hung (not erroring) API can't consume the
@@ -127,7 +131,7 @@ async function callOpenAI(apiKey, systemPrompt, userPrompt) {
         'Authorization': `Bearer ${apiKey}`
       },
       body: JSON.stringify({
-        model: 'gpt-4o-mini',
+        model: getModelSync('chat'),
         messages: [
           { role: 'system', content: systemPrompt },
           { role: 'user', content: userPrompt }
@@ -456,8 +460,9 @@ async function generateEmbeddingInternal(text, apiKey, uid) {
     return cached;
   }
 
-  // Generate new embedding
-  const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/text-embedding-004:embedContent?key=${apiKey}`, {
+  // Generate new embedding (legacy v1 space)
+  const embeddingModel = getModelSync('embedding');
+  const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${embeddingModel}:embedContent?key=${apiKey}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ content: { parts: [{ text: text }] } }),
@@ -478,7 +483,7 @@ async function generateEmbeddingInternal(text, apiKey, uid) {
   }
 
   // Cache for future use (owner-scoped, model-tagged, no plaintext preview)
-  await setCachedEmbedding(db, uid, text, embedding, AI_CONFIG.embedding.primary);
+  await setCachedEmbedding(db, uid, text, embedding, embeddingModel);
 
   return embedding;
 }
@@ -610,7 +615,7 @@ export const transcribeAudio = onCall(
         buffer,
         `\r\n--${boundary}\r\n`,
         `Content-Disposition: form-data; name="model"\r\n\r\n`,
-        `whisper-1\r\n`,
+        `${getModelSync('transcriptionFallback')}\r\n`,
         `--${boundary}--\r\n`
       ];
 
@@ -836,7 +841,7 @@ export const transcribeWithTone = onCall(
         buffer,
         `\r\n--${boundary}\r\n`,
         `Content-Disposition: form-data; name="model"\r\n\r\n`,
-        `whisper-1\r\n`,
+        `${getModelSync('transcriptionFallback')}\r\n`,
         `--${boundary}--\r\n`
       ];
 

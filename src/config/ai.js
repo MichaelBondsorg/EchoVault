@@ -1,30 +1,13 @@
-// AI Model Configuration (for reference - actual API calls are now handled by Cloud Functions)
-export const AI_CONFIG = {
-  classification: {
-    primary: 'gemini-3.0-flash',
-    fallback: 'gpt-4o-mini'
-  },
-  analysis: {
-    primary: 'gemini-3.0-flash',
-    fallback: 'gpt-4o'
-  },
-  chat: {
-    primary: 'gpt-4o-mini',
-    fallback: 'gemini-3.0-flash'
-  },
-  embedding: {
-    primary: 'text-embedding-004',
-    fallback: null
-  },
-  transcription: {
-    primary: 'gemini-2.5-flash',   // fused transcript+tone via transcribeEntry
-    fallback: 'whisper-1'          // server-side fallback inside transcribeEntry
-  }
-};
+// Client-side AI configuration.
+//
+// Model ids are NOT declared here. All AI calls run server-side (Cloud
+// Functions / relay-server) which own model selection via the server model
+// registry (functions/src/models/registry.js). The client never sends a model
+// name — see src/services/ai/gemini.js, which delegates to executePrompt.
 
 // Kill switch: false restores the legacy whisper-1 + separate tone pipeline
 // (transcribeWithTone) with no server redeploy.
 export const USE_FUSED_TRANSCRIPTION = true;
 
-// Note: API keys are now securely stored in Firebase Cloud Functions
-// and are no longer exposed in the frontend code
+// Note: API keys are securely stored in Firebase Cloud Functions and are not
+// exposed in the frontend code.

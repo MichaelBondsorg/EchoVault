@@ -65,6 +65,10 @@ function makeDb(stored) {
   const txUpdates = [];
   const db = {
     txUpdates,
+    // config/flags read for model resolution (getModel -> getServerFlag).
+    doc() {
+      return { async get() { return { exists: false, data: () => ({}) }; } };
+    },
     async runTransaction(fn) {
       const tx = {
         async get() {

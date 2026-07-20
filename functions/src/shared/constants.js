@@ -4,19 +4,24 @@
  * Shared constants used across function modules.
  */
 
+import { MODEL_DEFAULTS } from '../models/registry.js';
+
 // Firestore collection path prefix
 export const APP_COLLECTION_ID = 'echo-vault-v5-fresh';
 
 // Pattern tracking version
 export const PATTERN_VERSION = 1;
 
-// AI Model Configuration
+// AI Model Configuration.
+// DEPRECATED shape — retained so untouched call sites keep working. All values
+// are re-exported from the server-owned model registry (MODEL_DEFAULTS); prefer
+// getModel(db, workload) / getModelSync(workload) in new code.
 export const AI_CONFIG = {
-  classification: { primary: 'gemini-3-flash-preview', fallback: 'gpt-4o-mini' },
-  analysis: { primary: 'gemini-3-flash-preview', fallback: 'gpt-4o' },
-  chat: { primary: 'gpt-4o-mini', fallback: 'gemini-3-flash-preview' },
-  embedding: { primary: 'text-embedding-004', fallback: null },
-  transcription: { primary: 'whisper-1', fallback: null }
+  classification: { primary: MODEL_DEFAULTS.classify, fallback: MODEL_DEFAULTS.chat },
+  analysis: { primary: MODEL_DEFAULTS.analyze, fallback: MODEL_DEFAULTS.chatFallback },
+  chat: { primary: MODEL_DEFAULTS.chat, fallback: MODEL_DEFAULTS.classify },
+  embedding: { primary: MODEL_DEFAULTS.embedding, fallback: null },
+  transcription: { primary: MODEL_DEFAULTS.transcriptionFallback, fallback: null }
 };
 
 // Function regions

@@ -23,18 +23,19 @@ export const config = {
   whoopRedirectUri: process.env.WHOOP_REDIRECT_URI || 'https://echovault-voice-relay-581319345416.us-central1.run.app/auth/whoop/callback',
   whoopTokenEncryptionKey: process.env.WHOOP_TOKEN_ENCRYPTION_KEY || '',
 
-  // Realtime API settings
-  realtimeModel: 'gpt-4o-realtime-preview-2024-12-17',
+  // Realtime API settings. Model overridable via REALTIME_MODEL.
+  realtimeModel: process.env.REALTIME_MODEL || 'gpt-4o-realtime-preview-2024-12-17',
   realtimeVoice: 'alloy', // Options: alloy, echo, fable, onyx, nova, shimmer
 
-  // Standard mode settings
-  whisperModel: 'whisper-1',
-  chatModel: 'gpt-4o',
-  ttsModel: 'tts-1',
+  // Standard mode settings. Models overridable via env for parity with the
+  // Cloud Functions model registry.
+  whisperModel: process.env.WHISPER_MODEL || 'whisper-1',
+  chatModel: process.env.CHAT_MODEL || 'gpt-4o',
+  ttsModel: process.env.TTS_MODEL || 'tts-1',
   ttsVoice: 'nova',
 
-  // Gemini settings
-  geminiModel: 'gemini-2.0-flash-exp', // Supports audio input
+  // Gemini settings (voice tone analysis). Overridable via TONE_MODEL.
+  geminiModel: process.env.TONE_MODEL || 'gemini-2.0-flash-exp', // Supports audio input
 
   // Session settings
   maxSessionDurationMs: 15 * 60 * 1000, // 15 minutes

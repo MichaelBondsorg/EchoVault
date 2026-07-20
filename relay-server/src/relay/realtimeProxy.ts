@@ -59,7 +59,7 @@ export const createRealtimeConnection = async (
         input_audio_format: 'pcm16',
         output_audio_format: 'pcm16',
         input_audio_transcription: {
-          model: 'whisper-1',
+          model: config.whisperModel,
         },
         turn_detection: {
           type: 'server_vad',

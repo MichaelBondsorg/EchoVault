@@ -22,7 +22,7 @@
  * Never logs journal text — only ids and structured status.
  */
 import { FieldValue } from 'firebase-admin/firestore';
-import { AI_CONFIG } from '../shared/constants.js';
+import { getModel } from '../models/registry.js';
 import { isAiAllowed } from '../consent/consentGate.js';
 import {
   classifyEntry,
@@ -34,7 +34,6 @@ import {
 const ORCHESTRATOR_VERSION = 1;
 const PROMPT_VERSION = 1;
 const CONTEXT_VERSION = 1; // mirrors src/config/constants.js CURRENT_CONTEXT_VERSION
-const MODEL_ID = AI_CONFIG.analysis.primary;
 const RECENT_CONTEXT_LIMIT = 15;
 
 function pruneUndefined(obj) {
@@ -124,16 +123,19 @@ export async function runEntryAnalysis({ db, entryRef, entry, apiKeys, logStage 
   const gemini = apiKeys?.gemini;
   const text = entry?.text;
 
+  // Resolved (flag-aware) provider model id stamped into provenance/telemetry.
+  const modelId = await getModel(db, 'analyze');
+
   const end = (retryCount, extra) => {
     logStage(opId, 'analysis_end', {
       durationMs: Date.now() - startedAt,
-      modelId: MODEL_ID,
+      modelId,
       retryCount,
       ...extra,
     });
   };
 
-  logStage(opId, 'analysis_start', { modelId: MODEL_ID });
+  logStage(opId, 'analysis_start', { modelId });
 
   // Consent gate before ANY provider work (fail closed).
   if (!(await isAiAllowed(db, uid, { entrySnapshot: entry }))) {
@@ -143,7 +145,7 @@ export async function runEntryAnalysis({ db, entryRef, entry, apiKeys, logStage 
   }
 
   if (!text || typeof text !== 'string') {
-    await publishFinal(db, entryRef, inputVersion, buildFailedPayload('', inputVersion, 'missing text'));
+    await publishFinal(db, entryRef, inputVersion, buildFailedPayload('', inputVersion, 'missing text', modelId));
     end(0, { errorCode: 'missing-text' });
     return { outcome: 'failed', reason: 'missing-text' };
   }
@@ -153,7 +155,7 @@ export async function runEntryAnalysis({ db, entryRef, entry, apiKeys, logStage 
   try {
     classification = await classifyEntry(gemini, text);
   } catch (e) {
-    await publishFinal(db, entryRef, inputVersion, buildFailedPayload(text, inputVersion, e?.message || 'classify-failed'));
+    await publishFinal(db, entryRef, inputVersion, buildFailedPayload(text, inputVersion, e?.message || 'classify-failed', modelId));
     end(1, { errorCode: 'classify-failed' });
     return { outcome: 'failed', reason: 'classify-failed' };
   }
@@ -194,23 +196,23 @@ export async function runEntryAnalysis({ db, entryRef, entry, apiKeys, logStage 
       analyzeSettled.status === 'rejected'
         ? analyzeSettled.reason?.message || String(analyzeSettled.reason)
         : analyzeSettled.value?.analysisError || 'analysis-failed';
-    const result = await publishFinal(db, entryRef, inputVersion, buildFailedPayload(text, inputVersion, reason));
+    const result = await publishFinal(db, entryRef, inputVersion, buildFailedPayload(text, inputVersion, reason, modelId));
     end(retryCount, { errorCode: 'analysis-failed' });
     if (result.outcome !== 'published') return result;
     return { outcome: 'failed', reason };
   }
 
   const analysis = analyzeSettled.value;
-  const payload = buildSuccessPayload({ text, entryType, classification, analysis, insight, enhancedContext, inputVersion });
+  const payload = buildSuccessPayload({ text, entryType, classification, analysis, insight, enhancedContext, inputVersion, modelId });
   const result = await publishFinal(db, entryRef, inputVersion, payload);
   end(retryCount);
   if (result.outcome !== 'published') return result;
   return { outcome: 'published' };
 }
 
-function analysisMeta(inputVersion) {
+function analysisMeta(inputVersion, modelId) {
   return {
-    modelId: MODEL_ID,
+    modelId,
     promptVersion: PROMPT_VERSION,
     orchestratorVersion: ORCHESTRATOR_VERSION,
     inputVersion,
@@ -218,7 +220,7 @@ function analysisMeta(inputVersion) {
   };
 }
 
-function buildFailedPayload(text, inputVersion, errorMessage) {
+function buildFailedPayload(text, inputVersion, errorMessage, modelId) {
   return {
     title: truncateTitle(text),
     tags: [],
@@ -226,11 +228,11 @@ function buildFailedPayload(text, inputVersion, errorMessage) {
     analysisError: String(errorMessage || 'analysis-failed').slice(0, 200),
     entry_type: 'reflection',
     analysisLease: FieldValue.delete(),
-    analysisMeta: analysisMeta(inputVersion),
+    analysisMeta: analysisMeta(inputVersion, modelId),
   };
 }
 
-function buildSuccessPayload({ text, entryType, classification, analysis, insight, enhancedContext, inputVersion }) {
+function buildSuccessPayload({ text, entryType, classification, analysis, insight, enhancedContext, inputVersion, modelId }) {
   const topicTags = analysis?.tags || [];
   const structuredTags = enhancedContext?.structured_tags || [];
   const contextTopicTags = enhancedContext?.topic_tags || [];
@@ -261,7 +263,7 @@ function buildSuccessPayload({ text, entryType, classification, analysis, insigh
     context_version: CONTEXT_VERSION,
     analysis: analysisField,
     analysisLease: FieldValue.delete(),
-    analysisMeta: analysisMeta(inputVersion),
+    analysisMeta: analysisMeta(inputVersion, modelId),
   });
 
   if (enhancedContext?.continues_situation) payload.continues_situation = enhancedContext.continues_situation;
