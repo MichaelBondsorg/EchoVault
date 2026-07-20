@@ -416,6 +416,13 @@ export default function App() {
           // expects an id string (or null) to decide whether the draft was
           // durably adopted before deleting it.
           (base64, mime) => audioVault.saveRecording(user.uid, base64, mime).then((r) => r?.id ?? null)
+          // No 3rd {activeDraftId} arg here on purpose: this effect runs at
+          // launch/login with no visibility into EntryBar's live capture
+          // session (that state is private to EntryBar, not lifted here).
+          // The adapter covers that gap itself via a module-level "recording
+          // started recently" fallback (see nativeCaptureAdapter.ts) — real
+          // per-draft precision, if ever reachable from a call site, is
+          // still available via the options param.
         ).then((count) => count && console.log(`[Capture] recovered ${count} interrupted recording(s)`))
           .catch((error) => console.warn('[Capture] recovery scan failed:', error?.message));
       }

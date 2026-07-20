@@ -5,6 +5,7 @@ import { audioVault } from '../../services/audio/audioVault';
 import { discardEntry, getQueuedEntries } from '../../services/offline/offlineManager';
 import { forceSync } from '../../services/sync/syncOrchestrator';
 import { NativeCapture, deleteNativeDraft } from '../../services/capture/nativeCaptureAdapter';
+import { clearPendingReview } from '../../services/capture/pendingReviewDrafts';
 
 const formatDuration = (ms) => {
   const totalSeconds = Math.round((ms || 0) / 1000);
@@ -71,6 +72,7 @@ const CaptureReliabilityCenter = ({ ownerUid, onClose, onRetryAudio }) => {
       const saved = await audioVault.saveRecording(ownerUid, recording.base64, recording.mime);
       if (saved?.id) {
         await deleteNativeDraft(ownerUid, draftId);
+        clearPendingReview(ownerUid, draftId);
         await onRetryAudio?.(recording.base64, recording.mime, saved.id);
       }
     } finally {
@@ -84,6 +86,7 @@ const CaptureReliabilityCenter = ({ ownerUid, onClose, onRetryAudio }) => {
     setBusy(true);
     try {
       await deleteNativeDraft(ownerUid, draftId);
+      clearPendingReview(ownerUid, draftId);
     } finally {
       setBusy(false);
       await refresh();

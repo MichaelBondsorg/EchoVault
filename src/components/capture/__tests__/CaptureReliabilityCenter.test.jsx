@@ -4,6 +4,7 @@ import CaptureReliabilityCenter from '../CaptureReliabilityCenter';
 import { audioVault } from '../../../services/audio/audioVault';
 import { NativeCapture, deleteNativeDraft } from '../../../services/capture/nativeCaptureAdapter';
 import { getQueuedEntries } from '../../../services/offline/offlineManager';
+import { markPendingReview, isPendingReview } from '../../../services/capture/pendingReviewDrafts';
 
 vi.mock('@capacitor/core', () => ({
   Capacitor: { isNativePlatform: () => true },
@@ -43,6 +44,15 @@ beforeEach(() => {
   audioVault.listOrphans.mockResolvedValue([]);
   NativeCapture.listDrafts.mockResolvedValue({ drafts: [staleDraft] });
   window.confirm = vi.fn().mockReturnValue(true);
+
+  const store = new Map();
+  localStorage.getItem.mockImplementation((k) => (store.has(k) ? store.get(k) : null));
+  localStorage.setItem.mockImplementation((k, v) => { store.set(k, String(v)); });
+  localStorage.removeItem.mockImplementation((k) => { store.delete(k); });
+  // Simulate nativeCaptureAdapter having already flagged this draft during
+  // its stale-recording conversion — the pending-review tracking entry a
+  // Transcribe/Discard action is responsible for clearing.
+  markPendingReview(OWNER, 'draft-1');
 });
 
 describe('CaptureReliabilityCenter — needs-review native drafts', () => {
@@ -65,9 +75,10 @@ describe('CaptureReliabilityCenter — needs-review native drafts', () => {
     await waitFor(() => expect(audioVault.saveRecording).toHaveBeenCalledWith(OWNER, 'QUJD', 'audio/mp4'));
     expect(deleteNativeDraft).toHaveBeenCalledWith(OWNER, 'draft-1');
     expect(onRetryAudio).toHaveBeenCalledWith('QUJD', 'audio/mp4', 'rec_1');
+    await waitFor(() => expect(isPendingReview(OWNER, 'draft-1')).toBe(false));
   });
 
-  it('Transcribe does not delete the native draft or hand off when the vault adoption fails', async () => {
+  it('Transcribe does not delete the native draft, hand off, or clear pending-review tracking when the vault adoption fails', async () => {
     NativeCapture.readDraft.mockResolvedValue({ base64: 'QUJD', mime: 'audio/mp4' });
     audioVault.saveRecording.mockResolvedValue({ error: 'quota' });
     const onRetryAudio = vi.fn();
@@ -79,22 +90,25 @@ describe('CaptureReliabilityCenter — needs-review native drafts', () => {
     await waitFor(() => expect(audioVault.saveRecording).toHaveBeenCalled());
     expect(deleteNativeDraft).not.toHaveBeenCalled();
     expect(onRetryAudio).not.toHaveBeenCalled();
+    expect(isPendingReview(OWNER, 'draft-1')).toBe(true);
   });
 
-  it('Discard deletes the native draft after confirmation', async () => {
+  it('Discard deletes the native draft and clears pending-review tracking after confirmation', async () => {
     render(<CaptureReliabilityCenter ownerUid={OWNER} onClose={vi.fn()} onRetryAudio={vi.fn()} />);
     await screen.findByText(/Recording interrupted/);
     fireEvent.click(screen.getByLabelText('Discard interrupted recording'));
 
     await waitFor(() => expect(deleteNativeDraft).toHaveBeenCalledWith(OWNER, 'draft-1'));
+    await waitFor(() => expect(isPendingReview(OWNER, 'draft-1')).toBe(false));
   });
 
-  it('does not discard when the user cancels the confirmation', async () => {
+  it('does not discard or clear tracking when the user cancels the confirmation', async () => {
     window.confirm.mockReturnValue(false);
     render(<CaptureReliabilityCenter ownerUid={OWNER} onClose={vi.fn()} onRetryAudio={vi.fn()} />);
     await screen.findByText(/Recording interrupted/);
     fireEvent.click(screen.getByLabelText('Discard interrupted recording'));
 
     expect(deleteNativeDraft).not.toHaveBeenCalled();
+    expect(isPendingReview(OWNER, 'draft-1')).toBe(true);
   });
 });
