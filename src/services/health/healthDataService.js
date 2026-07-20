@@ -371,7 +371,8 @@ export const saveManualHealthInput = async (input) => {
       totalHours: input.sleepHours,
       quality: input.sleepHours >= 7 ? 'good' : input.sleepHours >= 5 ? 'fair' : 'poor'
     },
-    hasWorkout: input.hadWorkout || false,
+    // Absent/unknown stays null — never fabricate a "no workout" false.
+    hasWorkout: input.hadWorkout ?? null,
     hrv: {
       stressIndicator: input.stressLevel || null
     },

@@ -109,7 +109,10 @@ const detectAvailableSources = async () => {
  * @param {Date} date - The date to fetch health for
  * @returns {Object|null} Health context or null if unavailable
  */
-const fetchWhoopForDate = async (date) => {
+// Exported (in addition to being used internally by backfillHealthData)
+// solely so hasWorkout's null-not-fabricated contract has direct unit
+// coverage without mounting the full backfill orchestration.
+export const fetchWhoopForDate = async (date) => {
   try {
     const summary = await getWhoopSummary(date);
     const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
@@ -159,7 +162,8 @@ const fetchWhoopForDate = async (date) => {
         totalCaloriesBurned: summary.activity?.totalCaloriesBurned ?? null,
         activeCaloriesBurned: summary.activity?.activeCaloriesBurned ?? null,
         totalExerciseMinutes: summary.activity?.totalExerciseMinutes ?? null,
-        hasWorkout: summary.activity?.hasWorkout || false,
+        // Absent/unknown stays null — never fabricate a "no workout" false.
+        hasWorkout: summary.activity?.hasWorkout ?? null,
         workouts: (summary.activity?.workouts || []).map(w => ({ ...w, source: 'whoop' }))
       },
       source: 'whoop',
@@ -184,7 +188,8 @@ const fetchWhoopForDate = async (date) => {
  * @param {Date} date - The date to fetch health for
  * @returns {Object|null} Health context or null if unavailable
  */
-const fetchHealthKitForDate = async (date) => {
+// Exported for the same reason as fetchWhoopForDate above.
+export const fetchHealthKitForDate = async (date) => {
   try {
     const summary = await getHealthKitSummary(date);
 
@@ -221,7 +226,8 @@ const fetchHealthKitForDate = async (date) => {
         totalCaloriesBurned: summary.activity?.totalCaloriesBurned || null,
         activeCaloriesBurned: summary.activity?.activeCaloriesBurned || null,
         totalExerciseMinutes: summary.activity?.totalExerciseMinutes || null,
-        hasWorkout: summary.activity?.hasWorkout || false,
+        // Absent/unknown stays null — never fabricate a "no workout" false.
+        hasWorkout: summary.activity?.hasWorkout ?? null,
         workouts: (summary.activity?.workouts || []).map(w => ({ ...w, source: 'healthkit' }))
       },
       source: 'healthkit',
