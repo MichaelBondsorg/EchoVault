@@ -181,33 +181,70 @@ needs a green gate) is the right response.
 
 ## Embedding v2 cutover steps
 
-Placeholder — this is PRD Batch 6 / Task M3 territory
-(`functions/src/models/registry.js`, `scripts/backfill-embeddings-v2.js`),
-which had not landed as of this runbook's writing (a concurrent agent may
-be implementing the model-hygiene batch in parallel with this doc). Once
-M3 ships, its own commit should fill in this section with the specific
-backfill → verify-counts → flip-`model.embeddingV2Read` → (later) remove-v1
-sequence — see the plan doc's Task M3 for the target design (same-space
-retrieval guard: a v2 query vector is never scored against v1 vectors in
-the same similarity computation). Link that PR/commit here once it lands.
+Dual-index migration to `gemini-embedding-2` (M3). The v1 space
+(`text-embedding-004`) stays live throughout; the two spaces are never mixed
+(`scoreSameSpace` in `functions/src/ai/embeddingV2.js` throws if a v2 query
+vector is scored against a v1 doc vector, or vice versa).
+
+1. **Enable dual-write.** Set `model.embeddingWriteV2: true` in the
+   `config/flags` doc (default off). Within the 60s flag TTL, `onEntryCreate`
+   starts writing `embeddingV2` + `embeddingMeta` ({model, dim, taskType,
+   createdAt}) alongside the legacy `embedding` field. v2 vectors cache under
+   `sha256(uid+':v2:'+text)[:24]` — a distinct keyspace from v1. The write is
+   fail-open: a v2 failure never blocks the v1 vector.
+2. **Backfill existing entries.** Run the admin script (never CI):
+   `GOOGLE_APPLICATION_CREDENTIALS=… GEMINI_API_KEY=… NODE_PATH=functions/node_modules
+   node scripts/backfill-embeddings-v2.js --dry-run` first to preview counts,
+   then without `--dry-run`. It is batched (50, 200ms/batch), resumable
+   (checkpoint doc `migration_state/embeddingsV2`; `--restart` to ignore it),
+   per-user consent-gated (skips `settings/consent.aiProcessing === false`),
+   and idempotent (skips entries that already have `embeddingV2`).
+3. **Verify counts** before flipping reads: confirm the bulk of entries now
+   carry `embeddingV2` (checkpoint `updated`/`skipped`, or a Firestore query).
+4. **Flip reads.** Set `model.embeddingV2Read: true`. The rule: when the query
+   AND the docs both have v2 vectors, score in the v2 space EXCLUSIVELY; else
+   fall back to v1. **Caveat:** `functions/` only *writes* embeddings — the RAG
+   scoring consumers are client-side (`src/services/rag/*`,
+   `src/services/ai/embeddings.js`) and still read the v1 `embedding` field.
+   Switching those consumers to `scoreSameSpace({vector,space})` is a follow-up
+   outside M3's file ownership; until it lands, flipping the read flag has no
+   client-visible effect.
+5. **(Later) retire v1.** Once every entry has v2 and the read path is v2-only,
+   drop the `embedding` field + the `text-embedding-004` path and the
+   `embedding` workload default.
 
 ## Model registry flip procedure
 
-The plan's server-owned model registry (`functions/src/models/registry.js`,
-`getModel(workload)`, Task M1) had not landed as of this runbook's writing.
-**Today**, the closest equivalent is the `model.*` keys in the `config/flags`
-doc listed above (`model.gemini35flash`, `model.embeddingV2Read`,
-`model.fusedTranscription35`) — but per the "Where consumed" column, none of
-them are read by any call site yet; the underlying model strings are still
-hardcoded (see the plan's Ground Truth section for the current-prod model
-list). Until M1 ships, a bad model requires a code change + deploy to fix,
-not a flag flip.
+The server-owned registry (`functions/src/models/registry.js`, M1) is the
+single source of truth for AI model ids. `getModel(db, workload)` resolves a
+`config/flags` field `model.<workload>` (string override) over
+`MODEL_DEFAULTS`, cached 60s via `getServerFlag`; `getModelSync(workload)` is
+the defaults-only accessor for sync call sites.
 
-Once M1 lands, the flip procedure will be: edit the relevant `model.*` key
-in the `config/flags` Firestore doc — no functions/app deploy required,
-takes effect within the server's 60s flag cache TTL. Update this section
-with the real procedure (and the full `getModel(workload)` → default
-mapping table) when that PR merges.
+**To change a model with NO deploy:** set the `model.<workload>` field in the
+`config/flags` Firestore doc to the new model id (Admin SDK / console only).
+Takes effect within the 60s flag cache TTL. Example — flip classification and
+analysis from the preview model to `gemini-2.5-flash` by setting
+`model.classify` and `model.analyze` to `gemini-2.5-flash` (this is the
+intended path for the classify/analyze bump; no code change).
+
+Workload → default (as of M2):
+
+| Workload | Default | Notes |
+|---|---|---|
+| classify / analyze / insight / entityResolution | `gemini-3-flash-preview` | bump via `model.classify` / `model.analyze` |
+| chat | `gpt-4o-mini` | |
+| chatFallback | `gpt-4o` | |
+| embedding | `text-embedding-004` | legacy v1 space |
+| embeddingV2 | `gemini-embedding-2` | dual-index (flag-gated) |
+| transcriptionFallback | `whisper-1` | |
+| fusedTranscription | `gemini-2.5-flash` | |
+| tone / digest / temporal | `gemini-3.5-flash` | replaced shut-down Gemini 2.0 paths |
+| realtimeNA | `gpt-realtime-2.1` | owned by relay env `REALTIME_MODEL`, not this registry |
+
+**Relay-server models** (`REALTIME_MODEL`, `WHISPER_MODEL`, `CHAT_MODEL`,
+`TTS_MODEL`, `TONE_MODEL`) are env vars, not `config/flags` keys — changing one
+needs a Cloud Run env/redeploy, not a flag flip.
 
 ## Known gaps (accurate as of this runbook's writing)
 
@@ -224,7 +261,10 @@ mapping table) when that PR merges.
   Task B5 (or a follow-up task), not something this runbook's author
   (task D34) was scoped to fix — flagged here so it isn't mistaken for an
   already-shipped, flag-gated capability.
-- **Model registry (M1–M4) and intent system (I1–I4) are future batches.**
-  The flags table above lists their flags because they're already defined
-  in `FLAG_DEFAULTS`, but the code that would read them doesn't exist yet.
-  Treat those rows as forward-declared, not currently actionable.
+- **Model registry (M1–M4) has landed.** `functions/src/models/registry.js`
+  now owns every AI model id; the `model.<workload>` keys in `config/flags`
+  are read by `getModel`, and the shut-down Gemini 2.0 digest/tone paths plus
+  the deprecated realtime preview have been retired (see "Model registry flip
+  procedure" and "Embedding v2 cutover steps" above). The intent system
+  (I1–I4) remains a future batch — its `FLAG_DEFAULTS` rows are still
+  forward-declared, not currently actionable.
