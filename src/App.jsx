@@ -31,7 +31,7 @@ import {
   DEFAULT_SAFETY_PLAN
 } from './config/constants';
 import { USE_FUSED_TRANSCRIPTION } from './config/ai';
-import { initFlags } from './config/flags';
+import { initFlags, getFlag } from './config/flags';
 
 // Utils
 import { safeString, removeUndefined, formatMentions } from './utils/string';
@@ -47,6 +47,8 @@ import {
 } from './services/analysis';
 import { checkCrisisKeywords, checkWarningIndicators, checkLongitudinalRisk } from './services/safety';
 import { retrofitEntriesInBackground } from './services/entries';
+import { buildCoreEntry } from './services/entries/buildCoreEntry';
+import { runPostSaveEnrichment } from './services/entries/enrichmentRunner';
 import { queueEntry, resetStuckSyncing } from './services/offline';
 import { initializeSyncOrchestrator, triggerSync } from './services/sync/syncOrchestrator';
 import { ownerStorageKey } from './services/storage/ownerScopedStorage';
@@ -1010,257 +1012,13 @@ export default function App() {
       return 'saved';
     }
 
-    // OPTIMIZED: Save entry immediately, generate embedding in background
-    // This reduces user-perceived latency from ~5.9s to ~0.3s
-    // Embedding will be backfilled by Firestore trigger (see functions/index.js)
-
-    // On native platforms, perform local analysis for immediate feedback
-    // This runs in parallel with entry save and provides instant mood/classification
-    let localAnalysis = null;
-    if (isNative) {
-      try {
-        console.time('⏱️ Local Analysis (native)');
-        localAnalysis = performLocalAnalysis(finalTex, { voiceTone });
-        console.timeEnd('⏱️ Local Analysis (native)');
-        console.log('[LocalAnalysis] Immediate result:', {
-          entry_type: localAnalysis.entry_type,
-          mood_score: localAnalysis.mood_score?.toFixed(2),
-          time_ms: localAnalysis.local_analysis_time_ms
-        });
-      } catch (localError) {
-        console.warn('[LocalAnalysis] Failed, server analysis will provide results:', localError);
-      }
-    }
-
-    // Skip embedding generation - let server-side trigger handle it
-    const embedding = null;
-
-    // Use recent entries for context instead of vector similarity
-    // (Vector search requires embedding, which we'll add later)
-    const related = [];
-    const recent = entries.slice(0, 5);
-
-    // Capture health context (sleep, steps, workout, stress) if available
-    let healthContext = null;
-    try {
-      console.log('[EntrySave] Attempting to capture health context on platform:', platform);
-      healthContext = await getEntryHealthContext();
-      if (healthContext) {
-        console.log('[EntrySave] Health context captured:', {
-          source: healthContext.source,
-          hasSleep: !!healthContext.sleep?.totalHours,
-          hasHeart: !!healthContext.heart?.restingRate,
-          hasActivity: !!healthContext.activity?.stepsToday
-        });
-      } else {
-        console.log('[EntrySave] No health context available');
-      }
-    } catch (healthError) {
-      // Health context is optional - don't block entry saving
-      console.warn('[EntrySave] Could not capture health context:', healthError.message);
-    }
-
-    // Capture location separately (for environment backfill even if weather fails)
-    let entryLocation = null;
-    try {
-      const locationResult = await getCurrentLocation();
-      if (locationResult?.latitude && locationResult?.longitude) {
-        entryLocation = {
-          latitude: locationResult.latitude,
-          longitude: locationResult.longitude,
-          accuracy: locationResult.accuracy,
-          cached: locationResult.cached || false
-        };
-        console.log('Location captured:', entryLocation);
-      }
-    } catch (locError) {
-      console.warn('Could not capture location:', locError.message);
-    }
-
-    // Capture environment context (weather, light, sun times) if available
-    let environmentContext = null;
-    try {
-      environmentContext = await getEntryEnvironmentContext();
-      if (environmentContext) {
-        console.log('Environment context captured:', {
-          weather: environmentContext.weather,
-          temp: environmentContext.temperature,
-          dayWeather: environmentContext.daySummary?.condition,
-          dayTempHigh: environmentContext.daySummary?.tempHigh,
-          lightContext: environmentContext.lightContext
-        });
-      }
-    } catch (envError) {
-      // Environment context is optional - don't block entry saving
-      console.warn('Could not capture environment context:', envError.message);
-    }
-
-    try {
-      const entryData = {
-        text: finalTex,
-        category: cat,
-        analysisStatus: aiProcessingEnabled ? 'pending' : 'disabled',
-        aiProcessingConsent: aiProcessingEnabled,
-        embedding,
-        createdAt: Timestamp.now(),
-        effectiveDate: Timestamp.fromDate(effectiveDate),
-        userId: user.uid,
-        // Signal extraction version - increments on each edit for race condition handling
-        signalExtractionVersion: 1,
-        // Platform tracking - enables health context backfill for web entries when opened on mobile
-        createdOnPlatform: platform,
-        needsHealthContext: !healthContext && !isNative // Flag web entries that need health data
-      };
-
-      if (rawTranscript) {
-        entryData.transcription = {
-          rawTranscript,
-          cleanedTranscript: finalTex,
-          schemaVersion: 1,
-          correctedByUser: false
-        };
-      }
-
-      // Store health context if available (from Apple Health / Google Fit)
-      if (healthContext) {
-        entryData.healthContext = healthContext;
-      }
-
-      // Store environment context if available (weather, light, sun times)
-      if (environmentContext) {
-        entryData.environmentContext = environmentContext;
-      }
-
-      // Store location separately (enables environment backfill even if weather fetch failed)
-      if (entryLocation) {
-        entryData.location = entryLocation;
-      }
-
-      // Store voice tone analysis if available (from voice recording)
-      if (voiceTone) {
-        entryData.voiceTone = {
-          moodScore: voiceTone.moodScore,
-          energy: voiceTone.energy,
-          emotions: voiceTone.emotions,
-          confidence: voiceTone.confidence,
-          summary: voiceTone.summary,
-          analyzedAt: Timestamp.now()
-        };
-        // Also set initial analysis mood from voice tone if confidence is high enough
-        if (voiceTone.confidence >= 0.6) {
-          entryData.voiceMoodScore = voiceTone.moodScore;
-        }
-      }
-
-      // Store local analysis for immediate display (native platforms only)
-      // Server analysis will run in background and update with richer results
-      if (localAnalysis) {
-        entryData.localAnalysis = {
-          entry_type: localAnalysis.entry_type,
-          mood_score: localAnalysis.mood_score,
-          classification_confidence: localAnalysis.classification_confidence,
-          sentiment_confidence: localAnalysis.sentiment_confidence,
-          extracted_tasks: localAnalysis.extracted_tasks || [],
-          analyzed_at: new Date().toISOString(),
-          analysis_time_ms: localAnalysis.local_analysis_time_ms
-        };
-        // Use local results as initial analysis (will be updated by server)
-        entryData.entry_type = localAnalysis.entry_type;
-        entryData.title = finalTex.substring(0, 50) + (finalTex.length > 50 ? '...' : '');
-        entryData.analysis = {
-          mood_score: localAnalysis.mood_score,
-          framework: 'local_pending_server'
-        };
-        // Mark that we have local analysis, server should still run
-        entryData.hasLocalAnalysis = true;
-      }
-
-      // Store temporal context if detected (past reference)
-      if (temporalContext?.detected && temporalContext?.reference) {
-        entryData.temporalContext = {
-          detected: true,
-          reference: temporalContext.reference,
-          originalPhrase: temporalContext.originalPhrase,
-          confidence: temporalContext.confidence,
-          backdated: effectiveDate.toDateString() !== now.toDateString()
-        };
-      }
-
-      // Store future mentions for follow-up prompts
-      if (temporalContext?.futureMentions?.length > 0) {
-        entryData.futureMentions = temporalContext.futureMentions.map(mention => ({
-          targetDate: Timestamp.fromDate(mention.targetDate),
-          event: mention.event,
-          sentiment: mention.sentiment,
-          phrase: mention.phrase,
-          confidence: mention.confidence,
-          isRecurring: mention.isRecurring || false,
-          recurringPattern: mention.recurringPattern || null
-        }));
-      }
-
-      if (safetyFlagged) {
-        entryData.safety_flagged = true;
-        if (safetyUserResponse) {
-          entryData.safety_user_response = safetyUserResponse;
-        }
-      }
-
-      if (hasWarning) {
-        entryData.has_warning_indicators = true;
-      }
-
-      console.log('📝 Entry data being saved:', {
-        hasHealthContext: !!entryData.healthContext,
-        healthContext: entryData.healthContext,
-        hasEnvironmentContext: !!entryData.environmentContext
-      });
-      console.time('⏱️ Firestore save');
-      const ref = await addDoc(collection(db, 'artifacts', APP_COLLECTION_ID, 'users', user.uid, 'entries'), entryData);
-      console.timeEnd('⏱️ Firestore save');
-      console.timeEnd('⏱️ TOTAL: Save entry to Firestore');
-
-      // Streak celebration (D4b, CLOUD-DESIGN-SPEC.md §7): the just-saved
-      // entry isn't in `entries` yet (the Firestore onSnapshot listener that
-      // populates it hasn't fired), so diff a "before" streak (current
-      // `entries`) against an "after" streak (`entries` + the just-built
-      // entryData) using the shared calculateStreak() helper — the same one
-      // MiniStatsWidget's streak cell reads from, per the plan.
-      //
-      // shouldCelebrateNewStreak() (services/dashboard/index.js) owns the
-      // "is this actually a new personal best, and is it safe to celebrate"
-      // decision — pulled out to a pure function so the safety-adjacency
-      // gate (2026-07-18 reviewer fix, CRITICAL C1 / IMPORTANT I1) has real
-      // unit-test coverage without mounting this untested save flow. It
-      // gates off entirely when `safetyFlagged` (this save came through the
-      // crisis flow) or `hasWarning` (checkWarningIndicators(finalTex),
-      // computed synchronously above — the best *available-at-save-time*
-      // proxy for "heavy entry," NOT the same signal as the
-      // DecompressionScreen trigger a few lines down, which is mood-score-
-      // based and only resolves later in the async analysis pipeline; see
-      // that function's doc comment and task-D4b-report.md for the full
-      // caveat on this residual, narrower gap).
-      try {
-        const prevStreak = calculateStreak(entries);
-        const nextStreak = calculateStreak([...entries, entryData]);
-        if (shouldCelebrateNewStreak(prevStreak, nextStreak, { safetyFlagged, hasWarning })) {
-          openStreakCelebration({
-            currentStreak: nextStreak.currentStreak,
-            previousBest: prevStreak.longestStreak
-          });
-        }
-      } catch (streakError) {
-        console.warn('[StreakCelebration] Streak computation failed:', streakError);
-      }
-
-      setProcessing(false);
-      setReplyContext(null);
-
-      if (!aiProcessingEnabled) {
-        console.log('[AI] Processing paused; entry stored without third-party analysis');
-        return 'saved';
-      }
-
+    // Post-save AI pipeline (signal extraction + nexus insight update +
+    // server analysis). Extracted verbatim so BOTH the legacy save path and
+    // the core-first path (flag: coreFirstSave) fire the exact same
+    // non-blocking work once the entry is durable. `localAnalysis`, `related`,
+    // `recent`, and `ref` differ per path and are passed in; everything else
+    // (finalTex, now, cat, user, entries, setters) is closed over.
+    const firePostSaveProcessing = ({ ref, localAnalysis, related, recent }) => {
       // Signal extraction (non-blocking, parallel to analysis)
       // This extracts temporal signals for the DetectedStrip UI
       (async () => {
@@ -1518,6 +1276,398 @@ export default function App() {
           }
         }
       })();
+    };
+
+    // Core-first save (flag: coreFirstSave): persist the DURABLE core entry
+    // BEFORE any optional enrichment, so the user-visible write never blocks on
+    // the temporal Gemini call or the sequential health/location/weather
+    // fetches. Enrichment runs fire-and-forget afterward against capture-time
+    // provenance; missing context stays null and is never fabricated. Safety
+    // flags derive from TEXT (safetyFlagged / hasWarning), never enrichment, so
+    // the crisis path is preserved exactly.
+    if (getFlag('coreFirstSave')) {
+      // Local analysis is synchronous, native-only, on-device (no network) —
+      // instant, so it stays inline to feed the (unchanged) signals/nexus
+      // pipeline. It is NOT written into the core object; the enrichment runner
+      // persists the localAnalysis field post-save.
+      let coreLocalAnalysis = null;
+      if (isNative) {
+        try {
+          coreLocalAnalysis = performLocalAnalysis(finalTex, { voiceTone });
+        } catch (localError) {
+          console.warn('[LocalAnalysis] Failed, server analysis will provide results:', localError);
+        }
+      }
+
+      const related = [];
+      const recent = entries.slice(0, 5);
+
+      // Capture-time provenance. coarseLocation is a point-in-time / cached
+      // location attempt capped at 2000ms; on timeout it is null and the
+      // enrichment runner retries a fresh fix later.
+      const capturedAt = now.toISOString();
+      const captureTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+      let coarseLocation = null;
+      try {
+        coarseLocation = await Promise.race([
+          getCurrentLocation(),
+          new Promise((resolve) => setTimeout(() => resolve(null), 2000)),
+        ]);
+      } catch {
+        coarseLocation = null;
+      }
+      const captureContext = { capturedAt, captureTimezone, coarseLocation };
+
+      try {
+        const entryData = buildCoreEntry({
+          text: finalTex,
+          category: cat,
+          user,
+          transcription: rawTranscript ? { rawTranscript } : null,
+          consentSnapshot: { aiProcessingConsent: aiProcessingEnabled },
+          captureContext,
+          safety: { safetyFlagged, safetyUserResponse, hasWarning },
+          platform,
+          voiceTone,
+        });
+
+        console.time('⏱️ Firestore save (core-first)');
+        const ref = await addDoc(collection(db, 'artifacts', APP_COLLECTION_ID, 'users', user.uid, 'entries'), entryData);
+        console.timeEnd('⏱️ Firestore save (core-first)');
+        console.timeEnd('⏱️ TOTAL: Save entry to Firestore');
+
+        // Streak celebration — identical gating to the legacy path: never
+        // celebrate a safety-flagged or warning-bearing entry.
+        try {
+          const prevStreak = calculateStreak(entries);
+          const nextStreak = calculateStreak([...entries, entryData]);
+          if (shouldCelebrateNewStreak(prevStreak, nextStreak, { safetyFlagged, hasWarning })) {
+            openStreakCelebration({
+              currentStreak: nextStreak.currentStreak,
+              previousBest: prevStreak.longestStreak
+            });
+          }
+        } catch (streakError) {
+          console.warn('[StreakCelebration] Streak computation failed:', streakError);
+        }
+
+        // The core entry is durable — dismiss the composer immediately.
+        setProcessing(false);
+        setReplyContext(null);
+
+        // Post-save enrichment (fire-and-forget). Runs health / environment /
+        // temporal / native-local-analysis against capture-time provenance and
+        // writes them back with a single updateDoc. Never blocks, never throws.
+        runPostSaveEnrichment({
+          entryRef: ref,
+          entryData,
+          captureContext: { ...captureContext, localAnalysis: coreLocalAnalysis, voiceTone },
+        });
+
+        if (!aiProcessingEnabled) {
+          console.log('[AI] Processing paused; entry stored without third-party analysis');
+          return 'saved';
+        }
+
+        // Signals + nexus + server analysis — identical to the legacy path.
+        firePostSaveProcessing({ ref, localAnalysis: coreLocalAnalysis, related, recent });
+
+        return 'saved';
+      } catch (e) {
+        console.error('Save failed:', e);
+        // Never lose the entry on a failed online save. Persist it to the
+        // durable offline queue (survives app restart, syncs later) instead of
+        // dropping it. Enrichment is post-save, so no context is captured here.
+        let queuedLocally = false;
+        try {
+          await queueEntry(user.uid, {
+            text: finalTex,
+            category: cat,
+            createdAt: now.toISOString(),
+            effectiveDate: effectiveDate.toISOString(),
+            healthContext: null,
+            environmentContext: null,
+            voiceTone,
+            aiProcessingConsent: aiProcessingEnabled,
+            transcription: rawTranscript ? {
+              rawTranscript,
+              cleanedTranscript: finalTex,
+              schemaVersion: 1
+            } : undefined,
+            safety_flagged: safetyFlagged || undefined,
+            safety_user_response: safetyUserResponse || undefined,
+            has_warning_indicators: hasWarning || undefined,
+            platform
+          });
+          queuedLocally = true;
+          triggerSync().catch(() => {});
+        } catch (queueErr) {
+          console.error('Failed to queue entry after save failure:', queueErr);
+        }
+
+        const errorMessage = queuedLocally
+          ? "Couldn't save right now — your entry is stored on this device and will sync automatically."
+          : e.code === 'permission-denied'
+          ? 'Save failed: Permission denied. Please sign in again.'
+          : 'Save failed. Please try again.';
+        alert(errorMessage);
+        setProcessing(false);
+        return queuedLocally ? 'saved' : undefined;
+      }
+    }
+
+    // OPTIMIZED: Save entry immediately, generate embedding in background
+    // This reduces user-perceived latency from ~5.9s to ~0.3s
+    // Embedding will be backfilled by Firestore trigger (see functions/index.js)
+
+    // On native platforms, perform local analysis for immediate feedback
+    // This runs in parallel with entry save and provides instant mood/classification
+    let localAnalysis = null;
+    if (isNative) {
+      try {
+        console.time('⏱️ Local Analysis (native)');
+        localAnalysis = performLocalAnalysis(finalTex, { voiceTone });
+        console.timeEnd('⏱️ Local Analysis (native)');
+        console.log('[LocalAnalysis] Immediate result:', {
+          entry_type: localAnalysis.entry_type,
+          mood_score: localAnalysis.mood_score?.toFixed(2),
+          time_ms: localAnalysis.local_analysis_time_ms
+        });
+      } catch (localError) {
+        console.warn('[LocalAnalysis] Failed, server analysis will provide results:', localError);
+      }
+    }
+
+    // Skip embedding generation - let server-side trigger handle it
+    const embedding = null;
+
+    // Use recent entries for context instead of vector similarity
+    // (Vector search requires embedding, which we'll add later)
+    const related = [];
+    const recent = entries.slice(0, 5);
+
+    // Capture health context (sleep, steps, workout, stress) if available
+    let healthContext = null;
+    try {
+      console.log('[EntrySave] Attempting to capture health context on platform:', platform);
+      healthContext = await getEntryHealthContext();
+      if (healthContext) {
+        console.log('[EntrySave] Health context captured:', {
+          source: healthContext.source,
+          hasSleep: !!healthContext.sleep?.totalHours,
+          hasHeart: !!healthContext.heart?.restingRate,
+          hasActivity: !!healthContext.activity?.stepsToday
+        });
+      } else {
+        console.log('[EntrySave] No health context available');
+      }
+    } catch (healthError) {
+      // Health context is optional - don't block entry saving
+      console.warn('[EntrySave] Could not capture health context:', healthError.message);
+    }
+
+    // Capture location separately (for environment backfill even if weather fails)
+    let entryLocation = null;
+    try {
+      const locationResult = await getCurrentLocation();
+      if (locationResult?.latitude && locationResult?.longitude) {
+        entryLocation = {
+          latitude: locationResult.latitude,
+          longitude: locationResult.longitude,
+          accuracy: locationResult.accuracy,
+          cached: locationResult.cached || false
+        };
+        console.log('Location captured:', entryLocation);
+      }
+    } catch (locError) {
+      console.warn('Could not capture location:', locError.message);
+    }
+
+    // Capture environment context (weather, light, sun times) if available
+    let environmentContext = null;
+    try {
+      environmentContext = await getEntryEnvironmentContext();
+      if (environmentContext) {
+        console.log('Environment context captured:', {
+          weather: environmentContext.weather,
+          temp: environmentContext.temperature,
+          dayWeather: environmentContext.daySummary?.condition,
+          dayTempHigh: environmentContext.daySummary?.tempHigh,
+          lightContext: environmentContext.lightContext
+        });
+      }
+    } catch (envError) {
+      // Environment context is optional - don't block entry saving
+      console.warn('Could not capture environment context:', envError.message);
+    }
+
+    try {
+      const entryData = {
+        text: finalTex,
+        category: cat,
+        analysisStatus: aiProcessingEnabled ? 'pending' : 'disabled',
+        aiProcessingConsent: aiProcessingEnabled,
+        embedding,
+        createdAt: Timestamp.now(),
+        effectiveDate: Timestamp.fromDate(effectiveDate),
+        userId: user.uid,
+        // Signal extraction version - increments on each edit for race condition handling
+        signalExtractionVersion: 1,
+        // Platform tracking - enables health context backfill for web entries when opened on mobile
+        createdOnPlatform: platform,
+        needsHealthContext: !healthContext && !isNative // Flag web entries that need health data
+      };
+
+      if (rawTranscript) {
+        entryData.transcription = {
+          rawTranscript,
+          cleanedTranscript: finalTex,
+          schemaVersion: 1,
+          correctedByUser: false
+        };
+      }
+
+      // Store health context if available (from Apple Health / Google Fit)
+      if (healthContext) {
+        entryData.healthContext = healthContext;
+      }
+
+      // Store environment context if available (weather, light, sun times)
+      if (environmentContext) {
+        entryData.environmentContext = environmentContext;
+      }
+
+      // Store location separately (enables environment backfill even if weather fetch failed)
+      if (entryLocation) {
+        entryData.location = entryLocation;
+      }
+
+      // Store voice tone analysis if available (from voice recording)
+      if (voiceTone) {
+        entryData.voiceTone = {
+          moodScore: voiceTone.moodScore,
+          energy: voiceTone.energy,
+          emotions: voiceTone.emotions,
+          confidence: voiceTone.confidence,
+          summary: voiceTone.summary,
+          analyzedAt: Timestamp.now()
+        };
+        // Also set initial analysis mood from voice tone if confidence is high enough
+        if (voiceTone.confidence >= 0.6) {
+          entryData.voiceMoodScore = voiceTone.moodScore;
+        }
+      }
+
+      // Store local analysis for immediate display (native platforms only)
+      // Server analysis will run in background and update with richer results
+      if (localAnalysis) {
+        entryData.localAnalysis = {
+          entry_type: localAnalysis.entry_type,
+          mood_score: localAnalysis.mood_score,
+          classification_confidence: localAnalysis.classification_confidence,
+          sentiment_confidence: localAnalysis.sentiment_confidence,
+          extracted_tasks: localAnalysis.extracted_tasks || [],
+          analyzed_at: new Date().toISOString(),
+          analysis_time_ms: localAnalysis.local_analysis_time_ms
+        };
+        // Use local results as initial analysis (will be updated by server)
+        entryData.entry_type = localAnalysis.entry_type;
+        entryData.title = finalTex.substring(0, 50) + (finalTex.length > 50 ? '...' : '');
+        entryData.analysis = {
+          mood_score: localAnalysis.mood_score,
+          framework: 'local_pending_server'
+        };
+        // Mark that we have local analysis, server should still run
+        entryData.hasLocalAnalysis = true;
+      }
+
+      // Store temporal context if detected (past reference)
+      if (temporalContext?.detected && temporalContext?.reference) {
+        entryData.temporalContext = {
+          detected: true,
+          reference: temporalContext.reference,
+          originalPhrase: temporalContext.originalPhrase,
+          confidence: temporalContext.confidence,
+          backdated: effectiveDate.toDateString() !== now.toDateString()
+        };
+      }
+
+      // Store future mentions for follow-up prompts
+      if (temporalContext?.futureMentions?.length > 0) {
+        entryData.futureMentions = temporalContext.futureMentions.map(mention => ({
+          targetDate: Timestamp.fromDate(mention.targetDate),
+          event: mention.event,
+          sentiment: mention.sentiment,
+          phrase: mention.phrase,
+          confidence: mention.confidence,
+          isRecurring: mention.isRecurring || false,
+          recurringPattern: mention.recurringPattern || null
+        }));
+      }
+
+      if (safetyFlagged) {
+        entryData.safety_flagged = true;
+        if (safetyUserResponse) {
+          entryData.safety_user_response = safetyUserResponse;
+        }
+      }
+
+      if (hasWarning) {
+        entryData.has_warning_indicators = true;
+      }
+
+      console.log('📝 Entry data being saved:', {
+        hasHealthContext: !!entryData.healthContext,
+        healthContext: entryData.healthContext,
+        hasEnvironmentContext: !!entryData.environmentContext
+      });
+      console.time('⏱️ Firestore save');
+      const ref = await addDoc(collection(db, 'artifacts', APP_COLLECTION_ID, 'users', user.uid, 'entries'), entryData);
+      console.timeEnd('⏱️ Firestore save');
+      console.timeEnd('⏱️ TOTAL: Save entry to Firestore');
+
+      // Streak celebration (D4b, CLOUD-DESIGN-SPEC.md §7): the just-saved
+      // entry isn't in `entries` yet (the Firestore onSnapshot listener that
+      // populates it hasn't fired), so diff a "before" streak (current
+      // `entries`) against an "after" streak (`entries` + the just-built
+      // entryData) using the shared calculateStreak() helper — the same one
+      // MiniStatsWidget's streak cell reads from, per the plan.
+      //
+      // shouldCelebrateNewStreak() (services/dashboard/index.js) owns the
+      // "is this actually a new personal best, and is it safe to celebrate"
+      // decision — pulled out to a pure function so the safety-adjacency
+      // gate (2026-07-18 reviewer fix, CRITICAL C1 / IMPORTANT I1) has real
+      // unit-test coverage without mounting this untested save flow. It
+      // gates off entirely when `safetyFlagged` (this save came through the
+      // crisis flow) or `hasWarning` (checkWarningIndicators(finalTex),
+      // computed synchronously above — the best *available-at-save-time*
+      // proxy for "heavy entry," NOT the same signal as the
+      // DecompressionScreen trigger a few lines down, which is mood-score-
+      // based and only resolves later in the async analysis pipeline; see
+      // that function's doc comment and task-D4b-report.md for the full
+      // caveat on this residual, narrower gap).
+      try {
+        const prevStreak = calculateStreak(entries);
+        const nextStreak = calculateStreak([...entries, entryData]);
+        if (shouldCelebrateNewStreak(prevStreak, nextStreak, { safetyFlagged, hasWarning })) {
+          openStreakCelebration({
+            currentStreak: nextStreak.currentStreak,
+            previousBest: prevStreak.longestStreak
+          });
+        }
+      } catch (streakError) {
+        console.warn('[StreakCelebration] Streak computation failed:', streakError);
+      }
+
+      setProcessing(false);
+      setReplyContext(null);
+
+      if (!aiProcessingEnabled) {
+        console.log('[AI] Processing paused; entry stored without third-party analysis');
+        return 'saved';
+      }
+
+      firePostSaveProcessing({ ref, localAnalysis, related, recent });
 
       return 'saved';
     } catch (e) {
@@ -1583,6 +1733,14 @@ export default function App() {
       setCrisisModal(true);
       setProcessing(false);
       return 'deferred';
+    }
+
+    // Core-first save (flag: coreFirstSave): temporal detection is no longer a
+    // blocking pre-save Gemini call — it moved into the post-save enrichment
+    // runner (see doSaveEntry). Skip the 45s temporal await entirely and go
+    // straight to the durable core write.
+    if (getFlag('coreFirstSave')) {
+      return await doSaveEntry(textInput, false, null, null, voiceTone, rawTranscript);
     }
 
     // Detect temporal context (Phase 2)
