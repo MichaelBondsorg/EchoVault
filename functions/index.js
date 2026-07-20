@@ -26,13 +26,14 @@ import { GEMINI_TRANSCRIBE_MODEL, buildGeminiRequestBody, parseFusedResponse } f
 import { transcribeWithWhisper } from './src/shared/openai.js';
 import { assertAiConsent, isAiAllowed, grantConsent, revokeConsent } from './src/consent/consentGate.js';
 import { logStage } from './src/telemetry/stageLog.js';
-import { getCachedEmbedding, setCachedEmbedding } from './src/ai/embeddingCache.js';
+import { getCachedEmbedding, setCachedEmbedding, getCachedEmbeddingV2, setCachedEmbeddingV2 } from './src/ai/embeddingCache.js';
+import { generateEmbeddingV2, buildEmbeddingMeta, EMBEDDING_V2_TASK_TYPE } from './src/ai/embeddingV2.js';
 import { claimProcessingMarker, acquireEntryLease, LEASE_MS } from './src/triggers/idempotency.js';
 import { maybeReanalyzeOnEntryUpdate } from './src/triggers/entryUpdateAnalysis.js';
 import { shouldWatchdogSkipEditedEntry } from './src/triggers/watchdogGuards.js';
 import { callGemini, classifyEntry, analyzeEntry, extractEnhancedContext, generateInsight } from './src/analysis/analysisHelpers.js';
 import { getServerFlag } from './src/shared/flags.js';
-import { getModelSync } from './src/models/registry.js';
+import { getModelSync, getModelFlag } from './src/models/registry.js';
 import { runEntryAnalysis } from './src/analysis/orchestrator.js';
 import { issueCaptureUploadTicketCore } from './src/capture/uploadTicket.js';
 import { processCaptureAudioObject, sweepCaptureUploads } from './src/capture/onAudioUploaded.js';
@@ -445,47 +446,81 @@ export const analyzeJournalEntry = onCall(
 );
 
 /**
- * Helper: Generate embedding (internal use)
- * Used by both onCall function and Firestore trigger
+ * Helper: Generate embedding (internal use). Used by both the onCall function
+ * and the Firestore trigger.
+ *
+ * Returns `{ embedding, embeddingV2, embeddingMeta }`:
+ *  - `embedding`   legacy v1 (text-embedding-004) vector — always present.
+ *  - `embeddingV2` gemini-embedding-2 vector — present only when the
+ *                  `model.embeddingWriteV2` flag is ON and generation succeeds.
+ *  - `embeddingMeta` provenance for the v2 vector ({model, dim, taskType,
+ *                  createdAt}) — present iff `embeddingV2` is.
+ *
+ * The v2 dual-write is fail-open: a v2 failure never blocks the v1 result.
  */
 async function generateEmbeddingInternal(text, apiKey, uid) {
   if (!text || typeof text !== 'string' || text.trim().length === 0) {
     throw new Error('Valid text is required');
   }
 
-  // Check cache first (owner-scoped)
-  const cached = await getCachedEmbedding(db, uid, text);
-  if (cached) {
+  const writeV2 = await getModelFlag(db, 'model.embeddingWriteV2');
+
+  // --- Legacy v1 vector (owner-scoped cache) ---
+  let embedding = await getCachedEmbedding(db, uid, text);
+  if (embedding) {
     console.log('Embedding cache HIT');
-    return cached;
+  } else {
+    const embeddingModel = getModelSync('embedding');
+    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${embeddingModel}:embedContent?key=${apiKey}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content: { parts: [{ text: text }] } }),
+      signal: AbortSignal.timeout(LLM_TIMEOUT_MS)
+    });
+
+    if (!res.ok) {
+      const errorData = await res.json().catch(() => ({}));
+      console.error('Embedding API error:', res.status, errorData);
+      throw new Error('Embedding generation failed');
+    }
+
+    const data = await res.json();
+    embedding = data.embedding?.values || null;
+    if (!embedding) {
+      throw new Error('No embedding returned');
+    }
+    // Cache for future use (owner-scoped, model-tagged, no plaintext preview)
+    await setCachedEmbedding(db, uid, text, embedding, embeddingModel);
   }
 
-  // Generate new embedding (legacy v1 space)
-  const embeddingModel = getModelSync('embedding');
-  const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${embeddingModel}:embedContent?key=${apiKey}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ content: { parts: [{ text: text }] } }),
-    signal: AbortSignal.timeout(LLM_TIMEOUT_MS)
-  });
-
-  if (!res.ok) {
-    const errorData = await res.json().catch(() => ({}));
-    console.error('Embedding API error:', res.status, errorData);
-    throw new Error('Embedding generation failed');
+  // --- Dual-index v2 vector (gemini-embedding-2), flag-gated + fail-open ---
+  let embeddingV2;
+  let embeddingMeta;
+  if (writeV2) {
+    const cachedV2 = await getCachedEmbeddingV2(db, uid, text);
+    if (cachedV2) {
+      embeddingV2 = cachedV2.embedding;
+      embeddingMeta = cachedV2.embeddingMeta;
+    } else {
+      const v2Model = getModelSync('embeddingV2');
+      const v2 = await generateEmbeddingV2(text, apiKey, {
+        model: v2Model,
+        taskType: EMBEDDING_V2_TASK_TYPE,
+        timeoutMs: LLM_TIMEOUT_MS,
+      });
+      if (v2) {
+        embeddingMeta = buildEmbeddingMeta({
+          model: v2Model,
+          dim: v2.dim,
+          taskType: EMBEDDING_V2_TASK_TYPE,
+        });
+        embeddingV2 = v2.embedding;
+        await setCachedEmbeddingV2(db, uid, text, embeddingV2, embeddingMeta);
+      }
+    }
   }
 
-  const data = await res.json();
-  const embedding = data.embedding?.values || null;
-
-  if (!embedding) {
-    throw new Error('No embedding returned');
-  }
-
-  // Cache for future use (owner-scoped, model-tagged, no plaintext preview)
-  await setCachedEmbedding(db, uid, text, embedding, embeddingModel);
-
-  return embedding;
+  return { embedding, embeddingV2, embeddingMeta };
 }
 
 /**
@@ -514,7 +549,9 @@ export const generateEmbedding = onCall(
     const apiKey = geminiApiKey.value();
 
     try {
-      const embedding = await generateEmbeddingInternal(text, apiKey, userId);
+      // The callable returns the legacy v1 vector (client retrieval space); the
+      // v2 dual-write, if enabled, is persisted server-side via the cache.
+      const { embedding } = await generateEmbeddingInternal(text, apiKey, userId);
       return { embedding, cached: false };  // Caching handled internally
     } catch (error) {
       console.error('generateEmbedding error:', error);
@@ -1804,8 +1841,15 @@ export const onEntryCreate = onDocumentCreated(
         console.time(`[Entry ${entryId}] Generate embedding`);
         try {
           const apiKey = geminiApiKey.value();
-          const embedding = await generateEmbeddingInternal(entry.text, apiKey, userId);
-          await event.data.ref.update({ embedding });
+          const { embedding, embeddingV2, embeddingMeta } = await generateEmbeddingInternal(entry.text, apiKey, userId);
+          const embeddingUpdate = { embedding };
+          // Dual-index: when the write-v2 flag is on, persist the v2 vector +
+          // its provenance alongside the legacy field (same-space by field name).
+          if (embeddingV2) {
+            embeddingUpdate.embeddingV2 = embeddingV2;
+            embeddingUpdate.embeddingMeta = embeddingMeta;
+          }
+          await event.data.ref.update(embeddingUpdate);
           console.timeEnd(`[Entry ${entryId}] Generate embedding`);
           console.log(`✅ Entry ${entryId} enriched with embedding`);
         } catch (embError) {

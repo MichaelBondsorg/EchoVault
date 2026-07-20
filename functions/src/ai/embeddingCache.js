@@ -21,6 +21,19 @@ export function embeddingCacheKey(uid, text) {
     .substring(0, 24);
 }
 
+/**
+ * Owner-scoped v2 cache key: sha256(uid + ':' + 'v2:' + text)[:24]. The 'v2:'
+ * infix keeps gemini-embedding-2 vectors in a distinct keyspace so a v2 vector
+ * can never be served for a v1 lookup (or vice versa) — same-space by
+ * construction.
+ */
+export function embeddingV2CacheKey(uid, text) {
+  return createHash('sha256')
+    .update(`${uid}:v2:${(text || '').trim()}`)
+    .digest('hex')
+    .substring(0, 24);
+}
+
 /** Read a cached embedding for this user's text, or null on miss/error. */
 export async function getCachedEmbedding(db, uid, text) {
   try {
@@ -51,4 +64,49 @@ export async function setCachedEmbedding(db, uid, text, embedding, embeddingMode
   }
 }
 
-export default { embeddingCacheKey, getCachedEmbedding, setCachedEmbedding };
+/**
+ * Read a cached v2 embedding for this user's text, or null on miss/error.
+ * Returns `{ embedding, embeddingMeta }` so the same-space metadata travels
+ * with the vector.
+ */
+export async function getCachedEmbeddingV2(db, uid, text) {
+  try {
+    const key = embeddingV2CacheKey(uid, text);
+    const snap = await db.collection(CACHE_COLLECTION).doc(key).get();
+    if (!snap.exists) return null;
+    const data = snap.data() || {};
+    if (!Array.isArray(data.embedding)) return null;
+    return { embedding: data.embedding, embeddingMeta: data.embeddingMeta || null };
+  } catch (e) {
+    console.warn('V2 cache read failed:', e?.message);
+    return null;
+  }
+}
+
+/**
+ * Write a cached v2 embedding for this user's text. Stores the vector plus its
+ * embeddingMeta (model, dim, taskType, createdAt) — never a plaintext preview.
+ */
+export async function setCachedEmbeddingV2(db, uid, text, embedding, embeddingMeta) {
+  try {
+    const key = embeddingV2CacheKey(uid, text);
+    await db.collection(CACHE_COLLECTION).doc(key).set({
+      embedding,
+      ownerUid: uid,
+      embeddingMeta: embeddingMeta || null,
+      embeddingModel: embeddingMeta?.model || null,
+      createdAt: FieldValue.serverTimestamp(),
+    });
+  } catch (e) {
+    console.warn('V2 cache write failed:', e?.message);
+  }
+}
+
+export default {
+  embeddingCacheKey,
+  embeddingV2CacheKey,
+  getCachedEmbedding,
+  setCachedEmbedding,
+  getCachedEmbeddingV2,
+  setCachedEmbeddingV2,
+};
