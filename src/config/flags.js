@@ -25,6 +25,9 @@ export const FLAG_DEFAULTS = {
   'model.gemini35flash': false,
   'model.embeddingV2Read': false,
   'model.fusedTranscription35': false,
+  openLoops: false,
+  contextSpaces: false,
+  insightBudget: false,
 };
 
 const LOCAL_OVERRIDE_PREFIX = 'engram:flag:';

@@ -45,7 +45,22 @@ describe('config/flags', () => {
         'model.gemini35flash': false,
         'model.embeddingV2Read': false,
         'model.fusedTranscription35': false,
+        openLoops: false,
+        contextSpaces: false,
+        insightBudget: false,
       });
+    });
+
+    it('provides default false for openLoops flag', () => {
+      expect(FLAG_DEFAULTS.openLoops).toBe(false);
+    });
+
+    it('provides default false for contextSpaces flag', () => {
+      expect(FLAG_DEFAULTS.contextSpaces).toBe(false);
+    });
+
+    it('provides default false for insightBudget flag', () => {
+      expect(FLAG_DEFAULTS.insightBudget).toBe(false);
     });
   });
 
