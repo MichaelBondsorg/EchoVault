@@ -12,19 +12,7 @@ import { auth } from '../../config/firebase';
 import { Preferences } from '@capacitor/preferences';
 import { cacheHealthData } from './platformHealth';
 import { normalizeWhoopSummary, requestedLocalDate } from './whoopTransforms';
-
-// Derive HTTP relay URL from WebSocket URL
-const getRelayHttpUrl = () => {
-  const wsUrl = import.meta.env.VITE_VOICE_RELAY_URL || 'ws://localhost:8080/voice';
-  // Convert wss://host/voice or ws://host/voice to https://host or http://host
-  return wsUrl
-    .replace(/^wss:/, 'https:')
-    .replace(/^ws:/, 'http:')
-    .replace(/\/voice$/, '');
-};
-
-const RELAY_URL = getRelayHttpUrl();
-const WHOOP_STATUS_KEY = 'whoop_link_status';
+import { getRelayHttpUrl } from '../../config/relay';
 
 /**
  * Get Firebase auth token for API calls
@@ -53,6 +41,14 @@ const withTimeout = (promise, ms, message = 'Request timed out') => {
  * Make authenticated request to relay server with timeout
  */
 const relayFetch = async (endpoint, options = {}, timeoutMs = 10000) => {
+  const relayUrl = getRelayHttpUrl();
+  if (!relayUrl) {
+    // No valid relay endpoint for this environment (see src/config/relay.js).
+    // Fail the same way any other unreachable-relay error does, so callers'
+    // existing catch/fallback paths handle it without a code path change.
+    throw new Error('relay_unavailable');
+  }
+
   console.log(`[Whoop] relayFetch: ${endpoint}`);
 
   const token = await withTimeout(
@@ -61,7 +57,7 @@ const relayFetch = async (endpoint, options = {}, timeoutMs = 10000) => {
     'Auth token fetch timed out'
   );
 
-  const fetchPromise = fetch(`${RELAY_URL}${endpoint}`, {
+  const fetchPromise = fetch(`${relayUrl}${endpoint}`, {
     ...options,
     headers: {
       ...options.headers,

@@ -1,8 +1,6 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { auth } from '../config/firebase';
-
-// Configuration - update this with your Cloud Run URL after deployment
-const VOICE_RELAY_URL = import.meta.env.VITE_VOICE_RELAY_URL || 'ws://localhost:8080/voice';
+import { getRelayWsUrl, getRelayHttpUrl } from '../config/relay';
 
 /**
  * Hook for managing voice relay connection
@@ -63,6 +61,14 @@ export const useVoiceRelay = () => {
       return;
     }
 
+    const relayWsUrl = getRelayWsUrl();
+    const relayHttpUrl = getRelayHttpUrl();
+    if (!relayWsUrl || !relayHttpUrl) {
+      setError('Voice conversations are currently unavailable.');
+      setStatus('disconnected');
+      return;
+    }
+
     setError(null);
     setStatus('connecting');
 
@@ -84,10 +90,6 @@ export const useVoiceRelay = () => {
 
       const token = await user.getIdToken(true);
 
-      const relayHttpUrl = VOICE_RELAY_URL
-        .replace(/^wss:/, 'https:')
-        .replace(/^ws:/, 'http:')
-        .replace(/\/voice(?:\?.*)?$/, '');
       const ticketResponse = await fetch(`${relayHttpUrl}/voice-ticket`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}` },
@@ -97,7 +99,7 @@ export const useVoiceRelay = () => {
       if (!ticket) throw new Error('voice_ticket_missing');
 
       // Connect to relay
-      const wsUrl = `${VOICE_RELAY_URL}?ticket=${encodeURIComponent(ticket)}`;
+      const wsUrl = `${relayWsUrl}?ticket=${encodeURIComponent(ticket)}`;
       const ws = new WebSocket(wsUrl);
       wsRef.current = ws;
 
