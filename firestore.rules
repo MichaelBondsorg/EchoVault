@@ -85,7 +85,19 @@ service cloud.firestore {
         // (IAP / RevenueCat webhook running with admin credentials) — a client
         // must not be able to self-grant premium by writing settings/subscription.
         // The admin catch-all below still permits the trusted server write.
-        allow write: if isOwner(userId) && settingId != 'subscription';
+        //
+        // settings/consent is the authoritative AI-processing consent doc. A
+        // client write is only allowed when it is a well-formed consent shape:
+        // aiProcessing must be a bool and no unexpected keys may be present.
+        // (Server grant/revoke callables run with admin creds and bypass this.)
+        allow write: if isOwner(userId)
+          && settingId != 'subscription'
+          && (
+            settingId != 'consent' || (
+              request.resource.data.aiProcessing is bool
+              && request.resource.data.keys().hasOnly(['aiProcessing', 'grantedAt', 'revokedAt', 'updatedAt', 'policyVersion'])
+            )
+          );
       }
 
       // Dashboard preferences subcollection

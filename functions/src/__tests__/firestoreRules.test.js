@@ -305,3 +305,57 @@ describe('Notification settings rules', () => {
     await assertSucceeds(getDoc(ref));
   });
 });
+
+// --- AI consent settings rules (settings/consent shape validation) ---
+
+describe('AI consent settings rules', () => {
+  it('allows owner to write a valid consent shape (aiProcessing bool only)', async () => {
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    const ref = doc(db, userPath(USER_ID), 'settings', 'consent');
+    await assertSucceeds(setDoc(ref, { aiProcessing: true }));
+  });
+
+  it('allows owner to write consent with permitted extra keys', async () => {
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    const ref = doc(db, userPath(USER_ID), 'settings', 'consent');
+    await assertSucceeds(
+      setDoc(ref, { aiProcessing: false, policyVersion: 1, updatedAt: Date.now() })
+    );
+  });
+
+  it('allows owner to read their own consent doc', async () => {
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    const ref = doc(db, userPath(USER_ID), 'settings', 'consent');
+    await assertSucceeds(getDoc(ref));
+  });
+
+  it('denies a consent write with a non-bool aiProcessing', async () => {
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    const ref = doc(db, userPath(USER_ID), 'settings', 'consent');
+    await assertFails(setDoc(ref, { aiProcessing: 'yes' }));
+  });
+
+  it('denies a consent write missing aiProcessing', async () => {
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    const ref = doc(db, userPath(USER_ID), 'settings', 'consent');
+    await assertFails(setDoc(ref, { policyVersion: 1 }));
+  });
+
+  it('denies a consent write with an unexpected junk key', async () => {
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    const ref = doc(db, userPath(USER_ID), 'settings', 'consent');
+    await assertFails(setDoc(ref, { aiProcessing: true, hacked: 'gotcha' }));
+  });
+
+  it('denies another user reading the consent doc', async () => {
+    const db = testEnv.authenticatedContext(OTHER_USER_ID).firestore();
+    const ref = doc(db, userPath(USER_ID), 'settings', 'consent');
+    await assertFails(getDoc(ref));
+  });
+
+  it('denies another user writing the consent doc', async () => {
+    const db = testEnv.authenticatedContext(OTHER_USER_ID).firestore();
+    const ref = doc(db, userPath(USER_ID), 'settings', 'consent');
+    await assertFails(setDoc(ref, { aiProcessing: false }));
+  });
+});
