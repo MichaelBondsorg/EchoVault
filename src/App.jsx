@@ -67,6 +67,7 @@ import {
   createOperation,
   advance as advanceOperation,
   completeOperation,
+  abandonOperation,
   markNeedsAttention,
   findByRecordingId,
 } from './services/capture/operationStore';
@@ -904,6 +905,8 @@ export default function App() {
       // Complete the capture op now that the deferred crisis entry is durable
       // (it was left at 'transcribing' when the crisis modal deferred the save).
       if (result === 'saved' && entry.operationId) {
+        await advanceOperation(user.uid, entry.operationId, 'entry_saved').catch(() => {});
+        await recordStage(user.uid, entry.operationId, STAGES.ENTRY_SAVED);
         await completeOperation(user.uid, entry.operationId).catch(() => {});
         await recordStage(user.uid, entry.operationId, STAGES.COMPLETE);
       }
@@ -1964,11 +1967,27 @@ export default function App() {
     // cap can eventually stop looping. An app killed mid-pipeline never reaches
     // finally, so it stays in-flight and is auto-retried on next launch.
     let operationSettled = false;
+    // The real error code for a transient failure, threaded into the finally
+    // block's markNeedsAttention (instead of a hardcoded string). Terminal
+    // outcomes (no-speech/bad-request) don't use this — they route the op to
+    // the 'abandoned' resting state inline and set operationSettled.
+    let failureCode = 'transcription-failed';
+
+    // Route a terminal (non-retryable) outcome to the 'abandoned' resting
+    // state with its real error code, then settle so finally doesn't also mark
+    // it needs_attention. Abandoned ops are excluded from launch resume and
+    // pruned after 24h, so blank recordings never accrete as permanent items.
+    const abandonForTerminalOutcome = async (code) => {
+      if (operationId) {
+        await abandonOperation(user.uid, operationId, code).catch(() => {});
+      }
+      operationSettled = true;
+    };
 
     try {
       if (operationId) {
         await advanceOperation(user.uid, operationId, 'transcribing');
-        await recordStage(user.uid, operationId, 'transcribing');
+        await recordStage(user.uid, operationId, STAGES.TRANSCRIBE_START);
       }
       console.log('[Transcription] Starting transcription+tone API call...');
       const startTime = Date.now();
@@ -1987,6 +2006,8 @@ export default function App() {
       // Handle error codes (string responses)
       if (typeof result === 'string') {
         if (result === 'API_RATE_LIMIT') {
+          // Transient — leave in-flight/needs_attention so it can be retried.
+          failureCode = 'rate-limit';
           alert("Too many requests - please wait a moment and try again");
           setProcessing(false);
           releaseWakeLock();
@@ -1994,6 +2015,7 @@ export default function App() {
         }
 
         if (result === 'API_AUTH_ERROR') {
+          failureCode = 'auth-error';
           alert("API authentication error - please check settings");
           setProcessing(false);
           releaseWakeLock();
@@ -2001,6 +2023,8 @@ export default function App() {
         }
 
         if (result === 'API_BAD_REQUEST') {
+          // Terminal — malformed audio won't succeed on retry.
+          await abandonForTerminalOutcome('bad-request');
           alert("Audio format not supported - please try recording again");
           setProcessing(false);
           releaseWakeLock();
@@ -2008,9 +2032,11 @@ export default function App() {
         }
 
         if (result === 'API_NO_CONTENT') {
-          // Silent/near-silent audio — this is terminal (retrying gets the
-          // same result), so don't fall through to the generic retry-exhausted
-          // message. Audio stays vaulted as an orphan, same as other failures.
+          // Silent/near-silent audio — terminal (retrying gets the same
+          // result). Route the op to the 'abandoned' resting state so it
+          // doesn't linger as a permanent needs_attention item; audio stays
+          // vaulted as an orphan, same as before.
+          await abandonForTerminalOutcome('no-speech');
           alert("No speech detected - please try speaking closer to the microphone");
           setProcessing(false);
           releaseWakeLock();
@@ -2018,6 +2044,8 @@ export default function App() {
         }
 
         if (result.startsWith('API_')) {
+          // Generic API failure (network / retry-exhausted) — transient.
+          failureCode = result.toLowerCase().replace(/_/g, '-');
           alert("Transcription failed after multiple attempts. Please check your network connection and try again. Your recording has been saved locally.");
           setProcessing(false);
           releaseWakeLock();
@@ -2033,6 +2061,8 @@ export default function App() {
       });
 
       if (!transcript) {
+        // Empty result with no error code — treat as transient (retryable).
+        failureCode = 'empty-transcript';
         alert("Transcription failed - please try again. Your recording has been saved locally.");
         setProcessing(false);
         releaseWakeLock();
@@ -2040,6 +2070,8 @@ export default function App() {
       }
 
       if (transcript.includes("NO_SPEECH")) {
+        // Terminal — no speech in the audio; won't change on retry.
+        await abandonForTerminalOutcome('no-speech');
         alert("No speech detected - please try speaking closer to the microphone");
         setProcessing(false);
         releaseWakeLock();
@@ -2097,17 +2129,21 @@ export default function App() {
         code: error?.code,
         stack: error?.stack?.substring?.(0, 500)
       });
+      // Transient — record the real error code for the finally-path surface.
+      failureCode = error?.code || 'transcription-error';
       alert("An error occurred during transcription. Your recording has been saved locally. Please try again.");
       setProcessing(false);
       return false;
     } finally {
-      // A definitive failure (transcription error, empty transcript, save
+      // A transient failure (network/API error, empty transcript, save
       // exception) that reached here without settling the op: bump attempts +
-      // mark needs_attention so it surfaces in the reliability center and the
-      // auto-retry cap can eventually stop looping.
+      // mark needs_attention with the REAL error code so it surfaces in the
+      // reliability center and the auto-retry cap can eventually stop looping.
+      // (Terminal no-speech/bad-request outcomes already settled to
+      // 'abandoned', so this is skipped for them.)
       if (operationId && !operationSettled) {
-        await markNeedsAttention(user.uid, operationId, 'transcription-failed').catch(() => {});
-        await recordStage(user.uid, operationId, STAGES.NEEDS_ATTENTION, { errorCode: 'transcription-failed' });
+        await markNeedsAttention(user.uid, operationId, failureCode).catch(() => {});
+        await recordStage(user.uid, operationId, STAGES.NEEDS_ATTENTION, { errorCode: failureCode });
       }
       console.log('[Transcription] Releasing wake lock');
       releaseWakeLock();

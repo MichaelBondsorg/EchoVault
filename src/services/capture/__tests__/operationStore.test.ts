@@ -17,6 +17,8 @@ const {
   advance,
   listIncomplete,
   completeOperation,
+  abandonOperation,
+  recordAttempt,
   markNeedsAttention,
   findByRecordingId,
 } = await import('../operationStore');
@@ -65,17 +67,53 @@ describe('operationStore', () => {
     expect(raw(OWNER)[0].stage).toBe('local_ready');
   });
 
-  it('listIncomplete returns everything except complete (needs_attention IS returned)', async () => {
+  it('listIncomplete excludes complete AND abandoned (needs_attention IS returned)', async () => {
     const a = await createOperation(OWNER, { recordingId: 'rec_a_aaaaaa' });
     const b = await createOperation(OWNER, { recordingId: 'rec_b_bbbbbb' });
     const c = await createOperation(OWNER, { recordingId: 'rec_c_cccccc' });
+    const d = await createOperation(OWNER, { recordingId: 'rec_d_dddddd' });
     await advance(OWNER, b.opId, 'transcribing');
     await markNeedsAttention(OWNER, c.opId, 'io');
+    await abandonOperation(OWNER, d.opId, 'no-speech');
     await completeOperation(OWNER, a.opId);
 
     const incomplete = await listIncomplete(OWNER);
     const ids = incomplete.map((o) => o.opId).sort();
     expect(ids).toEqual([b.opId, c.opId].sort());
+  });
+
+  it('abandonOperation moves an op to the terminal abandoned state with the real error code', async () => {
+    const op = await createOperation(OWNER, { recordingId: 'rec_ab_aaaaaa' });
+    await abandonOperation(OWNER, op.opId, 'no-speech');
+    const [stored] = raw(OWNER);
+    expect(stored.stage).toBe('abandoned');
+    expect(stored.lastError).toBe('no-speech');
+    expect(await listIncomplete(OWNER)).toEqual([]);
+  });
+
+  it('completeOperation prunes both complete AND abandoned ops older than 24h', async () => {
+    const now = Date.now();
+    seed(OWNER, [
+      { opId: 'old-complete', ownerUid: OWNER, stage: 'complete', createdAt: now - 100000, updatedAt: now - 25 * 60 * 60 * 1000, attempts: 0 },
+      { opId: 'old-abandoned', ownerUid: OWNER, stage: 'abandoned', createdAt: now - 100000, updatedAt: now - 25 * 60 * 60 * 1000, attempts: 1, lastError: 'no-speech' },
+      { opId: 'recent-abandoned', ownerUid: OWNER, stage: 'abandoned', createdAt: now, updatedAt: now - 60 * 1000, attempts: 1 },
+      { opId: 'live', ownerUid: OWNER, stage: 'transcribing', createdAt: now, updatedAt: now, attempts: 0 },
+    ]);
+
+    await completeOperation(OWNER, 'live');
+
+    const ids = raw(OWNER).map((o: { opId: string }) => o.opId).sort();
+    expect(ids).toEqual(['live', 'recent-abandoned'].sort());
+  });
+
+  it('recordAttempt bumps attempts without changing the stage', async () => {
+    const op = await createOperation(OWNER, { recordingId: 'rec_at_aaaaaa' });
+    await advance(OWNER, op.opId, 'transcribing');
+    await recordAttempt(OWNER, op.opId);
+    await recordAttempt(OWNER, op.opId);
+    const [stored] = raw(OWNER);
+    expect(stored.stage).toBe('transcribing');
+    expect(stored.attempts).toBe(2);
   });
 
   it('completeOperation sets complete and prunes completed ops older than 24h', async () => {

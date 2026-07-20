@@ -17,6 +17,10 @@ const makeStore = (ops) => {
       const op = state.find((o) => o.opId === opId);
       if (op) op.stage = 'complete';
     }),
+    recordAttempt: vi.fn(async (uid, opId) => {
+      const op = state.find((o) => o.opId === opId);
+      if (op) op.attempts += 1;
+    }),
     markNeedsAttention: vi.fn(async (uid, opId, code) => {
       const op = state.find((o) => o.opId === opId);
       if (op) { op.stage = 'needs_attention'; op.attempts += 1; op.lastError = code; }
@@ -64,21 +68,26 @@ describe('resumeIncompleteOperations', () => {
     expect(store.completeOperation).not.toHaveBeenCalled();
   });
 
-  it('respects the attempts cap: >= 5 attempts is never auto-retried', async () => {
+  it('attempt cap via REAL increments: an in-flight op retries 5x across launches, then needs_attention on the 6th (no 6th retry)', async () => {
     const store = makeStore([
-      { opId: 'op-capped', ownerUid: OWNER, stage: 'transcribing', recordingId: 'rec_3_cccccc', attempts: 5 },
+      { opId: 'op-poison', ownerUid: OWNER, stage: 'transcribing', recordingId: 'rec_p_pppppp', attempts: 0 },
     ]);
-    const vault = makeVault(new Set(['rec_3_cccccc']));
-    const handleAudioRetry = vi.fn();
+    const vault = makeVault(new Set(['rec_p_pppppp']));
+    const handleAudioRetry = vi.fn(); // simulates a retry that never lands (app killed each time)
     const findEntryByOperationId = vi.fn(async () => null);
 
-    await resumeIncompleteOperations({
-      ownerUid: OWNER, db: {}, handleAudioRetry,
-      store, vault, findEntryByOperationId,
-    });
+    // Six successive app launches.
+    for (let i = 0; i < 6; i += 1) {
+      await resumeIncompleteOperations({
+        ownerUid: OWNER, db: {}, handleAudioRetry,
+        store, vault, findEntryByOperationId,
+      });
+    }
 
-    expect(handleAudioRetry).not.toHaveBeenCalled();
-    expect(findEntryByOperationId).not.toHaveBeenCalled();
+    expect(handleAudioRetry).toHaveBeenCalledTimes(5);
+    expect(store.recordAttempt).toHaveBeenCalledTimes(5);
+    expect(store.markNeedsAttention).toHaveBeenCalledWith(OWNER, 'op-poison', 'retry-exhausted');
+    expect(store._state.find((o) => o.opId === 'op-poison').stage).toBe('needs_attention');
   });
 
   it('audio-missing: an in-flight op with no vault audio goes to needs_attention', async () => {

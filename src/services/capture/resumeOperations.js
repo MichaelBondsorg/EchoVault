@@ -74,7 +74,15 @@ export async function resumeIncompleteOperations({
       const { opId, stage, recordingId, attempts = 0 } = op;
 
       if (IN_FLIGHT_STAGES.includes(stage)) {
-        if (attempts >= MAX_ATTEMPTS) continue; // capped: surfaced, no auto-retry
+        // Attempt cap: an op stuck in-flight by an app kill would otherwise be
+        // auto-retried every launch forever (a poison recording = launch
+        // crash-loop). Once attempts reaches the cap, stop retrying and surface
+        // it for manual attention instead.
+        if (attempts >= MAX_ATTEMPTS) {
+          await store.markNeedsAttention(ownerUid, opId, 'retry-exhausted');
+          summary.needsAttention += 1;
+          continue;
+        }
 
         const recording = recordingId ? await vault.getRecording(ownerUid, recordingId) : null;
         if (!recording) {
@@ -93,6 +101,9 @@ export async function resumeIncompleteOperations({
           continue;
         }
 
+        // Count this resume attempt BEFORE dispatching, so a retry that never
+        // returns (app killed again mid-retry) still advances toward the cap.
+        await store.recordAttempt(ownerUid, opId);
         await handleAudioRetry(recordingId, opId);
         summary.resumed += 1;
         continue;

@@ -26,7 +26,15 @@ export type CaptureStage =
   | 'entry_saved'
   | 'enriching'
   | 'complete'
-  | 'needs_attention';
+  | 'needs_attention'
+  // Terminal resting state for outcomes where retrying is pointless (silent /
+  // no-speech / malformed audio). Excluded from listIncomplete (never resumed)
+  // and pruned like `complete`, so blank recordings don't accrete as permanent
+  // reliability-center items or grow capture_ops unbounded.
+  | 'abandoned';
+
+// Terminal resting stages: not incomplete, and eligible for time-based pruning.
+const RESTING_STAGES: CaptureStage[] = ['complete', 'abandoned'];
 
 export type CaptureOp = {
   opId: string;
@@ -123,16 +131,25 @@ export async function advance(
   await writeOps(owner, ops);
 }
 
-/** Every op not yet `complete` — includes needs_attention (surfaced, retryable). */
+/**
+ * Every op not in a terminal resting state (complete / abandoned) — includes
+ * needs_attention (surfaced, retryable).
+ */
 export async function listIncomplete(ownerUid: string): Promise<CaptureOp[]> {
   const owner = parseOwnerUid(ownerUid);
   const ops = await readOps(owner);
-  return ops.filter((o) => o.stage !== 'complete');
+  return ops.filter((o) => !RESTING_STAGES.includes(o.stage));
+}
+
+/** Drop resting ops (complete/abandoned) whose rest is older than 24h. */
+function pruneResting(ops: CaptureOp[]): CaptureOp[] {
+  const cutoff = Date.now() - PRUNE_COMPLETED_AFTER_MS;
+  return ops.filter((o) => !(RESTING_STAGES.includes(o.stage) && o.updatedAt < cutoff));
 }
 
 /**
- * Mark an op `complete`, then prune any completed op whose completion is older
- * than 24h (housekeeping so the array can't grow unbounded).
+ * Mark an op `complete`, then prune any resting op older than 24h (housekeeping
+ * so the array can't grow unbounded).
  */
 export async function completeOperation(ownerUid: string, opId: string): Promise<void> {
   const owner = parseOwnerUid(ownerUid);
@@ -142,9 +159,45 @@ export async function completeOperation(ownerUid: string, opId: string): Promise
     op.stage = 'complete';
     op.updatedAt = Date.now();
   }
-  const cutoff = Date.now() - PRUNE_COMPLETED_AFTER_MS;
-  const pruned = ops.filter((o) => !(o.stage === 'complete' && o.updatedAt < cutoff));
-  await writeOps(owner, pruned);
+  await writeOps(owner, pruneResting(ops));
+}
+
+/**
+ * Move an op to the terminal `abandoned` resting state (retrying is pointless —
+ * silent/no-speech/malformed audio), recording the real error code. Prunes
+ * resting ops >24h, exactly like completeOperation. An unknown opId no-ops.
+ */
+export async function abandonOperation(
+  ownerUid: string,
+  opId: string,
+  errorCode: string,
+): Promise<void> {
+  const owner = parseOwnerUid(ownerUid);
+  const ops = await readOps(owner);
+  const op = ops.find((o) => o.opId === opId);
+  if (op) {
+    op.stage = 'abandoned';
+    op.lastError = errorCode;
+    op.updatedAt = Date.now();
+  }
+  await writeOps(owner, pruneResting(ops));
+}
+
+/**
+ * Record a resume retry attempt: bump attempts and refresh updatedAt WITHOUT
+ * changing the stage (the op is being retried, not failing). This is what lets
+ * the launch resume enforce the attempt cap on ops stuck in-flight by an app
+ * kill — otherwise attempts would never grow and a poison recording would
+ * crash-loop every launch forever. An unknown opId no-ops safely.
+ */
+export async function recordAttempt(ownerUid: string, opId: string): Promise<void> {
+  const owner = parseOwnerUid(ownerUid);
+  const ops = await readOps(owner);
+  const op = ops.find((o) => o.opId === opId);
+  if (!op) return;
+  op.attempts = (op.attempts || 0) + 1;
+  op.updatedAt = Date.now();
+  await writeOps(owner, ops);
 }
 
 /**
@@ -184,6 +237,8 @@ export default {
   advance,
   listIncomplete,
   completeOperation,
+  abandonOperation,
+  recordAttempt,
   markNeedsAttention,
   findByRecordingId,
 };
