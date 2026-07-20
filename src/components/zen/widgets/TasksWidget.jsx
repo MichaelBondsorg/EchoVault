@@ -1,12 +1,26 @@
-import { useMemo } from 'react';
+import { useMemo, useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { CheckSquare, Square, Check } from 'lucide-react';
+import { CheckSquare, Square, Check, X } from 'lucide-react';
 import GlassCard from '../GlassCard';
+import { getFlag } from '../../../config/flags';
+import { db } from '../../../config/firebase';
+import { useUser } from '../../../stores';
+import {
+  subscribeActiveTaskIntents,
+  completeIntent,
+  dismissIntent,
+} from '../../../services/intents/intentClient';
 
 /**
  * TasksWidget - Pending tasks for Bento dashboard
  *
- * Shows extracted tasks from recent entries
+ * Two sources, chosen by the `intentExtraction` flag:
+ *  - flag OFF (legacy): pending tasks parsed from `entry.extracted_tasks`
+ *    (byte-identical to the pre-intent behaviour; entries/onToggleTask used).
+ *  - flag ON: policy-qualified ACTIVE task intents streamed via
+ *    subscribeActiveTaskIntents. Row toggle completes the intent; a small
+ *    "Not a task" affordance dismisses it (undo-friendly — it just disappears,
+ *    no confirm dialog). entries/onToggleTask are accepted but unused.
  */
 const TasksWidget = ({
   entries = [],
@@ -16,8 +30,25 @@ const TasksWidget = ({
   onDelete,
   size = '1x1',
 }) => {
-  // Extract pending tasks from entries
-  const tasks = useMemo(() => {
+  const useIntents = getFlag('intentExtraction');
+  const user = useUser();
+  const uid = user?.uid;
+
+  const [activeIntents, setActiveIntents] = useState([]);
+
+  useEffect(() => {
+    if (!useIntents || !uid) return undefined;
+    const unsubscribe = subscribeActiveTaskIntents(
+      db,
+      uid,
+      setActiveIntents,
+      () => setActiveIntents([]),
+    );
+    return unsubscribe;
+  }, [useIntents, uid]);
+
+  // Legacy source: pending tasks from recent entries.
+  const legacyTasks = useMemo(() => {
     const allTasks = [];
 
     entries.slice(0, 20).forEach(entry => {
@@ -39,9 +70,31 @@ const TasksWidget = ({
     return allTasks.slice(0, 4); // Show max 4 tasks
   }, [entries]);
 
+  // Intent source: policy-qualified active task intents.
+  const intentTasks = useMemo(() => (
+    activeIntents.slice(0, 4).map((intent, index) => ({
+      id: intent.id,
+      intentId: intent.id,
+      text: intent.sourceSpan?.text || '',
+      index,
+      completed: false,
+    }))
+  ), [activeIntents]);
+
+  const tasks = useIntents ? intentTasks : legacyTasks;
+
   const handleToggle = (task) => {
     if (isEditing) return;
+    if (useIntents) {
+      if (uid) completeIntent(db, uid, task.intentId);
+      return;
+    }
     onToggleTask?.(task.text, task.entryId, task.index);
+  };
+
+  const handleDismiss = (task) => {
+    if (isEditing || !uid) return;
+    dismissIntent(db, uid, task.intentId);
   };
 
   return (
@@ -64,7 +117,7 @@ const TasksWidget = ({
               {tasks.map((task, index) => (
                 <motion.li
                   key={task.id}
-                  className="flex items-start gap-2"
+                  className="flex items-start gap-2 group"
                   initial={{ opacity: 0, x: -10 }}
                   animate={{ opacity: 1, x: 0 }}
                   transition={{ delay: index * 0.05 }}
@@ -85,6 +138,22 @@ const TasksWidget = ({
                   <span className="text-xs text-warm-600 line-clamp-2 flex-1">
                     {task.text}
                   </span>
+                  {useIntents && !isEditing && (
+                    <button
+                      onClick={() => handleDismiss(task)}
+                      title="Not a task"
+                      aria-label="Not a task"
+                      className="
+                        mt-0.5 w-4 h-4 rounded shrink-0
+                        text-warm-300 hover:text-warm-500
+                        opacity-0 group-hover:opacity-100
+                        flex items-center justify-center
+                        transition-opacity
+                      "
+                    >
+                      <X size={10} />
+                    </button>
+                  )}
                 </motion.li>
               ))}
             </ul>
