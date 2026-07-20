@@ -30,13 +30,17 @@ export const INTENT_KINDS = Object.freeze([
 ]);
 
 // Lifecycle state. `active` and `suggested` are surfaced to the user; `abstain`
-// is captured-but-silent; `dismissed` / `completed_state` are user-terminal.
+// is captured-but-silent; `dismissed` / `completed_state` are user-terminal;
+// `superseded` is a SERVER-ONLY terminal state stamped on a stale intent whose
+// entry was re-extracted at a newer inputVersion (orphan reap) and which a
+// user_decision still references (so it is retired, not hard-deleted).
 export const INTENT_STATES = Object.freeze([
   'active',
   'suggested',
   'abstain',
   'dismissed',
   'completed_state',
+  'superseded',
 ]);
 
 // The ten boolean signals the policy reasons over. Every one is REQUIRED and
@@ -119,12 +123,14 @@ export function buildIntent({
   targetAt = null,
   model,
   authorization,
+  inputVersion = 0,
   createdAt,
   updatedAt,
 }) {
   if (typeof id !== 'string' || !id.trim()) throw new Error('intent: id is required');
   if (typeof ownerId !== 'string' || !ownerId.trim()) throw new Error('intent: ownerId is required');
   if (typeof entryId !== 'string' || !entryId.trim()) throw new Error('intent: entryId is required');
+  if (!isFiniteNumber(inputVersion) || inputVersion < 0) throw new Error('intent: inputVersion must be a non-negative number');
   if (!INTENT_KINDS.includes(kind)) throw new Error(`intent: unknown kind "${kind}"`);
   if (!INTENT_STATES.includes(state)) throw new Error(`intent: unknown state "${state}"`);
   if (!isFiniteNumber(confidence) || confidence < 0 || confidence > 1) {
@@ -156,6 +162,9 @@ export function buildIntent({
     activationReason: typeof activationReason === 'string' ? activationReason : '',
     targetAt: targetAt ?? null,
     authorization: auth,
+    // Entry inputVersion at extraction time — the reap key: a re-extraction at
+    // version N retires every intent for this entry with inputVersion < N.
+    inputVersion,
     versions: {
       extraction: 1,
       model,

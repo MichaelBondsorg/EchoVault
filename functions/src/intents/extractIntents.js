@@ -17,6 +17,7 @@
 import { createHash } from 'crypto';
 import { INTENT_KINDS, INTENT_ATTRIBUTE_KEYS, buildIntent } from './intentSchema.js';
 import { decideActivation } from './activationPolicy.js';
+import { getServerFlag } from '../shared/flags.js';
 
 const LLM_TIMEOUT_MS = 15000;
 
@@ -162,7 +163,7 @@ export function deterministicIntentId(entryId, spanStart, kind) {
  * @returns {Promise<Array>} normalized, policy-ready candidates (possibly empty).
  * @throws on a hard model/API failure (lets the caller decide whether to retry).
  */
-export async function extractIntentCandidates({ apiKey, entry, modelId, callModel = defaultGeminiJsonCall }) {
+export async function extractIntentCandidates({ apiKey, entry, modelId, callModel = defaultGeminiJsonCall } = {}) {
   const text = entry?.text;
   if (typeof text !== 'string' || !text.trim()) return [];
   const raw = await callModel({ apiKey, model: modelId, systemPrompt: SYSTEM_PROMPT, userText: text });
@@ -193,10 +194,56 @@ async function readExistingActiveTaskIntents(intentsCol, entryId) {
 }
 
 /**
+ * Reap intents left behind by an earlier extraction of this entry at an OLDER
+ * inputVersion. A user edit that shifts spans mints NEW deterministic ids, so
+ * the old-version docs (including a possibly-active one) would otherwise linger
+ * and render as phantom tasks. For each stale doc: hard-DELETE it, unless a
+ * user_decision references its id — in which case retire it to `superseded`
+ * (never delete something a decision audit points at). Mutates `batch`.
+ */
+async function reapStaleIntents(batch, intentsCol, decisionsCol, entryId, inputVersion, writtenIds) {
+  let snap;
+  try {
+    snap = await intentsCol.where('entryId', '==', entryId).get();
+  } catch {
+    return; // reap is best-effort; never block a fresh extraction on a read error
+  }
+  const stale = [];
+  snap.forEach((doc) => {
+    const d = doc.data() || {};
+    // Skip ids this run already re-wrote (a span that didn't shift keeps its id
+    // and was just refreshed to the new version) — never write the same doc
+    // twice in one batch.
+    if (writtenIds.has(doc.id)) return;
+    if ((d.inputVersion ?? 0) < inputVersion) stale.push(doc.id);
+  });
+  for (const id of stale) {
+    let referenced = false;
+    try {
+      const dref = await decisionsCol.where('targetId', '==', id).get();
+      referenced = (dref.size ?? 0) > 0;
+    } catch {
+      referenced = false;
+    }
+    if (referenced) {
+      batch.set(intentsCol.doc(id), { state: 'superseded', updatedAt: new Date().toISOString() }, { merge: true });
+    } else {
+      batch.delete(intentsCol.doc(id));
+    }
+  }
+}
+
+/**
  * Full extraction pass for one entry. Idempotent via deterministic intent IDs
  * plus a versioned dedup marker (`processing.intentsExtractedForVersion`)
  * committed in the SAME batch as the intents, so it only latches on success and
- * a transient failure can be retried.
+ * a transient failure can be retried. The same batch reaps stale-version
+ * intents (orphan reap) so an edited entry never leaves phantom tasks live.
+ *
+ * Abstain candidates are persisted ONLY when the server flag
+ * `intentAbstainAudit` is on (default off) — the widget never reads abstains,
+ * so by default we do not grow the collection with silent context. Active and
+ * suggested intents are always persisted.
  *
  * @returns {Promise<{ran:boolean, extractedTasks:Array}>}  extractedTasks is the
  *   legacy-compat active-task list for the orchestrator to publish.
@@ -206,6 +253,7 @@ export async function runIntentExtraction({ db, entryRef, entry, modelId, apiKey
   const entryId = entry?.id || entryRef?.id;
   const ownerId = entryRef?.parent?.parent?.id;
   const intentsCol = entryRef.parent.parent.collection('intents');
+  const decisionsCol = entryRef.parent.parent.collection('user_decisions');
 
   // Dedup: already extracted for this exact version -> rebuild the compat list
   // from stored intents rather than re-calling the model.
@@ -214,13 +262,18 @@ export async function runIntentExtraction({ db, entryRef, entry, modelId, apiKey
     return { ran: false, extractedTasks: toLegacyTasks(existing) };
   }
 
-  const candidates = await extractCandidates({ db, apiKey, entry, modelId });
+  const persistAbstain = await getServerFlag(db, 'intentAbstainAudit', false);
+  const candidates = await extractCandidates({ apiKey, entry, modelId });
 
   const batch = db.batch();
   const activeTaskIntents = [];
+  const writtenIds = new Set();
   for (const cand of candidates) {
     const { state, reason } = decideActivation(cand);
+    // Silent context (abstain) is only persisted under the audit flag.
+    if (state === 'abstain' && !persistAbstain) continue;
     const id = deterministicIntentId(entryId, cand.sourceSpan.start, cand.kind);
+    writtenIds.add(id);
     const intent = buildIntent({
       id,
       ownerId,
@@ -233,10 +286,14 @@ export async function runIntentExtraction({ db, entryRef, entry, modelId, apiKey
       activationReason: reason,
       targetAt: cand.targetAt ?? null,
       model: modelId,
+      inputVersion,
     });
     batch.set(intentsCol.doc(id), intent);
     if (state === 'active' && cand.kind === 'task') activeTaskIntents.push(intent);
   }
+
+  // Reap intents from any earlier (older-version) extraction of this entry.
+  await reapStaleIntents(batch, intentsCol, decisionsCol, entryId, inputVersion, writtenIds);
 
   // Version marker in the same batch: latches only on a successful commit.
   batch.set(entryRef, { processing: { intentsExtractedForVersion: inputVersion } }, { merge: true });

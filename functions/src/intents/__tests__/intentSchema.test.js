@@ -38,7 +38,7 @@ describe('intent taxonomy constants', () => {
       'task', 'open_loop', 'event', 'goal_habit', 'reflection',
       'external_action', 'conditional', 'completed',
     ]);
-    expect(INTENT_STATES).toEqual(['active', 'suggested', 'abstain', 'dismissed', 'completed_state']);
+    expect(INTENT_STATES).toEqual(['active', 'suggested', 'abstain', 'dismissed', 'completed_state', 'superseded']);
   });
 
   it('has exactly the 10 policy attributes', () => {
@@ -58,6 +58,7 @@ describe('buildIntent', () => {
     expect(intent.decidedBy).toBe('policy');
     expect(intent.versions).toMatchObject({ extraction: 1, model: 'gemini-3.5-flash', prompt: 1, schema: 1 });
     expect(intent.targetAt).toBeNull();
+    expect(intent.inputVersion).toBe(0);
     expect(typeof intent.createdAt).toBe('string');
     expect(typeof intent.updatedAt).toBe('string');
     // all 10 attributes present as booleans
@@ -106,6 +107,11 @@ describe('buildIntent', () => {
 
   it('requires model provenance', () => {
     expect(() => buildIntent(validArgs({ model: '' }))).toThrow(/model/);
+  });
+
+  it('stamps a provided inputVersion and rejects a negative one', () => {
+    expect(buildIntent(validArgs({ inputVersion: 4 })).inputVersion).toBe(4);
+    expect(() => buildIntent(validArgs({ inputVersion: -1 }))).toThrow(/inputVersion/);
   });
 });
 

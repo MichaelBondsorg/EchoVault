@@ -274,5 +274,50 @@ needs a Cloud Run env/redeploy, not a flag flip.
   are read by `getModel`, and the shut-down Gemini 2.0 digest/tone paths plus
   the deprecated realtime preview have been retired (see "Model registry flip
   procedure" and "Embedding v2 cutover steps" above). The intent system
-  (I1–I4) remains a future batch — its `FLAG_DEFAULTS` rows are still
-  forward-declared, not currently actionable.
+  (I1–I4) has now landed behind the `intentExtraction` flag (default off) —
+  see "Intent system (precision-first tasks)" below.
+
+## Intent system (precision-first tasks)
+
+The precision-first intent system (PRD 0B, plan I1–I4) replaces broad
+phrase-matching task extraction. It is dark by default behind two server flags.
+
+**Flags:**
+
+| Flag | Default | Effect |
+|------|---------|--------|
+| `intentExtraction` | `false` | When ON, the post-save orchestrator runs async intent extraction; the intent system OWNS `entry.extracted_tasks` (policy-qualified ACTIVE task intents only) and the TasksWidget reads from `subscribeActiveTaskIntents`. Extraction failure never fails the analysis publish. Both a client (`src/config/flags.js`) and server (`getServerFlag`) read this key. |
+| `intentAbstainAudit` | `false` | **Server-side only** (read via `getServerFlag` in `functions/src/intents/extractIntents.js`; NOT a client flag). When OFF, abstain candidates are not persisted — only `active`/`suggested` intents are written. Turning it ON enables the full decision audit trail (every candidate persisted as an intent doc) for eval/debugging, at the cost of **unbounded growth of the `intents` subcollection** until a TTL/retention policy exists. Leave OFF in production until retention lands. |
+
+**Model:** workload `intentExtraction` → default `gemini-3.5-flash` (registry),
+overridable via `config/flags` key `model.intentExtraction`.
+
+**Orphan reap:** editing an entry re-extracts at a new `entryInputVersion`; each
+intent stores the `inputVersion` it was extracted at, and a re-extraction
+deletes every older-version intent for that entry in the same batch (so a
+shifted-span task can never linger as a phantom). A stale intent that a
+`user_decisions` doc references is retired to `state:'superseded'` instead of
+being deleted.
+
+**Composite index (MANUAL — do NOT deploy indexes from firebase.json):**
+The active-task subscription query (`intents` where `kind==task`,
+`state==active`, `orderBy createdAt desc`) needs a composite index. It is
+recorded in `firestore.indexes.json` for source-control accuracy and is
+already provisioned in prod. `firebase.json` deliberately does NOT wire
+`firestore.indexes` (a deploy can DELETE unlisted prod indexes). To (re)create
+it manually:
+
+```
+gcloud firestore indexes composite create \
+  --project=echo-vault-app \
+  --collection-group=intents \
+  --field-config field-path=kind,order=ascending \
+  --field-config field-path=state,order=ascending \
+  --field-config field-path=createdAt,order=descending
+```
+
+**Growth gate:** the eval fixture set
+(`functions/src/intents/__evals__/fixtures.json`) is a 62-example starter that
+locks the contract (zero hard-negatives active, active precision 1.0). Before
+`intentExtraction` defaults ON in prod, grow it to ≥500 real (consented,
+de-identified) examples at ≥97% active precision. See that dir's `README.md`.
