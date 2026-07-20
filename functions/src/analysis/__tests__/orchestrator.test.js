@@ -33,8 +33,15 @@ vi.mock('../../consent/consentGate.js', () => ({
   isAiAllowed: vi.fn(async () => true),
 }));
 
+// Intent extraction mocked — the orchestrator seam is what's under test here
+// (the extraction internals have their own suite). Default: no active tasks.
+vi.mock('../../intents/extractIntents.js', () => ({
+  runIntentExtraction: vi.fn(async () => ({ ran: true, extractedTasks: [] })),
+}));
+
 const { runEntryAnalysis } = await import('../orchestrator.js');
 const helpers = await import('../analysisHelpers.js');
+const { runIntentExtraction } = await import('../../intents/extractIntents.js');
 const { isAiAllowed } = await import('../../consent/consentGate.js');
 const { claimProcessingMarker } = await import('../../triggers/idempotency.js');
 const { _clearFlagCacheForTest } = await import('../../shared/flags.js');
@@ -353,6 +360,67 @@ describe('runEntryAnalysis - failure path', () => {
     });
     expect(res.outcome).toBe('failed');
     expect(db.txUpdates[0]).not.toHaveProperty('analysis');
+  });
+});
+
+describe('runEntryAnalysis - intent extraction seam (flag: intentExtraction)', () => {
+  it('flag OFF (default): extraction never runs; legacy classifier tasks stand', async () => {
+    helpers.classifyEntry.mockResolvedValue({ entry_type: 'task', confidence: 0.9, extracted_tasks: [{ text: 'legacy task', completed: false }] });
+    helpers.analyzeEntry.mockResolvedValue({ ...goodAnalysis, entry_type: 'task' });
+    const stored = { entryInputVersion: 1, text: 'hi' };
+    const db = makeDb(stored); // no flag fields -> intentExtraction false
+    const res = await runEntryAnalysis({
+      db, entryRef: makeEntryRef('userA'),
+      entry: { id: 'e1', entryInputVersion: 1, text: 'hi' },
+      apiKeys: { gemini: 'g', openai: 'o' }, logStage: noopLogStage,
+    });
+    expect(res.outcome).toBe('published');
+    expect(runIntentExtraction).not.toHaveBeenCalled();
+    expect(db.txUpdates[0].extracted_tasks).toEqual([{ text: 'legacy task', completed: false }]);
+  });
+
+  it('flag ON: the intent system OWNS extracted_tasks (replaces the classifier list)', async () => {
+    helpers.classifyEntry.mockResolvedValue({ entry_type: 'task', confidence: 0.9, extracted_tasks: [{ text: 'legacy task', completed: false }] });
+    helpers.analyzeEntry.mockResolvedValue({ ...goodAnalysis, entry_type: 'task' });
+    runIntentExtraction.mockResolvedValueOnce({ ran: true, extractedTasks: [{ text: 'call the dentist', completed: false, index: 0 }] });
+    const stored = { entryInputVersion: 1, text: 'hi' };
+    const db = makeDb(stored, { intentExtraction: true });
+    const res = await runEntryAnalysis({
+      db, entryRef: makeEntryRef('userA'),
+      entry: { id: 'e1', entryInputVersion: 1, text: 'hi' },
+      apiKeys: { gemini: 'g', openai: 'o' }, logStage: noopLogStage,
+    });
+    expect(res.outcome).toBe('published');
+    expect(runIntentExtraction).toHaveBeenCalledTimes(1);
+    expect(db.txUpdates[0].extracted_tasks).toEqual([{ text: 'call the dentist', completed: false, index: 0 }]);
+  });
+
+  it('flag ON + no active intents: extracted_tasks is dropped (silence is correct)', async () => {
+    helpers.classifyEntry.mockResolvedValue({ entry_type: 'task', confidence: 0.9, extracted_tasks: [{ text: 'legacy task', completed: false }] });
+    helpers.analyzeEntry.mockResolvedValue({ ...goodAnalysis, entry_type: 'task' });
+    runIntentExtraction.mockResolvedValueOnce({ ran: true, extractedTasks: [] });
+    const stored = { entryInputVersion: 1, text: 'hi' };
+    const db = makeDb(stored, { intentExtraction: true });
+    const res = await runEntryAnalysis({
+      db, entryRef: makeEntryRef('userA'),
+      entry: { id: 'e1', entryInputVersion: 1, text: 'hi' },
+      apiKeys: { gemini: 'g', openai: 'o' }, logStage: noopLogStage,
+    });
+    expect(res.outcome).toBe('published');
+    expect(db.txUpdates[0]).not.toHaveProperty('extracted_tasks');
+  });
+
+  it('flag ON + extraction THROWS: analysis still publishes (failure is isolated)', async () => {
+    runIntentExtraction.mockRejectedValueOnce(new Error('gemini-intent-extract 503'));
+    const stored = { entryInputVersion: 1, text: 'hi' };
+    const db = makeDb(stored, { intentExtraction: true });
+    const res = await runEntryAnalysis({
+      db, entryRef: makeEntryRef('userA'),
+      entry: { id: 'e1', entryInputVersion: 1, text: 'hi' },
+      apiKeys: { gemini: 'g', openai: 'o' }, logStage: noopLogStage,
+    });
+    expect(res.outcome).toBe('published');
+    expect(db.txUpdates[0].analysisStatus).toBe('complete');
   });
 });
 

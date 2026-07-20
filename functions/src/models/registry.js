@@ -35,6 +35,7 @@ export const WORKLOADS = Object.freeze({
   temporal: 'temporal',
   entityResolution: 'entityResolution',
   insight: 'insight',
+  intentExtraction: 'intentExtraction',
   // realtime voice model is owned by the relay-server (env var REALTIME_MODEL);
   // recorded here for documentation/inventory completeness only.
   realtimeNA: 'realtimeNA',
@@ -58,6 +59,7 @@ export const MODEL_DEFAULTS = Object.freeze({
   temporal: 'gemini-3.5-flash',
   entityResolution: 'gemini-3-flash-preview',
   insight: 'gemini-3-flash-preview',
+  intentExtraction: 'gemini-3.5-flash',
   realtimeNA: 'gpt-realtime-2.1',
 });
 

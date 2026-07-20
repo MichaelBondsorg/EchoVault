@@ -23,7 +23,9 @@
  */
 import { FieldValue } from 'firebase-admin/firestore';
 import { getModel } from '../models/registry.js';
+import { getServerFlag } from '../shared/flags.js';
 import { isAiAllowed } from '../consent/consentGate.js';
+import { runIntentExtraction } from '../intents/extractIntents.js';
 import {
   classifyEntry,
   analyzeEntry,
@@ -213,6 +215,25 @@ export async function runEntryAnalysis({ db, entryRef, entry, apiKeys, logStage 
 
   const analysis = analyzeSettled.value;
   const payload = buildSuccessPayload({ text, entryType, classification, analysis, insight, enhancedContext, inputVersion, modelId });
+
+  // Precision-first intent extraction (PRD 0B), behind the `intentExtraction`
+  // server flag. Best-effort: a failure here must NEVER fail the analysis
+  // publish. When ON, the intent system OWNS `extracted_tasks` — it replaces
+  // the legacy classifier's list (policy-qualified active task intents only,
+  // or nothing at all: silence is a correct result).
+  if (await getServerFlag(db, 'intentExtraction', false)) {
+    try {
+      const intentModel = await getModel(db, 'intentExtraction');
+      const { extractedTasks } = await runIntentExtraction({ db, entryRef, entry, modelId: intentModel, apiKey: gemini });
+      if (Array.isArray(extractedTasks)) {
+        if (extractedTasks.length > 0) payload.extracted_tasks = extractedTasks;
+        else delete payload.extracted_tasks;
+      }
+    } catch (e) {
+      logStage(opId, 'intent_extraction_error', { error: (e?.message || String(e)).slice(0, 200) });
+    }
+  }
+
   const result = await publishFinal(db, entryRef, inputVersion, payload);
   end(retryCount);
   if (result.outcome !== 'published') return result;
