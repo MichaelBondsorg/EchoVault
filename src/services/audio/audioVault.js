@@ -56,7 +56,15 @@ const emitChanged = (ownerUid) => {
 };
 
 export const audioVault = {
-  /** Returns the recording id, or null if storage failed (never throws). */
+  /**
+   * Persist a recording durably. Never throws. Returns a discriminated result:
+   *   - `{ id }` on success
+   *   - `{ error: 'quota' | 'io' }` on failure
+   * so the caller can BLOCK transcription (and keep the native draft) rather
+   * than silently proceed with no durable local copy. `error: 'quota'` means a
+   * capacity limit was hit (oversized web blob / index write rejected);
+   * `error: 'io'` means the underlying storage write failed.
+   */
   async saveRecording(ownerUid, base64, mime) {
     const owner = requireOwner(ownerUid);
     const id = `rec_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
@@ -65,7 +73,7 @@ export const audioVault = {
         await Filesystem.mkdir({ path: ownerDir(owner), directory: Directory.Data, recursive: true }).catch(() => {});
         await Filesystem.writeFile({ path: filePath(owner, id), directory: Directory.Data, data: base64 });
       } else {
-        if (base64.length > WEB_MAX_BYTES) return null;
+        if (base64.length > WEB_MAX_BYTES) return { error: 'quota' };
         localStorage.setItem(webKey(owner, id), base64);
       }
 
@@ -77,13 +85,13 @@ export const audioVault = {
         } else {
           localStorage.removeItem(webKey(owner, id));
         }
-        return null;
+        return { error: 'quota' };
       }
       emitChanged(owner);
-      return id;
+      return { id };
     } catch (error) {
       console.warn('[audioVault] saveRecording failed:', error.message);
-      return null;
+      return { error: 'io' };
     }
   },
 
