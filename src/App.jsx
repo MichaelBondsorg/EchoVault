@@ -49,6 +49,7 @@ import { retrofitEntriesInBackground } from './services/entries';
 import { queueEntry, resetStuckSyncing } from './services/offline';
 import { initializeSyncOrchestrator, triggerSync } from './services/sync/syncOrchestrator';
 import { ownerStorageKey } from './services/storage/ownerScopedStorage';
+import { clearOwnerCaches } from './services/storage/clearOwnerCaches';
 import { deleteNativeDraft, recoverNativeDrafts } from './services/capture/nativeCaptureAdapter';
 import { inferCategory } from './services/prompts';
 import { getActiveReflectionPrompts, dismissReflectionPrompt } from './services/prompts/activePrompts';
@@ -2577,10 +2578,12 @@ export default function App() {
       onShowReports={() => setView('reports')}
       onRequestNotifications={requestPermission}
       onLogout={async () => {
+        const uid = user?.uid;
         try {
           await signOut(auth);
         } finally {
           resetAllStores();
+          await clearOwnerCaches(uid);
         }
       }}
       aiProcessingEnabled={aiProcessingEnabled}

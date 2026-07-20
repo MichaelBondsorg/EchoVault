@@ -14,6 +14,36 @@ import { cacheHealthData } from './platformHealth';
 import { normalizeWhoopSummary, requestedLocalDate } from './whoopTransforms';
 import { getRelayHttpUrl } from '../../config/relay';
 
+// Legacy (pre owner-scoping) global cache keys. Per ADR-0001, unowned local
+// data is quarantined (deleted) on discovery — never adopted by whichever
+// account happens to be signed in when it's next encountered.
+const LEGACY_WHOOP_SUMMARY_KEY = 'whoop_cached_summary';
+const LEGACY_WHOOP_STATUS_KEY = 'whoop_link_status';
+
+const whoopSummaryKey = (uid) => `whoop_cached_summary::${uid}`;
+const whoopStatusKey = (uid) => `whoop_link_status::${uid}`;
+
+/**
+ * Resolve the currently authenticated owner for cache scoping. Returns null
+ * (rather than throwing) so cache reads/writes fail safe to "no cache"
+ * instead of surfacing an auth error out of an unrelated lookup. No uid is
+ * ever cached at module scope — every call re-derives it from the live
+ * Firebase auth session.
+ */
+const currentUid = () => auth.currentUser?.uid || null;
+
+/**
+ * Delete an unowned legacy Preferences key if present. Best-effort — a
+ * failed removal just means we try again next time the key is encountered.
+ */
+const quarantineLegacyKey = async (legacyKey) => {
+  try {
+    await Preferences.remove({ key: legacyKey });
+  } catch {
+    // Nothing to recover if removal fails.
+  }
+};
+
 /**
  * Get Firebase auth token for API calls
  */
@@ -97,14 +127,25 @@ export const isWhoopLinked = async () => {
  * reachability. Cached linkage is never treated as fresh provider access.
  */
 export const getWhoopConnectionStatus = async () => {
+  const uid = currentUid();
   try {
     const { linked } = await relayFetch('/auth/whoop/status', {}, 5000);
-    await setLocalWhoopStatus(linked);
+    await setLocalWhoopStatus(uid, linked);
     return linked ? 'connected' : 'disconnected';
   } catch (error) {
     console.warn('[Whoop] Status verification unavailable:', error.message);
+    if (!uid) {
+      await quarantineLegacyKey(LEGACY_WHOOP_STATUS_KEY);
+      return 'disconnected';
+    }
     try {
-      const { value } = await Preferences.get({ key: WHOOP_STATUS_KEY });
+      const { value } = await Preferences.get({ key: whoopStatusKey(uid) });
+      if (value == null) {
+        // This owner has never cached a status locally — quarantine any
+        // pre-owner-scoping global status instead of exposing it.
+        await quarantineLegacyKey(LEGACY_WHOOP_STATUS_KEY);
+        return 'disconnected';
+      }
       return value === 'true' ? 'unreachable' : 'disconnected';
     } catch {
       return 'disconnected';
@@ -113,12 +154,13 @@ export const getWhoopConnectionStatus = async () => {
 };
 
 /**
- * Store Whoop link status locally
+ * Store Whoop link status locally, scoped to the given owner uid.
  */
-const setLocalWhoopStatus = async (linked) => {
+const setLocalWhoopStatus = async (uid, linked) => {
+  if (!uid) return;
   try {
     await Preferences.set({
-      key: WHOOP_STATUS_KEY,
+      key: whoopStatusKey(uid),
       value: linked ? 'true' : 'false',
     });
   } catch (error) {
@@ -139,10 +181,13 @@ export const initiateWhoopOAuth = async () => {
  * Disconnect Whoop from user account
  */
 export const disconnectWhoop = async () => {
+  const uid = currentUid();
   await relayFetch('/auth/whoop', { method: 'DELETE' });
-  await setLocalWhoopStatus(false);
-  // Clear cached Whoop data
-  await Preferences.remove({ key: 'whoop_cached_summary' });
+  await setLocalWhoopStatus(uid, false);
+  // Clear this owner's cached Whoop data only.
+  if (uid) {
+    await Preferences.remove({ key: whoopSummaryKey(uid) });
+  }
 };
 
 /**
@@ -164,6 +209,7 @@ export const handleWhoopOAuthSuccess = async () => {
  * Returns data in Engram-compatible format
  */
 export const getWhoopSummary = async (date = new Date()) => {
+  const uid = currentUid();
   const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
   const localDate = requestedLocalDate(date, timezone);
   try {
@@ -174,14 +220,14 @@ export const getWhoopSummary = async (date = new Date()) => {
 
     // Cache for offline/web access
     await cacheHealthData(summary);
-    await cacheWhoopSummary(summary);
+    await cacheWhoopSummary(uid, summary);
 
     return summary;
   } catch (error) {
     console.error('Error fetching Whoop summary:', error);
 
     // Try to return cached data on error
-    const cached = await getCachedWhoopSummary(localDate, timezone);
+    const cached = await getCachedWhoopSummary(uid, localDate, timezone);
     if (cached) {
       return {
         ...cached,
@@ -233,12 +279,13 @@ export const getWhoopHistory = async (days = 14) => {
 };
 
 /**
- * Cache Whoop summary for quick access
+ * Cache Whoop summary for quick access, scoped to the given owner uid.
  */
-const cacheWhoopSummary = async (summary) => {
+const cacheWhoopSummary = async (uid, summary) => {
+  if (!uid) return;
   try {
     await Preferences.set({
-      key: 'whoop_cached_summary',
+      key: whoopSummaryKey(uid),
       value: JSON.stringify({
         ...summary,
         cachedAt: new Date().toISOString(),
@@ -250,11 +297,17 @@ const cacheWhoopSummary = async (summary) => {
 };
 
 /**
- * Get cached Whoop summary
+ * Get this owner's cached Whoop summary. On a scoped-key miss, quarantines
+ * any pre-owner-scoping legacy global cache rather than ever returning it —
+ * a different account's health data must never surface here.
  */
-const getCachedWhoopSummary = async (requestedDate, timezone) => {
+const getCachedWhoopSummary = async (uid, requestedDate, timezone) => {
+  if (!uid) {
+    await quarantineLegacyKey(LEGACY_WHOOP_SUMMARY_KEY);
+    return null;
+  }
   try {
-    const { value } = await Preferences.get({ key: 'whoop_cached_summary' });
+    const { value } = await Preferences.get({ key: whoopSummaryKey(uid) });
     if (value) {
       const cached = JSON.parse(value);
       // Check if cache is fresh (within 1 hour)
@@ -266,7 +319,9 @@ const getCachedWhoopSummary = async (requestedDate, timezone) => {
       ) {
         return cached;
       }
+      return null;
     }
+    await quarantineLegacyKey(LEGACY_WHOOP_SUMMARY_KEY);
   } catch {
     // Ignore cache errors
   }
