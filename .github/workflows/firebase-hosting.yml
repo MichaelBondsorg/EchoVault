@@ -73,7 +73,8 @@ jobs:
           VITE_GOOGLE_WEB_CLIENT_ID: ${{ secrets.VITE_GOOGLE_WEB_CLIENT_ID }}
           VITE_GOOGLE_IOS_CLIENT_ID: ${{ secrets.VITE_GOOGLE_IOS_CLIENT_ID }}
           VITE_GOOGLE_IOS_SERVER_CLIENT_ID: ${{ secrets.VITE_GOOGLE_IOS_SERVER_CLIENT_ID }}
-          VITE_VOICE_RELAY_URL: ${{ secrets.VITE_VOICE_RELAY_URL }}
+          # Public wss endpoint (not a credential); secret overrides when set
+          VITE_VOICE_RELAY_URL: ${{ secrets.VITE_VOICE_RELAY_URL != '' && secrets.VITE_VOICE_RELAY_URL || 'wss://echovault-voice-relay-2wotujlctq-uc.a.run.app/voice' }}
 
       - name: Deploy to Firebase Hosting (live)
         uses: FirebaseExtended/action-hosting-deploy@500ac625ca2dd40cbd15f7659af953801858032a  # v0
@@ -108,7 +109,8 @@ jobs:
           VITE_GOOGLE_WEB_CLIENT_ID: ${{ secrets.VITE_GOOGLE_WEB_CLIENT_ID }}
           VITE_GOOGLE_IOS_CLIENT_ID: ${{ secrets.VITE_GOOGLE_IOS_CLIENT_ID }}
           VITE_GOOGLE_IOS_SERVER_CLIENT_ID: ${{ secrets.VITE_GOOGLE_IOS_SERVER_CLIENT_ID }}
-          VITE_VOICE_RELAY_URL: ${{ secrets.VITE_VOICE_RELAY_URL }}
+          # Public wss endpoint (not a credential); secret overrides when set
+          VITE_VOICE_RELAY_URL: ${{ secrets.VITE_VOICE_RELAY_URL != '' && secrets.VITE_VOICE_RELAY_URL || 'wss://echovault-voice-relay-2wotujlctq-uc.a.run.app/voice' }}
 
       - name: Deploy to Firebase Hosting (preview channel)
         uses: FirebaseExtended/action-hosting-deploy@500ac625ca2dd40cbd15f7659af953801858032a  # v0
