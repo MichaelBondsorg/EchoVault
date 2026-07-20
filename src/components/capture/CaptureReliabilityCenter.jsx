@@ -1,12 +1,22 @@
 import { useCallback, useEffect, useState } from 'react';
-import { CheckCircle2, CloudOff, Mic, RefreshCw, Trash2, X } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, CloudOff, Mic, RefreshCw, Trash2, X } from 'lucide-react';
+import { Capacitor } from '@capacitor/core';
 import { audioVault } from '../../services/audio/audioVault';
 import { discardEntry, getQueuedEntries } from '../../services/offline/offlineManager';
 import { forceSync } from '../../services/sync/syncOrchestrator';
+import { NativeCapture, deleteNativeDraft } from '../../services/capture/nativeCaptureAdapter';
+
+const formatDuration = (ms) => {
+  const totalSeconds = Math.round((ms || 0) / 1000);
+  const mins = Math.floor(totalSeconds / 60);
+  const secs = totalSeconds % 60;
+  return `${mins}:${String(secs).padStart(2, '0')}`;
+};
 
 const CaptureReliabilityCenter = ({ ownerUid, onClose, onRetryAudio }) => {
   const [entries, setEntries] = useState([]);
   const [recordings, setRecordings] = useState([]);
+  const [needsReviewDrafts, setNeedsReviewDrafts] = useState([]);
   const [busy, setBusy] = useState(false);
 
   const refresh = useCallback(async () => {
@@ -17,6 +27,17 @@ const CaptureReliabilityCenter = ({ ownerUid, onClose, onRetryAudio }) => {
     ]);
     setEntries(queued);
     setRecordings(orphaned);
+
+    if (Capacitor.isNativePlatform()) {
+      try {
+        const { drafts } = await NativeCapture.listDrafts({ ownerUid });
+        setNeedsReviewDrafts((drafts || []).filter((d) => d.status === 'needsReview'));
+      } catch {
+        setNeedsReviewDrafts([]);
+      }
+    } else {
+      setNeedsReviewDrafts([]);
+    }
   }, [ownerUid]);
 
   useEffect(() => { refresh(); }, [refresh]);
@@ -37,6 +58,38 @@ const CaptureReliabilityCenter = ({ ownerUid, onClose, onRetryAudio }) => {
     await refresh();
   };
 
+  // A stale native "recording" draft (app died mid-recording) was flagged
+  // needsReview by nativeCaptureAdapter's recovery pass instead of being
+  // auto-adopted, since the file may be partial/corrupt — the user decides
+  // here. Transcribe adopts it into the audio vault (durable custody) at the
+  // user's explicit request, then hands off through the same
+  // onRetryAudio/handleAudioWrapper path used elsewhere.
+  const transcribeNeedsReview = async (draftId) => {
+    setBusy(true);
+    try {
+      const recording = await NativeCapture.readDraft({ ownerUid, draftId });
+      const saved = await audioVault.saveRecording(ownerUid, recording.base64, recording.mime);
+      if (saved?.id) {
+        await deleteNativeDraft(ownerUid, draftId);
+        await onRetryAudio?.(recording.base64, recording.mime, saved.id);
+      }
+    } finally {
+      setBusy(false);
+      await refresh();
+    }
+  };
+
+  const discardNeedsReview = async (draftId) => {
+    if (!window.confirm('Discard this recording? This cannot be undone.')) return;
+    setBusy(true);
+    try {
+      await deleteNativeDraft(ownerUid, draftId);
+    } finally {
+      setBusy(false);
+      await refresh();
+    }
+  };
+
   return (
     <div className="fixed inset-0 z-[90] overflow-y-auto bg-[var(--background)] p-4 pb-[calc(env(safe-area-inset-bottom)+24px)] pt-[calc(env(safe-area-inset-top)+16px)]" role="dialog" aria-modal="true" aria-labelledby="reliability-title">
       <div className="mx-auto max-w-xl">
@@ -49,7 +102,7 @@ const CaptureReliabilityCenter = ({ ownerUid, onClose, onRetryAudio }) => {
           <button type="button" className="cloud-icon-button" aria-label="Close reliability center" onClick={onClose}><X size={21} /></button>
         </div>
 
-        {entries.length === 0 && recordings.length === 0 ? (
+        {entries.length === 0 && recordings.length === 0 && needsReviewDrafts.length === 0 ? (
           <div className="cloud-sheet rounded-2xl border p-6 text-center shadow-sm">
             <CheckCircle2 className="mx-auto mb-3 text-[var(--accent)]" size={34} />
             <p className="font-semibold">Everything is up to date</p>
@@ -97,6 +150,25 @@ const CaptureReliabilityCenter = ({ ownerUid, onClose, onRetryAudio }) => {
                         <p className="text-xs text-[var(--muted-foreground)]">{new Date(recording.createdAt).toLocaleString()}</p>
                       </div>
                       <button type="button" onClick={() => retryRecording(recording.id)} className="min-h-11 rounded-full px-3 text-sm font-semibold text-[var(--accent-deep)]">Retry</button>
+                    </div>
+                  ))}
+                </div>
+              </section>
+            )}
+
+            {needsReviewDrafts.length > 0 && (
+              <section>
+                <h3 className="cloud-kicker mb-2">NEEDS REVIEW · {needsReviewDrafts.length}</h3>
+                <div className="cloud-sheet divide-y divide-[var(--divider)] overflow-hidden rounded-2xl border shadow-sm">
+                  {needsReviewDrafts.map((draft) => (
+                    <div key={draft.draftId} className="flex min-h-16 items-center gap-3 px-4 py-3">
+                      <AlertTriangle className="text-[var(--accent)]" size={20} />
+                      <div className="flex-1">
+                        <p className="font-semibold">Recording interrupted — {formatDuration(draft.durationMilliseconds ?? draft.durationMs)}</p>
+                        <p className="text-xs text-[var(--muted-foreground)]">{draft.createdAt ? new Date(draft.createdAt).toLocaleString() : ''}</p>
+                      </div>
+                      <button type="button" disabled={busy} onClick={() => transcribeNeedsReview(draft.draftId)} className="min-h-11 rounded-full px-3 text-sm font-semibold text-[var(--accent-deep)]">Transcribe</button>
+                      <button type="button" disabled={busy} aria-label="Discard interrupted recording" className="cloud-icon-button text-[var(--destructive)]" onClick={() => discardNeedsReview(draft.draftId)}><Trash2 size={18} /></button>
                     </div>
                   ))}
                 </div>
