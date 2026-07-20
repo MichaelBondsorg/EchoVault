@@ -32,40 +32,23 @@ export default defineConfig({
     // Global test utilities (describe, it, expect)
     globals: true,
 
-    // Include patterns (functions tests only for pure/properly-mocked modules)
+    // Include patterns. All functions/src unit tests run under the root vitest
+    // config via glob (pure/properly-mocked modules). The emulator-only
+    // firestoreRules suite is excluded below and runs under the rules config.
     include: [
       'src/**/*.{test,spec}.{js,jsx,ts,tsx}',
-      'functions/src/reports/__tests__/charts.test.js',
-      'functions/src/reports/__tests__/narrative.test.js',
-      'functions/src/reports/__tests__/periodUtils.test.js',
-      'functions/src/notifications/__tests__/templates.test.js',
-      'functions/src/reports/__tests__/pdfExport.test.js',
-      'functions/src/insights/__tests__/conversationReady.test.js',
-      'functions/src/insights/__tests__/engagementTracker.test.js',
-      'functions/src/reports/__tests__/privacy.test.js',
-      'functions/src/auth/__tests__/appleToken.test.js',
-      'functions/src/auth/__tests__/providerSubjects.test.js',
-      'functions/src/safety/__tests__/crisisKeywords.test.js',
-      'functions/src/limits/__tests__/dailyQuota.test.js',
-      'functions/src/transcription/__tests__/fusedTranscription.test.js',
-      'functions/src/transcription/__tests__/runFusedTranscription.test.js',
-      'functions/src/capture/__tests__/uploadTicket.test.js',
-      'functions/src/capture/__tests__/onAudioUploaded.test.js',
-      'functions/src/consent/__tests__/consentGate.test.js',
-      'functions/src/consent/__tests__/consentActions.test.js',
-      'functions/src/__tests__/triggerIdempotency.test.js',
-      'functions/src/analytics/__tests__/onEntryAnalyzed.test.js',
-      'functions/src/notifications/__tests__/sender.test.js',
-      'functions/src/reports/__tests__/reportCleanup.test.js',
-      'functions/src/shared/__tests__/flags.test.js',
-      'functions/src/telemetry/__tests__/stageLog.test.js',
-      'functions/src/analysis/__tests__/orchestrator.test.js',
-      'functions/src/triggers/__tests__/entryUpdateAnalysis.test.js',
-      'functions/src/triggers/__tests__/watchdogGuards.test.js',
+      'functions/src/**/__tests__/**/*.test.js',
     ],
 
-    // Exclude patterns
-    exclude: ['node_modules', 'dist', 'ios', 'android'],
+    // Exclude patterns. firestoreRules.test.js needs the Firestore emulator and
+    // runs only via `npm run test:rules`, never in the jsdom root suite.
+    exclude: [
+      'node_modules',
+      'dist',
+      'ios',
+      'android',
+      '**/functions/src/__tests__/firestoreRules.test.js',
+    ],
 
     // Coverage configuration
     coverage: {

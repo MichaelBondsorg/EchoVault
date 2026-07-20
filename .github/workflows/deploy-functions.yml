@@ -50,6 +50,9 @@ jobs:
           cd functions
           npm ci
 
+      - name: Typecheck (root TS islands)
+        run: npm run typecheck
+
       - name: Run test suite (covers src/ and functions/src/)
         run: npm test
 
