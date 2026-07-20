@@ -260,4 +260,117 @@ describe('runIntentExtraction', () => {
       expect(store.get(milkPath).state).toBe('superseded');
     });
   });
+
+  describe('dismissal preservation across re-extraction', () => {
+    const dentistText = 'I need to call the dentist tomorrow.';
+
+    function dentistCand() {
+      return async () => normalizeCandidates([
+        { kind: 'task', text: 'call the dentist', attributes: attrs({ agency: true, concrete: true, unfinished: true, temporalFit: true }), confidence: 0.9 },
+      ], dentistText);
+    }
+
+    it('does not resurrect a dismissed intent re-extracted at a newer inputVersion; only bumps inputVersion/updatedAt', async () => {
+      const { db, store } = makeFakeDb();
+      const entryRef = db.doc(`${USER_BASE}/entries/e1`);
+
+      // v1: normal extraction creates an active task intent.
+      await runIntentExtraction({ db, entryRef, entry: { id: 'e1', text: dentistText, entryInputVersion: 1 }, modelId: 'm', apiKey: 'k', extractCandidates: dentistCand() });
+      const intentPath = [...store.keys()].find((p) => p.includes('/intents/'));
+      expect(store.get(intentPath).state).toBe('active');
+
+      // Simulate the user dismissing it client-side and setting user-owned
+      // fields that must survive re-extraction.
+      store.set(intentPath, {
+        ...store.get(intentPath),
+        state: 'dismissed',
+        authorization: { notifications: true },
+        snoozedUntil: '2026-08-01T00:00:00.000Z',
+        outcome: { closedAt: '2026-07-20T00:00:00.000Z', kind: 'closed', answerEntryId: null },
+        userText: 'edited by user',
+      });
+      const beforeDismiss = store.get(intentPath);
+
+      // v2: an unrelated edit bumps inputVersion; the span for this candidate
+      // is unchanged so the deterministic id is the SAME as before.
+      const result = await runIntentExtraction({ db, entryRef, entry: { id: 'e1', text: dentistText, entryInputVersion: 2 }, modelId: 'm', apiKey: 'k', extractCandidates: dentistCand() });
+
+      const stored = store.get(intentPath);
+      expect(stored.state).toBe('dismissed'); // never resurrected, never deleted/superseded
+      expect(stored.authorization).toEqual({ notifications: true });
+      expect(stored.snoozedUntil).toBe('2026-08-01T00:00:00.000Z');
+      expect(stored.outcome).toEqual({ closedAt: '2026-07-20T00:00:00.000Z', kind: 'closed', answerEntryId: null });
+      expect(stored.userText).toBe('edited by user');
+      expect(stored.inputVersion).toBe(2); // only this + updatedAt were bumped
+      expect(typeof stored.updatedAt).toBe('string');
+      // Confirm the merge touched ONLY inputVersion/updatedAt: everything else
+      // is byte-for-byte identical to the pre-re-extraction (dismissed) doc.
+      const { inputVersion: _iv, updatedAt: _ua, ...restBefore } = beforeDismiss;
+      const { inputVersion: _iv2, updatedAt: _ua2, ...restAfter } = stored;
+      expect(restAfter).toEqual(restBefore);
+      expect(result.extractedTasks).toEqual([]); // dismissed task must not resurface
+    });
+
+    it('preserves a completed_state doc the same way', async () => {
+      const { db, store } = makeFakeDb();
+      const entryRef = db.doc(`${USER_BASE}/entries/e1`);
+      await runIntentExtraction({ db, entryRef, entry: { id: 'e1', text: dentistText, entryInputVersion: 1 }, modelId: 'm', apiKey: 'k', extractCandidates: dentistCand() });
+      const intentPath = [...store.keys()].find((p) => p.includes('/intents/'));
+      store.set(intentPath, { ...store.get(intentPath), state: 'completed_state', userText: 'done already' });
+
+      await runIntentExtraction({ db, entryRef, entry: { id: 'e1', text: dentistText, entryInputVersion: 2 }, modelId: 'm', apiKey: 'k', extractCandidates: dentistCand() });
+
+      const stored = store.get(intentPath);
+      expect(stored.state).toBe('completed_state');
+      expect(stored.userText).toBe('done already');
+      expect(stored.inputVersion).toBe(2);
+    });
+
+    it('preserves via a user_decisions reference even when the doc state alone is not dismissed/completed_state', async () => {
+      const { db, store } = makeFakeDb();
+      const entryRef = db.doc(`${USER_BASE}/entries/e1`);
+      await runIntentExtraction({ db, entryRef, entry: { id: 'e1', text: dentistText, entryInputVersion: 1 }, modelId: 'm', apiKey: 'k', extractCandidates: dentistCand() });
+      const intentPath = [...store.keys()].find((p) => p.includes('/intents/'));
+      const id = intentPath.split('/').pop();
+
+      // The doc's own state was left as 'suggested' (not itself dismissal-shaped)
+      // but a decision audit already recorded a dismissal for this id.
+      store.set(intentPath, { ...store.get(intentPath), state: 'suggested' });
+      store.set(`${USER_BASE}/user_decisions/d1`, { targetId: id, targetType: 'intent', action: 'not_a_task', createdAt: 'x', reversible: true });
+
+      await runIntentExtraction({ db, entryRef, entry: { id: 'e1', text: dentistText, entryInputVersion: 2 }, modelId: 'm', apiKey: 'k', extractCandidates: dentistCand() });
+
+      const stored = store.get(intentPath);
+      expect(stored.state).toBe('suggested'); // untouched, not overwritten back to active/suggested-by-policy
+      expect(stored.inputVersion).toBe(2);
+    });
+
+    it('a preserved (dismissed) doc coexists with a fresh active candidate in the same run', async () => {
+      const { db, store } = makeFakeDb();
+      const entryRef = db.doc(`${USER_BASE}/entries/e1`);
+      const twoTaskText = 'Buy milk. I need to call the dentist tomorrow.';
+      const twoTaskCands = () => async () => normalizeCandidates([
+        { kind: 'task', text: 'Buy milk', attributes: attrs({ agency: true, concrete: true, unfinished: true, temporalFit: true }), confidence: 0.9 },
+        { kind: 'task', text: 'call the dentist', attributes: attrs({ agency: true, concrete: true, unfinished: true, temporalFit: true }), confidence: 0.9 },
+      ], twoTaskText);
+
+      await runIntentExtraction({ db, entryRef, entry: { id: 'e1', text: twoTaskText, entryInputVersion: 1 }, modelId: 'm', apiKey: 'k', extractCandidates: twoTaskCands() });
+      const dentistPath = [...store.keys()].find((p) => p.includes('/intents/') && store.get(p).sourceSpan.text === 'call the dentist');
+      const milkPath = [...store.keys()].find((p) => p.includes('/intents/') && store.get(p).sourceSpan.text === 'Buy milk');
+
+      // Dismiss only the dentist task.
+      store.set(dentistPath, { ...store.get(dentistPath), state: 'dismissed', userText: 'not needed' });
+
+      const result = await runIntentExtraction({ db, entryRef, entry: { id: 'e1', text: twoTaskText, entryInputVersion: 2 }, modelId: 'm', apiKey: 'k', extractCandidates: twoTaskCands() });
+
+      const dentist = store.get(dentistPath);
+      const milk = store.get(milkPath);
+      expect(dentist.state).toBe('dismissed');
+      expect(dentist.userText).toBe('not needed');
+      expect(dentist.inputVersion).toBe(2);
+      expect(milk.state).toBe('active'); // active doc still updates normally
+      expect(milk.inputVersion).toBe(2);
+      expect(result.extractedTasks).toEqual([{ text: 'Buy milk', completed: false, index: 0 }]);
+    });
+  });
 });

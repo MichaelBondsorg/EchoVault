@@ -61,9 +61,32 @@ export const INTENT_ATTRIBUTE_KEYS = Object.freeze([
 
 // Fields a client update may touch. Extraction-owned fields are immutable from
 // the client. Kept identical to the firestore.rules affectedKeys allowlist.
-export const CLIENT_MUTABLE_KEYS = Object.freeze(['state', 'updatedAt', 'authorization']);
+//   snoozedUntil: ISO string | null — defer a due loop (state stays `active`).
+//   outcome:      {closedAt, kind, answerEntryId} | null — set when closing a
+//                 loop; never touches the source entry.
+//   userText:     string | null — display override for repair/edit;
+//                 `sourceSpan` stays immutable evidence.
+export const CLIENT_MUTABLE_KEYS = Object.freeze([
+  'state',
+  'updatedAt',
+  'authorization',
+  'snoozedUntil',
+  'outcome',
+  'userText',
+]);
 
-export const DECISION_ACTIONS = Object.freeze(['kept', 'dismissed', 'not_a_task', 'completed']);
+export const DECISION_ACTIONS = Object.freeze([
+  'kept',
+  'dismissed',
+  'not_a_task',
+  'completed',
+  'snoozed',
+  'answered',
+  'closed',
+]);
+
+const OUTCOME_KEYS = Object.freeze(['closedAt', 'kind', 'answerEntryId']);
+const OUTCOME_KINDS = Object.freeze(['answered', 'closed']);
 
 const SCHEMA_VERSION = 1;
 const PROMPT_VERSION = 1;
@@ -88,6 +111,39 @@ function validateSourceSpan(sourceSpan) {
     throw new Error('intent: sourceSpan.text (the evidence span) is required');
   }
   return { start, end, text };
+}
+
+function validateIsoOrNull(value, label) {
+  if (value === null) return null;
+  if (typeof value !== 'string' || !value.trim()) {
+    throw new Error(`intent: ${label} must be an ISO string or null`);
+  }
+  return value;
+}
+
+function validateOutcome(outcome) {
+  if (outcome === null) return null;
+  if (!outcome || typeof outcome !== 'object') throw new Error('intent: outcome must be an object or null');
+  for (const key of Object.keys(outcome)) {
+    if (!OUTCOME_KEYS.includes(key)) throw new Error(`intent: outcome has unknown key "${key}"`);
+  }
+  const { closedAt, kind, answerEntryId } = outcome;
+  if (typeof closedAt !== 'string' || !closedAt.trim()) {
+    throw new Error('intent: outcome.closedAt must be an ISO string');
+  }
+  if (!OUTCOME_KINDS.includes(kind)) {
+    throw new Error(`intent: outcome.kind must be one of ${OUTCOME_KINDS.join('/')}`);
+  }
+  if (answerEntryId !== null && typeof answerEntryId !== 'string') {
+    throw new Error('intent: outcome.answerEntryId must be a string or null');
+  }
+  return { closedAt, kind, answerEntryId: answerEntryId ?? null };
+}
+
+function validateUserText(userText) {
+  if (userText === null) return null;
+  if (typeof userText !== 'string') throw new Error('intent: userText must be a string or null');
+  return userText;
 }
 
 function validateAttributes(attributes) {
@@ -126,6 +182,9 @@ export function buildIntent({
   inputVersion = 0,
   createdAt,
   updatedAt,
+  snoozedUntil = null,
+  outcome = null,
+  userText = null,
 }) {
   if (typeof id !== 'string' || !id.trim()) throw new Error('intent: id is required');
   if (typeof ownerId !== 'string' || !ownerId.trim()) throw new Error('intent: ownerId is required');
@@ -143,6 +202,9 @@ export function buildIntent({
 
   const span = validateSourceSpan(sourceSpan);
   const attrs = validateAttributes(attributes);
+  const snoozed = validateIsoOrNull(snoozedUntil, 'snoozedUntil');
+  const validatedOutcome = validateOutcome(outcome);
+  const validatedUserText = validateUserText(userText);
   const now = new Date().toISOString();
 
   // authorization defaults CLOSED: no notification authority is granted at
@@ -174,6 +236,9 @@ export function buildIntent({
     createdAt: createdAt || now,
     updatedAt: updatedAt || now,
     decidedBy: 'policy',
+    snoozedUntil: snoozed,
+    outcome: validatedOutcome,
+    userText: validatedUserText,
   };
 }
 

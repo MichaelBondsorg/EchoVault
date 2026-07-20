@@ -194,6 +194,49 @@ async function readExistingActiveTaskIntents(intentsCol, entryId) {
 }
 
 /**
+ * Single shared read of this entry's existing intent docs, keyed by id. Feeds
+ * BOTH the dismissal-preservation check and the stale-intent reap below so a
+ * re-extraction never issues more than one `where(entryId==)` query.
+ */
+async function readExistingIntentsById(intentsCol, entryId) {
+  const byId = new Map();
+  try {
+    const snap = await intentsCol.where('entryId', '==', entryId).get();
+    snap.forEach((doc) => byId.set(doc.id, doc.data() || {}));
+  } catch {
+    // best-effort; treat as no existing docs when the read fails
+  }
+  return byId;
+}
+
+const DISMISSAL_STATES = new Set(['dismissed', 'completed_state']);
+const DISMISSAL_DECISION_ACTIONS = new Set(['not_a_task', 'dismissed']);
+
+/**
+ * A dismissed/completed loop must never be silently resurrected by a later
+ * re-extraction — "a dismissed loop/task can only return if the user
+ * explicitly restores it." The existing doc's own `state` is the primary
+ * signal (cheap: already in hand from `readExistingIntentsById`); a
+ * user_decisions lookup is only consulted as a fallback when the state alone
+ * doesn't already confirm it (e.g. a doc left in some other state by a prior
+ * decision that hasn't propagated to `state` yet).
+ */
+async function shouldPreserveDismissal(existingDoc, decisionsCol, id) {
+  if (!existingDoc) return false; // brand-new id: nothing to preserve
+  if (DISMISSAL_STATES.has(existingDoc.state)) return true;
+  try {
+    const dref = await decisionsCol.where('targetId', '==', id).get();
+    let preserved = false;
+    dref.forEach((doc) => {
+      if (DISMISSAL_DECISION_ACTIONS.has(doc.data()?.action)) preserved = true;
+    });
+    return preserved;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Reap intents left behind by an earlier extraction of this entry at an OLDER
  * inputVersion. A user edit that shifts spans mints NEW deterministic ids, so
  * the old-version docs (including a possibly-active one) would otherwise linger
@@ -201,22 +244,15 @@ async function readExistingActiveTaskIntents(intentsCol, entryId) {
  * user_decision references its id — in which case retire it to `superseded`
  * (never delete something a decision audit points at). Mutates `batch`.
  */
-async function reapStaleIntents(batch, intentsCol, decisionsCol, entryId, inputVersion, writtenIds) {
-  let snap;
-  try {
-    snap = await intentsCol.where('entryId', '==', entryId).get();
-  } catch {
-    return; // reap is best-effort; never block a fresh extraction on a read error
-  }
+async function reapStaleIntents(batch, intentsCol, decisionsCol, inputVersion, writtenIds, existingById) {
   const stale = [];
-  snap.forEach((doc) => {
-    const d = doc.data() || {};
-    // Skip ids this run already re-wrote (a span that didn't shift keeps its id
-    // and was just refreshed to the new version) — never write the same doc
-    // twice in one batch.
-    if (writtenIds.has(doc.id)) return;
-    if ((d.inputVersion ?? 0) < inputVersion) stale.push(doc.id);
-  });
+  for (const [id, d] of existingById) {
+    // Skip ids this run already wrote/merged (a span that didn't shift keeps
+    // its id and was just refreshed to the new version) — never write the same
+    // doc twice in one batch.
+    if (writtenIds.has(id)) continue;
+    if ((d.inputVersion ?? 0) < inputVersion) stale.push(id);
+  }
   for (const id of stale) {
     let referenced = false;
     try {
@@ -265,6 +301,10 @@ export async function runIntentExtraction({ db, entryRef, entry, modelId, apiKey
   const persistAbstain = await getServerFlag(db, 'intentAbstainAudit', false);
   const candidates = await extractCandidates({ apiKey, entry, modelId });
 
+  // Single shared read of this entry's existing intents — serves both the
+  // dismissal-preservation check below and the stale-intent reap.
+  const existingById = await readExistingIntentsById(intentsCol, entryId);
+
   const batch = db.batch();
   const activeTaskIntents = [];
   const writtenIds = new Set();
@@ -274,6 +314,16 @@ export async function runIntentExtraction({ db, entryRef, entry, modelId, apiKey
     if (state === 'abstain' && !persistAbstain) continue;
     const id = deterministicIntentId(entryId, cand.sourceSpan.start, cand.kind);
     writtenIds.add(id);
+
+    const existingDoc = existingById.get(id);
+    if (await shouldPreserveDismissal(existingDoc, decisionsCol, id)) {
+      // Dismissed/completed is user-terminal: never overwrite state or
+      // user-set fields here — only bump the reap-relevant version marker so
+      // the reaper above never treats this doc as stale.
+      batch.set(intentsCol.doc(id), { inputVersion, updatedAt: new Date().toISOString() }, { merge: true });
+      continue;
+    }
+
     const intent = buildIntent({
       id,
       ownerId,
@@ -293,7 +343,7 @@ export async function runIntentExtraction({ db, entryRef, entry, modelId, apiKey
   }
 
   // Reap intents from any earlier (older-version) extraction of this entry.
-  await reapStaleIntents(batch, intentsCol, decisionsCol, entryId, inputVersion, writtenIds);
+  await reapStaleIntents(batch, intentsCol, decisionsCol, inputVersion, writtenIds, existingById);
 
   // Version marker in the same batch: latches only on a successful commit.
   batch.set(entryRef, { processing: { intentsExtractedForVersion: inputVersion } }, { merge: true });

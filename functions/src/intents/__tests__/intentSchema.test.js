@@ -3,6 +3,8 @@ import {
   INTENT_KINDS,
   INTENT_STATES,
   INTENT_ATTRIBUTE_KEYS,
+  CLIENT_MUTABLE_KEYS,
+  DECISION_ACTIONS,
   buildIntent,
   isClientTransitionAllowed,
   validateUserIntentUpdate,
@@ -46,6 +48,14 @@ describe('intent taxonomy constants', () => {
       'agency', 'concrete', 'unfinished', 'temporalFit', 'negated',
       'quoted', 'conditional', 'goalLanguage', 'otherOwned', 'completed',
     ]);
+  });
+
+  it('CLIENT_MUTABLE_KEYS includes the new client-settable loop-management fields', () => {
+    expect(CLIENT_MUTABLE_KEYS).toEqual(['state', 'updatedAt', 'authorization', 'snoozedUntil', 'outcome', 'userText']);
+  });
+
+  it('DECISION_ACTIONS includes the new loop-closing actions', () => {
+    expect(DECISION_ACTIONS).toEqual(['kept', 'dismissed', 'not_a_task', 'completed', 'snoozed', 'answered', 'closed']);
   });
 });
 
@@ -112,6 +122,43 @@ describe('buildIntent', () => {
   it('stamps a provided inputVersion and rejects a negative one', () => {
     expect(buildIntent(validArgs({ inputVersion: 4 })).inputVersion).toBe(4);
     expect(() => buildIntent(validArgs({ inputVersion: -1 }))).toThrow(/inputVersion/);
+  });
+
+  it('defaults snoozedUntil, outcome, userText to null', () => {
+    const intent = buildIntent(validArgs());
+    expect(intent.snoozedUntil).toBeNull();
+    expect(intent.outcome).toBeNull();
+    expect(intent.userText).toBeNull();
+  });
+
+  it('accepts a snoozedUntil ISO string and rejects a non-ISO value', () => {
+    const intent = buildIntent(validArgs({ snoozedUntil: '2026-08-01T00:00:00.000Z' }));
+    expect(intent.snoozedUntil).toBe('2026-08-01T00:00:00.000Z');
+    expect(() => buildIntent(validArgs({ snoozedUntil: 123 }))).toThrow(/snoozedUntil/);
+    expect(() => buildIntent(validArgs({ snoozedUntil: '' }))).toThrow(/snoozedUntil/);
+  });
+
+  it('accepts a well-formed outcome and rejects malformed shapes', () => {
+    const outcome = { closedAt: '2026-07-20T00:00:00.000Z', kind: 'answered', answerEntryId: 'entry-9' };
+    expect(buildIntent(validArgs({ outcome })).outcome).toEqual(outcome);
+
+    const closedOutcome = { closedAt: '2026-07-20T00:00:00.000Z', kind: 'closed', answerEntryId: null };
+    expect(buildIntent(validArgs({ outcome: closedOutcome })).outcome).toEqual(closedOutcome);
+
+    expect(() => buildIntent(validArgs({
+      outcome: { closedAt: '2026-07-20T00:00:00.000Z', kind: 'bogus', answerEntryId: null },
+    }))).toThrow(/outcome/);
+    expect(() => buildIntent(validArgs({
+      outcome: { closedAt: 123, kind: 'closed', answerEntryId: null },
+    }))).toThrow(/outcome/);
+    expect(() => buildIntent(validArgs({
+      outcome: { closedAt: '2026-07-20T00:00:00.000Z', kind: 'closed', answerEntryId: null, extra: 'nope' },
+    }))).toThrow(/outcome/);
+  });
+
+  it('accepts a userText string or null and rejects a non-string', () => {
+    expect(buildIntent(validArgs({ userText: 'call the vet instead' })).userText).toBe('call the vet instead');
+    expect(() => buildIntent(validArgs({ userText: 42 }))).toThrow(/userText/);
   });
 });
 
