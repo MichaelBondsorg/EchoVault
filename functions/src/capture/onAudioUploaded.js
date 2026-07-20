@@ -152,7 +152,7 @@ export async function processCaptureAudioObject(object, deps) {
   const dup = await entriesRef.where('operationId', '==', operationId).limit(1).get();
   if (!dup.empty) {
     await safeDelete();
-    log(operationId, 'entry_saved', { errorCode: 'duplicate' });
+    log(operationId, 'duplicate_skipped', { errorCode: 'duplicate' });
     return { status: 'deleted', reason: 'duplicate' };
   }
 
@@ -177,6 +177,10 @@ export async function processCaptureAudioObject(object, deps) {
       return { status: 'kept', reason: 'transcription-failed' };
     }
 
+    // Capture provenance rides in as GCS custom metadata: the ticket signed
+    // `x-goog-meta-captured-at` / `x-goog-meta-capture-timezone` PUT headers, and
+    // GCS surfaces them here under the prefix-stripped, lowercased keys
+    // `captured-at` / `capture-timezone` (NOT camelCase). Absent ⇒ null.
     const meta = object.metadata || {};
     const entry = buildBackgroundCoreEntry(
       {
@@ -185,8 +189,8 @@ export async function processCaptureAudioObject(object, deps) {
         userId: uid,
         operationId,
         toneAnalysis: result.toneAnalysis,
-        capturedAt: meta.capturedAt || null,
-        captureTimezone: meta.captureTimezone || null,
+        capturedAt: meta['captured-at'] || null,
+        captureTimezone: meta['capture-timezone'] || null,
       },
       { FieldValue: FV }
     );

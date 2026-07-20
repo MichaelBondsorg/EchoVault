@@ -65,12 +65,26 @@ final class BackgroundUploader: NSObject {
     }
 
     /// Enqueue a background PUT upload of `fileURL` to `signedUrl`.
+    /// - Parameter headers: extra request headers that were signed into the V4
+    ///   URL (e.g. `x-goog-meta-*` capture provenance). These MUST match exactly
+    ///   what `issueCaptureUploadTicket` returned in `requiredHeaders`, or GCS
+    ///   rejects the PUT with SignatureDoesNotMatch.
     /// - Note: `taskDescription` is set to `draftId` so the completion delegate
     ///   can identify the draft even after an app relaunch.
-    func enqueueUpload(draftId: String, ownerHash: String, fileURL: URL, signedUrl: URL, contentType: String) {
+    func enqueueUpload(
+        draftId: String,
+        ownerHash: String,
+        fileURL: URL,
+        signedUrl: URL,
+        contentType: String,
+        headers: [String: String] = [:]
+    ) {
         var request = URLRequest(url: signedUrl)
         request.httpMethod = "PUT"
         request.setValue(contentType, forHTTPHeaderField: "Content-Type")
+        for (key, value) in headers {
+            request.setValue(value, forHTTPHeaderField: key)
+        }
         let task = session.uploadTask(with: request, fromFile: fileURL)
         task.taskDescription = draftId
         task.resume()

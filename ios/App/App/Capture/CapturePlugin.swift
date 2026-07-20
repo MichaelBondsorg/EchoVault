@@ -195,6 +195,15 @@ public final class CapturePlugin: CAPPlugin, CAPBridgedPlugin {
             return
         }
         let contentType = call.getString("contentType") ?? "audio/mp4"
+        // Extra signed headers (e.g. x-goog-meta-* provenance) the JS caller
+        // passes straight through from the ticket's `requiredHeaders`. Content-Type
+        // is set explicitly above; any duplicate here simply overwrites it.
+        var headers: [String: String] = [:]
+        if let raw = call.getObject("headers") {
+            for (key, value) in raw {
+                if let stringValue = value as? String { headers[key] = stringValue }
+            }
+        }
         do {
             let fileURL = try CaptureCoordinator.shared.audioURL(ownerUid: ownerUid, draftId: draftId)
             let ownerHash = try CaptureCoordinator.shared.ownerHash(ownerUid)
@@ -203,7 +212,8 @@ public final class CapturePlugin: CAPPlugin, CAPBridgedPlugin {
                 ownerHash: ownerHash,
                 fileURL: fileURL,
                 signedUrl: signedUrl,
-                contentType: contentType
+                contentType: contentType,
+                headers: headers
             )
             call.resolve(["draftId": draftId])
         } catch { call.reject(error.localizedDescription) }

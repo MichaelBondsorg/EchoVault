@@ -111,6 +111,7 @@ describe('processCaptureAudioObject — guard chain', () => {
     expect(t.add).not.toHaveBeenCalled();
     expect(t.transcribe).not.toHaveBeenCalled();
     expect(t.file.delete).toHaveBeenCalledTimes(1);
+    expect(t.log).toHaveBeenCalledWith(OP_ID, 'duplicate_skipped', expect.anything());
   });
 
   it('rejects oversized audio before downloading', async () => {
@@ -133,7 +134,8 @@ describe('processCaptureAudioObject — success path', () => {
       },
     });
     const res = await processCaptureAudioObject(
-      object({ metadata: { capturedAt: '2026-07-20T10:00:00Z', captureTimezone: 'America/Los_Angeles' } }),
+      // GCS surfaces x-goog-meta-* headers under prefix-stripped, lowercased keys.
+      object({ metadata: { 'captured-at': '2026-07-20T10:00:00Z', 'capture-timezone': 'America/Los_Angeles' } }),
       t.deps
     );
 
