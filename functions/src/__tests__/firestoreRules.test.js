@@ -387,3 +387,149 @@ describe('Top-level config/flags rules', () => {
     await assertFails(getDoc(ref));
   });
 });
+
+// --- Intents collection rules (PRD 0B precision-first intent system) -----
+
+// Seed a server-created intent (bypassing rules, as the Admin SDK does) so we
+// can exercise the client update contract against it.
+async function seedIntent(intentId, state, extra = {}) {
+  await testEnv.withSecurityRulesDisabled(async (context) => {
+    const db = context.firestore();
+    await setDoc(doc(db, userPath(USER_ID), 'intents', intentId), {
+      ownerId: USER_ID,
+      entryId: 'entry-1',
+      kind: 'task',
+      state,
+      sourceSpan: { start: 0, end: 5, text: 'call' },
+      attributes: { agency: true, concrete: true, unfinished: true, temporalFit: true, negated: false, quoted: false, conditional: false, goalLanguage: false, otherOwned: false, completed: false },
+      confidence: 0.9,
+      activationReason: 'seed',
+      targetAt: null,
+      authorization: { notifications: false },
+      versions: { extraction: 1, model: 'gemini-3.5-flash', prompt: 1, schema: 1 },
+      decidedBy: 'policy',
+      createdAt: 'seed',
+      updatedAt: 'seed',
+      ...extra,
+    });
+  });
+}
+
+describe('Intents collection rules', () => {
+  it('allows the owner to read their own intents', async () => {
+    await seedIntent('i-read', 'active');
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    await assertSucceeds(getDoc(doc(db, userPath(USER_ID), 'intents', 'i-read')));
+  });
+
+  it('denies another user reading an intent', async () => {
+    await seedIntent('i-cross', 'active');
+    const db = testEnv.authenticatedContext(OTHER_USER_ID).firestore();
+    await assertFails(getDoc(doc(db, userPath(USER_ID), 'intents', 'i-cross')));
+  });
+
+  it('denies a client CREATE (only the server may mint intents)', async () => {
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    const ref = doc(db, userPath(USER_ID), 'intents', 'forged');
+    await assertFails(setDoc(ref, {
+      ownerId: USER_ID, kind: 'task', state: 'active',
+      attributes: {}, confidence: 0.99,
+    }));
+  });
+
+  it('denies a client DELETE', async () => {
+    await seedIntent('i-del', 'active');
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    await assertFails(deleteDoc(doc(db, userPath(USER_ID), 'intents', 'i-del')));
+  });
+
+  it('ALLOWS suggested -> active (keep) touching only state/updatedAt', async () => {
+    await seedIntent('i-keep', 'suggested');
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    await assertSucceeds(updateDoc(doc(db, userPath(USER_ID), 'intents', 'i-keep'), { state: 'active', updatedAt: 'now' }));
+  });
+
+  it('ALLOWS active -> completed_state (complete)', async () => {
+    await seedIntent('i-done', 'active');
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    await assertSucceeds(updateDoc(doc(db, userPath(USER_ID), 'intents', 'i-done'), { state: 'completed_state', updatedAt: 'now' }));
+  });
+
+  it('ALLOWS any -> dismissed', async () => {
+    await seedIntent('i-dismiss', 'suggested');
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    await assertSucceeds(updateDoc(doc(db, userPath(USER_ID), 'intents', 'i-dismiss'), { state: 'dismissed', updatedAt: 'now' }));
+  });
+
+  it('FORBIDS abstain -> active (a hard-negative can never be activated by a client)', async () => {
+    await seedIntent('i-abstain', 'abstain');
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    await assertFails(updateDoc(doc(db, userPath(USER_ID), 'intents', 'i-abstain'), { state: 'active', updatedAt: 'now' }));
+  });
+
+  it('FORBIDS suggested -> completed_state (illegal transition)', async () => {
+    await seedIntent('i-badtrans', 'suggested');
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    await assertFails(updateDoc(doc(db, userPath(USER_ID), 'intents', 'i-badtrans'), { state: 'completed_state', updatedAt: 'now' }));
+  });
+
+  it('FORBIDS mutating an extraction-owned field alongside a legal state move', async () => {
+    await seedIntent('i-tamper', 'suggested');
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    await assertFails(updateDoc(doc(db, userPath(USER_ID), 'intents', 'i-tamper'), { state: 'active', confidence: 0.1 }));
+  });
+
+  it('denies another user updating an intent', async () => {
+    await seedIntent('i-crossupd', 'suggested');
+    const db = testEnv.authenticatedContext(OTHER_USER_ID).firestore();
+    await assertFails(updateDoc(doc(db, userPath(USER_ID), 'intents', 'i-crossupd'), { state: 'active', updatedAt: 'now' }));
+  });
+});
+
+// --- user_decisions collection rules -------------------------------------
+
+describe('user_decisions collection rules', () => {
+  const validDecision = { targetId: 'i1', targetType: 'intent', action: 'kept', reasonCode: null, createdAt: 'now', reversible: true };
+
+  it('allows the owner to create a well-formed intent decision', async () => {
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    await assertSucceeds(addDoc(collection(db, userPath(USER_ID), 'user_decisions'), validDecision));
+  });
+
+  it('allows the owner to read their own decisions', async () => {
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    await assertSucceeds(getDoc(doc(db, userPath(USER_ID), 'user_decisions', 'anything')));
+  });
+
+  it('denies a decision with an unknown action', async () => {
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    await assertFails(addDoc(collection(db, userPath(USER_ID), 'user_decisions'), { ...validDecision, action: 'frobnicate' }));
+  });
+
+  it('denies a decision with an unexpected extra key', async () => {
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    await assertFails(addDoc(collection(db, userPath(USER_ID), 'user_decisions'), { ...validDecision, escalate: true }));
+  });
+
+  it('denies a decision missing a required key', async () => {
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    await assertFails(addDoc(collection(db, userPath(USER_ID), 'user_decisions'), { targetId: 'i1', targetType: 'intent', action: 'kept' }));
+  });
+
+  it('denies another user creating a decision in this user space', async () => {
+    const db = testEnv.authenticatedContext(OTHER_USER_ID).firestore();
+    await assertFails(addDoc(collection(db, userPath(USER_ID), 'user_decisions'), validDecision));
+  });
+
+  it('denies update and delete of a decision', async () => {
+    let decisionId;
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      const cdb = context.firestore();
+      const ref = await addDoc(collection(cdb, userPath(USER_ID), 'user_decisions'), validDecision);
+      decisionId = ref.id;
+    });
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    await assertFails(updateDoc(doc(db, userPath(USER_ID), 'user_decisions', decisionId), { action: 'dismissed' }));
+    await assertFails(deleteDoc(doc(db, userPath(USER_ID), 'user_decisions', decisionId)));
+  });
+});

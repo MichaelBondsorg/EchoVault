@@ -19,6 +19,18 @@ service cloud.firestore {
         && request.auth.token.admin == true;
     }
 
+    // Client-permitted intent state transitions (PRD 0B). Mirrors
+    // functions/src/intents/intentSchema.js isClientTransitionAllowed:
+    //   any -> dismissed; suggested -> active; active -> completed_state;
+    //   no-op (from == to, e.g. an authorization-only edit).
+    // Structurally, `abstain` (every hard-negative) has no path to `active`.
+    function intentTransitionAllowed(from, to) {
+      return to == 'dismissed'
+        || (from == 'suggested' && to == 'active')
+        || (from == 'active' && to == 'completed_state')
+        || from == to;
+    }
+
     // Artifacts collection (main app data)
     match /artifacts/{appId}/users/{userId} {
       // Allow user to read/write their own user document
@@ -168,6 +180,36 @@ service cloud.firestore {
         allow create, update: if isOwner(userId)
           && request.resource.data.keys().size() <= 10;
         allow delete: if isOwner(userId);
+      }
+
+      // Intents subcollection (PRD 0B precision-first intent system).
+      // Documents are CREATED ONLY by the server (Admin SDK, via the
+      // catch-all below). A client may read its own intents and make a narrow
+      // set of state transitions — and only touch state/updatedAt/
+      // authorization. Every extraction-owned field (kind, attributes,
+      // confidence, sourceSpan, versions, ...) is immutable from the client.
+      // No client create or delete: model confidence alone can never mint an
+      // active intent, and a user can only dismiss (never hard-delete).
+      match /intents/{intentId} {
+        allow read: if isOwner(userId);
+        allow update: if isOwner(userId)
+          && request.resource.data.diff(resource.data).affectedKeys()
+               .hasOnly(['state', 'updatedAt', 'authorization'])
+          && intentTransitionAllowed(resource.data.state, request.resource.data.state);
+      }
+
+      // User decisions (append-only audit of keep/dismiss/complete actions).
+      // Owner may create a shape-validated decision and read its own; never
+      // update or delete (reversibility is modelled by a new decision, not a
+      // mutation).
+      match /user_decisions/{decisionId} {
+        allow read: if isOwner(userId);
+        allow create: if isOwner(userId)
+          && request.resource.data.targetType == 'intent'
+          && request.resource.data.keys().hasAll(['targetId', 'targetType', 'action', 'createdAt', 'reversible'])
+          && request.resource.data.keys().hasOnly(['targetId', 'targetType', 'action', 'reasonCode', 'createdAt', 'reversible'])
+          && request.resource.data.action in ['kept', 'dismissed', 'not_a_task', 'completed']
+          && request.resource.data.reversible == true;
       }
 
       // FCM tokens subcollection (write-only, no client reads or deletes)
