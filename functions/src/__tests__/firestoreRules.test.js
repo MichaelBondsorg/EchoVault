@@ -359,3 +359,31 @@ describe('AI consent settings rules', () => {
     await assertFails(setDoc(ref, { aiProcessing: false }));
   });
 });
+
+// --- Top-level config/flags rules (D12: feature-flag service) -----------
+
+describe('Top-level config/flags rules', () => {
+  it('allows an authenticated user to read config/flags', async () => {
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    const ref = doc(db, 'config', 'flags');
+    await assertSucceeds(getDoc(ref));
+  });
+
+  it('denies an unauthenticated user reading config/flags', async () => {
+    const db = testEnv.unauthenticatedContext().firestore();
+    const ref = doc(db, 'config', 'flags');
+    await assertFails(getDoc(ref));
+  });
+
+  it('denies an authenticated user writing config/flags', async () => {
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    const ref = doc(db, 'config', 'flags');
+    await assertFails(setDoc(ref, { coreFirstSave: true }));
+  });
+
+  it('denies an authenticated user reading any other config/{docId}', async () => {
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    const ref = doc(db, 'config', 'secrets');
+    await assertFails(getDoc(ref));
+  });
+});

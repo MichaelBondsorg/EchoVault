@@ -178,6 +178,17 @@ service cloud.firestore {
       }
     }
 
+    // Top-level runtime feature-flag doc, written only by the Admin
+    // SDK/console (see functions/src/shared/flags.js, src/config/flags.js).
+    // Any authenticated user may read the single `flags` doc; no other
+    // config/{docId} is client-readable, and no client write is ever
+    // allowed here — the admin catch-all below still lets Cloud Functions
+    // manage it.
+    match /config/{docId} {
+      allow read: if isAuthenticated() && docId == 'flags';
+      allow write: if false;
+    }
+
     // Allow Cloud Functions to read/write with admin claims
     match /{document=**} {
       allow read, write: if isAdmin();

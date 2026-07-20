@@ -54,6 +54,7 @@ export default defineConfig({
       'functions/src/analytics/__tests__/onEntryAnalyzed.test.js',
       'functions/src/notifications/__tests__/sender.test.js',
       'functions/src/reports/__tests__/reportCleanup.test.js',
+      'functions/src/shared/__tests__/flags.test.js',
     ],
 
     // Exclude patterns

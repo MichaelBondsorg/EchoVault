@@ -31,6 +31,7 @@ import {
   DEFAULT_SAFETY_PLAN
 } from './config/constants';
 import { USE_FUSED_TRANSCRIPTION } from './config/ai';
+import { initFlags } from './config/flags';
 
 // Utils
 import { safeString, removeUndefined, formatMentions } from './utils/string';
@@ -560,6 +561,9 @@ export default function App() {
   // Auth
   useEffect(() => {
     console.log('[Engram] Setting up auth listener...');
+    // Fire-and-forget: feature flags must never block first paint. getFlag()
+    // falls back to defaults/localStorage until this resolves.
+    initFlags(db);
     const init = async () => {
       if (typeof window !== 'undefined' && typeof window.__initial_auth_token !== 'undefined' && window.__initial_auth_token) {
         try {
