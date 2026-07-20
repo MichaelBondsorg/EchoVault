@@ -98,6 +98,8 @@ const AppLayout = ({
   const [entryMode, setEntryMode] = useState('text'); // 'voice' or 'text'
   const [isFreshEntry, setIsFreshEntry] = useState(true); // true = FAB entry, false = responding to prompt
   const [currentPrompt, setCurrentPrompt] = useState(null); // Track prompt being answered for auto-dismiss
+  const [initialContext, setInitialContext] = useState(null); // Quiet composer context chip (e.g. open-loop "Following up: ...")
+  const [onEntrySavedCallback, setOnEntrySavedCallback] = useState(null); // Fires with the saved entry id/result
   const [daySummary, setDaySummary] = useState({ isOpen: false, date: null, dayData: null }); // Day summary modal
   const [reflectionIndex, setReflectionIndex] = useState(0); // Current reflection prompt index
 
@@ -259,22 +261,39 @@ const AppLayout = ({
     setIsFreshEntry(true); // Reset for next time
     setCurrentPrompt(null); // Clear tracked prompt
     setReplyContext?.(null);
+    setInitialContext(null);
+    setOnEntrySavedCallback(null);
   };
 
   // Handler for successful entry submission - dismisses prompt if responding to one
   const handleEntrySubmitted = async (submitFn, ...args) => {
     try {
-      await submitFn?.(...args);
+      const result = await submitFn?.(...args);
       // If this was a response to a reflection prompt, dismiss it
       if (currentPrompt && !isFreshEntry) {
         dismissReflectionPrompt(currentPrompt);
       }
       handleCloseEntryModal();
+      return result;
     } catch (e) {
       console.error('Entry submission failed:', e);
       handleCloseEntryModal();
     }
   };
+
+  // Opens the composer for an open-loop "Answer" action: a quiet context
+  // chip (the loop's display text) instead of the Reflect banner, and a
+  // callback that's told what the save resolved to so the caller can link
+  // the intent to the new entry (see OpenLoopsWidget / intentClient.answerLoop).
+  const handleAnswerLoop = useCallback((loopDisplayText, onSaved) => {
+    setEntryMode('text');
+    setIsFreshEntry(true);
+    setCurrentPrompt(null);
+    setReplyContext?.(null);
+    setInitialContext(loopDisplayText);
+    setOnEntrySavedCallback(() => onSaved);
+    setShowEntryModal(true);
+  }, [setReplyContext]);
 
   // Handler for Quick Mood - also clears any stale replyContext
   const handleOpenQuickMood = () => {
@@ -364,6 +383,7 @@ const AppLayout = ({
                 onStartTextEntry={onStartTextEntry}
                 onPromptResponse={handlePromptResponse}
                 onDayClick={handleDayClick}
+                onAnswerLoop={handleAnswerLoop}
               />
             }
           />
@@ -447,6 +467,8 @@ const AppLayout = ({
         aiProcessingEnabled={aiProcessingEnabled}
         onRequestAiConsent={onRequestAiConsent}
         promptContext={isFreshEntry ? null : replyContext}
+        initialContext={initialContext}
+        onEntrySaved={onEntrySavedCallback}
         reflection={isFreshEntry && reflectionQuestions.length > 0 ? (
           <div className="mb-3 rounded-2xl bg-[var(--accent-wash)] p-3">
             <div className="mb-1 flex items-center justify-between text-[var(--accent-deep)]">

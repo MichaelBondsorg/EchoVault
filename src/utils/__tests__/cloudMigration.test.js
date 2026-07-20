@@ -312,6 +312,13 @@ export const MIGRATED = [
   'src/components/shelter/BreathingExercise.jsx',
   'src/components/shelter/GroundingExercise.jsx',
   'src/components/screens/StreakCelebration.jsx',
+  // R1 Task 5 (2026-07-20): OpenLoopsWidget.jsx (due open-loops home surface,
+  // added to DEFAULT_DASHBOARD_LAYOUT after prompt_card) is a new file,
+  // authored Cloud-clean from the start (text-foreground/text-muted-foreground/
+  // text-faint/border-divider/accent-deep, cloud `Chip` for snooze options) —
+  // same "new file, already clean" precedent as RecentEntriesWidget/
+  // StreakCelebration, so it doesn't change the offender count.
+  'src/components/zen/widgets/OpenLoopsWidget.jsx',
 ];
 
 // --- Ratchet: how many non-migrated .jsx files still use legacy palette classes ---

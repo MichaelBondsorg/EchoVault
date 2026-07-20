@@ -8,6 +8,7 @@ export { default as MoodHeatmapWidget } from './MoodHeatmapWidget';
 export { default as StoriesWidget } from './StoriesWidget';
 export { default as NexusInsightsWidget } from './NexusInsightsWidget';
 export { default as RecentEntriesWidget } from './RecentEntriesWidget';
+export { default as OpenLoopsWidget } from './OpenLoopsWidget';
 
 // Widget type to component mapping
 import HeroWidget from './HeroWidget';
@@ -19,6 +20,7 @@ import MoodHeatmapWidget from './MoodHeatmapWidget';
 import StoriesWidget from './StoriesWidget';
 import NexusInsightsWidget from './NexusInsightsWidget';
 import RecentEntriesWidget from './RecentEntriesWidget';
+import OpenLoopsWidget from './OpenLoopsWidget';
 
 export const WIDGET_COMPONENTS = {
   hero: HeroWidget,
@@ -30,6 +32,7 @@ export const WIDGET_COMPONENTS = {
   stories: StoriesWidget,
   nexus: NexusInsightsWidget,
   recent: RecentEntriesWidget,
+  openloops: OpenLoopsWidget,
   // Future widgets
   trend: null,
   digest: null,

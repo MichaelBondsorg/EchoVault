@@ -24,6 +24,14 @@ export const WIDGET_DEFINITIONS = {
     defaultSize: '2x1',
     icon: 'Sparkles',
   },
+  open_loops: {
+    id: 'open_loops',
+    type: 'openloops',
+    name: 'Open Loops',
+    description: 'Follow-ups you set aside, ready when you are',
+    defaultSize: '2x1',
+    icon: 'Clock',
+  },
   quick_stats: {
     id: 'quick_stats',
     type: 'stats',
@@ -90,6 +98,7 @@ export const WIDGET_DEFINITIONS = {
 export const DEFAULT_DASHBOARD_LAYOUT = [
   { id: 'hero_card', type: 'hero', size: '2x1' },
   { id: 'prompt_card', type: 'prompt', size: '2x1' },
+  { id: 'open_loops', type: 'openloops', size: '2x1' },
   { id: 'quick_stats', type: 'stats', size: '2x1' },
   { id: 'mood_heatmap', type: 'heatmap', size: '2x1' },
   { id: 'recent_entries', type: 'recent', size: '2x1' },

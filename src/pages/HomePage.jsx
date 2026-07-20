@@ -23,6 +23,7 @@ const HomePage = ({
   onStartTextEntry,
   onPromptResponse, // Opens entry modal with prompt context
   onDayClick, // Opens day summary modal from 30-day journey / Recent list
+  onAnswerLoop, // Opens entry modal with an open-loop's quiet context chip (OpenLoopsWidget)
 }) => {
   const [showWidgetDrawer, setShowWidgetDrawer] = useState(false);
 
@@ -50,6 +51,8 @@ const HomePage = ({
     onToggleTask,
     // 30-day journey / Recent list - open day summary modal
     onDayClick,
+    // Open Loops "Answer" - open entry modal with a quiet follow-up chip
+    onAnswerLoop,
   };
 
   // Handle add widget button in edit mode

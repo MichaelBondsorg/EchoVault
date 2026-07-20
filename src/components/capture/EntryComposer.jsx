@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Mic, X } from 'lucide-react';
-import { Drawer, DrawerContent, DrawerDescription } from '../cloud';
+import { Drawer, DrawerContent, DrawerDescription, Chip } from '../cloud';
 import EntryBar from '../dashboard/EntryBar';
 
 /**
@@ -10,6 +10,14 @@ import EntryBar from '../dashboard/EntryBar';
  * editor (15px/1.65 text, accent caret, mic + Aa + Save entry pill).
  *
  * New Entry is capture-only. AI conversation remains a separate product surface.
+ *
+ * `initialContext` (optional): a plain one-line hint from the caller (e.g. an
+ * open-loop's display text) rendered as a quiet, non-interactive "Following
+ * up: {text}" chip — distinct from the Reflect banner, and never baked into
+ * the saved entry's text (unlike `promptContext`/replyContext). When
+ * provided alongside `onEntrySaved`, that callback fires with whatever the
+ * underlying save resolves to once the entry is saved, so a caller (e.g. an
+ * open-loop "Answer" action) can link the new entry back to its source.
  */
 const EntryComposer = ({
   isOpen,
@@ -24,6 +32,8 @@ const EntryComposer = ({
   ownerUid,
   promptContext,
   reflection,
+  initialContext,
+  onEntrySaved,
 }) => {
   const [captureState, setCaptureState] = useState('idle');
   const captureLocked = captureState === 'preparing' || captureState === 'recording';
@@ -32,6 +42,24 @@ const EntryComposer = ({
   const handleModeSelect = (value) => {
     if (value === 'voice' && !aiProcessingEnabled) onRequestAiConsent?.();
     else onModeChange(value);
+  };
+
+  // Wrap the save handlers so a caller can be told what the save resolved
+  // to (best-effort — the underlying save chain doesn't guarantee a clean
+  // entry id in every path, e.g. the crisis-confirm detour). These closures
+  // capture the current `onEntrySaved`/`onVoiceSave`/`onTextSave` at the
+  // time EntryBar invokes them, so they still fire correctly even if the
+  // composer has since closed and cleared its props.
+  const handleVoiceSave = async (...args) => {
+    const result = await onVoiceSave?.(...args);
+    onEntrySaved?.(result);
+    return result;
+  };
+
+  const handleTextSave = async (text) => {
+    const result = await onTextSave?.(text);
+    onEntrySaved?.(result);
+    return result;
   };
 
   return (
@@ -65,6 +93,12 @@ const EntryComposer = ({
         </div>
 
         {reflection}
+
+        {initialContext && (
+          <div className="mb-3">
+            <Chip>Following up: {initialContext}</Chip>
+          </div>
+        )}
 
         <div className="mb-3 flex items-center gap-2" role="tablist" aria-label="Entry method">
           {[
@@ -104,8 +138,8 @@ const EntryComposer = ({
           key={mode}
           ownerUid={ownerUid}
           embedded
-          onVoiceSave={onVoiceSave}
-          onTextSave={onTextSave}
+          onVoiceSave={handleVoiceSave}
+          onTextSave={handleTextSave}
           loading={processing}
           preferredMode={mode}
           promptContext={promptContext}
