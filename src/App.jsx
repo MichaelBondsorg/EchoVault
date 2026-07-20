@@ -49,6 +49,11 @@ import { retrofitEntriesInBackground } from './services/entries';
 import { queueEntry, resetStuckSyncing } from './services/offline';
 import { initializeSyncOrchestrator, triggerSync } from './services/sync/syncOrchestrator';
 import { ownerStorageKey } from './services/storage/ownerScopedStorage';
+import {
+  grantAiConsent as grantAiConsentToServer,
+  revokeAiConsent as revokeAiConsentToServer,
+  flushConsentOutbox,
+} from './services/consent/consentService';
 import { clearOwnerCaches } from './services/storage/clearOwnerCaches';
 import { deleteNativeDraft, recoverNativeDrafts } from './services/capture/nativeCaptureAdapter';
 import { inferCategory } from './services/prompts';
@@ -219,23 +224,12 @@ export default function App() {
 
   const handleAiConsent = async () => {
     setAiConsentSaving(true);
-    try {
-      if (user?.uid) {
-        localStorage.setItem(ownerStorageKey(user.uid, 'consent/aiVersion'), AI_CONSENT_VERSION);
-        localStorage.setItem(ownerStorageKey(user.uid, 'consent/aiAcceptedAt'), new Date().toISOString());
-        localStorage.removeItem(ownerStorageKey(user.uid, 'consent/aiDeclinedVersion'));
-      }
-    } catch { /* private mode — proceed anyway */ }
-    try {
-      if (user?.uid) {
-        await setDoc(
-          doc(db, 'artifacts', APP_COLLECTION_ID, 'users', user.uid, 'settings', 'consent'),
-          { aiProcessing: true, consentVersion: AI_CONSENT_VERSION, acceptedAt: Timestamp.now() },
-          { merge: true }
-        );
-      }
-    } catch (e) {
-      console.error('Failed to record AI consent:', e);
+    // Fail-closed, server-authoritative consent: local marker + legacy
+    // localStorage keys are written synchronously inside the service, and
+    // the grantAiProcessing callable is queued in a retryable outbox so a
+    // network failure here can never silently drop the user's grant.
+    if (user?.uid) {
+      await grantAiConsentToServer(user.uid);
     }
     setAiProcessingEnabled(true);
     setNeedsAiConsent(false);
@@ -266,16 +260,10 @@ export default function App() {
 
   const revokeAiConsent = async () => {
     if (!user?.uid) return;
-    try {
-      localStorage.removeItem(ownerStorageKey(user.uid, 'consent/aiVersion'));
-      localStorage.removeItem(ownerStorageKey(user.uid, 'consent/aiAcceptedAt'));
-      localStorage.setItem(ownerStorageKey(user.uid, 'consent/aiDeclinedVersion'), AI_CONSENT_VERSION);
-    } catch { /* storage can be unavailable in private browsing */ }
-    await setDoc(
-      doc(db, 'artifacts', APP_COLLECTION_ID, 'users', user.uid, 'settings', 'consent'),
-      { aiProcessing: false, consentVersion: AI_CONSENT_VERSION, revokedAt: Timestamp.now() },
-      { merge: true }
-    );
+    // Fail-closed: the service flips the local marker synchronously before
+    // any network call, and never re-enables it if revokeAiProcessing fails —
+    // the outbox retries on next launch/online/visible instead.
+    await revokeAiConsentToServer(user.uid);
     setAiProcessingEnabled(false);
     setNeedsAiConsent(false);
   };
@@ -420,6 +408,28 @@ export default function App() {
           .catch((error) => console.warn('[Capture] recovery scan failed:', error?.message));
       }
     }
+  }, [user?.uid]);
+
+  // Fail-closed AI consent outbox: retry any queued revoke/grant callable
+  // that couldn't reach the server when the user acted (offline, cold start,
+  // transient failure). Flushed on app launch, whenever we come back online,
+  // and whenever the app returns to the foreground — local state already
+  // reflects the user's choice, this just keeps the server in sync.
+  useEffect(() => {
+    if (!user?.uid) return;
+    flushConsentOutbox(user.uid);
+
+    const handleOnline = () => flushConsentOutbox(user.uid);
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') flushConsentOutbox(user.uid);
+    };
+
+    window.addEventListener('online', handleOnline);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
   }, [user?.uid]);
 
   // Deep link handler for OAuth callbacks (Whoop integration)

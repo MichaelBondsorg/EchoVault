@@ -73,6 +73,8 @@ export const reprocessEntriesForGoalsFn = httpsCallable(functions, 'reprocessEnt
 export const migrateEntitiesFromEntriesFn = httpsCallable(functions, 'migrateEntitiesFromEntries', { timeout: 540000 }); // 9 min
 export const exportReportPdfFn = httpsCallable(functions, 'exportReportPdf', { timeout: 120000 }); // 2 min
 export const deleteAccountFn = httpsCallable(functions, 'deleteAccount', { timeout: 300000 }); // 5 min - recursive delete can be slow
+export const revokeAiProcessingFn = httpsCallable(functions, 'revokeAiProcessing', { timeout: 30000 }); // 30s - consent write should be fast
+export const grantAiProcessingFn = httpsCallable(functions, 'grantAiProcessing', { timeout: 30000 }); // 30s - consent write should be fast
 
 // Expose for console debugging
 if (typeof window !== 'undefined') {
