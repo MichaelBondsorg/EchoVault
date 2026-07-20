@@ -123,7 +123,8 @@ export const enrichEntryWithHealth = async (entry) => {
         totalCaloriesBurned: healthSummary.activity?.totalCaloriesBurned || null,
         activeCaloriesBurned: healthSummary.activity?.activeCaloriesBurned || null,
         totalExerciseMinutes: healthSummary.activity?.totalExerciseMinutes || null,
-        hasWorkout: healthSummary.activity?.hasWorkout || false,
+        // Unknown workout state stays null (not fabricated `false`).
+        hasWorkout: healthSummary.activity?.hasWorkout ?? null,
         workouts: healthSummary.activity?.workouts || []
       },
       // Whoop-specific fields if available

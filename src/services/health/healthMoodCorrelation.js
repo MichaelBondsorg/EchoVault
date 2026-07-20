@@ -193,8 +193,11 @@ const analyzeStepsCorrelation = (pairs) => {
  * Analyze workout-mood correlation
  */
 const analyzeWorkoutCorrelation = (pairs) => {
-  const workoutDays = pairs.filter(p => p.health.hasWorkout);
-  const restDays = pairs.filter(p => !p.health.hasWorkout);
+  // hasWorkout may now be null ("unknown"). Explicit === checks keep unknowns
+  // OUT of both buckets so a missing reading is not miscounted as a rest day
+  // (which would silently skew the workout-vs-mood correlation).
+  const workoutDays = pairs.filter(p => p.health.hasWorkout === true);
+  const restDays = pairs.filter(p => p.health.hasWorkout === false);
 
   if (workoutDays.length < 3 || restDays.length < 3) {
     return { available: false, reason: 'insufficient_workout_data' };

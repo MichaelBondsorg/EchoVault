@@ -215,7 +215,9 @@ export const getEntryEnvironmentContext = async () => {
     temperature: context.weather?.temperature || null,
     temperatureUnit: context.weather?.temperatureUnit || '°C',
     cloudCover: context.weather?.cloudCover || null,
-    isDay: context.weather?.isDay ?? true,
+    // Unknown day/night stays null (not fabricated `true`) so consumers can tell
+    // "no weather data" from a genuine daytime reading.
+    isDay: context.weather?.isDay ?? null,
 
     // Day summary (overall day conditions - more useful for mood correlation)
     daySummary,

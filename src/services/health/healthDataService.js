@@ -306,7 +306,9 @@ export const getEntryHealthContext = async () => {
         totalCaloriesBurned: summary.activity?.totalCaloriesBurned || null,
         activeCaloriesBurned: summary.activity?.activeCaloriesBurned || null,
         totalExerciseMinutes: summary.activity?.totalExerciseMinutes || null,
-        hasWorkout: summary.activity?.hasWorkout || false,
+        // Unknown workout state stays null (not fabricated `false`) so downstream
+        // correlation/rendering can distinguish "no workout" from "no data".
+        hasWorkout: summary.activity?.hasWorkout ?? null,
         workouts: summary.activity?.workouts || []
       },
       source: summary.source || 'healthkit',
@@ -340,7 +342,8 @@ export const getEntryHealthContext = async () => {
       totalCaloriesBurned: summary.calories?.total || null,
       activeCaloriesBurned: summary.calories?.active || null,
       totalExerciseMinutes: summary.exerciseMinutes || null,
-      hasWorkout: summary.hasWorkout || false,
+      // Unknown workout state stays null (not fabricated `false`).
+      hasWorkout: summary.hasWorkout ?? null,
       workouts: (summary.workouts || []).map(w => ({
         type: w.type,
         duration: w.duration,
