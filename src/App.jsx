@@ -1,12 +1,13 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-  Mic, Loader2, LogIn, Activity, Brain, Share,
+  Mic, Loader2, LogIn, Brain, Share,
   User as UserIcon, Briefcase, X, Mail, Apple, Eye, EyeOff, Shield
 } from 'lucide-react';
 
 // UI Components
-import { celebrate, Button, Modal, ModalHeader, ModalBody, Badge, MoodBadge, BreathingLoader } from './components/ui';
+import { celebrate, Modal, ModalHeader, ModalBody, Badge, MoodBadge, BreathingLoader } from './components/ui';
+import { Button, Pebble, LinenWaveBackground } from './components/cloud';
 
 // Config
 import {
@@ -2251,16 +2252,19 @@ export default function App() {
     const isIOS = Capacitor.getPlatform() === 'ios';
 
     return (
-      <div className="min-h-screen flex flex-col items-center justify-center p-4 bg-gradient-to-br from-warm-50 to-honey-50 dark:from-hearth-950 dark:to-hearth-900">
+      <div className="relative min-h-screen flex flex-col items-center justify-center p-6 bg-background text-foreground">
+        {/* Cloud canvas: same linen + wave ambient background as the app */}
+        <LinenWaveBackground />
+        {/* Welcome Pebble (CLOUD-DESIGN-SPEC.md §6.3: calm state on welcome) */}
         <motion.div
-          className="h-16 w-16 bg-gradient-to-br from-honey-600 to-honey-700 rounded-3xl flex items-center justify-center mb-4 shadow-soft-lg rotate-3"
-          initial={{ scale: 0, rotate: -10 }}
-          animate={{ scale: 1, rotate: 3 }}
+          className="mb-4"
+          initial={{ scale: 0 }}
+          animate={{ scale: 1 }}
           transition={{ type: "spring", damping: 15 }}
         >
-          <Activity className="text-white"/>
+          <Pebble state="calm" size={88} />
         </motion.div>
-        <h1 className="text-2xl font-display font-bold mb-6 text-warm-800">
+        <h1 className="font-display font-medium text-[27px] tracking-[-0.01em] mb-6 text-foreground">
           Engram
         </h1>
 
@@ -2280,7 +2284,7 @@ export default function App() {
                 {isIOS && (
                   <button
                     onClick={handleAppleSignIn}
-                    className="w-full flex gap-2 items-center justify-center px-4 py-3 rounded-xl font-medium transition-all bg-black text-white hover:bg-gray-800 active:scale-[0.98]"
+                    className="w-full flex gap-2 items-center justify-center px-6 min-h-[48px] rounded-full text-sm font-semibold transition-all bg-black text-white hover:opacity-90 active:scale-[0.98]"
                   >
                     <Apple size={18}/> Sign in with Apple
                   </button>
@@ -2289,7 +2293,7 @@ export default function App() {
                 {/* Sign in with Google */}
                 <button
                   onClick={handleSignIn}
-                  className="w-full flex gap-2 items-center justify-center px-4 py-3 rounded-xl font-medium transition-all bg-white text-gray-700 border border-gray-300 hover:bg-gray-50 active:scale-[0.98] shadow-sm"
+                  className="w-full flex gap-2 items-center justify-center px-6 min-h-[48px] rounded-full text-sm font-semibold transition-all bg-card text-foreground border border-border hover:bg-divider active:scale-[0.98] shadow-sm"
                 >
                   {/* @color-safe: Google brand logo colors */}
                   <svg className="w-5 h-5" viewBox="0 0 24 24">
@@ -2302,29 +2306,27 @@ export default function App() {
                 </button>
 
                 {/* Divider */}
-                <div className="relative my-4">
-                  <div className="absolute inset-0 flex items-center">
-                    <div className="w-full border-t border-warm-200"></div>
-                  </div>
-                  <div className="relative flex justify-center text-sm">
-                    <span className="px-2 bg-gradient-to-br from-warm-50 to-honey-50 text-warm-500">or</span>
-                  </div>
+                <div className="my-4 flex items-center gap-3">
+                  <div className="h-px flex-1 bg-divider" />
+                  <span className="text-xs text-muted-foreground">or</span>
+                  <div className="h-px flex-1 bg-divider" />
                 </div>
 
                 {/* Email Sign-In Button */}
-                <button
+                <Button
+                  variant="ghost"
+                  className="w-full"
                   onClick={() => {
                     setShowEmailForm(true);
                     setAuthMode('signin');
                     setAuthError('');
                   }}
-                  className="w-full flex gap-2 items-center justify-center px-4 py-3 rounded-xl font-medium transition-all text-warm-700 hover:bg-warm-100 active:scale-[0.98]"
                 >
                   <Mail size={18}/> Continue with Email
-                </button>
+                </Button>
 
                 {/* Wellness-not-therapy disclaimer (App Store / FDA framing) */}
-                <p className="text-[11px] leading-relaxed text-center text-warm-400 mt-5 px-2">
+                <p className="text-[11px] leading-relaxed text-center text-muted-foreground mt-5 px-2">
                   Engram is a general-wellness tool for self-reflection — not therapy,
                   not a medical device, and not a crisis service. If you're in crisis,
                   call or text 988.
@@ -2341,14 +2343,14 @@ export default function App() {
                   /* MFA Verification Form */
                   <form onSubmit={handleMfaVerify} className="space-y-3">
                     <div className="flex justify-center mb-2">
-                      <div className="h-12 w-12 bg-honey-100 rounded-full flex items-center justify-center">
-                        <Shield className="text-honey-600" size={24}/>
+                      <div className="h-12 w-12 bg-accent-wash rounded-full flex items-center justify-center">
+                        <Shield className="text-accent-deep" size={24}/>
                       </div>
                     </div>
-                    <h2 className="text-lg font-semibold text-center text-warm-800">
+                    <h2 className="font-display font-medium text-xl text-center text-foreground">
                       Two-Factor Authentication
                     </h2>
-                    <p className="text-sm text-center text-warm-600">
+                    <p className="text-sm text-center text-secondary-foreground">
                       {mfaHint || 'Enter your verification code'}
                     </p>
 
@@ -2361,7 +2363,7 @@ export default function App() {
                       onChange={(e) => setMfaCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
                       required
                       autoFocus
-                      className="w-full px-4 py-3 rounded-lg border border-warm-200 focus:border-honey-500 focus:ring-2 focus:ring-honey-200 outline-none transition-all text-center text-2xl tracking-widest font-mono"
+                      className="w-full px-4 py-3 rounded-xl border border-border bg-card text-foreground placeholder-faint focus:outline-none focus:ring-2 focus:ring-accent transition-all text-center text-2xl tracking-widest font-mono"
                     />
 
                     {authError && (
@@ -2387,7 +2389,7 @@ export default function App() {
                         setMfaHint('');
                         setAuthError('');
                       }}
-                      className="w-full text-center text-sm text-warm-500 hover:text-warm-700"
+                      className="w-full min-h-11 text-center text-sm text-muted-foreground hover:text-foreground"
                     >
                       ← Back to sign in
                     </button>
@@ -2395,7 +2397,7 @@ export default function App() {
                 ) : (
                   /* Email/Password Form */
                   <form onSubmit={handleEmailAuth} className="space-y-3">
-                    <h2 className="text-lg font-semibold text-center text-warm-800">
+                    <h2 className="font-display font-medium text-xl text-center text-foreground">
                       {authMode === 'signup' ? 'Create Account' : authMode === 'reset' ? 'Reset Password' : 'Sign In'}
                     </h2>
 
@@ -2405,7 +2407,7 @@ export default function App() {
                         placeholder="Name (optional)"
                         value={displayName}
                         onChange={(e) => setDisplayName(e.target.value)}
-                        className="w-full px-4 py-2 rounded-lg border border-warm-200 focus:border-honey-500 focus:ring-2 focus:ring-honey-200 outline-none transition-all"
+                        className="w-full min-h-11 px-4 py-2.5 rounded-xl border border-border bg-card text-sm text-foreground placeholder-faint focus:outline-none focus:ring-2 focus:ring-accent transition-all"
                       />
                     )}
 
@@ -2415,7 +2417,7 @@ export default function App() {
                       value={email}
                       onChange={(e) => setEmail(e.target.value)}
                       required
-                      className="w-full px-4 py-2 rounded-lg border border-warm-200 focus:border-honey-500 focus:ring-2 focus:ring-honey-200 outline-none transition-all"
+                      className="w-full min-h-11 px-4 py-2.5 rounded-xl border border-border bg-card text-sm text-foreground placeholder-faint focus:outline-none focus:ring-2 focus:ring-accent transition-all"
                     />
 
                     {authMode !== 'reset' && (
@@ -2427,12 +2429,12 @@ export default function App() {
                           onChange={(e) => setPassword(e.target.value)}
                           required
                           minLength={6}
-                          className="w-full px-4 py-2 pr-10 rounded-lg border border-warm-200 focus:border-honey-500 focus:ring-2 focus:ring-honey-200 outline-none transition-all"
+                          className="w-full min-h-11 px-4 py-2.5 pr-10 rounded-xl border border-border bg-card text-sm text-foreground placeholder-faint focus:outline-none focus:ring-2 focus:ring-accent transition-all"
                         />
                         <button
                           type="button"
                           onClick={() => setShowPassword(!showPassword)}
-                          className="absolute right-3 top-1/2 -translate-y-1/2 text-warm-400 hover:text-warm-600"
+                          className="absolute right-1 top-1/2 -translate-y-1/2 flex h-11 w-11 items-center justify-center text-muted-foreground hover:text-secondary-foreground"
                         >
                           {showPassword ? <EyeOff size={18}/> : <Eye size={18}/>}
                         </button>
@@ -2460,7 +2462,7 @@ export default function App() {
                         <button
                           type="button"
                           onClick={() => { setAuthMode('signup'); setAuthError(''); }}
-                          className="text-honey-600 hover:underline"
+                          className="min-h-11 text-accent-deep font-medium hover:underline"
                         >
                           Need an account? Sign up
                         </button>
@@ -2468,7 +2470,7 @@ export default function App() {
                         <button
                           type="button"
                           onClick={() => { setAuthMode('reset'); setAuthError(''); }}
-                          className="text-warm-500 hover:underline"
+                          className="min-h-11 text-muted-foreground hover:underline"
                         >
                           Forgot password?
                         </button>
@@ -2478,7 +2480,7 @@ export default function App() {
                       <button
                         type="button"
                         onClick={() => { setAuthMode('signin'); setAuthError(''); }}
-                        className="text-honey-600 hover:underline"
+                        className="min-h-11 text-accent-deep font-medium hover:underline"
                       >
                         Already have an account? Sign in
                       </button>
@@ -2487,7 +2489,7 @@ export default function App() {
                       <button
                         type="button"
                         onClick={() => { setAuthMode('signin'); setAuthError(''); }}
-                        className="text-honey-600 hover:underline"
+                        className="min-h-11 text-accent-deep font-medium hover:underline"
                       >
                         Back to sign in
                       </button>
@@ -2504,7 +2506,7 @@ export default function App() {
                       setPassword('');
                       setDisplayName('');
                     }}
-                    className="w-full text-center text-sm text-warm-500 hover:text-warm-700"
+                    className="w-full min-h-11 text-center text-sm text-muted-foreground hover:text-foreground"
                   >
                     ← Back to other sign-in options
                   </button>
