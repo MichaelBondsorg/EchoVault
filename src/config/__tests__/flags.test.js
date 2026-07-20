@@ -37,7 +37,7 @@ describe('config/flags', () => {
   describe('FLAG_DEFAULTS', () => {
     it('matches the spec defaults exactly', () => {
       expect(FLAG_DEFAULTS).toEqual({
-        coreFirstSave: false,
+        coreFirstSave: true,
         serverAnalysisOrchestrator: false,
         nativeBackgroundUpload: false,
         webChunkPersistence: true,
@@ -51,15 +51,15 @@ describe('config/flags', () => {
 
   describe('getFlag before initFlags resolves', () => {
     it('returns the default value', () => {
-      expect(getFlag('coreFirstSave')).toBe(false);
+      expect(getFlag('serverAnalysisOrchestrator')).toBe(false);
       expect(getFlag('webChunkPersistence')).toBe(true);
     });
 
     it('still honours a localStorage dev override', () => {
       localStorage.getItem.mockImplementation((key) =>
-        key === `${LOCAL_PREFIX}coreFirstSave` ? 'true' : null
+        key === `${LOCAL_PREFIX}serverAnalysisOrchestrator` ? 'true' : null
       );
-      expect(getFlag('coreFirstSave')).toBe(true);
+      expect(getFlag('serverAnalysisOrchestrator')).toBe(true);
     });
   });
 
@@ -67,13 +67,13 @@ describe('config/flags', () => {
     it('fetches config/flags and merges it over the defaults', async () => {
       getDocMock.mockResolvedValue({
         exists: () => true,
-        data: () => ({ coreFirstSave: true, 'model.gemini35flash': true }),
+        data: () => ({ serverAnalysisOrchestrator: true, 'model.gemini35flash': true }),
       });
 
       await initFlags(fakeDb);
 
       expect(docMock).toHaveBeenCalledWith(fakeDb, 'config', 'flags');
-      expect(getFlag('coreFirstSave')).toBe(true);
+      expect(getFlag('serverAnalysisOrchestrator')).toBe(true);
       expect(getFlag('model.gemini35flash')).toBe(true);
       // Untouched defaults still apply.
       expect(getFlag('webChunkPersistence')).toBe(true);
@@ -84,7 +84,7 @@ describe('config/flags', () => {
       getDocMock.mockResolvedValue({ exists: () => false, data: () => undefined });
 
       await expect(initFlags(fakeDb)).resolves.toBeUndefined();
-      expect(getFlag('coreFirstSave')).toBe(false);
+      expect(getFlag('serverAnalysisOrchestrator')).toBe(false);
     });
 
     it('falls back to defaults and logs once (no throw) when the read fails', async () => {
@@ -92,7 +92,7 @@ describe('config/flags', () => {
       getDocMock.mockRejectedValue(new Error('firestore unavailable'));
 
       await expect(initFlags(fakeDb)).resolves.toBeUndefined();
-      expect(getFlag('coreFirstSave')).toBe(false);
+      expect(getFlag('serverAnalysisOrchestrator')).toBe(false);
       expect(warnSpy).toHaveBeenCalledTimes(1);
     });
 
@@ -117,29 +117,29 @@ describe('config/flags', () => {
       getDocMock.mockRejectedValueOnce(new Error('unauthenticated'));
 
       await initFlags(fakeDb);
-      expect(getFlag('coreFirstSave')).toBe(false); // still defaults after the failure
+      expect(getFlag('serverAnalysisOrchestrator')).toBe(false); // still defaults after the failure
 
       getDocMock.mockResolvedValueOnce({
         exists: () => true,
-        data: () => ({ coreFirstSave: true }),
+        data: () => ({ serverAnalysisOrchestrator: true }),
       });
       await initFlags(fakeDb);
 
       expect(getDocMock).toHaveBeenCalledTimes(2);
-      expect(getFlag('coreFirstSave')).toBe(true);
+      expect(getFlag('serverAnalysisOrchestrator')).toBe(true);
     });
 
     it('a successful init latches: a later call does not re-fetch', async () => {
       getDocMock.mockResolvedValue({
         exists: () => true,
-        data: () => ({ coreFirstSave: true }),
+        data: () => ({ serverAnalysisOrchestrator: true }),
       });
 
       await initFlags(fakeDb);
       await initFlags(fakeDb);
 
       expect(getDocMock).toHaveBeenCalledTimes(1);
-      expect(getFlag('coreFirstSave')).toBe(true);
+      expect(getFlag('serverAnalysisOrchestrator')).toBe(true);
     });
   });
 
@@ -147,14 +147,14 @@ describe('config/flags', () => {
     it('a localStorage override wins over the fetched doc value', async () => {
       getDocMock.mockResolvedValue({
         exists: () => true,
-        data: () => ({ coreFirstSave: true }),
+        data: () => ({ serverAnalysisOrchestrator: true }),
       });
       await initFlags(fakeDb);
 
       localStorage.getItem.mockImplementation((key) =>
-        key === `${LOCAL_PREFIX}coreFirstSave` ? 'false' : null
+        key === `${LOCAL_PREFIX}serverAnalysisOrchestrator` ? 'false' : null
       );
-      expect(getFlag('coreFirstSave')).toBe(false);
+      expect(getFlag('serverAnalysisOrchestrator')).toBe(false);
     });
 
     it('unknown flag name throws in DEV', async () => {
@@ -176,13 +176,13 @@ describe('config/flags', () => {
     it('clears cached fetched flags so getFlag reverts to defaults', async () => {
       getDocMock.mockResolvedValue({
         exists: () => true,
-        data: () => ({ coreFirstSave: true }),
+        data: () => ({ serverAnalysisOrchestrator: true }),
       });
       await initFlags(fakeDb);
-      expect(getFlag('coreFirstSave')).toBe(true);
+      expect(getFlag('serverAnalysisOrchestrator')).toBe(true);
 
       _resetFlagsForTest();
-      expect(getFlag('coreFirstSave')).toBe(false);
+      expect(getFlag('serverAnalysisOrchestrator')).toBe(false);
     });
 
     it('allows initFlags to run again (fetches a second time)', async () => {

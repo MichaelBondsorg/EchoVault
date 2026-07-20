@@ -17,7 +17,7 @@
 import { doc, getDoc } from './firebase';
 
 export const FLAG_DEFAULTS = {
-  coreFirstSave: false,            // flipped true later in WS-C after tests pass
+  coreFirstSave: true,             // WS-C: core-first save validated by tests; server flag doc can force off in prod
   serverAnalysisOrchestrator: false,
   nativeBackgroundUpload: false,
   webChunkPersistence: true,       // additive durability, safe default-on
