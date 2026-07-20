@@ -2331,9 +2331,14 @@ export const pendingEntryCleanup = onSchedule(
         ? { safety_flagged: true, safetyServerChecked: true }
         : {};
 
-      // Consent gate (per entry owner). If revoked, stop reprocessing this entry
-      // by flipping it to 'disabled' — but still apply the safety flag.
-      if (ownerUid && !(await isAiAllowed(db, ownerUid, { entrySnapshot: data }))) {
+      // Consent gate (per entry owner), fail closed: an entry whose owner we
+      // cannot resolve is never analyzed. If revoked, stop reprocessing this
+      // entry by flipping it to 'disabled' — but still apply the safety flag.
+      if (!ownerUid) {
+        console.log(JSON.stringify({ type: 'consent-denied', reason: 'unresolved-owner', job: 'pendingEntryCleanup' }));
+        continue;
+      }
+      if (!(await isAiAllowed(db, ownerUid, { entrySnapshot: data }))) {
         await docSnap.ref.update({ analysisStatus: 'disabled', ...crisisFields });
         console.log(JSON.stringify({ type: 'consent-denied', uid: ownerUid, job: 'pendingEntryCleanup' }));
         continue;
@@ -2961,6 +2966,7 @@ export const refreshMemory = onCall(
     }
 
     const userId = request.auth.uid;
+    await assertAiConsent(db, userId);
     const { limit: entryLimit = 10 } = request.data || {};
 
     console.log(`Manual memory refresh for user ${userId}, processing ${entryLimit} recent entries`);
