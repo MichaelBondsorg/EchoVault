@@ -27,6 +27,7 @@ import { assertAiConsent, isAiAllowed, grantConsent, revokeConsent } from './src
 import { logStage } from './src/telemetry/stageLog.js';
 import { getCachedEmbedding, setCachedEmbedding } from './src/ai/embeddingCache.js';
 import { claimProcessingMarker, acquireEntryLease, LEASE_MS } from './src/triggers/idempotency.js';
+import { maybeReanalyzeOnEntryUpdate } from './src/triggers/entryUpdateAnalysis.js';
 import { callGemini, classifyEntry, analyzeEntry, extractEnhancedContext, generateInsight } from './src/analysis/analysisHelpers.js';
 import { getServerFlag } from './src/shared/flags.js';
 import { runEntryAnalysis } from './src/analysis/orchestrator.js';
@@ -2046,11 +2047,16 @@ export const journalReminder = onSchedule(
 
 /**
  * Trigger: On entry update (mood analysis complete)
- * 1. Process goals when analysis is added (goal_update from extractEnhancedContext)
- * 2. Recompute patterns when entry gets mood score
+ * 1. Correction invalidation (plan task C4): re-run server analysis when the
+ *    client bumped entryInputVersion (a meaningful user text edit)
+ * 2. Process goals when analysis is added (goal_update from extractEnhancedContext)
+ * 3. Recompute patterns when entry gets mood score
  */
 export const onEntryUpdate = onDocumentUpdated(
-  'artifacts/{appId}/users/{userId}/entries/{entryId}',
+  {
+    document: 'artifacts/{appId}/users/{userId}/entries/{entryId}',
+    secrets: [geminiApiKey, openaiApiKey],
+  },
   async (event) => {
     const { userId, appId, entryId } = event.params;
 
@@ -2069,6 +2075,27 @@ export const onEntryUpdate = onDocumentUpdated(
     if (isBackfillUpdate) {
       console.log(`[onEntryUpdate] Backfill update detected for ${entryId} - skipping pattern recompute`);
       return null;
+    }
+
+    // Correction invalidation (plan task C4): a meaningful text edit bumps
+    // entryInputVersion client-side; re-run analysis exactly once per version
+    // (versioned dedup marker) when the server owns analysis. Best-effort —
+    // never blocks the pre-existing goal/pattern processing below.
+    try {
+      const result = await maybeReanalyzeOnEntryUpdate({
+        db,
+        entryRef: event.data.after.ref,
+        entryId,
+        before,
+        after,
+        apiKeys: { gemini: geminiApiKey.value(), openai: openaiApiKey.value() },
+        logStage,
+      });
+      if (result?.reanalyzed) {
+        console.log(`[onEntryUpdate] Re-analysis for ${entryId}: outcome=${result.outcome}`);
+      }
+    } catch (error) {
+      console.error(`[onEntryUpdate] Correction re-analysis failed for ${entryId}:`, error?.message);
     }
 
     // Check if analysis was just added (contains goal_update info)

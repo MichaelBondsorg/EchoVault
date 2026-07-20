@@ -13,7 +13,7 @@ vi.mock('firebase-admin/firestore', () => ({
   },
 }));
 
-const { claimProcessingMarker, acquireEntryLease } = await import('../triggers/idempotency.js');
+const { claimProcessingMarker, claimProcessingMarkerForVersion, acquireEntryLease } = await import('../triggers/idempotency.js');
 const { embeddingCacheKey, setCachedEmbedding } = await import('../ai/embeddingCache.js');
 
 /** Fake transactional db: `docData` is the current stored doc (null = missing). */
@@ -58,6 +58,31 @@ describe('claimProcessingMarker (memory extraction / burnout dedup)', () => {
     const claimed = await claimProcessingMarker(db, {}, 'processing.burnoutCheckedAt');
     expect(claimed).toBe(true);
     expect(sets[0].data).toEqual({ processing: { burnoutCheckedAt: '__ts__' } });
+  });
+});
+
+describe('claimProcessingMarkerForVersion (correction invalidation, plan task C4)', () => {
+  it('claims the marker for a brand-new version when no marker exists', async () => {
+    const { db, sets } = makeTxDb({ text: 'hi' });
+    const claimed = await claimProcessingMarkerForVersion(db, {}, 'processing.analysisStartedForVersion', 2);
+    expect(claimed).toBe(true);
+    expect(sets).toHaveLength(1);
+    expect(sets[0].data).toEqual({ processing: { analysisStartedForVersion: 2 } });
+    expect(sets[0].opts).toEqual({ merge: true });
+  });
+
+  it('is a no-op on a duplicate delivery for the SAME version', async () => {
+    const { db, sets } = makeTxDb({ processing: { analysisStartedForVersion: 2 } });
+    const claimed = await claimProcessingMarkerForVersion(db, {}, 'processing.analysisStartedForVersion', 2);
+    expect(claimed).toBe(false);
+    expect(sets).toHaveLength(0);
+  });
+
+  it('claims again for a NEW version even though a previous version was already claimed', async () => {
+    const { db, sets } = makeTxDb({ processing: { analysisStartedForVersion: 2 } });
+    const claimed = await claimProcessingMarkerForVersion(db, {}, 'processing.analysisStartedForVersion', 3);
+    expect(claimed).toBe(true);
+    expect(sets[0].data).toEqual({ processing: { analysisStartedForVersion: 3 } });
   });
 });
 

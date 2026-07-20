@@ -265,7 +265,12 @@ function buildSuccessPayload({ text, entryType, classification, analysis, insigh
   });
 
   if (enhancedContext?.continues_situation) payload.continues_situation = enhancedContext.continues_situation;
-  if (enhancedContext?.goal_update?.tag) payload.goal_update = enhancedContext.goal_update;
+  // Derived-data stamp (plan task C4): records which entryInputVersion this
+  // goal_update was computed from, so a later downstream consumer can tell a
+  // stale goal_update (computed pre-correction) apart from a fresh one.
+  if (enhancedContext?.goal_update?.tag) {
+    payload.goal_update = { ...enhancedContext.goal_update, derivedFromInputVersion: inputVersion };
+  }
 
   const tasks = classification?.extracted_tasks;
   if (Array.isArray(tasks) && tasks.length > 0) {

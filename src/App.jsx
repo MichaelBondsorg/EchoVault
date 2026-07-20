@@ -22,7 +22,7 @@ import {
   TotpMultiFactorGenerator, RecaptchaVerifier,
   collection, addDoc, query, orderBy, onSnapshot,
   Timestamp, deleteDoc, doc, updateDoc, limit, setDoc,
-  runTransaction
+  runTransaction, increment
 } from './config/firebase';
 import { Capacitor, registerPlugin } from '@capacitor/core';
 import { App as CapacitorApp } from '@capacitor/app';
@@ -50,6 +50,7 @@ import { retrofitEntriesInBackground } from './services/entries';
 import { buildCoreEntry } from './services/entries/buildCoreEntry';
 import { runPostSaveEnrichment } from './services/entries/enrichmentRunner';
 import { runPostSavePipelines } from './services/entries/postSavePipeline';
+import { hasTextMeaningfullyChanged, buildMeaningfulEditFields } from './services/entries/entryCorrectionFields';
 import { queueEntry, resetStuckSyncing } from './services/offline';
 import { initializeSyncOrchestrator, triggerSync } from './services/sync/syncOrchestrator';
 import { ownerStorageKey } from './services/storage/ownerScopedStorage';
@@ -765,42 +766,13 @@ export default function App() {
     });
   }, [entries, cat]);
 
-  /**
-   * Check if text has meaningfully changed (not just typos/punctuation/whitespace)
-   * Only triggers re-extraction if the semantic content is different
-   */
-  const hasTextMeaningfullyChanged = useCallback((oldText, newText) => {
-    if (!oldText || !newText) return true;
-
-    // Normalize: lowercase, collapse whitespace, remove punctuation
-    const normalize = (text) => text
-      .toLowerCase()
-      .replace(/[^\w\s]/g, ' ')  // Remove punctuation
-      .replace(/\s+/g, ' ')       // Collapse whitespace
-      .trim();
-
-    const oldNorm = normalize(oldText);
-    const newNorm = normalize(newText);
-
-    // Exact match after normalization = no meaningful change
-    if (oldNorm === newNorm) return false;
-
-    // Calculate word-level difference
-    const oldWords = oldNorm.split(' ').filter(w => w.length > 0);
-    const newWords = newNorm.split(' ').filter(w => w.length > 0);
-
-    // If word counts differ by more than 2, meaningful
-    if (Math.abs(oldWords.length - newWords.length) > 2) return true;
-
-    // Count words that are different
-    const oldSet = new Set(oldWords);
-    const newSet = new Set(newWords);
-    const addedWords = [...newSet].filter(w => !oldSet.has(w));
-    const removedWords = [...oldSet].filter(w => !newSet.has(w));
-
-    // More than 2 words added or removed = meaningful
-    return (addedWords.length + removedWords.length) > 2;
-  }, []);
+  // hasTextMeaningfullyChanged: check if text has meaningfully changed (not
+  // just typos/punctuation/whitespace) — only triggers re-extraction if the
+  // semantic content is different. Moved to services/entries/entryCorrectionFields.js
+  // (plan task C4) so it has direct unit coverage without mounting App.jsx;
+  // it's a pure function (no closures), so the plain import binding is a
+  // stable reference across renders — safe to use directly in the
+  // handleEntryUpdate dependency array below.
 
   // Handle entry update with date change cache invalidation
   // Options parameter keeps control logic separate from data (Fix A: Control Coupling)
@@ -820,10 +792,19 @@ export default function App() {
 
         // FIX: Use runTransaction to atomically read current version from Firestore and increment
         // This prevents race conditions on concurrent edits
+        //
+        // Correction invalidation (plan task C4): a meaningful text edit also
+        // bumps entryInputVersion (increment sentinel — the server
+        // onEntryUpdate trigger keys off `after.entryInputVersion >
+        // before.entryInputVersion` to idempotently re-run analysis), and
+        // marks the entry's derived data stale until recompute finishes.
         await runTransaction(db, async (transaction) => {
           const entryDoc = await transaction.get(entryRef);
           const currentVersion = entryDoc.data()?.signalExtractionVersion || 1;
-          updates.signalExtractionVersion = currentVersion + 1;
+          Object.assign(updates, buildMeaningfulEditFields({
+            nextSignalExtractionVersion: currentVersion + 1,
+            increment,
+          }));
           console.log(`[handleEntryUpdate] Incrementing version ${currentVersion} -> ${currentVersion + 1}, runId:post-fix`);
           transaction.update(entryRef, updates);
         });

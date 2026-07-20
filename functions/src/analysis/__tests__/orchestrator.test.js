@@ -158,6 +158,35 @@ describe('runEntryAnalysis - analysisMeta provenance', () => {
   });
 });
 
+describe('runEntryAnalysis - goal_update derived-data stamp (plan task C4)', () => {
+  it('stamps derivedFromInputVersion onto goal_update when extractEnhancedContext finds one', async () => {
+    helpers.extractEnhancedContext.mockResolvedValue({
+      structured_tags: [],
+      topic_tags: [],
+      continues_situation: null,
+      goal_update: { tag: '@goal:fitness', status: 'progress' },
+      sentiment_by_entity: {},
+    });
+    const stored = { entryInputVersion: 5, text: 'ran again today' };
+    const db = makeDb(stored);
+    const entryRef = makeEntryRef('userA');
+    const res = await runEntryAnalysis({
+      db,
+      entryRef,
+      entry: { id: 'e1', entryInputVersion: 5, text: 'ran again today' },
+      apiKeys: { gemini: 'g', openai: 'o' },
+      logStage: noopLogStage,
+    });
+    expect(res.outcome).toBe('published');
+    const published = db.txUpdates[0];
+    expect(published.goal_update).toEqual({
+      tag: '@goal:fitness',
+      status: 'progress',
+      derivedFromInputVersion: 5,
+    });
+  });
+});
+
 describe('runEntryAnalysis - stale version guard', () => {
   it('discards + re-enqueues once when the version changed under it, and does NOT re-enqueue a second time', async () => {
     // Doc has moved to version 2 while this run started at version 1.

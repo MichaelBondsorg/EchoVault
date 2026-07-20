@@ -12,7 +12,7 @@ import {
 import {
   getFirestore, collection, addDoc, query, orderBy, onSnapshot,
   Timestamp, deleteDoc, doc, updateDoc, limit, getDocs, setDoc, getDoc,
-  where, writeBatch, runTransaction
+  where, writeBatch, runTransaction, increment
 } from 'firebase/firestore';
 import { getFunctions, httpsCallable } from 'firebase/functions';
 import { getMessaging, getToken, onMessage } from 'firebase/messaging';
@@ -131,5 +131,6 @@ export {
   getDoc,
   where,
   writeBatch,
-  runTransaction
+  runTransaction,
+  increment
 };

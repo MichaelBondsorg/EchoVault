@@ -34,6 +34,38 @@ export async function claimProcessingMarker(db, ref, markerField) {
 }
 
 /**
+ * Transactionally claim a one-time-PER-VERSION processing marker on `ref`.
+ *
+ * Like `claimProcessingMarker`, but the marker stores a `version` number
+ * instead of a timestamp, so it dedups redelivery of the SAME version while
+ * still allowing exactly one claim for each NEW version (plan task C4:
+ * correction invalidation — a user editing an entry a second time must be
+ * able to trigger a second re-analysis).
+ *
+ * `markerField` is a one- or two-level dotted path (e.g.
+ * `'processing.analysisStartedForVersion'`). Returns true if THIS call set
+ * the marker to `version` (proceed), false if the marker already equals
+ * `version` (duplicate/redelivered event for the same edit — skip).
+ */
+export async function claimProcessingMarkerForVersion(db, ref, markerField, version) {
+  const [group, field] = String(markerField).split('.');
+  return db.runTransaction(async (tx) => {
+    const snap = await tx.get(ref);
+    const data = snap.exists ? snap.data() || {} : {};
+    const current = field ? data[group]?.[field] : data[group];
+
+    if (current === version) return false;
+
+    if (field) {
+      tx.set(ref, { [group]: { [field]: version } }, { merge: true });
+    } else {
+      tx.set(ref, { [group]: version }, { merge: true });
+    }
+    return true;
+  });
+}
+
+/**
  * Transactionally acquire a lease on `ref`. Wins only when no lease exists or
  * the existing lease is older than `leaseMs`. When `requireStatus` is given the
  * lease is refused unless `analysisStatus` still equals it (someone else may
@@ -66,4 +98,9 @@ export async function acquireEntryLease(
 
 export const LEASE_MS = DEFAULT_LEASE_MS;
 
-export default { claimProcessingMarker, acquireEntryLease, LEASE_MS };
+export default {
+  claimProcessingMarker,
+  claimProcessingMarkerForVersion,
+  acquireEntryLease,
+  LEASE_MS,
+};
