@@ -73,36 +73,21 @@ vi.mock('@capacitor/core', () => ({
   registerPlugin: () => ({ echo: async (options) => options }),
 }));
 
-// Provider callables from config/firebase.js. Every AI-provider entry point
-// (transcription + analysis) is mocked here alongside the consent callables
-// so row 1 can assert none of them are ever invoked by a consent revoke.
+// Consent callables from config/firebase.js — this is the only real module
+// under test in this file (consentService.js) that imports config/firebase,
+// so the mock only needs to cover its two exports (it still exists purely to
+// keep the real Firebase app from initializing on import). See the "Row 1"
+// describe block below for why this file does NOT also assert on
+// transcription/analysis provider callables — consentService.js's import
+// graph never references them, so that assertion would be tautological;
+// provider-blocking enforcement is covered elsewhere (see that block's
+// comment for exactly where).
 const revokeAiProcessingFn = vi.fn();
 const grantAiProcessingFn = vi.fn();
-const transcribeAudioFn = vi.fn();
-const transcribeWithToneFn = vi.fn();
-const transcribeEntryFn = vi.fn();
-const analyzeJournalEntryFn = vi.fn();
-const askJournalAIFn = vi.fn();
-const executePromptFn = vi.fn();
 vi.mock('../config/firebase', () => ({
   revokeAiProcessingFn: (...args) => revokeAiProcessingFn(...args),
   grantAiProcessingFn: (...args) => grantAiProcessingFn(...args),
-  transcribeAudioFn: (...args) => transcribeAudioFn(...args),
-  transcribeWithToneFn: (...args) => transcribeWithToneFn(...args),
-  transcribeEntryFn: (...args) => transcribeEntryFn(...args),
-  analyzeJournalEntryFn: (...args) => analyzeJournalEntryFn(...args),
-  askJournalAIFn: (...args) => askJournalAIFn(...args),
-  executePromptFn: (...args) => executePromptFn(...args),
 }));
-
-const providerFns = [
-  transcribeAudioFn,
-  transcribeWithToneFn,
-  transcribeEntryFn,
-  analyzeJournalEntryFn,
-  askJournalAIFn,
-  executePromptFn,
-];
 
 // localStorage backing store. src/test/setup.js replaces window.localStorage
 // with plain vi.fn() no-op stubs; drive them with an in-memory Map so the
@@ -160,25 +145,47 @@ describe('Matrix row: Consent revoked while queued', () => {
     expect(revokeAiProcessingFn).toHaveBeenCalled();
   });
 
-  it('no provider callable (transcription/analysis) is ever invoked by the revoke + reload + flush sequence', async () => {
-    const { revokeAiConsent, flushConsentOutbox } = await import('../services/consent/consentService.js');
+  it('isAiLocallyEnabled stays false across a rejected callable AND a simulated reload — the seam any client gate must consume', async () => {
+    // NOTE on scope: this file cannot assert "no provider callable invoked"
+    // directly here — consentService.js's import graph never references
+    // transcription/analysis callables at all, so that assertion would be
+    // tautological (it could never fail no matter what the code does).
+    // End-to-end provider blocking is actually enforced in two other places,
+    // neither of which belongs in this test:
+    //   - Server-side: functions/src/consent/consentGate.js's
+    //     `assertAiConsent`/`isAiAllowed`, fail-closed on every AI callable
+    //     and trigger — covered by
+    //     functions/src/consent/__tests__/consentGate.test.js.
+    //   - Client-side: App.jsx's `aiProcessingEnabled` UI gates that decide
+    //     whether to invoke a provider callable at all — untestable here per
+    //     this repo's project constraints (App.jsx is untested; see
+    //     docs/quality's gotchas / root CLAUDE.md).
+    // What IS this module's honest contract, and what every such gate must
+    // ultimately read, is `isAiLocallyEnabled`: it must report `false`
+    // synchronously after a revoke whose server callable rejected, and it
+    // must stay `false` across a simulated app restart (Preferences-backed
+    // state persists; a fresh module import re-reads the same localStorage
+    // marker). That's what this test asserts.
+    const { revokeAiConsent, isAiLocallyEnabled } = await import('../services/consent/consentService.js');
     revokeAiProcessingFn.mockRejectedValue(new Error('offline'));
 
     await revokeAiConsent(OWNER);
+    expect(isAiLocallyEnabled(OWNER)).toBe(false);
+
+    // Simulate an app restart: reset the module registry, then re-check the
+    // seam through a freshly imported module handle. localStorage (the
+    // marker's real backing store) persists across this, exactly as it
+    // would across a real process restart.
     vi.resetModules();
     const fresh = await import('../services/consent/consentService.js');
+    expect(fresh.isAiLocallyEnabled(OWNER)).toBe(false);
+
+    // Draining the outbox afterward (server finally reachable) must not
+    // flip local state back on — a late-succeeding revoke ack is still a
+    // revoke ack, not a grant.
     revokeAiProcessingFn.mockResolvedValue({ data: { cancelled: 3 } });
     await fresh.flushConsentOutbox(OWNER);
-    // Also exercise the module reference obtained before reload, mirroring a
-    // caller that already held a handle to the service.
-    await flushConsentOutbox(OWNER).catch(() => {});
-
-    for (const fn of providerFns) {
-      expect(fn).not.toHaveBeenCalled();
-    }
-    // The ONLY provider call reachable from this flow is the consent callable
-    // itself.
-    expect(revokeAiProcessingFn).toHaveBeenCalled();
+    expect(fresh.isAiLocallyEnabled(OWNER)).toBe(false);
     expect(grantAiProcessingFn).not.toHaveBeenCalled();
   });
 });

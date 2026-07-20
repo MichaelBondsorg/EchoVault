@@ -565,19 +565,15 @@ localStorage.removeItem('featureName.tipsDismissed')  // Page tips
 
 ## Trust & Capture Invariants
 
-The Trustworthy Capture Sprint (plan:
-`docs/superpowers/plans/2026-07-20-trustworthy-capture-and-intelligence.md`)
-made capture durability, consent, and account isolation load-bearing
-invariants, not just features:
-- At every destructive boundary, either the previous durable copy (native
-  draft) or the next durable copy (audio vault) must exist.
-- AI consent revocation is fail-closed and never silently re-granted.
-- All local caches/artifacts are owner-scoped; an account switch must never
-  leak the prior owner's data.
+Trustworthy Capture Sprint invariants (plan:
+`docs/superpowers/plans/2026-07-20-trustworthy-capture-and-intelligence.md`):
+a durable copy (native draft or audio vault) must exist at every destructive
+boundary; AI consent revocation is fail-closed and never silently re-granted;
+all local caches are owner-scoped — an account switch must never leak the
+prior owner's data.
 
-Flags: `src/config/flags.js`. Runbook (flags, retention, rollback, incident
-ownership): `docs/quality/trustworthy-capture-runbook.md`. Device checklist:
-`docs/quality/device-validation-matrix.md`. Automated regression tests:
+Flags: `src/config/flags.js`. Runbook: `docs/quality/trustworthy-capture-runbook.md`.
+Device checklist: `docs/quality/device-validation-matrix.md`. Tests:
 `src/__tests__/validationMatrix.test.js`.
 
 ## Crash Reporting
