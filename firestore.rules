@@ -41,6 +41,21 @@ service cloud.firestore {
         allow read, write: if isOwner(userId);
       }
 
+      // NEW: Spaces subcollection (PRD R1 Context Spaces v1 — organizational
+      // containers that scope entries/retrieval via `spaceId`). Owner may
+      // read/create/update but there is NO client delete: "Space deletion" in
+      // v1 is archive (state: 'archived') + an optional bulk move of member
+      // entries, both done via update (Task 8's client service) — journal
+      // content can never be silently deleted by removing its space.
+      match /spaces/{spaceId} {
+        allow read: if isOwner(userId);
+        allow create, update: if isOwner(userId)
+          && request.resource.data.keys().hasOnly(['name', 'state', 'createdAt', 'updatedAt'])
+          && request.resource.data.name is string
+          && request.resource.data.name.size() <= 40
+          && request.resource.data.state in ['active', 'archived'];
+      }
+
       // Patterns subcollection
       match /patterns/{patternId} {
         allow read, write: if isOwner(userId);
@@ -102,12 +117,35 @@ service cloud.firestore {
         // client write is only allowed when it is a well-formed consent shape:
         // aiProcessing must be a bool and no unexpected keys may be present.
         // (Server grant/revoke callables run with admin creds and bypass this.)
+        //
+        // settings/insightBudget (PRD R1 Insight Budget) gates how many
+        // insights the Nexus surfaces show per day. `mode` must be one of the
+        // three tiers; `shownLog` is an optional list field reserved for a
+        // later task (per-day shown-insight ledger) and, when present, must
+        // be a list.
+        //
+        // settings/spacePrefs (PRD R1 Context Spaces) remembers the user's
+        // last explicit capture-Space selection; `lastCaptureSpaceId` is
+        // either a space id (string) or null (no space remembered / unscoped).
         allow write: if isOwner(userId)
           && settingId != 'subscription'
           && (
             settingId != 'consent' || (
               request.resource.data.aiProcessing is bool
               && request.resource.data.keys().hasOnly(['aiProcessing', 'grantedAt', 'revokedAt', 'updatedAt', 'policyVersion'])
+            )
+          )
+          && (
+            settingId != 'insightBudget' || (
+              request.resource.data.keys().hasOnly(['mode', 'updatedAt', 'shownLog'])
+              && request.resource.data.mode in ['quiet', 'balanced', 'exploratory']
+              && (!('shownLog' in request.resource.data) || request.resource.data.shownLog is list)
+            )
+          )
+          && (
+            settingId != 'spacePrefs' || (
+              request.resource.data.keys().hasOnly(['lastCaptureSpaceId', 'updatedAt'])
+              && (request.resource.data.lastCaptureSpaceId is string || request.resource.data.lastCaptureSpaceId == null)
             )
           );
       }
@@ -186,29 +224,34 @@ service cloud.firestore {
       // Documents are CREATED ONLY by the server (Admin SDK, via the
       // catch-all below). A client may read its own intents and make a narrow
       // set of state transitions — and only touch state/updatedAt/
-      // authorization. Every extraction-owned field (kind, attributes,
+      // authorization/snoozedUntil/outcome/userText (PRD R1 task-repair keys:
+      // snoozing an open loop, closing it with an outcome, and editing its
+      // display text). Every extraction-owned field (kind, attributes,
       // confidence, sourceSpan, versions, ...) is immutable from the client.
       // No client create or delete: model confidence alone can never mint an
       // active intent, and a user can only dismiss (never hard-delete).
+      // Mirrors functions/src/intents/intentSchema.js CLIENT_MUTABLE_KEYS.
       match /intents/{intentId} {
         allow read: if isOwner(userId);
         allow update: if isOwner(userId)
           && request.resource.data.diff(resource.data).affectedKeys()
-               .hasOnly(['state', 'updatedAt', 'authorization'])
+               .hasOnly(['state', 'updatedAt', 'authorization', 'snoozedUntil', 'outcome', 'userText'])
           && intentTransitionAllowed(resource.data.state, request.resource.data.state);
       }
 
       // User decisions (append-only audit of keep/dismiss/complete actions).
       // Owner may create a shape-validated decision and read its own; never
       // update or delete (reversibility is modelled by a new decision, not a
-      // mutation).
+      // mutation). Action set mirrors intentSchema.js DECISION_ACTIONS,
+      // extended in PRD R1 with the task-repair/open-loop actions
+      // (snoozed/answered/closed) alongside the original set.
       match /user_decisions/{decisionId} {
         allow read: if isOwner(userId);
         allow create: if isOwner(userId)
           && request.resource.data.targetType == 'intent'
           && request.resource.data.keys().hasAll(['targetId', 'targetType', 'action', 'createdAt', 'reversible'])
           && request.resource.data.keys().hasOnly(['targetId', 'targetType', 'action', 'reasonCode', 'createdAt', 'reversible'])
-          && request.resource.data.action in ['kept', 'dismissed', 'not_a_task', 'completed']
+          && request.resource.data.action in ['kept', 'dismissed', 'not_a_task', 'completed', 'snoozed', 'answered', 'closed']
           && request.resource.data.reversible == true;
       }
 

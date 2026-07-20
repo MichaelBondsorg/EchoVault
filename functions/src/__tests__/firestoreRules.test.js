@@ -484,6 +484,71 @@ describe('Intents collection rules', () => {
     const db = testEnv.authenticatedContext(OTHER_USER_ID).firestore();
     await assertFails(updateDoc(doc(db, userPath(USER_ID), 'intents', 'i-crossupd'), { state: 'active', updatedAt: 'now' }));
   });
+
+  // --- PRD R1 task-repair keys (snoozedUntil/outcome/userText) ------------
+
+  it('ALLOWS setting snoozedUntil on an active intent (no-op state)', async () => {
+    await seedIntent('i-snooze', 'active');
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    await assertSucceeds(updateDoc(doc(db, userPath(USER_ID), 'intents', 'i-snooze'), {
+      state: 'active',
+      updatedAt: 'now',
+      snoozedUntil: '2026-08-01T00:00:00.000Z',
+    }));
+  });
+
+  it('ALLOWS setting outcome when closing a loop', async () => {
+    await seedIntent('i-outcome', 'active');
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    await assertSucceeds(updateDoc(doc(db, userPath(USER_ID), 'intents', 'i-outcome'), {
+      state: 'active',
+      updatedAt: 'now',
+      outcome: { closedAt: '2026-07-20T00:00:00.000Z', kind: 'closed', answerEntryId: null },
+    }));
+  });
+
+  it('ALLOWS editing userText (repair) alongside a legal state move', async () => {
+    await seedIntent('i-usertext', 'suggested');
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    await assertSucceeds(updateDoc(doc(db, userPath(USER_ID), 'intents', 'i-usertext'), {
+      state: 'active',
+      updatedAt: 'now',
+      userText: 'Call the dentist',
+    }));
+  });
+
+  it('FORBIDS touching sourceSpan alongside an allowed snooze update', async () => {
+    await seedIntent('i-tamper-span', 'active');
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    await assertFails(updateDoc(doc(db, userPath(USER_ID), 'intents', 'i-tamper-span'), {
+      state: 'active',
+      updatedAt: 'now',
+      snoozedUntil: 'now',
+      sourceSpan: { start: 0, end: 3, text: 'xyz' },
+    }));
+  });
+
+  it('FORBIDS touching attributes alongside an allowed userText edit', async () => {
+    await seedIntent('i-tamper-attrs', 'active');
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    await assertFails(updateDoc(doc(db, userPath(USER_ID), 'intents', 'i-tamper-attrs'), {
+      state: 'active',
+      updatedAt: 'now',
+      userText: 'hacked',
+      attributes: { agency: false, concrete: false, unfinished: false, temporalFit: false, negated: false, quoted: false, conditional: false, goalLanguage: false, otherOwned: false, completed: true },
+    }));
+  });
+
+  it('FORBIDS touching confidence alongside an allowed outcome close', async () => {
+    await seedIntent('i-tamper-conf', 'active');
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    await assertFails(updateDoc(doc(db, userPath(USER_ID), 'intents', 'i-tamper-conf'), {
+      state: 'active',
+      updatedAt: 'now',
+      confidence: 0.01,
+      outcome: { closedAt: 'now', kind: 'closed', answerEntryId: null },
+    }));
+  });
 });
 
 // --- user_decisions collection rules -------------------------------------
@@ -504,6 +569,13 @@ describe('user_decisions collection rules', () => {
   it('denies a decision with an unknown action', async () => {
     const db = testEnv.authenticatedContext(USER_ID).firestore();
     await assertFails(addDoc(collection(db, userPath(USER_ID), 'user_decisions'), { ...validDecision, action: 'frobnicate' }));
+  });
+
+  it('allows the owner to create decisions with the new R1 open-loop actions', async () => {
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    for (const action of ['snoozed', 'answered', 'closed']) {
+      await assertSucceeds(addDoc(collection(db, userPath(USER_ID), 'user_decisions'), { ...validDecision, action }));
+    }
   });
 
   it('denies a decision with an unexpected extra key', async () => {
@@ -531,5 +603,147 @@ describe('user_decisions collection rules', () => {
     const db = testEnv.authenticatedContext(USER_ID).firestore();
     await assertFails(updateDoc(doc(db, userPath(USER_ID), 'user_decisions', decisionId), { action: 'dismissed' }));
     await assertFails(deleteDoc(doc(db, userPath(USER_ID), 'user_decisions', decisionId)));
+  });
+});
+
+// --- Spaces collection rules (PRD R1 Context Spaces v1) -------------------
+
+describe('Spaces collection rules', () => {
+  const validSpace = { name: 'Work', state: 'active', createdAt: 'now', updatedAt: 'now' };
+
+  it('allows the owner to create a well-formed space', async () => {
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    await assertSucceeds(setDoc(doc(db, userPath(USER_ID), 'spaces', 'space1'), validSpace));
+  });
+
+  it('allows the owner to read and update their own space', async () => {
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    const ref = doc(db, userPath(USER_ID), 'spaces', 'space1');
+    await assertSucceeds(setDoc(ref, validSpace));
+    await assertSucceeds(getDoc(ref));
+    await assertSucceeds(updateDoc(ref, { name: 'Deep Work', updatedAt: 'later' }));
+  });
+
+  it('denies a space name over 40 characters', async () => {
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    const ref = doc(db, userPath(USER_ID), 'spaces', 'space-toolong');
+    await assertFails(setDoc(ref, { ...validSpace, name: 'x'.repeat(41) }));
+  });
+
+  it('denies a non-string name', async () => {
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    const ref = doc(db, userPath(USER_ID), 'spaces', 'space-badname');
+    await assertFails(setDoc(ref, { ...validSpace, name: 123 }));
+  });
+
+  it('denies an unknown state', async () => {
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    const ref = doc(db, userPath(USER_ID), 'spaces', 'space-badstate');
+    await assertFails(setDoc(ref, { ...validSpace, state: 'deleted' }));
+  });
+
+  it('denies an unexpected extra key', async () => {
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    const ref = doc(db, userPath(USER_ID), 'spaces', 'space-junk');
+    await assertFails(setDoc(ref, { ...validSpace, color: 'blue' }));
+  });
+
+  it('denies another user reading, creating, or updating a space', async () => {
+    const ownerDb = testEnv.authenticatedContext(USER_ID).firestore();
+    const ownerRef = doc(ownerDb, userPath(USER_ID), 'spaces', 'space-cross');
+    await assertSucceeds(setDoc(ownerRef, validSpace));
+
+    const db = testEnv.authenticatedContext(OTHER_USER_ID).firestore();
+    const ref = doc(db, userPath(USER_ID), 'spaces', 'space-cross');
+    await assertFails(getDoc(ref));
+    await assertFails(setDoc(ref, validSpace));
+    await assertFails(updateDoc(ref, { name: 'Hacked' }));
+  });
+
+  it('denies a client DELETE (archive is a state update, never a hard delete)', async () => {
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    const ref = doc(db, userPath(USER_ID), 'spaces', 'space-nodelete');
+    await assertSucceeds(setDoc(ref, validSpace));
+    await assertFails(deleteDoc(ref));
+  });
+});
+
+// --- Insight Budget settings rules (settings/insightBudget shape) ---------
+
+describe('Insight Budget settings rules', () => {
+  it('allows owner to write a valid insightBudget shape', async () => {
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    const ref = doc(db, userPath(USER_ID), 'settings', 'insightBudget');
+    await assertSucceeds(setDoc(ref, { mode: 'balanced', updatedAt: 'now' }));
+  });
+
+  it('allows owner to write insightBudget with the optional shownLog list', async () => {
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    const ref = doc(db, userPath(USER_ID), 'settings', 'insightBudget');
+    await assertSucceeds(setDoc(ref, { mode: 'quiet', updatedAt: 'now', shownLog: ['insight-1'] }));
+  });
+
+  it('denies an unknown mode', async () => {
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    const ref = doc(db, userPath(USER_ID), 'settings', 'insightBudget');
+    await assertFails(setDoc(ref, { mode: 'unlimited', updatedAt: 'now' }));
+  });
+
+  it('denies a non-list shownLog', async () => {
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    const ref = doc(db, userPath(USER_ID), 'settings', 'insightBudget');
+    await assertFails(setDoc(ref, { mode: 'balanced', updatedAt: 'now', shownLog: 'not-a-list' }));
+  });
+
+  it('denies a write missing mode', async () => {
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    const ref = doc(db, userPath(USER_ID), 'settings', 'insightBudget');
+    await assertFails(setDoc(ref, { updatedAt: 'now' }));
+  });
+
+  it('denies an unexpected extra key', async () => {
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    const ref = doc(db, userPath(USER_ID), 'settings', 'insightBudget');
+    await assertFails(setDoc(ref, { mode: 'balanced', updatedAt: 'now', hacked: true }));
+  });
+
+  it('denies another user writing the insightBudget doc', async () => {
+    const db = testEnv.authenticatedContext(OTHER_USER_ID).firestore();
+    const ref = doc(db, userPath(USER_ID), 'settings', 'insightBudget');
+    await assertFails(setDoc(ref, { mode: 'balanced', updatedAt: 'now' }));
+  });
+});
+
+// --- Space prefs settings rules (settings/spacePrefs shape) ---------------
+
+describe('Space prefs settings rules', () => {
+  it('allows owner to write a valid spacePrefs shape with a space id', async () => {
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    const ref = doc(db, userPath(USER_ID), 'settings', 'spacePrefs');
+    await assertSucceeds(setDoc(ref, { lastCaptureSpaceId: 'space1', updatedAt: 'now' }));
+  });
+
+  it('allows owner to write spacePrefs with a null lastCaptureSpaceId (unscoped)', async () => {
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    const ref = doc(db, userPath(USER_ID), 'settings', 'spacePrefs');
+    await assertSucceeds(setDoc(ref, { lastCaptureSpaceId: null, updatedAt: 'now' }));
+  });
+
+  it('denies a non-string/non-null lastCaptureSpaceId', async () => {
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    const ref = doc(db, userPath(USER_ID), 'settings', 'spacePrefs');
+    await assertFails(setDoc(ref, { lastCaptureSpaceId: 42, updatedAt: 'now' }));
+  });
+
+  it('denies an unexpected extra key', async () => {
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    const ref = doc(db, userPath(USER_ID), 'settings', 'spacePrefs');
+    await assertFails(setDoc(ref, { lastCaptureSpaceId: 'space1', updatedAt: 'now', hacked: true }));
+  });
+
+  it('denies another user writing the spacePrefs doc', async () => {
+    const db = testEnv.authenticatedContext(OTHER_USER_ID).firestore();
+    const ref = doc(db, userPath(USER_ID), 'settings', 'spacePrefs');
+    await assertFails(setDoc(ref, { lastCaptureSpaceId: 'space1', updatedAt: 'now' }));
   });
 });
