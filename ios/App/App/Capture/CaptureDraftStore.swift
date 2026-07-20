@@ -21,6 +21,12 @@ final class CaptureDraftStore {
     }
 
     func directory(for ownerUid: String) throws -> URL {
+        try directory(forHash: try ownerHash(ownerUid))
+    }
+
+    /// Locate a draft directory from an already-computed owner hash. Used by
+    /// callers (e.g. updateStatus) that hold the hash rather than the raw uid.
+    func directory(forHash ownerHash: String) throws -> URL {
         let base = try fileManager.url(
             for: .applicationSupportDirectory,
             in: .userDomainMask,
@@ -28,7 +34,7 @@ final class CaptureDraftStore {
             create: true
         )
         let directory = base.appendingPathComponent("CaptureDrafts", isDirectory: true)
-            .appendingPathComponent(try ownerHash(ownerUid), isDirectory: true)
+            .appendingPathComponent(ownerHash, isDirectory: true)
         try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
         return directory
     }
@@ -56,6 +62,21 @@ final class CaptureDraftStore {
         let id = try validatedDraftId(draftId)
         let url = try directory(for: ownerUid).appendingPathComponent("\(id).json")
         return try decoder.decode(CaptureDraft.self, from: Data(contentsOf: url))
+    }
+
+    /// Update only the status field of an existing draft's sidecar JSON, keyed
+    /// by an already-computed owner hash. Reads the sidecar, mutates status, and
+    /// rewrites atomically. Verifies the decoded draft's ownerHash matches the
+    /// caller-supplied hash (defence in depth — the directory is already
+    /// hash-scoped) before writing.
+    func updateStatus(id: String, ownerHash: String, status: CaptureDraft.Status) throws {
+        let draftId = try validatedDraftId(id)
+        let url = try directory(forHash: ownerHash).appendingPathComponent("\(draftId).json")
+        var draft = try decoder.decode(CaptureDraft.self, from: Data(contentsOf: url))
+        guard draft.ownerHash == ownerHash else { throw CaptureError.ownerMismatch }
+        draft.status = status
+        let data = try encoder.encode(draft)
+        try data.write(to: url, options: .atomic)
     }
 
     func delete(ownerUid: String, draftId: String) throws {

@@ -103,6 +103,22 @@ final class CaptureCoordinator: NSObject, AVAudioRecorderDelegate {
         try store.delete(ownerUid: ownerUid, draftId: draftId)
     }
 
+    /// Update a stored draft's status (e.g. mark uploaded/needsReview from JS).
+    func updateStatus(ownerUid: String, draftId: String, status: CaptureDraft.Status) throws {
+        try store.updateStatus(id: draftId, ownerHash: try store.ownerHash(ownerUid), status: status)
+    }
+
+    /// Resolve the on-disk audio file URL for a draft (used by the background
+    /// uploader and duration derivation).
+    func audioURL(ownerUid: String, draftId: String) throws -> URL {
+        try store.audioURL(ownerUid: ownerUid, draftId: draftId)
+    }
+
+    /// Owner hash for a uid (used when tagging background upload tasks).
+    func ownerHash(_ ownerUid: String) throws -> String {
+        try store.ownerHash(ownerUid)
+    }
+
     @objc private func handleInterruption(_ notification: Notification) {
         guard let recorder, var draft = activeDraft, let ownerUid = activeOwnerUid else { return }
         guard let raw = notification.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt,

@@ -11,7 +11,28 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         // Configure Firebase
         FirebaseApp.configure()
 
+        // Recreate the background upload session early so its delegate can
+        // receive callbacks for uploads that finished while the app was dead.
+        BackgroundUploader.shared.activate()
+
         return true
+    }
+
+    /// The system relaunches (or wakes) the app to deliver events for a
+    /// background URLSession. Hand the completion handler to BackgroundUploader,
+    /// which invokes it once `urlSessionDidFinishEvents` fires. Recreating the
+    /// session (via setBackgroundCompletionHandler → activate) reattaches to the
+    /// finished tasks so their delegate callbacks are delivered.
+    func application(
+        _ application: UIApplication,
+        handleEventsForBackgroundURLSession identifier: String,
+        completionHandler: @escaping () -> Void
+    ) {
+        if identifier == BackgroundUploader.sessionIdentifier {
+            BackgroundUploader.shared.setBackgroundCompletionHandler(completionHandler)
+        } else {
+            completionHandler()
+        }
     }
 
     func applicationWillResignActive(_ application: UIApplication) {
