@@ -4,7 +4,19 @@ import { Mic, Square, X, Loader2 } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
 import { CaptureService } from '../../services/capture/captureService';
 import { nativeCaptureAdapter } from '../../services/capture/nativeCaptureAdapter';
+import { appendChunk, deleteDraft, recoverWebDrafts } from '../../services/capture/webChunkStore';
+import { restoreDraft, writeDraft, clearDraft } from '../../services/capture/draftAutosave';
+import { audioVault } from '../../services/audio/audioVault';
+import { getFlag } from '../../config/flags';
 import { Button } from '../cloud';
+
+const ENTRY_DRAFT_PREFIX = 'entry_draft';
+
+// Module-level latch: web chunk-draft recovery must run once per browser
+// session (not once per EntryBar mount/remount — the bar can remount across
+// navigation). Keyed by owner so switching accounts within the same session
+// still gets a recovery pass.
+const webChunkRecoveryOwners = new Set();
 
 /**
  * EntryBar - Persistent bottom bar for instant entry creation
@@ -25,6 +37,9 @@ const EntryBar = ({ ownerUid, onVoiceSave, onTextSave, onStateChange, loading, d
   const textInputRef = useRef(null);
   const shouldAutoStartVoice = useRef(false);
   const nativeCaptureRef = useRef(null);
+  const webChunkDraftIdRef = useRef(null);
+  const webChunkSeqRef = useRef(0);
+  const draftRestoredRef = useRef(false);
 
   // Use refs to always have the latest callbacks
   // This prevents stale closure issues during long recordings
@@ -45,6 +60,40 @@ const EntryBar = ({ ownerUid, onVoiceSave, onTextSave, onStateChange, loading, d
       if (timerRef.current) clearInterval(timerRef.current);
     };
   }, []);
+
+  // Restore a typed draft once ownerUid is known — only when the current
+  // text state is still empty, so we never clobber something the user is
+  // already typing.
+  useEffect(() => {
+    if (draftRestoredRef.current || !ownerUid || textValue) return;
+    const restored = restoreDraft(ENTRY_DRAFT_PREFIX, ownerUid);
+    if (restored) setTextValue(restored);
+    draftRestoredRef.current = true;
+  }, [ownerUid, textValue]);
+
+  // Debounced typed-draft autosave. Small strings — plain localStorage is
+  // fine (see draftAutosave.js).
+  useEffect(() => {
+    if (!ownerUid) return;
+    const timeout = setTimeout(() => writeDraft(ENTRY_DRAFT_PREFIX, ownerUid, textValue), 500);
+    return () => clearTimeout(timeout);
+  }, [ownerUid, textValue]);
+
+  // One-time-per-session web recording-chunk recovery: adopt any chunks left
+  // over from a tab death mid-recording into the durable audio vault. Native
+  // has its own recovery path (recoverNativeDrafts, run from App.jsx) — this
+  // is web-only.
+  useEffect(() => {
+    if (!ownerUid || Capacitor.isNativePlatform()) return;
+    if (!getFlag('webChunkPersistence')) return;
+    if (webChunkRecoveryOwners.has(ownerUid)) return;
+    webChunkRecoveryOwners.add(ownerUid);
+    recoverWebDrafts(ownerUid, (base64, mime) =>
+      audioVault.saveRecording(ownerUid, base64, mime).then((result) => result?.id ?? null)
+    )
+      .then((count) => count && console.log(`[Recording] recovered ${count} web draft(s)`))
+      .catch((error) => console.warn('[Recording] web draft recovery failed:', error?.message));
+  }, [ownerUid]);
 
   // Auto-open appropriate mode when embedded (from FAB) or prompt context is provided
   // For embedded mode, auto-start based on preferredMode without requiring promptContext
@@ -122,10 +171,25 @@ const EntryBar = ({ ownerUid, onVoiceSave, onTextSave, onStateChange, loading, d
       const recorder = new MediaRecorder(stream, { mimeType: mime, audioBitsPerSecond: 32000 });
       const chunks = [];
 
+      // Incremental chunk persistence (flag: webChunkPersistence). The
+      // in-memory `chunks` array above remains the fast path used to
+      // assemble the final blob on stop; IndexedDB persistence here exists
+      // purely so a tab death mid-recording doesn't lose the audio — see
+      // webChunkStore.js recoverWebDrafts for the recovery side.
+      const chunkPersistenceOn = getFlag('webChunkPersistence') && !!ownerUid;
+      webChunkDraftIdRef.current = chunkPersistenceOn ? crypto.randomUUID() : null;
+      webChunkSeqRef.current = 0;
+
       recorder.ondataavailable = e => {
         if (e.data && e.data.size > 0) {
           chunks.push(e.data);
           console.log('[Recording] Chunk received:', e.data.size, 'bytes, total chunks:', chunks.length);
+          if (webChunkDraftIdRef.current) {
+            const seq = webChunkSeqRef.current++;
+            appendChunk(ownerUid, webChunkDraftIdRef.current, seq, e.data, mime).catch((err) => {
+              console.warn('[Recording] chunk persistence failed:', err?.message);
+            });
+          }
         }
       };
 
@@ -170,7 +234,7 @@ const EntryBar = ({ ownerUid, onVoiceSave, onTextSave, onStateChange, loading, d
           stream.getTracks().forEach(t => t.stop());
         };
 
-        reader.onloadend = () => {
+        reader.onloadend = async () => {
           console.log('[Recording] FileReader complete, result length:', reader.result?.length || 0);
 
           if (!reader.result || reader.result.length < 100) {
@@ -194,7 +258,29 @@ const EntryBar = ({ ownerUid, onVoiceSave, onTextSave, onStateChange, loading, d
 
           // Use ref to get the latest callback, avoiding stale closure
           console.log('[Recording] Sending to transcription...');
-          onVoiceSaveRef.current(base64, mime);
+          const persistedDraftId = webChunkDraftIdRef.current;
+          if (persistedDraftId) {
+            // Assembled from the fast in-memory path above (unchanged); the
+            // chunk draft is only a fallback for a crash before this point.
+            // Hand off, then drop the chunk draft ONLY once the hand-off
+            // succeeded — a failure (throw, or an explicit `false` return
+            // like handleAudioWrapper uses) keeps the chunks around so the
+            // next launch's recovery pass can retry.
+            let handedOff = false;
+            try {
+              const result = await onVoiceSaveRef.current(base64, mime);
+              handedOff = result !== false;
+            } catch (err) {
+              console.warn('[Recording] onVoiceSave failed, keeping chunk draft:', err?.message);
+              handedOff = false;
+            }
+            if (handedOff) {
+              await deleteDraft(ownerUid, persistedDraftId).catch(() => {});
+            }
+            webChunkDraftIdRef.current = null;
+          } else {
+            onVoiceSaveRef.current(base64, mime);
+          }
           setMode('idle');
         };
 
@@ -259,6 +345,7 @@ const EntryBar = ({ ownerUid, onVoiceSave, onTextSave, onStateChange, loading, d
       // Use ref to get the latest callback, avoiding stale closure
       onTextSaveRef.current(textValue.trim());
       setTextValue('');
+      if (ownerUid) clearDraft(ENTRY_DRAFT_PREFIX, ownerUid);
       setMode('idle');
       if (onClearPrompt) onClearPrompt();
     }
@@ -266,6 +353,7 @@ const EntryBar = ({ ownerUid, onVoiceSave, onTextSave, onStateChange, loading, d
 
   const handleTextCancel = () => {
     setTextValue('');
+    if (ownerUid) clearDraft(ENTRY_DRAFT_PREFIX, ownerUid);
     setMode('idle');
     if (onClearPrompt) onClearPrompt();
   };
