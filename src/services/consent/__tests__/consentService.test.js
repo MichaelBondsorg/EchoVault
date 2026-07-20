@@ -22,6 +22,7 @@ vi.mock('../../../config/firebase', () => ({
 const {
   revokeAiConsent,
   grantAiConsent,
+  declineAiConsent,
   flushConsentOutbox,
   isAiLocallyEnabled,
 } = await import('../consentService.js');
@@ -154,6 +155,72 @@ describe('consentService', () => {
       // the user's local marker still reflects what they asked for so the UI
       // is consistent; the outbox retries the server call.
       expect(localMarker(OWNER_A)).toBe('granted');
+    });
+  });
+
+  describe('declineAiConsent — first-run "Continue without AI"', () => {
+    it('sets a disabled local marker synchronously even when the callable rejects', async () => {
+      revokeAiProcessingFn.mockRejectedValue(new Error('offline'));
+
+      await declineAiConsent(OWNER_A);
+
+      expect(localMarker(OWNER_A)).toBe('declined');
+      expect(isAiLocallyEnabled(OWNER_A)).toBe(false);
+    });
+
+    it('never throws, even when the callable rejects', async () => {
+      revokeAiProcessingFn.mockRejectedValue(new Error('offline'));
+      await expect(declineAiConsent(OWNER_A)).resolves.toBeUndefined();
+    });
+
+    it('queues the same revoke outbox op the server revokeAiProcessing callable understands, and drains it on a later flush', async () => {
+      revokeAiProcessingFn.mockRejectedValue(new Error('offline'));
+      await declineAiConsent(OWNER_A);
+
+      const queued = outboxOp(OWNER_A);
+      expect(queued).toMatchObject({ type: 'revoke', uid: OWNER_A });
+      expect(queued.attempts).toBeGreaterThanOrEqual(1);
+      expect(revokeAiProcessingFn).toHaveBeenCalled();
+      expect(grantAiProcessingFn).not.toHaveBeenCalled();
+
+      revokeAiProcessingFn.mockResolvedValue({ data: { cancelled: 0 } });
+      await flushConsentOutbox(OWNER_A);
+      expect(outboxRaw(OWNER_A)).toBeUndefined();
+    });
+
+    it('clears the legacy first-run consent markers, same as revoke', async () => {
+      revokeAiProcessingFn.mockResolvedValue({ data: { cancelled: 0 } });
+      localStorage.setItem(`engram:v2:owner:${OWNER_A}:consent%2FaiVersion`, '1');
+      await declineAiConsent(OWNER_A);
+      expect(localStorage.getItem(`engram:v2:owner:${OWNER_A}:consent%2FaiVersion`)).toBeNull();
+      expect(localStorage.getItem(`engram:v2:owner:${OWNER_A}:consent%2FaiDeclinedVersion`)).toBe('1');
+    });
+
+    it('last-wins: a grant queued after a still-pending decline leaves a single grant op', async () => {
+      revokeAiProcessingFn.mockRejectedValue(new Error('offline'));
+      await declineAiConsent(OWNER_A);
+      expect(outboxOp(OWNER_A).type).toBe('revoke');
+      expect(isAiLocallyEnabled(OWNER_A)).toBe(false);
+
+      grantAiProcessingFn.mockRejectedValue(new Error('still offline'));
+      await grantAiConsent(OWNER_A);
+
+      const queued = outboxOp(OWNER_A);
+      expect(queued.type).toBe('grant');
+      expect(isAiLocallyEnabled(OWNER_A)).toBe(true);
+    });
+
+    it('last-wins: a decline queued after a still-pending grant leaves a single revoke op', async () => {
+      grantAiProcessingFn.mockRejectedValue(new Error('offline'));
+      await grantAiConsent(OWNER_A);
+      expect(outboxOp(OWNER_A).type).toBe('grant');
+
+      revokeAiProcessingFn.mockRejectedValue(new Error('still offline'));
+      await declineAiConsent(OWNER_A);
+
+      const queued = outboxOp(OWNER_A);
+      expect(queued.type).toBe('revoke');
+      expect(isAiLocallyEnabled(OWNER_A)).toBe(false);
     });
   });
 

@@ -52,6 +52,7 @@ import { ownerStorageKey } from './services/storage/ownerScopedStorage';
 import {
   grantAiConsent as grantAiConsentToServer,
   revokeAiConsent as revokeAiConsentToServer,
+  declineAiConsent as declineAiConsentToServer,
   flushConsentOutbox,
 } from './services/consent/consentService';
 import { clearOwnerCaches } from './services/storage/clearOwnerCaches';
@@ -239,20 +240,12 @@ export default function App() {
   const continueWithoutAi = async () => {
     if (!user?.uid) return;
     setAiConsentSaving(true);
-    try {
-      localStorage.removeItem(ownerStorageKey(user.uid, 'consent/aiVersion'));
-      localStorage.removeItem(ownerStorageKey(user.uid, 'consent/aiAcceptedAt'));
-      localStorage.setItem(ownerStorageKey(user.uid, 'consent/aiDeclinedVersion'), AI_CONSENT_VERSION);
-    } catch { /* storage can be unavailable in private browsing */ }
-    try {
-      await setDoc(
-        doc(db, 'artifacts', APP_COLLECTION_ID, 'users', user.uid, 'settings', 'consent'),
-        { aiProcessing: false, consentVersion: AI_CONSENT_VERSION, declinedAt: Timestamp.now() },
-        { merge: true }
-      );
-    } catch (error) {
-      console.error('Failed to record AI preference:', error);
-    }
+    // Fail-closed, server-authoritative consent: handled as a revoke (no
+    // server-side "declined" state exists). The previous raw setDoc here
+    // wrote `consentVersion`/`declinedAt`, keys firestore.rules' settings/consent
+    // allowlist rejects — the write silently failed on every decline, and
+    // consentGate's missing-doc default then left AI enabled server-side.
+    await declineAiConsentToServer(user.uid);
     setAiProcessingEnabled(false);
     setNeedsAiConsent(false);
     setAiConsentSaving(false);

@@ -17,6 +17,11 @@
  * grant and a queued revoke for the same user can never both be outstanding
  * (last write wins), matching how a real user's intent works: whatever they
  * did most recently is the thing that should reach the server.
+ *
+ * `declineAiConsent` (first-run "Continue without AI") is handled as a
+ * revoke: there is no distinct server-side "declined" state — the consent
+ * doc is a boolean gate — so it reuses the same fail-closed local-marker +
+ * outbox mechanics and the same `revokeAiProcessing` callable.
  */
 import { Preferences } from '@capacitor/preferences';
 import { revokeAiProcessingFn, grantAiProcessingFn } from '../../config/firebase';
@@ -143,6 +148,15 @@ export async function revokeAiConsent(uid) {
 
 /**
  * Grant AI-processing consent. Returns void — never throws.
+ *
+ * Unlike revoke, grant is optimistic: the local marker flips to enabled
+ * immediately so the UI doesn't block on the network, because a failed
+ * `grantAiProcessing` callable is the *safe* direction to fail in — the
+ * outbox will retry it, and until it lands the server-side consent gate
+ * (which is authoritative, not this local marker) still denies AI
+ * processing. Revoke is pessimistic in the opposite, higher-stakes
+ * direction: it must disable locally before any async work, and a failed
+ * callable must never silently re-enable it.
  */
 export async function grantAiConsent(uid) {
   if (!uid) return;
@@ -159,6 +173,31 @@ export async function grantAiConsent(uid) {
 }
 
 /**
+ * Decline AI-processing consent on first run, before it was ever granted.
+ * There is no separate server-side "declined" state — the consent doc is a
+ * boolean gate — so this is handled as a revoke: same fail-closed
+ * guarantees, same outbox mechanics, same `revokeAiProcessing` callable
+ * (writing a rules-compliant `{aiProcessing:false, revokedAt, policyVersion}`
+ * doc is semantically correct for "user never opted in" too). Uses a
+ * distinct local marker value only so a future decline-vs-revoke UI
+ * distinction is possible without another server-side change. Returns void
+ * — never throws.
+ */
+export async function declineAiConsent(uid) {
+  if (!uid) return;
+
+  setLocalMarker(uid, 'declined');
+  setLegacyMarkers(uid, false);
+
+  try {
+    await enqueueOp(uid, 'revoke');
+  } catch {
+    return;
+  }
+  await flushConsentOutbox(uid);
+}
+
+/**
  * Synchronous local read of whether AI processing is enabled on this device
  * for `uid`. Default (no marker written yet) is `true` — matches the legacy
  * behavior of the version-marker check this replaces.
@@ -167,7 +206,7 @@ export function isAiLocallyEnabled(uid) {
   if (!uid) return true;
   try {
     const marker = localStorage.getItem(localMarkerKey(uid));
-    if (marker === 'revoked') return false;
+    if (marker === 'revoked' || marker === 'declined') return false;
     return true;
   } catch {
     return true;
