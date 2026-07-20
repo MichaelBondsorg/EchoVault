@@ -56,6 +56,7 @@ export default defineConfig({
       'functions/src/reports/__tests__/reportCleanup.test.js',
       'functions/src/shared/__tests__/flags.test.js',
       'functions/src/telemetry/__tests__/stageLog.test.js',
+      'functions/src/analysis/__tests__/orchestrator.test.js',
     ],
 
     // Exclude patterns
