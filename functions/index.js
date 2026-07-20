@@ -28,6 +28,7 @@ import { logStage } from './src/telemetry/stageLog.js';
 import { getCachedEmbedding, setCachedEmbedding } from './src/ai/embeddingCache.js';
 import { claimProcessingMarker, acquireEntryLease, LEASE_MS } from './src/triggers/idempotency.js';
 import { maybeReanalyzeOnEntryUpdate } from './src/triggers/entryUpdateAnalysis.js';
+import { shouldWatchdogSkipEditedEntry } from './src/triggers/watchdogGuards.js';
 import { callGemini, classifyEntry, analyzeEntry, extractEnhancedContext, generateInsight } from './src/analysis/analysisHelpers.js';
 import { getServerFlag } from './src/shared/flags.js';
 import { runEntryAnalysis } from './src/analysis/orchestrator.js';
@@ -1841,6 +1842,17 @@ export const pendingEntryCleanup = onSchedule(
       const retry = data.analysisRetryCount || 0;
       // Owner uid for this collectionGroup hit: entries -> user doc parent.
       const ownerUid = docSnap.ref.parent.parent?.id;
+
+      // Correction invalidation (plan task C4) interaction — see
+      // watchdogGuards.js doc comment: an edited entry's `createdAt` is its
+      // ORIGINAL creation date, so a meaningfully-edited entry looks "stuck"
+      // to this sweep on the very next run. Skip entirely (no lease, not
+      // counted as failed) rather than running the REDUCED legacy inline
+      // path when the server orchestrator flag is off.
+      if (await shouldWatchdogSkipEditedEntry(db, data)) {
+        console.log(JSON.stringify({ type: 'watchdog-skip', reason: 'edited-entry-legacy-mode' }));
+        continue;
+      }
 
       // Server-authoritative crisis flag regardless of analysis/consent outcome.
       const crisisFields = (text && isCrisisText(text) && data.safety_flagged !== true)
