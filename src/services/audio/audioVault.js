@@ -2,10 +2,24 @@
 import { Capacitor } from '@capacitor/core';
 import { Filesystem, Directory } from '@capacitor/filesystem';
 import { encodedOwnerSegment, ownerStorageKey, requireOwner } from '../storage/ownerScopedStorage';
+import { openCaptureDb, hasIndexedDb, reqP } from '../capture/idbCaptureDb';
 
 const LEGACY_INDEX_KEY = 'engram_audio_vault_index';
 const RETENTION_DAYS = 7;
-const WEB_MAX_BYTES = 10 * 1024 * 1024;
+// All new web blobs move into IndexedDB (see idbCaptureDb.js's `vault`
+// store) rather than localStorage — a single JSON blob-per-key localStorage
+// scheme shares the browser's small (~5-10MB) per-origin quota with the
+// rest of the app, which is what forced the old 10MB cap. Moving audio out
+// entirely (not just blobs over some size threshold) keeps one read/write
+// path instead of two, and frees the old headroom for everything else.
+// 50MB is enforced ourselves by summing each index entry's recorded `size`
+// (base64 length) on save — IndexedDB's real quota is far larger, this is a
+// deliberate app-level ceiling, not a browser limit.
+const WEB_MAX_BYTES = 50 * 1024 * 1024;
+// Fallback cap ONLY used when IndexedDB itself is unavailable (e.g. some
+// private-browsing modes, very old browsers) and we must fall back to the
+// pre-migration localStorage-blob path for a single save.
+const LEGACY_WEB_SINGLE_MAX_BYTES = 10 * 1024 * 1024;
 const RECORDING_ID_PATTERN = /^rec_\d+_[a-z0-9]{6}$/;
 
 const isNative = () => Capacitor.isNativePlatform();
@@ -55,6 +69,32 @@ const emitChanged = (ownerUid) => {
   }
 };
 
+const sumWebBytes = (index) =>
+  Object.values(index).reduce((total, meta) => total + (meta?.size || 0), 0);
+
+const idbPutBlob = async (ownerUid, id, base64) => {
+  const db = await openCaptureDb();
+  if (!db) return false;
+  const tx = db.transaction(['vault'], 'readwrite');
+  await reqP(tx.objectStore('vault').put({ ownerUid, id, base64 }));
+  return true;
+};
+
+const idbGetBlob = async (ownerUid, id) => {
+  const db = await openCaptureDb();
+  if (!db) return null;
+  const tx = db.transaction(['vault'], 'readonly');
+  const record = await reqP(tx.objectStore('vault').get([ownerUid, id]));
+  return record ? record.base64 : null;
+};
+
+const idbDeleteBlob = async (ownerUid, id) => {
+  const db = await openCaptureDb();
+  if (!db) return;
+  const tx = db.transaction(['vault'], 'readwrite');
+  await reqP(tx.objectStore('vault').delete([ownerUid, id]));
+};
+
 export const audioVault = {
   /**
    * Persist a recording durably. Never throws. Returns a discriminated result:
@@ -73,15 +113,24 @@ export const audioVault = {
         await Filesystem.mkdir({ path: ownerDir(owner), directory: Directory.Data, recursive: true }).catch(() => {});
         await Filesystem.writeFile({ path: filePath(owner, id), directory: Directory.Data, data: base64 });
       } else {
-        if (base64.length > WEB_MAX_BYTES) return { error: 'quota' };
-        localStorage.setItem(webKey(owner, id), base64);
+        const existingTotal = sumWebBytes(readIndex(owner));
+        if (existingTotal + base64.length > WEB_MAX_BYTES) return { error: 'quota' };
+        if (hasIndexedDb()) {
+          const ok = await idbPutBlob(owner, id, base64);
+          if (!ok) return { error: 'io' };
+        } else {
+          if (base64.length > LEGACY_WEB_SINGLE_MAX_BYTES) return { error: 'quota' };
+          localStorage.setItem(webKey(owner, id), base64);
+        }
       }
 
       const index = readIndex(owner);
-      index[id] = { ownerUid: owner, createdAt: Date.now(), mime, entryId: null };
+      index[id] = { ownerUid: owner, createdAt: Date.now(), mime, entryId: null, size: base64.length };
       if (!writeIndex(owner, index)) {
         if (isNative()) {
           await Filesystem.deleteFile({ path: filePath(owner, id), directory: Directory.Data }).catch(() => {});
+        } else if (hasIndexedDb()) {
+          await idbDeleteBlob(owner, id).catch(() => {});
         } else {
           localStorage.removeItem(webKey(owner, id));
         }
@@ -101,9 +150,18 @@ export const audioVault = {
     const meta = readIndex(owner)[id];
     if (!meta) return null;
     try {
-      const base64 = isNative()
-        ? (await Filesystem.readFile({ path: filePath(owner, id), directory: Directory.Data })).data
-        : localStorage.getItem(webKey(owner, id));
+      let base64;
+      if (isNative()) {
+        base64 = (await Filesystem.readFile({ path: filePath(owner, id), directory: Directory.Data })).data;
+      } else {
+        // localStorage first: blobs saved before the IndexedDB migration
+        // still live there. New saves are IDB-only, so this is a fast miss
+        // for them.
+        base64 = localStorage.getItem(webKey(owner, id));
+        if (!base64 && hasIndexedDb()) {
+          base64 = await idbGetBlob(owner, id);
+        }
+      }
       return base64 ? { base64, mime: meta.mime, createdAt: meta.createdAt, entryId: meta.entryId } : null;
     } catch { return null; }
   },
@@ -126,7 +184,10 @@ export const audioVault = {
       if (isNative()) {
         await Filesystem.deleteFile({ path: filePath(owner, id), directory: Directory.Data }).catch(() => {});
       } else {
+        // Best-effort against both backends — a recording may be a legacy
+        // localStorage blob, an IndexedDB blob, or (transiently) neither.
         localStorage.removeItem(webKey(owner, id));
+        if (hasIndexedDb()) await idbDeleteBlob(owner, id).catch(() => {});
       }
     } finally {
       const index = readIndex(owner);
