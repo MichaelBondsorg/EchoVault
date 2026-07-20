@@ -23,6 +23,10 @@ import { getNotificationTemplate } from './src/notifications/templates.js';
 import { enforceDailyQuota } from './src/limits/dailyQuota.js';
 import { GEMINI_TRANSCRIBE_MODEL, buildGeminiRequestBody, parseFusedResponse } from './src/transcription/fusedTranscription.js';
 import { transcribeWithWhisper } from './src/shared/openai.js';
+import { assertAiConsent, isAiAllowed, grantConsent, revokeConsent } from './src/consent/consentGate.js';
+import { getCachedEmbedding, setCachedEmbedding } from './src/ai/embeddingCache.js';
+import { claimProcessingMarker, acquireEntryLease, LEASE_MS } from './src/triggers/idempotency.js';
+import { randomUUID } from 'node:crypto';
 
 /**
  * Constant-time secret comparison. Hashes both inputs to a fixed-length digest
@@ -917,6 +921,7 @@ export const analyzeJournalEntry = onCall(
     }
 
     const userId = request.auth.uid;
+    await assertAiConsent(db, userId);
     const { text, recentEntriesContext, historyContext, moodTrajectory, cyclicalPatterns, pendingPrompts, operations, userLocalHour, skipEntityResolution } = request.data;
 
     if (!text || typeof text !== 'string') {
@@ -994,13 +999,13 @@ export const analyzeJournalEntry = onCall(
  * Helper: Generate embedding (internal use)
  * Used by both onCall function and Firestore trigger
  */
-async function generateEmbeddingInternal(text, apiKey) {
+async function generateEmbeddingInternal(text, apiKey, uid) {
   if (!text || typeof text !== 'string' || text.trim().length === 0) {
     throw new Error('Valid text is required');
   }
 
-  // Check cache first
-  const cached = await getCachedEmbedding(text);
+  // Check cache first (owner-scoped)
+  const cached = await getCachedEmbedding(db, uid, text);
   if (cached) {
     console.log('Embedding cache HIT');
     return cached;
@@ -1027,48 +1032,10 @@ async function generateEmbeddingInternal(text, apiKey) {
     throw new Error('No embedding returned');
   }
 
-  // Cache for future use
-  await setCachedEmbedding(text, embedding);
+  // Cache for future use (owner-scoped, model-tagged, no plaintext preview)
+  await setCachedEmbedding(db, uid, text, embedding, AI_CONFIG.embedding.primary);
 
   return embedding;
-}
-
-/**
- * Helper: Get cached embedding by text content hash
- */
-async function getCachedEmbedding(text) {
-  try {
-    const crypto = await import('crypto');
-    const hash = crypto.createHash('sha256').update(text.trim()).digest('hex').slice(0, 16);
-    const cacheRef = db.collection('embedding_cache').doc(hash);
-    const cached = await cacheRef.get();
-
-    if (cached.exists) {
-      return cached.data().embedding;
-    }
-    return null;
-  } catch (e) {
-    console.warn('Cache read failed:', e);
-    return null;
-  }
-}
-
-/**
- * Helper: Cache embedding for future use
- */
-async function setCachedEmbedding(text, embedding) {
-  try {
-    const crypto = await import('crypto');
-    const hash = crypto.createHash('sha256').update(text.trim()).digest('hex').slice(0, 16);
-    await db.collection('embedding_cache').doc(hash).set({
-      embedding,
-      created: FieldValue.serverTimestamp(),
-      preview: text.slice(0, 100)  // For debugging
-    });
-  } catch (e) {
-    console.warn('Cache write failed:', e);
-    // Non-critical, continue
-  }
 }
 
 /**
@@ -1085,6 +1052,9 @@ export const generateEmbedding = onCall(
       throw new HttpsError('unauthenticated', 'User must be authenticated');
     }
 
+    const userId = request.auth.uid;
+    await assertAiConsent(db, userId);
+
     const { text } = request.data;
 
     if (!text || typeof text !== 'string' || text.trim().length === 0) {
@@ -1094,11 +1064,54 @@ export const generateEmbedding = onCall(
     const apiKey = geminiApiKey.value();
 
     try {
-      const embedding = await generateEmbeddingInternal(text, apiKey);
+      const embedding = await generateEmbeddingInternal(text, apiKey, userId);
       return { embedding, cached: false };  // Caching handled internally
     } catch (error) {
       console.error('generateEmbedding error:', error);
       throw new HttpsError('internal', 'Embedding generation failed');
+    }
+  }
+);
+
+/**
+ * Callable: Revoke AI-processing consent (authoritative). Writes the consent
+ * doc and cancels any queued server-side analysis for this user.
+ */
+export const revokeAiProcessing = onCall(
+  { cors: true, maxInstances: 10 },
+  async (request) => {
+    if (!request.auth) {
+      throw new HttpsError('unauthenticated', 'User must be authenticated');
+    }
+    const userId = request.auth.uid;
+    try {
+      const { cancelled } = await revokeConsent(db, userId);
+      console.log(JSON.stringify({ type: 'consent-revoked', uid: userId, cancelled }));
+      return { cancelled };
+    } catch (error) {
+      console.error('[revokeAiProcessing] failed', { userId, err: error?.message });
+      throw new HttpsError('internal', 'Failed to revoke AI processing');
+    }
+  }
+);
+
+/**
+ * Callable: Grant AI-processing consent (authoritative).
+ */
+export const grantAiProcessing = onCall(
+  { cors: true, maxInstances: 10 },
+  async (request) => {
+    if (!request.auth) {
+      throw new HttpsError('unauthenticated', 'User must be authenticated');
+    }
+    const userId = request.auth.uid;
+    try {
+      await grantConsent(db, userId);
+      console.log(JSON.stringify({ type: 'consent-granted', uid: userId }));
+      return { granted: true };
+    } catch (error) {
+      console.error('[grantAiProcessing] failed', { userId, err: error?.message });
+      throw new HttpsError('internal', 'Failed to grant AI processing');
     }
   }
 );
@@ -1121,6 +1134,7 @@ export const transcribeAudio = onCall(
     }
 
     const userId = request.auth.uid;
+    await assertAiConsent(db, userId);
     const { base64, mimeType } = request.data;
 
     if (!base64 || !mimeType) {
@@ -1220,6 +1234,7 @@ export const executePrompt = onCall(
     }
 
     const userId = request.auth.uid;
+    await assertAiConsent(db, userId);
     const { prompt, systemPrompt } = request.data;
 
     if (!prompt || typeof prompt !== 'string') {
@@ -1264,6 +1279,7 @@ export const askJournalAI = onCall(
     }
 
     const userId = request.auth.uid;
+    await assertAiConsent(db, userId);
     const { question, entriesContext } = request.data;
 
     if (!question || typeof question !== 'string') {
@@ -1343,6 +1359,7 @@ export const transcribeWithTone = onCall(
     }
 
     const userId = request.auth.uid;
+    await assertAiConsent(db, userId);
     const { base64, mimeType } = request.data;
 
     if (!base64 || !mimeType) {
@@ -1515,6 +1532,7 @@ export const transcribeEntry = onCall(
     }
 
     const userId = request.auth.uid;
+    await assertAiConsent(db, userId);
     const { base64, mimeType, properNouns = [] } = request.data;
 
     if (!base64 || !mimeType) {
@@ -2225,12 +2243,20 @@ export const onEntryCreate = onDocumentCreated(
         }
       }
 
+      // Consent gate: server-authoritative. The crisis flag above ALWAYS runs
+      // (safety-critical); everything below is AI processing and must be
+      // skipped when consent is revoked. Fails closed on an unreadable consent doc.
+      if (!(await isAiAllowed(db, userId, { entrySnapshot: entry }))) {
+        console.log(JSON.stringify({ type: 'consent-denied', uid: userId, job: 'onEntryCreate' }));
+        return { skipped: true, reason: 'ai-consent-revoked' };
+      }
+
       // Step 0: Generate embedding if not present (OPTIMIZED: Background processing)
-      if (entry.aiProcessingConsent !== false && !entry.embedding && entry.text) {
+      if (!entry.embedding && entry.text) {
         console.time(`[Entry ${entryId}] Generate embedding`);
         try {
           const apiKey = geminiApiKey.value();
-          const embedding = await generateEmbeddingInternal(entry.text, apiKey);
+          const embedding = await generateEmbeddingInternal(entry.text, apiKey, userId);
           await event.data.ref.update({ embedding });
           console.timeEnd(`[Entry ${entryId}] Generate embedding`);
           console.log(`✅ Entry ${entryId} enriched with embedding`);
@@ -2289,6 +2315,7 @@ export const pendingEntryCleanup = onSchedule(
     }
 
     const apiKey = geminiApiKey.value();
+    const invocationId = randomUUID();
     let analyzed = 0;
     let failed = 0;
 
@@ -2296,14 +2323,33 @@ export const pendingEntryCleanup = onSchedule(
       const data = docSnap.data();
       const text = data.text;
       const retry = data.analysisRetryCount || 0;
+      // Owner uid for this collectionGroup hit: entries -> user doc parent.
+      const ownerUid = docSnap.ref.parent.parent?.id;
 
-      // Server-authoritative crisis flag regardless of analysis outcome.
+      // Server-authoritative crisis flag regardless of analysis/consent outcome.
       const crisisFields = (text && isCrisisText(text) && data.safety_flagged !== true)
         ? { safety_flagged: true, safetyServerChecked: true }
         : {};
 
+      // Consent gate (per entry owner). If revoked, stop reprocessing this entry
+      // by flipping it to 'disabled' — but still apply the safety flag.
+      if (ownerUid && !(await isAiAllowed(db, ownerUid, { entrySnapshot: data }))) {
+        await docSnap.ref.update({ analysisStatus: 'disabled', ...crisisFields });
+        console.log(JSON.stringify({ type: 'consent-denied', uid: ownerUid, job: 'pendingEntryCleanup' }));
+        continue;
+      }
+
+      // Per-entry lease: only process entries whose lease we win, so overlapping
+      // sweeps never double-analyze the same entry. Refuses if a lease <5min old
+      // is held or the entry is no longer pending.
+      const wonLease = await acquireEntryLease(db, docSnap.ref, invocationId, {
+        leaseMs: LEASE_MS,
+        requireStatus: 'pending',
+      });
+      if (!wonLease) continue;
+
       if (!text) {
-        await docSnap.ref.update({ analysisStatus: 'failed', analysisError: 'missing text', ...crisisFields });
+        await docSnap.ref.update({ analysisStatus: 'failed', analysisError: 'missing text', analysisLease: FieldValue.delete(), ...crisisFields });
         failed++;
         continue;
       }
@@ -2328,6 +2374,7 @@ export const pendingEntryCleanup = onSchedule(
             framework: analysis.framework || 'general',
           },
           analyzedBy: 'watchdog',
+          analysisLease: FieldValue.delete(),
           ...crisisFields,
         });
         analyzed++;
@@ -2340,11 +2387,13 @@ export const pendingEntryCleanup = onSchedule(
             analysisStatus: 'failed',
             analysisRetryCount: nextRetry,
             analysisError: errMsg,
+            analysisLease: FieldValue.delete(),
             ...crisisFields,
           });
           failed++;
         } else {
-          await docSnap.ref.update({ analysisRetryCount: nextRetry, ...crisisFields });
+          // Release the lease so the next sweep can retry promptly.
+          await docSnap.ref.update({ analysisRetryCount: nextRetry, analysisLease: FieldValue.delete(), ...crisisFields });
         }
         console.error(`[pendingEntryCleanup] Analysis failed for ${docSnap.id}:`, errMsg);
       }
@@ -2833,8 +2882,10 @@ export const onEntryCreateMemoryExtraction = onDocumentCreated(
     const entryData = event.data.data();
     const entry = { id: entryId, ...entryData };
 
-    if (entry.aiProcessingConsent === false) {
-      return { skipped: true, reason: 'ai_processing_paused' };
+    // Server-authoritative consent gate (fails closed on read error).
+    if (!(await isAiAllowed(db, userId, { entrySnapshot: entry }))) {
+      console.log(JSON.stringify({ type: 'consent-denied', uid: userId, job: 'memoryExtraction' }));
+      return { skipped: true, reason: 'ai-consent-revoked' };
     }
 
     // Skip if no text
@@ -2844,6 +2895,13 @@ export const onEntryCreateMemoryExtraction = onDocumentCreated(
     if (containsCrisisContent(entry.text)) {
       console.log(`Entry ${entryId} contains crisis content - skipping memory extraction`);
       return { skipped: true, reason: 'crisis_content' };
+    }
+
+    // Idempotency: claim a one-time marker so a redelivered create event does
+    // not extract memory twice. Skip if already claimed.
+    const claimed = await claimProcessingMarker(db, event.data.ref, 'processing.memoryExtractedAt');
+    if (!claimed) {
+      return { skipped: true, reason: 'already_extracted' };
     }
 
     console.log(`Extracting memory from entry ${entryId} for user ${userId}`);
@@ -3399,6 +3457,21 @@ export const onEntryCreateBurnoutCheck = onDocumentCreated(
 
     if (appId !== APP_COLLECTION_ID) {
       return null;
+    }
+
+    // Server-authoritative consent gate (fails closed on read error).
+    const entrySnapshot = event.data?.data?.() || undefined;
+    if (!(await isAiAllowed(db, userId, { entrySnapshot }))) {
+      console.log(JSON.stringify({ type: 'consent-denied', uid: userId, job: 'burnoutCheck' }));
+      return { skipped: true, reason: 'ai-consent-revoked' };
+    }
+
+    // Idempotency: one burnout check per created entry, even on event redelivery.
+    if (event.data?.ref) {
+      const claimed = await claimProcessingMarker(db, event.data.ref, 'processing.burnoutCheckedAt');
+      if (!claimed) {
+        return { skipped: true, reason: 'already_checked' };
+      }
     }
 
     console.log(`Checking burnout risk for user ${userId} after new entry...`);
@@ -4315,6 +4388,12 @@ export const generateWeeklyDigests = onSchedule(
  * Generate weekly digest for a single user
  */
 async function generateUserWeeklyDigest(userId, apiKey) {
+  // Server-authoritative consent gate (fails closed on read error).
+  if (!(await isAiAllowed(db, userId))) {
+    console.log(JSON.stringify({ type: 'consent-denied', uid: userId, job: 'weeklyDigest' }));
+    return;
+  }
+
   const oneWeekAgo = new Date();
   oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
 
