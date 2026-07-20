@@ -48,6 +48,12 @@ export default defineConfig({
       'functions/src/safety/__tests__/crisisKeywords.test.js',
       'functions/src/limits/__tests__/dailyQuota.test.js',
       'functions/src/transcription/__tests__/fusedTranscription.test.js',
+      'functions/src/consent/__tests__/consentGate.test.js',
+      'functions/src/consent/__tests__/consentActions.test.js',
+      'functions/src/__tests__/triggerIdempotency.test.js',
+      'functions/src/analytics/__tests__/onEntryAnalyzed.test.js',
+      'functions/src/notifications/__tests__/sender.test.js',
+      'functions/src/reports/__tests__/reportCleanup.test.js',
     ],
 
     // Exclude patterns
