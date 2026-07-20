@@ -1,0 +1,242 @@
+# Trustworthy capture — physical-device validation matrix
+
+Companion to `src/__tests__/validationMatrix.test.js` (the automatable rows).
+The rows below can only be validated on real hardware — iOS backgrounding,
+lock-screen behavior, and force-quit recovery are not observable in a
+simulator or in Vitest/jsdom. Run this checklist on a physical iPhone before
+enabling any capture-durability flag in production, and again whenever
+`src/services/capture/**`, `ios/App/App/Capture/**`, or the native capture
+plugin change.
+
+Source plan: `docs/superpowers/plans/2026-07-20-trustworthy-capture-and-intelligence.md`
+(Task D3). Runbook: `docs/quality/trustworthy-capture-runbook.md`.
+
+## How to run this
+
+1. Build to a physical device (`npm run cap:build:ios`, open in Xcode, run on
+   hardware — the simulator does not enforce real background execution
+   limits or lock-screen audio session behavior).
+2. Sign in as a real test account. For any row that depends on a flag, set it
+   in the `config/flags` Firestore doc (see runbook) before recording.
+3. Work down the table. For each row: reproduce the physical action, then
+   confirm every item in "Expected outcome" before checking it off.
+4. If a row fails, capture the device console log (Xcode → Devices and
+   Simulators → View Device Logs) filtered to `[capture-stage]` /
+   `[Capture]` / `[audioVault]`, and file it against the relevant task in the
+   plan doc rather than silently working around it.
+
+## Rows
+
+### 1. Auto-lock while recording
+
+**Setup:** Start a voice recording, then let the screen auto-lock (do not
+press the lock button) while recording continues.
+
+**Depends on:** none (baseline native capture path); if
+`nativeBackgroundUpload` is on, also exercises row 6 (background upload) in
+combination.
+
+**Expected outcome:**
+- [ ] The native recording file continues to grow after lock (native
+      `AVAudioSession`/`AVAudioRecorder` keeps running under the audio
+      background mode — this is NOT `nativeBackgroundUpload`, it's the base
+      recording session).
+- [ ] Unlocking mid-recording shows the app still in the recording state,
+      with elapsed time reflecting the locked interval (no gap/reset).
+- [ ] Stopping and saving after unlock produces exactly one entry — no
+      duplicate asset in the audio vault (check Entry Reliability Center /
+      `audioVault.listOrphans` count for the session).
+- [ ] If the app is killed while locked (simulate via device Settings or a
+      forced kill), the draft is recoverable on next launch per row 4 below
+      (the native draft persists to disk before recording starts —
+      `CaptureDraftStore`).
+
+### 2. Manual lock after Stop
+
+**Setup:** Tap Stop to end a recording, then immediately press the physical
+lock button before the save/upload pipeline finishes.
+
+**Depends on:** `nativeBackgroundUpload` (native background upload path) —
+run this row with the flag both OFF (foreground base64 pipeline) and ON
+(background `URLSession` path) since the safe-continuation mechanism
+differs.
+
+**Expected outcome:**
+- [ ] With the flag OFF: the in-flight base64 transcription call either
+      completes before lock suspends the app, or the operation is left at
+      `local_ready`/`uploading` (never partially transcribed) and is picked
+      up by `resumeIncompleteOperations` on next foreground/launch — no
+      duplicate entry is created (idempotent duplicate-delivery guard, see
+      `src/services/capture/resumeOperations.js`).
+- [ ] With the flag ON: the `BackgroundUploader` (`URLSession(configuration:
+      .background(...))`) continues the PUT after lock without the app
+      needing to be foregrounded; the op record advances
+      `uploading → uploaded` via plugin events even while locked.
+- [ ] In both cases: unlocking later shows the entry as completed (or a
+      clearly surfaced `needs_attention` state) — never a silent gap with no
+      entry and no error.
+- [ ] The app is never re-opened by the user to "finish" the save — the
+      pipeline completes on its own or surfaces for retry.
+
+### 3. Background during transcription
+
+**Setup:** Start a recording, stop it, and background the app (Home button
+/ swipe up) while transcription is actively in flight.
+
+**Depends on:** `nativeBackgroundUpload`. With it OFF, iOS gives foreground
+JS/network work only a few seconds of background grace before suspension —
+this row is specifically validating that the SERVER, not a dying client
+promise chain, owns completion.
+
+**Expected outcome:**
+- [ ] The server (Storage-triggered `onCaptureAudioUploaded`, or the
+      `transcribeEntry` callable path) owns finishing the job — completion
+      does not depend on the client JS event loop staying alive.
+- [ ] Re-opening the app after backgrounding shows the UI "catching up" from
+      the durable operation record (`capture_ops::{uid}` via
+      `operationStore.listIncomplete`) and the entry snapshot listener —
+      not from any in-memory promise state that was lost when the app
+      suspended.
+- [ ] No duplicate entry is created by re-opening the app mid-transcription.
+- [ ] If transcription fails while backgrounded, the op surfaces as
+      `needs_attention` with a real error code on next foreground — never a
+      silently vanished recording.
+
+### 4. Force-quit while recording
+
+**Setup:** Start a recording, then force-quit the app (swipe up and away in
+the app switcher) mid-recording — not a clean Stop.
+
+**Depends on:** none (native draft persistence is unconditional).
+
+**Expected outcome:**
+- [ ] On next launch, the interrupted native draft is detected as stale
+      (non-empty, older than the staleness window, no active session) and
+      converted to `needsReview` — see
+      `src/services/capture/nativeCaptureAdapter.ts` (`recoverNativeDrafts` /
+      `isStaleRecordingDraft`).
+- [ ] The stale draft NEVER auto-submits / auto-transcribes. It surfaces in
+      the Capture Reliability Center with explicit **Transcribe** / **Discard**
+      actions and is tracked in
+      `pending_review_drafts::{uid}` (`src/services/capture/pendingReviewDrafts.ts`)
+      so it cannot be silently re-adopted by a later recovery pass.
+- [ ] The reviewed draft shows accurate play-context (duration derived via
+      `AVURLAsset` when the sidecar lacks it, and capture date).
+- [ ] Choosing **Discard** removes it from `pending_review_drafts` and the
+      native draft store without creating an entry. Choosing **Transcribe**
+      runs it through the normal pipeline and creates exactly one entry.
+- [ ] Force-quitting AGAIN before reviewing the flagged draft does not lose
+      it, duplicate it, or auto-submit it on the next launch.
+
+### 5. Background-upload flag-on end-to-end
+
+**Setup:** With `nativeBackgroundUpload` set to `true` in `config/flags`,
+record, stop, and background the app immediately (do not wait for the
+foreground upload to start).
+
+**Depends on:** `nativeBackgroundUpload` (default OFF — only run this row
+once the flag is intentionally enabled for a test/staging account, never in
+prod without explicit rollout sign-off).
+
+**Expected outcome:**
+- [ ] `issueCaptureUploadTicket` is called at `local_ready` and a signed V4
+      PUT URL is obtained (functions consent gate must pass — test with
+      consent granted).
+- [ ] The file uploads via `BackgroundUploader`'s background `URLSession`
+      even with the app backgrounded and the device screen locked.
+- [ ] `AppDelegate.swift`'s `handleEventsForBackgroundURLSession` correctly
+      re-attaches the completion handler after an iOS-initiated app
+      relaunch (kill the app via Xcode's "Debug > Simulate Background
+      Fetch"-style relaunch, or let iOS terminate and relaunch it naturally
+      after a long background period, then confirm the upload still
+      completes and is reported through `CapturePlugin` events).
+- [ ] `onCaptureAudioUploaded` (Storage `onObjectFinalized`) creates exactly
+      one entry server-side, using the SAME `operationId` idempotency guard
+      as the client duplicate-delivery path.
+- [ ] Raw audio at `capture-uploads/{uid}/{opId}.m4a` is deleted immediately
+      on transcript success (see runbook's retention policy).
+
+### 6. PUT-with-signed-headers correctness
+
+**Setup:** With `nativeBackgroundUpload` on, inspect (via a proxy or Xcode
+network debugging) the actual PUT request `BackgroundUploader` sends.
+
+**Depends on:** `nativeBackgroundUpload`.
+
+**Expected outcome:**
+- [ ] The PUT sends EXACTLY the headers echoed back in `requiredHeaders` by
+      `issueCaptureUploadTicketCore` (`Content-Type`, and when capture
+      provenance is supplied: `x-goog-meta-captured-at` /
+      `x-goog-meta-capture-timezone`) — no more, no fewer, no different
+      values. Any mismatch fails the V4 signature (`SignatureDoesNotMatch`);
+      this is a security property (see `functions/src/capture/uploadTicket.js`
+      module doc), not just a correctness nit.
+- [ ] `capturedAt` sent is a strict ISO-8601 instant and `captureTimezone` is
+      a valid IANA id (invalid values are rejected by the ticket issuer
+      before a signed URL is ever produced — confirm the client surfaces
+      that failure rather than silently dropping provenance).
+- [ ] The uploaded object's path is exactly
+      `capture-uploads/{authenticated-uid}/{operationId}.m4a` where
+      `operationId` is a canonical UUID — confirm the server derives
+      ownership from this PATH, never from client-supplied custom metadata.
+
+### 7. Xcode / pbxproj build integrity
+
+**Setup:** Clean build (`Product > Clean Build Folder`) then build for a
+physical device from a fresh `pod install` / `cap sync ios`.
+
+**Depends on:** none — this is a build-hygiene row, run it after any change
+under `ios/App/App/Capture/**` or when `cap:sync`/`cap:build:ios` is next run
+before a release.
+
+**Expected outcome:**
+- [ ] `CapturePlugin.swift`, `CaptureDraftStore.swift`, and
+      `BackgroundUploader.swift` (when present) are all members of the `App`
+      target in `project.pbxproj` — a file added on disk but not added to the
+      Xcode project target silently fails to compile into the app with no
+      obvious build error.
+- [ ] The background modes capability (`UIBackgroundModes` → `audio` for
+      recording continuity, plus background `URLSession` support for
+      `nativeBackgroundUpload`) is present in `Info.plist` / the target's
+      Signing & Capabilities tab.
+- [ ] Build succeeds with no new warnings introduced in the Capture sources.
+- [ ] App Intents / Siri Shortcuts metadata (if touched) still resolves —
+      spot check via the Shortcuts app.
+
+### 8. `AVURLAsset` duration derivation
+
+**Setup:** Trigger the stale-draft recovery path (row 4) for a draft whose
+sidecar JSON lacks a duration field (simulate by deleting/corrupting the
+sidecar's duration key, or by force-quitting early enough that the sidecar
+was written before duration was known).
+
+**Depends on:** none.
+
+**Expected outcome:**
+- [ ] `readDraft` in the native plugin derives duration from the audio file
+      itself via `AVURLAsset` rather than reporting `0`, `null`, or a
+      fabricated placeholder.
+- [ ] The derived duration is accurate to within normal `AVURLAsset`
+      precision (spot check against the actual recording length).
+- [ ] A genuinely zero-length / corrupt file does not crash the recovery
+      scan — it surfaces as a reviewable (and likely discardable) draft
+      rather than throwing.
+
+## Flag cross-reference
+
+| Row | Flag(s) | Default | Where read |
+|---|---|---|---|
+| 1 | — | n/a | native `AVAudioSession` background audio mode |
+| 2 | `nativeBackgroundUpload` | `false` | `src/config/flags.js`, `functions/src/shared/flags.js` |
+| 3 | `nativeBackgroundUpload` | `false` | same |
+| 4 | — | n/a | `pending_review_drafts::{uid}` (unconditional) |
+| 5 | `nativeBackgroundUpload` | `false` | same |
+| 6 | `nativeBackgroundUpload` | `false` | same |
+| 7 | — | n/a | build configuration |
+| 8 | — | n/a | native plugin (unconditional) |
+
+Flip procedure for any flag above: edit the `config/flags` Firestore doc —
+see `docs/quality/trustworthy-capture-runbook.md` § Flags for the full table
+and rollback semantics. No app deploy is required to flip a flag; a native
+background-upload row still requires a build that contains
+`BackgroundUploader.swift` before the flag can do anything on that device.
