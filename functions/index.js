@@ -905,7 +905,7 @@ Respond in this exact JSON format only, no other text:
   "summary": "<brief 1-sentence description of their emotional state>"
 }`;
 
-          const geminiRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key=${gemKey}`, {
+          const geminiRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${getModelSync('tone')}:generateContent?key=${gemKey}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -4163,7 +4163,7 @@ async function generateUserWeeklyDigest(userId, apiKey) {
     weekStart: oneWeekAgo.toLocaleDateString()
   });
 
-  const narrative = await callGemini(apiKey, DIGEST_SYSTEM_PROMPT, prompt, 'gemini-2.0-flash');
+  const narrative = await callGemini(apiKey, DIGEST_SYSTEM_PROMPT, prompt, getModelSync('digest'));
 
   if (!narrative) {
     console.error(`Failed to generate narrative for user ${userId}`);

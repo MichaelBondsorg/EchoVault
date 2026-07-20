@@ -35,6 +35,12 @@ describe('relay config — model defaults', () => {
     expect(config.ttsModel).toBe('tts-1');
   });
 
+  it('defaults realtime + tone to the GA replacements (no shut-down models)', async () => {
+    const config = await loadConfig();
+    expect(config.realtimeModel).toBe('gpt-realtime-2.1');
+    expect(config.geminiModel).toBe('gemini-3.5-flash');
+  });
+
   it('env vars override every model', async () => {
     process.env.REALTIME_MODEL = 'gpt-realtime-2.1';
     process.env.WHISPER_MODEL = 'whisper-x';

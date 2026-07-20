@@ -23,8 +23,10 @@ export const config = {
   whoopRedirectUri: process.env.WHOOP_REDIRECT_URI || 'https://echovault-voice-relay-581319345416.us-central1.run.app/auth/whoop/callback',
   whoopTokenEncryptionKey: process.env.WHOOP_TOKEN_ENCRYPTION_KEY || '',
 
-  // Realtime API settings. Model overridable via REALTIME_MODEL.
-  realtimeModel: process.env.REALTIME_MODEL || 'gpt-4o-realtime-preview-2024-12-17',
+  // Realtime API settings. Model overridable via REALTIME_MODEL. Default is
+  // the GA gpt-realtime-2.1 (replaces the deprecated preview model). The
+  // session.update payload uses only stable Realtime API fields.
+  realtimeModel: process.env.REALTIME_MODEL || 'gpt-realtime-2.1',
   realtimeVoice: 'alloy', // Options: alloy, echo, fable, onyx, nova, shimmer
 
   // Standard mode settings. Models overridable via env for parity with the
@@ -34,8 +36,10 @@ export const config = {
   ttsModel: process.env.TTS_MODEL || 'tts-1',
   ttsVoice: 'nova',
 
-  // Gemini settings (voice tone analysis). Overridable via TONE_MODEL.
-  geminiModel: process.env.TONE_MODEL || 'gemini-2.0-flash-exp', // Supports audio input
+  // Gemini settings (voice tone analysis). Overridable via TONE_MODEL. Default
+  // is GA gemini-3.5-flash (replaces the shut-down 2.0 experimental preview);
+  // same generateContent surface for audio-in tone analysis.
+  geminiModel: process.env.TONE_MODEL || 'gemini-3.5-flash', // Supports audio input
 
   // Session settings
   maxSessionDurationMs: 15 * 60 * 1000, // 15 minutes
