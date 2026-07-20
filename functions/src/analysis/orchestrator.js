@@ -123,8 +123,17 @@ export async function runEntryAnalysis({ db, entryRef, entry, apiKeys, logStage 
   const gemini = apiKeys?.gemini;
   const text = entry?.text;
 
-  // Resolved (flag-aware) provider model id stamped into provenance/telemetry.
-  const modelId = await getModel(db, 'analyze');
+  // Resolve every workload's model ONCE per run (flag-aware; getServerFlag's
+  // 60s cache means these share a single Firestore read). The models are
+  // threaded into the actual provider calls below, and the analyze model is the
+  // one stamped into provenance/telemetry — so analysisMeta.modelId always
+  // matches the model the analyze call really used.
+  const [classifyModel, analyzeModel, insightModel] = await Promise.all([
+    getModel(db, 'classify'),
+    getModel(db, 'analyze'),
+    getModel(db, 'insight'),
+  ]);
+  const modelId = analyzeModel;
 
   const end = (retryCount, extra) => {
     logStage(opId, 'analysis_end', {
@@ -153,7 +162,7 @@ export async function runEntryAnalysis({ db, entryRef, entry, apiKeys, logStage 
   // Stage 1: classify ONCE.
   let classification;
   try {
-    classification = await classifyEntry(gemini, text);
+    classification = await classifyEntry(gemini, text, { modelId: classifyModel });
   } catch (e) {
     await publishFinal(db, entryRef, inputVersion, buildFailedPayload(text, inputVersion, e?.message || 'classify-failed', modelId));
     end(1, { errorCode: 'classify-failed' });
@@ -171,10 +180,10 @@ export async function runEntryAnalysis({ db, entryRef, entry, apiKeys, logStage 
   // Stage 2: analyze + (non-task) insight + enhanced context, in parallel.
   // The client skips insight/context for pure 'task' entries — mirror that.
   const recentContext = entryType === 'task' ? '' : await buildRecentContext(entryRef, opId);
-  const stageTasks = [analyzeEntry(gemini, text, entryType, entry?.userLocalHour ?? null)];
+  const stageTasks = [analyzeEntry(gemini, text, entryType, entry?.userLocalHour ?? null, { modelId: analyzeModel })];
   if (entryType !== 'task') {
-    stageTasks.push(generateInsight(gemini, text, recentContext, null, null, []));
-    stageTasks.push(extractEnhancedContext(gemini, text, recentContext));
+    stageTasks.push(generateInsight(gemini, text, recentContext, null, null, [], { modelId: insightModel }));
+    stageTasks.push(extractEnhancedContext(gemini, text, recentContext, { modelId: classifyModel }));
   }
   const settled = await Promise.allSettled(stageTasks);
   const retryCount = settled.filter((s) => s.status === 'rejected').length;

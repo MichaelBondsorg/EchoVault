@@ -37,6 +37,7 @@ const { runEntryAnalysis } = await import('../orchestrator.js');
 const helpers = await import('../analysisHelpers.js');
 const { isAiAllowed } = await import('../../consent/consentGate.js');
 const { claimProcessingMarker } = await import('../../triggers/idempotency.js');
+const { _clearFlagCacheForTest } = await import('../../shared/flags.js');
 
 const MODEL_ID = 'gemini-3-flash-preview';
 
@@ -61,12 +62,15 @@ function makeEntryRef(uid) {
  * Fake db whose transaction re-reads `stored` (mutable) so a re-enqueue write is
  * visible to the next transaction. Records every tx.update payload.
  */
-function makeDb(stored) {
+function makeDb(stored, flagFields = {}) {
   const txUpdates = [];
   const db = {
     txUpdates,
     // config/flags read for model resolution (getModel -> getServerFlag).
-    doc() {
+    doc(path) {
+      if (path === 'config/flags') {
+        return { async get() { return { exists: true, data: () => flagFields }; } };
+      }
       return { async get() { return { exists: false, data: () => ({}) }; } };
     },
     async runTransaction(fn) {
@@ -93,6 +97,7 @@ const goodAnalysis = { title: 'A day', tags: ['calm'], mood_score: 0.7, framewor
 
 beforeEach(() => {
   vi.clearAllMocks();
+  _clearFlagCacheForTest();
   isAiAllowed.mockImplementation(async () => true);
   helpers.classifyEntry.mockResolvedValue(goodClassification);
   helpers.analyzeEntry.mockResolvedValue(goodAnalysis);
@@ -144,6 +149,42 @@ describe('runEntryAnalysis - analysisMeta provenance', () => {
     expect(published.analysisMeta.orchestratorVersion).toBe(1);
     expect(published.analysisMeta.completedAt).toBeTruthy();
     expect(published.analysis.mood_score).toBe(0.7);
+  });
+
+  it('a config/flags model.analyze override drives BOTH the analyze call and analysisMeta.modelId', async () => {
+    const stored = { entryInputVersion: 1, text: 'hi' };
+    const db = makeDb(stored, { 'model.analyze': 'gemini-2.5-flash', 'model.classify': 'classify-x' });
+    const entryRef = makeEntryRef('userA');
+    await runEntryAnalysis({
+      db,
+      entryRef,
+      entry: { id: 'e1', entryInputVersion: 1, text: 'hi' },
+      apiKeys: { gemini: 'g', openai: 'o' },
+      logStage: noopLogStage,
+    });
+    // the analyze provider call received the overridden model...
+    expect(helpers.analyzeEntry).toHaveBeenCalledWith('g', 'hi', 'reflection', null, {
+      modelId: 'gemini-2.5-flash',
+    });
+    // ...classify used its own overridden model...
+    expect(helpers.classifyEntry).toHaveBeenCalledWith('g', 'hi', { modelId: 'classify-x' });
+    // ...and provenance records the model actually used for analyze (no lie).
+    expect(db.txUpdates[0].analysisMeta.modelId).toBe('gemini-2.5-flash');
+  });
+
+  it('with no override, defaults are unchanged', async () => {
+    const stored = { entryInputVersion: 1, text: 'hi' };
+    const db = makeDb(stored);
+    const entryRef = makeEntryRef('userA');
+    await runEntryAnalysis({
+      db,
+      entryRef,
+      entry: { id: 'e1', entryInputVersion: 1, text: 'hi' },
+      apiKeys: { gemini: 'g', openai: 'o' },
+      logStage: noopLogStage,
+    });
+    expect(helpers.analyzeEntry).toHaveBeenCalledWith('g', 'hi', 'reflection', null, { modelId: MODEL_ID });
+    expect(db.txUpdates[0].analysisMeta.modelId).toBe(MODEL_ID);
   });
 
   it('treats a legacy entry (no entryInputVersion) as version 0 and publishes', async () => {

@@ -142,6 +142,7 @@ export async function runFusedTranscription({
   oaiKey = null,
   timeoutMs = FUSED_TRANSCRIBE_TIMEOUT_MS,
   fetchImpl = fetch,
+  modelId = GEMINI_TRANSCRIBE_MODEL,
 } = {}) {
   if (!gemKey && !oaiKey) {
     return { error: 'API_ERROR' };
@@ -151,7 +152,7 @@ export async function runFusedTranscription({
   if (gemKey) {
     try {
       const geminiRes = await fetchImpl(
-        `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_TRANSCRIBE_MODEL}:generateContent?key=${gemKey}`,
+        `https://generativelanguage.googleapis.com/v1beta/models/${modelId}:generateContent?key=${gemKey}`,
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },

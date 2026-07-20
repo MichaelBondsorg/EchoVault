@@ -22,7 +22,7 @@ import { isCrisisText } from './src/safety/crisisKeywords.js';
 import { sendNotification } from './src/notifications/sender.js';
 import { getNotificationTemplate } from './src/notifications/templates.js';
 import { enforceDailyQuota } from './src/limits/dailyQuota.js';
-import { GEMINI_TRANSCRIBE_MODEL, buildGeminiRequestBody, parseFusedResponse } from './src/transcription/fusedTranscription.js';
+import { buildGeminiRequestBody, parseFusedResponse } from './src/transcription/fusedTranscription.js';
 import { transcribeWithWhisper } from './src/shared/openai.js';
 import { assertAiConsent, isAiAllowed, grantConsent, revokeConsent } from './src/consent/consentGate.js';
 import { logStage } from './src/telemetry/stageLog.js';
@@ -33,7 +33,7 @@ import { maybeReanalyzeOnEntryUpdate } from './src/triggers/entryUpdateAnalysis.
 import { shouldWatchdogSkipEditedEntry } from './src/triggers/watchdogGuards.js';
 import { callGemini, classifyEntry, analyzeEntry, extractEnhancedContext, generateInsight } from './src/analysis/analysisHelpers.js';
 import { getServerFlag } from './src/shared/flags.js';
-import { getModelSync, getModelFlag } from './src/models/registry.js';
+import { getModel, getModelSync, getModelFlag } from './src/models/registry.js';
 import { runEntryAnalysis } from './src/analysis/orchestrator.js';
 import { issueCaptureUploadTicketCore } from './src/capture/uploadTicket.js';
 import { processCaptureAudioObject, sweepCaptureUploads } from './src/capture/onAudioUploaded.js';
@@ -414,21 +414,29 @@ export const analyzeJournalEntry = onCall(
         }
       }
 
+      // Resolve each workload's model (flag-aware) once; getServerFlag's 60s
+      // cache collapses these to a single Firestore read.
+      const [classifyModel, analyzeModel, insightModel] = await Promise.all([
+        getModel(db, 'classify'),
+        getModel(db, 'analyze'),
+        getModel(db, 'insight'),
+      ]);
+
       if (ops.includes('classify')) {
-        results.classification = await classifyEntry(apiKey, processedText);
+        results.classification = await classifyEntry(apiKey, processedText, { modelId: classifyModel });
       }
 
       if (ops.includes('analyze')) {
         const entryType = results.classification?.entry_type || 'reflection';
-        results.analysis = await analyzeEntry(apiKey, processedText, entryType, userLocalHour);
+        results.analysis = await analyzeEntry(apiKey, processedText, entryType, userLocalHour, { modelId: analyzeModel });
       }
 
       if (ops.includes('extractContext')) {
-        results.enhancedContext = await extractEnhancedContext(apiKey, processedText, recentEntriesContext);
+        results.enhancedContext = await extractEnhancedContext(apiKey, processedText, recentEntriesContext, { modelId: classifyModel });
       }
 
       if (ops.includes('generateInsight') && historyContext) {
-        results.insight = await generateInsight(apiKey, processedText, historyContext, moodTrajectory, cyclicalPatterns, pendingPrompts);
+        results.insight = await generateInsight(apiKey, processedText, historyContext, moodTrajectory, cyclicalPatterns, pendingPrompts, { modelId: insightModel });
       }
 
       return results;
@@ -470,7 +478,7 @@ async function generateEmbeddingInternal(text, apiKey, uid) {
   if (embedding) {
     console.log('Embedding cache HIT');
   } else {
-    const embeddingModel = getModelSync('embedding');
+    const embeddingModel = await getModel(db, 'embedding');
     const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${embeddingModel}:embedContent?key=${apiKey}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -502,7 +510,7 @@ async function generateEmbeddingInternal(text, apiKey, uid) {
       embeddingV2 = cachedV2.embedding;
       embeddingMeta = cachedV2.embeddingMeta;
     } else {
-      const v2Model = getModelSync('embeddingV2');
+      const v2Model = await getModel(db, 'embeddingV2');
       const v2 = await generateEmbeddingV2(text, apiKey, {
         model: v2Model,
         taskType: EMBEDDING_V2_TASK_TYPE,
@@ -644,6 +652,7 @@ export const transcribeAudio = onCall(
       const fileExt = mimeType.includes('webm') ? 'webm' : mimeType.includes('mp4') ? 'mp4' : 'wav';
 
       // Create form data
+      const whisperModel = await getModel(db, 'transcriptionFallback');
       const boundary = '----FormBoundary' + Math.random().toString(36).slice(2);
       const formDataParts = [
         `--${boundary}\r\n`,
@@ -652,7 +661,7 @@ export const transcribeAudio = onCall(
         buffer,
         `\r\n--${boundary}\r\n`,
         `Content-Disposition: form-data; name="model"\r\n\r\n`,
-        `${getModelSync('transcriptionFallback')}\r\n`,
+        `${whisperModel}\r\n`,
         `--${boundary}--\r\n`
       ];
 
@@ -870,6 +879,7 @@ export const transcribeWithTone = onCall(
       const fileExt = mimeType.includes('webm') ? 'webm' : mimeType.includes('mp4') ? 'mp4' : 'wav';
 
       // 1. Transcribe with Whisper
+      const whisperModel = await getModel(db, 'transcriptionFallback');
       const boundary = '----FormBoundary' + Math.random().toString(36).slice(2);
       const formDataParts = [
         `--${boundary}\r\n`,
@@ -878,7 +888,7 @@ export const transcribeWithTone = onCall(
         buffer,
         `\r\n--${boundary}\r\n`,
         `Content-Disposition: form-data; name="model"\r\n\r\n`,
-        `${getModelSync('transcriptionFallback')}\r\n`,
+        `${whisperModel}\r\n`,
         `--${boundary}--\r\n`
       ];
 
@@ -926,6 +936,7 @@ export const transcribeWithTone = onCall(
 
       if (gemKey && buffer.length >= minAudioSize) {
         try {
+          const toneModel = await getModel(db, 'tone');
           const tonePrompt = `Analyze the emotional tone and mood from this voice recording. Focus on:
 1. The speaker's emotional state based on voice characteristics (tone, pace, pitch variations, pauses)
 2. Energy level (low/medium/high)
@@ -942,7 +953,7 @@ Respond in this exact JSON format only, no other text:
   "summary": "<brief 1-sentence description of their emotional state>"
 }`;
 
-          const geminiRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${getModelSync('tone')}:generateContent?key=${gemKey}`, {
+          const geminiRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${toneModel}:generateContent?key=${gemKey}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -1045,10 +1056,11 @@ export const transcribeEntry = onCall(
       logStage(operationId, 'transcribe_end', { engine, durationMs: Date.now() - transcribeStartedAt });
 
     // 1. Primary: fused Gemini call (transcript + tone in one pass)
+    const fusedModel = await getModel(db, 'fusedTranscription');
     if (gemKey) {
       try {
         const geminiRes = await fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_TRANSCRIBE_MODEL}:generateContent?key=${gemKey}`,
+          `https://generativelanguage.googleapis.com/v1beta/models/${fusedModel}:generateContent?key=${gemKey}`,
           {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -1181,12 +1193,13 @@ export const onCaptureAudioUploaded = onObjectFinalized(
       getFlag: (name, def) => getServerFlag(db, name, def),
       isAllowed: isAiAllowed,
       log: logStage,
-      transcribe: ({ base64, mimeType }) =>
+      transcribe: async ({ base64, mimeType }) =>
         runFusedTranscription({
           base64,
           mimeType,
           gemKey: geminiApiKey.value(),
           oaiKey: openaiApiKey.value(),
+          modelId: await getModel(db, 'fusedTranscription'),
         }),
     });
   }
@@ -2047,9 +2060,13 @@ export const pendingEntryCleanup = onSchedule(
       }
 
       try {
-        const classification = await classifyEntry(apiKey, text);
+        const [classifyModel, analyzeModel] = await Promise.all([
+          getModel(db, 'classify'),
+          getModel(db, 'analyze'),
+        ]);
+        const classification = await classifyEntry(apiKey, text, { modelId: classifyModel });
         const entryType = classification?.entry_type || 'reflection';
-        const analysis = await analyzeEntry(apiKey, text, entryType);
+        const analysis = await analyzeEntry(apiKey, text, entryType, null, { modelId: analyzeModel });
 
         // Do NOT fabricate a mood score — a missing one means analysis failed.
         if (typeof analysis?.mood_score !== 'number') {
@@ -4207,7 +4224,7 @@ async function generateUserWeeklyDigest(userId, apiKey) {
     weekStart: oneWeekAgo.toLocaleDateString()
   });
 
-  const narrative = await callGemini(apiKey, DIGEST_SYSTEM_PROMPT, prompt, getModelSync('digest'));
+  const narrative = await callGemini(apiKey, DIGEST_SYSTEM_PROMPT, prompt, await getModel(db, 'digest'));
 
   if (!narrative) {
     console.error(`Failed to generate narrative for user ${userId}`);
@@ -4359,8 +4376,8 @@ export const reprocessEntriesForGoals = onCall(
         // Build recent entries context (simplified - just use empty for reprocessing)
         const recentEntriesContext = '';
 
-        // Re-run enhanced context extraction
-        const enhancedContext = await extractEnhancedContext(apiKey, text, recentEntriesContext);
+        // Re-run enhanced context extraction (classify workload, flag-aware)
+        const enhancedContext = await extractEnhancedContext(apiKey, text, recentEntriesContext, { modelId: await getModel(db, 'classify') });
 
         // Check if we found any goals
         const goalTags = (enhancedContext.structured_tags || []).filter(tag =>

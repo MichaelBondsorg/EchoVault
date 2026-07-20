@@ -42,7 +42,7 @@ export async function callGemini(apiKey, systemPrompt, userPrompt, model = AI_CO
 /**
  * Classify entry into type: task, mixed, reflection, or vent
  */
-export async function classifyEntry(apiKey, text) {
+export async function classifyEntry(apiKey, text, { modelId = AI_CONFIG.classification.primary } = {}) {
   const prompt = `
     Classify this journal entry into ONE of these types:
     - "task": Pure task/todo list with specific one-time actions (e.g., "Need to buy groceries, call mom, submit report by Friday")
@@ -91,7 +91,7 @@ export async function classifyEntry(apiKey, text) {
   `;
 
   try {
-    const raw = await callGemini(apiKey, prompt, text, AI_CONFIG.classification.primary);
+    const raw = await callGemini(apiKey, prompt, text, modelId);
     if (!raw) {
       return { entry_type: 'reflection', confidence: 0.5, extracted_tasks: [] };
     }
@@ -124,7 +124,7 @@ export async function classifyEntry(apiKey, text) {
 /**
  * Analyze entry and route to appropriate therapeutic framework
  */
-export async function analyzeEntry(apiKey, text, entryType = 'reflection', userLocalHour = null) {
+export async function analyzeEntry(apiKey, text, entryType = 'reflection', userLocalHour = null, { modelId = AI_CONFIG.analysis.primary } = {}) {
   // Use user's local hour if provided, otherwise fall back to server time
   const currentHour = userLocalHour !== null ? userLocalHour : new Date().getHours();
   if (entryType === 'task') {
@@ -176,7 +176,7 @@ export async function analyzeEntry(apiKey, text, entryType = 'reflection', userL
     `;
 
     try {
-      const raw = await callGemini(apiKey, ventPrompt, text);
+      const raw = await callGemini(apiKey, ventPrompt, text, modelId);
       if (!raw) {
         return {
           title: text.substring(0, 50) + (text.length > 50 ? '...' : ''),
@@ -308,7 +308,7 @@ export async function analyzeEntry(apiKey, text, entryType = 'reflection', userL
   `;
 
   try {
-    const raw = await callGemini(apiKey, prompt, text);
+    const raw = await callGemini(apiKey, prompt, text, modelId);
 
     if (!raw) {
       console.error('analyzeEntry: No response from Gemini API');
@@ -369,7 +369,7 @@ export async function analyzeEntry(apiKey, text, entryType = 'reflection', userL
 /**
  * Extract enhanced context from entry
  */
-export async function extractEnhancedContext(apiKey, text, recentEntriesContext = '') {
+export async function extractEnhancedContext(apiKey, text, recentEntriesContext = '', { modelId = AI_CONFIG.classification.primary } = {}) {
   const prompt = `
     Extract structured context from this journal entry.
 
@@ -460,7 +460,7 @@ export async function extractEnhancedContext(apiKey, text, recentEntriesContext 
   `;
 
   try {
-    const raw = await callGemini(apiKey, prompt, text, AI_CONFIG.classification.primary);
+    const raw = await callGemini(apiKey, prompt, text, modelId);
     if (!raw) return { structured_tags: [], topic_tags: [], continues_situation: null, goal_update: null, sentiment_by_entity: {} };
 
     const jsonStr = raw.replace(/```json|```/g, '').trim();
@@ -481,7 +481,7 @@ export async function extractEnhancedContext(apiKey, text, recentEntriesContext 
 /**
  * Generate contextual insight
  */
-export async function generateInsight(apiKey, currentText, historyContext, moodTrajectory = null, cyclicalPatterns = null, pendingPrompts = []) {
+export async function generateInsight(apiKey, currentText, historyContext, moodTrajectory = null, cyclicalPatterns = null, pendingPrompts = [], { modelId = AI_CONFIG.analysis.primary } = {}) {
   const today = new Date();
   const dayOfWeek = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][today.getDay()];
 
@@ -562,7 +562,7 @@ export async function generateInsight(apiKey, currentText, historyContext, moodT
   `;
 
   try {
-    const raw = await callGemini(apiKey, prompt, `HISTORY:\n${historyContext}\n\nCURRENT ENTRY [${today.toLocaleDateString()} - written just now]:\n${currentText}`);
+    const raw = await callGemini(apiKey, prompt, `HISTORY:\n${historyContext}\n\nCURRENT ENTRY [${today.toLocaleDateString()} - written just now]:\n${currentText}`, modelId);
 
     if (!raw) {
       console.error('generateInsight: No response from Gemini API');

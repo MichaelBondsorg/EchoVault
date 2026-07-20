@@ -8,6 +8,9 @@ import { describe, it, expect } from 'vitest';
 import { readdirSync, statSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
+// Raw substring scan: a bare `.includes` intentionally also flags the model id
+// in COMMENTS, not just code. That strictness is deliberate — a shut-down model
+// id should not linger anywhere in shipping source, even in a stale comment.
 const FORBIDDEN = ['gemini-2.0-flash', 'gemini-2.0-flash-exp'];
 
 const ROOTS = [

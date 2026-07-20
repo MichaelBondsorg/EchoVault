@@ -30,9 +30,11 @@ read-only for clients; only the Admin SDK/Firebase console can write it.
 | `nativeBackgroundUpload` | `false` | The native background-upload vertical slice: signed-URL PUT from `BackgroundUploader.swift`, server-side `onCaptureAudioUploaded` transcription + entry creation. **Fail-safe when off**: any object that somehow lands in `capture-uploads/**` is deleted without transcription (`onAudioUploaded.js` step 1). | The existing foreground base64 transcription pipeline (`transcribeEntryFn` et al.) — capture still works, just without background continuation. | Server: `functions/index.js` (`issueCaptureUploadTicket` callable, gates before signing), `functions/src/capture/onAudioUploaded.js` (`NATIVE_BACKGROUND_UPLOAD_FLAG`). **Client wiring status: incomplete** — see Known gaps below. |
 | `webChunkPersistence` | `true` | Web `MediaRecorder` chunks writing incrementally to IndexedDB (`webChunkStore.js`) as they arrive, instead of only living in a RAM closure until Stop. Additive durability; default-on. | The RAM-only chunk array — a tab crash/reload mid-recording loses the in-progress web recording. | `src/components/dashboard/EntryBar.jsx:88,179` |
 | `intentExtraction` | `false` | Async server-side intent extraction (PRD 0B, `functions/src/intents/extractIntents.js`) feeding the policy-qualified `TasksWidget`. Not part of this sprint's capture-durability surface. | The legacy `extracted_tasks` local-analysis path. | Batch 7 (I1–I4) — not yet implemented as of this runbook's writing. |
-| `model.gemini35flash` | `false` | Flips `classify`/`analyze` from the preview `gemini-3-flash-preview` default to GA `gemini-3.5-flash`. | The preview model default. | Model registry (`functions/src/models/registry.js`) — **not yet implemented**; see § Model registry flip procedure below. |
-| `model.embeddingV2Read` | `false` | Reading `embeddingV2` (gemini-embedding-2) instead of the legacy `embedding` field at retrieval sites, once dual-write backfill (M3) has run. | Legacy `embedding` field reads. | Retrieval read sites (RAG/askJournal) — **not yet implemented**; see embedding v2 cutover note below. |
-| `model.fusedTranscription35` | `false` | Shadow/cutover testing of fused transcription on `gemini-3.5-flash` instead of the current `gemini-2.5-flash` default. | The `gemini-2.5-flash` fused-transcription default. | Transcription call sites — **not yet implemented** (fused transcription is currently a hardcoded model string, per the plan's Ground Truth section; the registry work in Batch 6/M1 replaces it). |
+| `model.<workload>` (string) | (unset) | **Authoritative model lever.** A string value in `config/flags` for a key like `model.classify`, `model.analyze`, `model.insight`, `model.embedding`, `model.embeddingV2`, `model.fusedTranscription`, `model.tone`, `model.digest`, `model.transcriptionFallback` overrides that workload's default. | Removing the key → the compiled `MODEL_DEFAULTS`. | `functions/src/models/registry.js` `getModel(db, workload)` — LIVE at every threaded call site (see § Model registry flip procedure for the real/inventory-only breakdown). |
+| `model.gemini35flash` (bool) | `false` | **Vestigial.** Predates the registry; NO code reads it. To move classify/analyze to `gemini-3.5-flash`, set the string keys `model.classify` / `model.analyze` instead. | n/a | Not consumed anywhere — follow-up: remove from client `FLAG_DEFAULTS`. |
+| `model.fusedTranscription35` (bool) | `false` | **Vestigial.** The registry string key `model.fusedTranscription` WINS. NO code reads this boolean. | n/a | Not consumed — follow-up: remove from client `FLAG_DEFAULTS`. |
+| `model.embeddingWriteV2` (bool) | `false` | Dual-writes a gemini-embedding-2 `embeddingV2` vector + `embeddingMeta` alongside the legacy `embedding` field. | v1-only writes. | `functions/src/models/registry.js` (`MODEL_FLAG_DEFAULTS`) → read in `generateEmbeddingInternal`. LIVE (server write path). |
+| `model.embeddingV2Read` (bool) | `false` | Intended to make retrieval read `embeddingV2` (same-space) instead of the legacy `embedding` field. | Legacy `embedding` reads. | Registered default in the registry, but the RAG scoring consumers are **client-side** (`src/services/rag/*`, `src/services/ai/embeddings.js`) and NOT yet switched to `scoreSameSpace` — so flipping this is currently INERT client-side (follow-up). |
 
 **Local dev override:** any flag can be forced client-side without touching
 Firestore via `localStorage['engram:flag:' + name] = 'true' | 'false'`
@@ -228,19 +230,25 @@ analysis from the preview model to `gemini-2.5-flash` by setting
 `model.classify` and `model.analyze` to `gemini-2.5-flash` (this is the
 intended path for the classify/analyze bump; no code change).
 
-Workload → default (as of M2):
+**Which `model.<workload>` keys are LIVE vs inventory-only.** During an
+incident, only flip a lever that has a runtime consumer — the others are
+recorded for inventory completeness but reading/writing them does nothing.
 
-| Workload | Default | Notes |
-|---|---|---|
-| classify / analyze / insight / entityResolution | `gemini-3-flash-preview` | bump via `model.classify` / `model.analyze` |
-| chat | `gpt-4o-mini` | |
-| chatFallback | `gpt-4o` | |
-| embedding | `text-embedding-004` | legacy v1 space |
-| embeddingV2 | `gemini-embedding-2` | dual-index (flag-gated) |
-| transcriptionFallback | `whisper-1` | |
-| fusedTranscription | `gemini-2.5-flash` | |
-| tone / digest / temporal | `gemini-3.5-flash` | replaced shut-down Gemini 2.0 paths |
-| realtimeNA | `gpt-realtime-2.1` | owned by relay env `REALTIME_MODEL`, not this registry |
+| Workload | Default | Flag lever LIVE? | Consumer |
+|---|---|---|---|
+| classify | `gemini-3-flash-preview` | ✅ | orchestrator + `analyzeJournalEntry` + watchdog + reprocess (threaded `{modelId}` into `classifyEntry`/`extractEnhancedContext`) |
+| analyze | `gemini-3-flash-preview` | ✅ | orchestrator + callable + watchdog (`analyzeEntry`); stamped into `analysisMeta.modelId` |
+| insight | `gemini-3-flash-preview` | ✅ | orchestrator + callable (`generateInsight`) |
+| embedding | `text-embedding-004` | ✅ | `generateEmbeddingInternal` (`getModel(db,'embedding')`) — legacy v1 space |
+| embeddingV2 | `gemini-embedding-2` | ✅ | `generateEmbeddingInternal` when `model.embeddingWriteV2` on |
+| fusedTranscription | `gemini-2.5-flash` | ✅ | `transcribeEntry` callable + server trigger (`runFusedTranscription({modelId})`) |
+| tone | `gemini-3.5-flash` | ✅ | `transcribeAudio` tone call (`getModel(db,'tone')`) |
+| digest | `gemini-3.5-flash` | ✅ | weekly digest narrative (`getModel(db,'digest')`) |
+| transcriptionFallback | `whisper-1` | ✅ | Whisper multipart in `transcribeAudio` (`getModel(db,'transcriptionFallback')`) |
+| chat / chatFallback | `gpt-4o-mini` / `gpt-4o` | ❌ inventory-only | `callOpenAI` uses `getModelSync('chat')` (default only); `chatFallback` is an `AI_CONFIG` field with no call site |
+| temporal | `gemini-3.5-flash` | ❌ inventory-only | temporal detection routes through the generic `executePrompt` callable, which uses the `analyze` default; there is no `model.temporal` consumer. The client `src/services/temporal` passes a `gemini-2.0-flash` arg that the 2-arg client `callGemini` IGNORES (dead) |
+| entityResolution | `gemini-3-flash-preview` | ❌ inventory-only | entity resolution is string-similarity matching, not an LLM call — no model is used |
+| realtimeNA | `gpt-realtime-2.1` | ❌ N/A here | owned by relay env `REALTIME_MODEL`, not this registry |
 
 **Relay-server models** (`REALTIME_MODEL`, `WHISPER_MODEL`, `CHAT_MODEL`,
 `TTS_MODEL`, `TONE_MODEL`) are env vars, not `config/flags` keys — changing one
