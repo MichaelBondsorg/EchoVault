@@ -18,6 +18,12 @@ function attrs(overrides = {}) {
 // --- Minimal in-memory Firestore fake --------------------------------------
 function makeFakeDb(flagFields = {}) {
   const store = new Map(); // path -> data
+  const queryLog = []; // { path, field, op, value } — one entry per where(...).get() call
+
+  function matches(data, field, op, value) {
+    if (op === 'in') return Array.isArray(value) && value.includes(data[field]);
+    return data[field] === value;
+  }
 
   function makeDocRef(path) {
     return {
@@ -40,13 +46,14 @@ function makeFakeDb(flagFields = {}) {
       _isCol: true,
       get parent() { return makeDocRef(path.split('/').slice(0, -1).join('/')); },
       doc(id) { return makeDocRef(`${path}/${id}`); },
-      where(field, _op, value) {
+      where(field, op, value) {
         return {
           async get() {
+            queryLog.push({ path, field, op, value });
             const docs = [];
             for (const [p, data] of store.entries()) {
               if (p.startsWith(path + '/') && p.split('/').length === path.split('/').length + 1) {
-                if (data[field] === value) docs.push({ id: p.split('/').pop(), data: () => data });
+                if (matches(data, field, op, value)) docs.push({ id: p.split('/').pop(), data: () => data });
               }
             }
             return { forEach: (fn) => docs.forEach(fn), size: docs.length, empty: docs.length === 0 };
@@ -57,6 +64,7 @@ function makeFakeDb(flagFields = {}) {
   }
   const db = {
     _store: store,
+    _queryLog: queryLog,
     batch() {
       const ops = [];
       return {
@@ -74,7 +82,12 @@ function makeFakeDb(flagFields = {}) {
     doc: (p) => makeDocRef(p),
     collection: (p) => makeColRef(p),
   };
-  return { db, store, makeDocRef };
+  return { db, store, makeDocRef, queryLog };
+}
+
+/** Count how many `.get()` reads this run issued against a `user_decisions` collection. */
+function decisionsQueryCount(queryLog) {
+  return queryLog.filter((q) => q.path.endsWith('/user_decisions')).length;
 }
 
 const USER_BASE = 'artifacts/app/users/u1';
@@ -327,7 +340,7 @@ describe('runIntentExtraction', () => {
     });
 
     it('preserves via a user_decisions reference even when the doc state alone is not dismissed/completed_state', async () => {
-      const { db, store } = makeFakeDb();
+      const { db, store, queryLog } = makeFakeDb();
       const entryRef = db.doc(`${USER_BASE}/entries/e1`);
       await runIntentExtraction({ db, entryRef, entry: { id: 'e1', text: dentistText, entryInputVersion: 1 }, modelId: 'm', apiKey: 'k', extractCandidates: dentistCand() });
       const intentPath = [...store.keys()].find((p) => p.includes('/intents/'));
@@ -338,11 +351,46 @@ describe('runIntentExtraction', () => {
       store.set(intentPath, { ...store.get(intentPath), state: 'suggested' });
       store.set(`${USER_BASE}/user_decisions/d1`, { targetId: id, targetType: 'intent', action: 'not_a_task', createdAt: 'x', reversible: true });
 
+      queryLog.length = 0; // only count the v2 run's queries
       await runIntentExtraction({ db, entryRef, entry: { id: 'e1', text: dentistText, entryInputVersion: 2 }, modelId: 'm', apiKey: 'k', extractCandidates: dentistCand() });
 
       const stored = store.get(intentPath);
       expect(stored.state).toBe('suggested'); // untouched, not overwritten back to active/suggested-by-policy
       expect(stored.inputVersion).toBe(2);
+      expect(decisionsQueryCount(queryLog)).toBe(1); // one candidate needing the fallback -> one query
+    });
+
+    it('issues exactly ONE decisions query per run no matter how many candidates need the fallback check', async () => {
+      const { db, store, queryLog } = makeFakeDb();
+      const entryRef = db.doc(`${USER_BASE}/entries/e1`);
+      const threeTaskText = 'Buy milk. Call the dentist. Email the landlord.';
+      const threeTaskCands = () => async () => normalizeCandidates([
+        { kind: 'task', text: 'Buy milk', attributes: attrs({ agency: true, concrete: true, unfinished: true, temporalFit: true }), confidence: 0.9 },
+        { kind: 'task', text: 'Call the dentist', attributes: attrs({ agency: true, concrete: true, unfinished: true, temporalFit: true }), confidence: 0.9 },
+        { kind: 'task', text: 'Email the landlord', attributes: attrs({ agency: true, concrete: true, unfinished: true, temporalFit: true }), confidence: 0.9 },
+      ], threeTaskText);
+
+      await runIntentExtraction({ db, entryRef, entry: { id: 'e1', text: threeTaskText, entryInputVersion: 1 }, modelId: 'm', apiKey: 'k', extractCandidates: threeTaskCands() });
+      const paths = [...store.keys()].filter((p) => p.includes('/intents/'));
+      expect(paths).toHaveLength(3);
+
+      // Push all 3 docs to a non-dismissal state so EVERY candidate needs the
+      // user_decisions fallback check on the next run. Reference only one of
+      // them from a decision.
+      for (const p of paths) store.set(p, { ...store.get(p), state: 'suggested' });
+      const landlordPath = paths.find((p) => store.get(p).sourceSpan.text === 'Email the landlord');
+      const landlordId = landlordPath.split('/').pop();
+      store.set(`${USER_BASE}/user_decisions/d1`, { targetId: landlordId, targetType: 'intent', action: 'dismissed', createdAt: 'x', reversible: true });
+
+      queryLog.length = 0; // only count the v2 run's queries
+      await runIntentExtraction({ db, entryRef, entry: { id: 'e1', text: threeTaskText, entryInputVersion: 2 }, modelId: 'm', apiKey: 'k', extractCandidates: threeTaskCands() });
+
+      expect(decisionsQueryCount(queryLog)).toBe(1); // 3 candidates needed the check, still 1 query
+      expect(store.get(landlordPath).state).toBe('suggested'); // preserved via the decision reference
+      const milkPath = paths.find((p) => store.get(p).sourceSpan.text === 'Buy milk');
+      const dentistPath = paths.find((p) => store.get(p).sourceSpan.text === 'Call the dentist');
+      expect(store.get(milkPath).state).toBe('active'); // not referenced -> normal policy re-evaluation
+      expect(store.get(dentistPath).state).toBe('active');
     });
 
     it('a preserved (dismissed) doc coexists with a fresh active candidate in the same run', async () => {

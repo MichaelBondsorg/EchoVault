@@ -212,28 +212,46 @@ async function readExistingIntentsById(intentsCol, entryId) {
 const DISMISSAL_STATES = new Set(['dismissed', 'completed_state']);
 const DISMISSAL_DECISION_ACTIONS = new Set(['not_a_task', 'dismissed']);
 
+// Firestore caps an `in` filter at 30 values — chunk any larger id list.
+const FIRESTORE_IN_LIMIT = 30;
+
+/**
+ * Resolve, for a batch of ids, which ones have a user_decisions entry with a
+ * dismissal-shaped action (`not_a_task`/`dismissed`). Issues exactly ONE query
+ * (or one per 30-id chunk, Firestore's `in` limit) for the WHOLE batch — never
+ * a per-id query — so the preservation check below never becomes an N+1 read.
+ */
+async function fetchDismissalDecisionIds(decisionsCol, ids) {
+  const found = new Set();
+  for (let i = 0; i < ids.length; i += FIRESTORE_IN_LIMIT) {
+    const chunk = ids.slice(i, i + FIRESTORE_IN_LIMIT);
+    try {
+      const snap = await decisionsCol.where('targetId', 'in', chunk).get();
+      snap.forEach((doc) => {
+        const d = doc.data() || {};
+        if (DISMISSAL_DECISION_ACTIONS.has(d.action)) found.add(d.targetId);
+      });
+    } catch {
+      // best-effort; a failed chunk simply yields no matches for those ids
+    }
+  }
+  return found;
+}
+
 /**
  * A dismissed/completed loop must never be silently resurrected by a later
  * re-extraction — "a dismissed loop/task can only return if the user
  * explicitly restores it." The existing doc's own `state` is the primary
- * signal (cheap: already in hand from `readExistingIntentsById`); a
- * user_decisions lookup is only consulted as a fallback when the state alone
- * doesn't already confirm it (e.g. a doc left in some other state by a prior
- * decision that hasn't propagated to `state` yet).
+ * signal (cheap: already in hand from `readExistingIntentsById`); the
+ * `dismissedDecisionIds` set (from ONE shared `fetchDismissalDecisionIds` call
+ * covering every candidate in this run) is only consulted as a fallback when
+ * the state alone doesn't already confirm it (e.g. a doc left in some other
+ * state by a prior decision that hasn't propagated to `state` yet).
  */
-async function shouldPreserveDismissal(existingDoc, decisionsCol, id) {
+function shouldPreserveDismissal(existingDoc, id, dismissedDecisionIds) {
   if (!existingDoc) return false; // brand-new id: nothing to preserve
   if (DISMISSAL_STATES.has(existingDoc.state)) return true;
-  try {
-    const dref = await decisionsCol.where('targetId', '==', id).get();
-    let preserved = false;
-    dref.forEach((doc) => {
-      if (DISMISSAL_DECISION_ACTIONS.has(doc.data()?.action)) preserved = true;
-    });
-    return preserved;
-  } catch {
-    return false;
-  }
+  return dismissedDecisionIds.has(id);
 }
 
 /**
@@ -305,18 +323,32 @@ export async function runIntentExtraction({ db, entryRef, entry, modelId, apiKey
   // dismissal-preservation check below and the stale-intent reap.
   const existingById = await readExistingIntentsById(intentsCol, entryId);
 
-  const batch = db.batch();
-  const activeTaskIntents = [];
+  // Pass 1: decide activation + look up each candidate's existing doc (if
+  // any). Collect the ids whose existing state alone does NOT already confirm
+  // a dismissal — only those need the user_decisions fallback.
   const writtenIds = new Set();
+  const evaluated = [];
+  const needsDecisionCheck = new Set();
   for (const cand of candidates) {
     const { state, reason } = decideActivation(cand);
     // Silent context (abstain) is only persisted under the audit flag.
     if (state === 'abstain' && !persistAbstain) continue;
     const id = deterministicIntentId(entryId, cand.sourceSpan.start, cand.kind);
     writtenIds.add(id);
-
     const existingDoc = existingById.get(id);
-    if (await shouldPreserveDismissal(existingDoc, decisionsCol, id)) {
+    if (existingDoc && !DISMISSAL_STATES.has(existingDoc.state)) needsDecisionCheck.add(id);
+    evaluated.push({ cand, state, reason, id, existingDoc });
+  }
+
+  // ONE shared decisions query (chunked at 30) covers every candidate in this
+  // run — never a per-candidate read.
+  const dismissedDecisionIds = await fetchDismissalDecisionIds(decisionsCol, [...needsDecisionCheck]);
+
+  // Pass 2: build the batch writes using the resolved preservation set.
+  const batch = db.batch();
+  const activeTaskIntents = [];
+  for (const { cand, state, reason, id, existingDoc } of evaluated) {
+    if (shouldPreserveDismissal(existingDoc, id, dismissedDecisionIds)) {
       // Dismissed/completed is user-terminal: never overwrite state or
       // user-set fields here — only bump the reap-relevant version marker so
       // the reaper above never treats this doc as stale.
