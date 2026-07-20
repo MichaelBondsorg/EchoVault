@@ -62,6 +62,16 @@ import {
 } from './services/consent/consentService';
 import { clearOwnerCaches } from './services/storage/clearOwnerCaches';
 import { deleteNativeDraft, recoverNativeDrafts } from './services/capture/nativeCaptureAdapter';
+import { prepareDurableRecording } from './services/capture/prepareDurableRecording';
+import {
+  createOperation,
+  advance as advanceOperation,
+  completeOperation,
+  markNeedsAttention,
+  findByRecordingId,
+} from './services/capture/operationStore';
+import { resumeIncompleteOperations } from './services/capture/resumeOperations';
+import { recordStage, STAGES } from './services/telemetry/captureTelemetry';
 import { inferCategory } from './services/prompts';
 import { getActiveReflectionPrompts, dismissReflectionPrompt } from './services/prompts/activePrompts';
 import { detectTemporalContext, needsConfirmation, formatEffectiveDate } from './services/temporal';
@@ -401,10 +411,33 @@ export default function App() {
       if (Capacitor.isNativePlatform()) {
         recoverNativeDrafts(
           user.uid,
-          (base64, mime) => audioVault.saveRecording(user.uid, base64, mime)
+          // saveRecording now returns { id } / { error }; recoverNativeDrafts
+          // expects an id string (or null) to decide whether the draft was
+          // durably adopted before deleting it.
+          (base64, mime) => audioVault.saveRecording(user.uid, base64, mime).then((r) => r?.id ?? null)
         ).then((count) => count && console.log(`[Capture] recovered ${count} interrupted recording(s)`))
           .catch((error) => console.warn('[Capture] recovery scan failed:', error?.message));
       }
+
+      // Resume voice-capture operations interrupted by an app kill/crash. The
+      // durable operationStore is the source of truth; each incomplete op is
+      // finished idempotently (duplicate-delivery guarded by the entry's
+      // operationId, so a resume never creates a second entry). Runs on every
+      // platform (web recordings can be interrupted too).
+      resumeIncompleteOperations({
+        ownerUid: user.uid,
+        db,
+        handleAudioRetry: async (recordingId, opId) => {
+          const rec = await audioVault.getRecording(user.uid, recordingId);
+          if (!rec) return;
+          await handleAudioWrapper(rec.base64, rec.mime, {
+            existingRecordingId: recordingId,
+            operationId: opId,
+          });
+        },
+      }).then((s) => s && (s.resumed || s.completed || s.needsAttention)
+        && console.log('[Capture] resume summary:', s))
+        .catch((error) => console.warn('[Capture] resume scan failed:', error?.message));
     }
   }, [user?.uid]);
 
@@ -859,13 +892,20 @@ export default function App() {
         safetyUserResponse,
         null,
         entry.voiceTone ?? null,
-        entry.rawTranscript ?? null
+        entry.rawTranscript ?? null,
+        entry.operationId ?? null
       );
       // The recording (if this crisis entry came from voice) was deliberately
       // left unlinked in the vault until the entry actually existed — link it
       // now so the recovery banner stops showing it as unsaved.
       if (result === 'saved' && entry.recordingId) {
         await audioVault.linkEntry(user.uid, entry.recordingId, 'saved');
+      }
+      // Complete the capture op now that the deferred crisis entry is durable
+      // (it was left at 'transcribing' when the crisis modal deferred the save).
+      if (result === 'saved' && entry.operationId) {
+        await completeOperation(user.uid, entry.operationId).catch(() => {});
+        await recordStage(user.uid, entry.operationId, STAGES.COMPLETE);
       }
     } catch (e) {
       console.error('Failed to persist crisis-flagged entry:', e);
@@ -899,7 +939,8 @@ export default function App() {
     safetyUserResponse = null,
     temporalContext = null,
     voiceTone = null,
-    rawTranscript = null
+    rawTranscript = null,
+    operationId = null
   ) => {
     if (!user) return;
 
@@ -1320,6 +1361,10 @@ export default function App() {
           safety: { safetyFlagged, safetyUserResponse, hasWarning },
           platform,
           voiceTone,
+          // Capture-pipeline operation id — lands on the durable core entry so
+          // launch resume's duplicate-delivery guard can find this entry by
+          // operationId and avoid re-transcribing the same recording.
+          operationId,
         });
 
         console.time('⏱️ Firestore save (core-first)');
@@ -1705,7 +1750,7 @@ export default function App() {
   };
 
   const saveEntry = async (textInput, voiceTone = null, options = {}) => {
-    const { recordingId, rawTranscript = null } = options;
+    const { recordingId, rawTranscript = null, operationId = null } = options;
     if (!user) return;
     setProcessing(true);
     console.log('[SaveEntry] Starting save process, text length:', textInput.length, 'hasVoiceTone:', !!voiceTone);
@@ -1719,7 +1764,10 @@ export default function App() {
         rawTranscript,
         safetyFlagged: true,
         voiceTone,
-        recordingId
+        recordingId,
+        // operationId travels with the deferred entry so the crisis-confirm
+        // save writes it onto the entry doc and completes the capture op.
+        operationId
       });
       setCrisisModal(true);
       setProcessing(false);
@@ -1731,7 +1779,7 @@ export default function App() {
     // runner (see doSaveEntry). Skip the 45s temporal await entirely and go
     // straight to the durable core write.
     if (getFlag('coreFirstSave')) {
-      return await doSaveEntry(textInput, false, null, null, voiceTone, rawTranscript);
+      return await doSaveEntry(textInput, false, null, null, voiceTone, rawTranscript, operationId);
     }
 
     // Detect temporal context (Phase 2)
@@ -1771,11 +1819,12 @@ export default function App() {
         null,
         temporal.detected ? temporal : null,
         voiceTone,
-        rawTranscript
+        rawTranscript,
+        operationId
       );
     } catch (e) {
       console.error('Temporal detection failed, saving normally:', e);
-      return await doSaveEntry(textInput, false, null, null, voiceTone, rawTranscript);
+      return await doSaveEntry(textInput, false, null, null, voiceTone, rawTranscript, operationId);
     }
   };
 
@@ -1826,7 +1875,7 @@ export default function App() {
   }, []);
 
   const handleAudioWrapper = async (base64, mime, options = {}) => {
-    const { existingRecordingId, nativeDraftId } = options;
+    const { existingRecordingId, nativeDraftId, operationId: resumeOperationId } = options;
     if (!aiProcessingEnabled) {
       setNeedsAiConsent(true);
       return false;
@@ -1859,18 +1908,68 @@ export default function App() {
     console.log('[Transcription] Wake lock acquired:', wakeLockAcquired);
 
     // Durable local backup BEFORE any network call — recordings must never
-    // depend on a successful cloud round-trip. If this is a retry of an
-    // already-vaulted recording, reuse its id instead of creating a
-    // duplicate vault entry.
-    const recordingId = existingRecordingId || await audioVault.saveRecording(user.uid, base64, mime);
-    console.log('[Transcription] Audio saved to vault:', recordingId);
-    if (recordingId && nativeDraftId && Capacitor.isNativePlatform()) {
-      await deleteNativeDraft(user.uid, nativeDraftId).catch((error) => {
-        console.warn('[Capture] Native handoff cleanup deferred:', error?.message);
-      });
+    // depend on a successful cloud round-trip. The durability invariant is
+    // enforced here: if the vault write fails we BLOCK transcription and keep
+    // the native draft (the previous durable copy) in place, rather than
+    // proceeding with no local copy at all. The native draft is deleted ONLY
+    // after the vault confirms (inside prepareDurableRecording).
+    const prep = await prepareDurableRecording({
+      ownerUid: user.uid,
+      base64,
+      mimeType: mime,
+      existingRecordingId,
+      audioVault,
+      // Only hand off (and thereby delete) the native draft on native.
+      nativeDraftId: Capacitor.isNativePlatform() ? nativeDraftId : undefined,
+      deleteNativeDraft,
+    });
+
+    if (!prep.ok) {
+      // Could not secure a durable local copy — do NOT transcribe. Surface the
+      // same "saved locally, retry" affordance transcription failures use; the
+      // recording (native draft) is untouched and still recoverable.
+      console.warn('[Transcription] Durable local copy failed — blocking transcription:', prep.reason);
+      if (resumeOperationId) {
+        // A resumed op that still can't secure a copy: bump attempts + surface.
+        await markNeedsAttention(user.uid, resumeOperationId, prep.reason).catch(() => {});
+      }
+      await recordStage(user.uid, resumeOperationId || null, STAGES.NEEDS_ATTENTION, { errorCode: prep.reason });
+      setProcessing(false);
+      releaseWakeLock();
+      alert("Couldn't secure a local copy of your recording, so we didn't send it for transcription. Nothing was lost — please try again.");
+      return false;
     }
 
+    const recordingId = prep.recordingId;
+    console.log('[Transcription] Audio saved to vault:', recordingId);
+
+    // Durable operation record — the source of truth that survives an app kill
+    // and drives idempotent launch resume. Reuse the existing op on a retry/
+    // resume; otherwise create a fresh one now that the recording is durable.
+    let operationId = resumeOperationId || null;
+    if (!operationId && existingRecordingId) {
+      const existingOp = await findByRecordingId(user.uid, recordingId).catch(() => null);
+      operationId = existingOp?.opId || null;
+    }
+    if (!operationId) {
+      const op = await createOperation(user.uid, { recordingId }).catch(() => null);
+      operationId = op?.opId || null;
+    }
+    await recordStage(user.uid, operationId, STAGES.LOCAL_READY, {});
+
+    // Tracks whether the operation reached a definitive resting state
+    // (completed, or deliberately deferred to the crisis flow). If it did NOT
+    // — i.e. transcription/save failed definitively — the finally block bumps
+    // attempts + marks the op needs_attention so it surfaces and the auto-retry
+    // cap can eventually stop looping. An app killed mid-pipeline never reaches
+    // finally, so it stays in-flight and is auto-retried on next launch.
+    let operationSettled = false;
+
     try {
+      if (operationId) {
+        await advanceOperation(user.uid, operationId, 'transcribing');
+        await recordStage(user.uid, operationId, 'transcribing');
+      }
       console.log('[Transcription] Starting transcription+tone API call...');
       const startTime = Date.now();
       const properNouns = Array.from(new Set([
@@ -1958,7 +2057,8 @@ export default function App() {
       console.log('[Transcription] Calling saveEntry with transcript length:', transcript.length, 'voiceTone:', !!toneAnalysis);
       const saveResult = await saveEntry(transcript, toneAnalysis, {
         recordingId,
-        rawTranscript
+        rawTranscript,
+        operationId
       });
       console.log('[Transcription] saveEntry completed with result:', saveResult);
       // Only link (and thereby clear it from the recovery banner) once the
@@ -1967,8 +2067,26 @@ export default function App() {
       // crisis-confirm site once the entry is actually persisted — leave it
       // as an orphan here in the meantime rather than link something that
       // doesn't exist yet.
-      if (saveResult === 'saved' && recordingId) {
-        await audioVault.linkEntry(user.uid, recordingId, 'saved');
+      if (saveResult === 'saved') {
+        if (operationId) {
+          await advanceOperation(user.uid, operationId, 'entry_saved');
+          await recordStage(user.uid, operationId, STAGES.ENTRY_SAVED);
+        }
+        if (recordingId) {
+          await audioVault.linkEntry(user.uid, recordingId, 'saved');
+          if (operationId) {
+            await completeOperation(user.uid, operationId);
+            await recordStage(user.uid, operationId, STAGES.COMPLETE);
+          }
+        }
+        operationSettled = true;
+      } else if (saveResult === 'deferred') {
+        // Crisis flow: the entry save is deferred until the user answers the
+        // crisis modal. The op is deliberately left at 'transcribing' (NOT a
+        // failure); the entry carries operationId once the crisis save
+        // completes, so launch resume's duplicate-delivery guard finds it and
+        // completes the op without re-transcribing.
+        operationSettled = true;
       }
       return saveResult === 'saved';
     } catch (error) {
@@ -1983,6 +2101,14 @@ export default function App() {
       setProcessing(false);
       return false;
     } finally {
+      // A definitive failure (transcription error, empty transcript, save
+      // exception) that reached here without settling the op: bump attempts +
+      // mark needs_attention so it surfaces in the reliability center and the
+      // auto-retry cap can eventually stop looping.
+      if (operationId && !operationSettled) {
+        await markNeedsAttention(user.uid, operationId, 'transcription-failed').catch(() => {});
+        await recordStage(user.uid, operationId, STAGES.NEEDS_ATTENTION, { errorCode: 'transcription-failed' });
+      }
       console.log('[Transcription] Releasing wake lock');
       releaseWakeLock();
     }
