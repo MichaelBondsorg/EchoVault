@@ -24,6 +24,7 @@ import { enforceDailyQuota } from './src/limits/dailyQuota.js';
 import { GEMINI_TRANSCRIBE_MODEL, buildGeminiRequestBody, parseFusedResponse } from './src/transcription/fusedTranscription.js';
 import { transcribeWithWhisper } from './src/shared/openai.js';
 import { assertAiConsent, isAiAllowed, grantConsent, revokeConsent } from './src/consent/consentGate.js';
+import { logStage } from './src/telemetry/stageLog.js';
 import { getCachedEmbedding, setCachedEmbedding } from './src/ai/embeddingCache.js';
 import { claimProcessingMarker, acquireEntryLease, LEASE_MS } from './src/triggers/idempotency.js';
 import { randomUUID } from 'node:crypto';
@@ -1533,7 +1534,7 @@ export const transcribeEntry = onCall(
 
     const userId = request.auth.uid;
     await assertAiConsent(db, userId);
-    const { base64, mimeType, properNouns = [] } = request.data;
+    const { base64, mimeType, properNouns = [], operationId = null } = request.data;
 
     if (!base64 || !mimeType) {
       throw new HttpsError('invalid-argument', 'Audio data and mimeType are required');
@@ -1547,6 +1548,15 @@ export const transcribeEntry = onCall(
     }
 
     await enforceDailyQuota(userId, { key: 'transcribe', limit: DAILY_QUOTA.transcribe });
+
+    // Non-content stage telemetry (task D12): marks the start of this
+    // transcription attempt and, at each exit below, its engine + duration.
+    // `operationId` is an optional client-supplied field so a single capture
+    // op's stages can be correlated end-to-end.
+    const transcribeStartedAt = Date.now();
+    logStage(operationId, 'transcribe_start', {});
+    const logTranscribeEnd = (engine) =>
+      logStage(operationId, 'transcribe_end', { engine, durationMs: Date.now() - transcribeStartedAt });
 
     // 1. Primary: fused Gemini call (transcript + tone in one pass)
     if (gemKey) {
@@ -1566,6 +1576,7 @@ export const transcribeEntry = onCall(
         } else if (geminiRes.ok) {
           const parsed = parseFusedResponse(await geminiRes.json());
           if (parsed && parsed.transcript) {
+            logTranscribeEnd('gemini');
             return {
               rawTranscript: parsed.rawTranscript,
               transcript: parsed.transcript,
@@ -1574,6 +1585,7 @@ export const transcribeEntry = onCall(
             };
           }
           if (parsed && parsed.transcript === '') {
+            logTranscribeEnd('gemini');
             return { error: 'API_NO_CONTENT' }; // model heard no speech
           }
           console.warn('[transcribeEntry] unparseable Gemini response, falling back to Whisper', { userId });
@@ -1587,6 +1599,7 @@ export const transcribeEntry = onCall(
 
     // 2. Fallback: Whisper raw transcript (NO filler-word regex — it corrupts meaning)
     if (!oaiKey) {
+      logTranscribeEnd('none');
       return { error: 'API_ERROR' };
     }
     try {
@@ -1603,16 +1616,22 @@ export const transcribeEntry = onCall(
         console.error('[transcribeEntry] both engines failed', {
           userId, audioBytes: base64?.length, mimeType
         });
+        logTranscribeEnd('none');
         return { error: 'API_ERROR' };
       }
 
       const transcript = whisperResult?.text?.trim();
-      if (!transcript) return { error: 'API_NO_CONTENT' }; // call succeeded, no speech detected
+      if (!transcript) {
+        logTranscribeEnd('whisper');
+        return { error: 'API_NO_CONTENT' }; // call succeeded, no speech detected
+      }
+      logTranscribeEnd('whisper');
       return { rawTranscript: transcript, transcript, toneAnalysis: null, engine: 'whisper' };
     } catch (error) {
       console.error('[transcribeEntry] both engines failed', {
         userId, audioBytes: base64?.length, mimeType, err: error?.message
       });
+      logTranscribeEnd('none');
       return { error: 'API_EXCEPTION' };
     }
   }

@@ -55,6 +55,7 @@ export default defineConfig({
       'functions/src/notifications/__tests__/sender.test.js',
       'functions/src/reports/__tests__/reportCleanup.test.js',
       'functions/src/shared/__tests__/flags.test.js',
+      'functions/src/telemetry/__tests__/stageLog.test.js',
     ],
 
     // Exclude patterns
