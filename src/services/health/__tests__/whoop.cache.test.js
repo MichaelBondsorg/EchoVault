@@ -33,6 +33,7 @@ const {
   getWhoopSummary,
   getWhoopConnectionStatus,
   disconnectWhoop,
+  handleWhoopOAuthSuccess,
 } = await import('../whoop.js');
 
 const LEGACY_SUMMARY_KEY = 'whoop_cached_summary';
@@ -160,5 +161,19 @@ describe('whoop.js owner-scoped cache (plan task A4)', () => {
 
     expect(summary.available).toBe(false);
     expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  it('handleWhoopOAuthSuccess stores linked status under the authenticated owner uid (regression: W1 review Critical)', async () => {
+    asUser('user-a');
+    // Summary refetch inside the handler may fail; the status write must still be owner-scoped.
+    global.fetch.mockRejectedValue(new Error('offline'));
+
+    await handleWhoopOAuthSuccess();
+
+    const scoped = await store.get(`whoop_link_status::user-a`);
+    expect(scoped).toBe('true');
+    // No garbage key derived from a boolean, and no legacy global key.
+    expect(await store.get('whoop_link_status::true')).toBeUndefined();
+    expect(await store.get(LEGACY_STATUS_KEY)).toBeUndefined();
   });
 });

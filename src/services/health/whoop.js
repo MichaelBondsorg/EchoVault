@@ -195,7 +195,7 @@ export const disconnectWhoop = async () => {
  * Called after user is redirected back from Whoop authorization
  */
 export const handleWhoopOAuthSuccess = async () => {
-  await setLocalWhoopStatus(true);
+  await setLocalWhoopStatus(currentUid(), true);
   // Fetch initial data to populate cache
   try {
     await getWhoopSummary();
