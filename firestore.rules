@@ -182,8 +182,18 @@ service cloud.firestore {
     // SDK/console (see functions/src/shared/flags.js, src/config/flags.js).
     // Any authenticated user may read the single `flags` doc; no other
     // config/{docId} is client-readable, and no client write is ever
-    // allowed here — the admin catch-all below still lets Cloud Functions
-    // manage it.
+    // allowed here for a normal (non-admin) user.
+    //
+    // Note on rule evaluation: Firestore rules are NOT "most specific match
+    // wins" — every `match` block whose path pattern matches the requested
+    // doc is evaluated, and the request is allowed if ANY of them grants
+    // it (they OR together). So this block and the `{document=**}` admin
+    // catch-all below both apply to `config/*` docs; `allow write: if
+    // false` here does not shadow the catch-all, it just contributes no
+    // grant of its own — the catch-all's `isAdmin()` check is what
+    // actually lets Cloud Functions (using an admin-claimed token) write
+    // here. The Admin SDK itself bypasses rules entirely, so this only
+    // matters for admin-claimed client tokens, if any ever exist.
     match /config/{docId} {
       allow read: if isAuthenticated() && docId == 'flags';
       allow write: if false;

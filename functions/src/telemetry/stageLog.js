@@ -12,6 +12,11 @@
  * content fields (transcript, text, etc.) are never whitelisted.
  */
 
+// KEEP IN SYNC with src/services/telemetry/captureTelemetry.js's
+// META_WHITELIST — the first 7 entries below must match that client-side
+// list exactly; modelId/uidHash/uid are server-only additions with no
+// client-side equivalent. Adding a shared (non-server-only) field here
+// should also be added there.
 const META_WHITELIST = [
   'durationMs',
   'bytes',

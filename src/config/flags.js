@@ -37,9 +37,13 @@ let loggedInitFailure = false;
 
 /**
  * Fetch `config/flags` once and cache the result merged over the defaults.
- * Never throws: a read failure logs a single warning and falls back to
- * defaults. Safe to call multiple times/concurrently — only one `getDoc`
- * is ever issued.
+ * Never throws: a read failure logs a warning and falls back to defaults.
+ * Safe to call multiple times/concurrently — only one `getDoc` is in
+ * flight at a time. A *successful* fetch latches permanently (later calls
+ * are no-ops that return the already-resolved promise); a *failed* fetch
+ * does NOT latch — it clears the in-flight promise so the next call (e.g.
+ * once `config/flags` becomes readable after auth resolves, see App.jsx)
+ * retries against Firestore instead of being stuck on defaults forever.
  */
 export async function initFlags(db) {
   if (!initPromise) {
@@ -54,6 +58,9 @@ export async function initFlags(db) {
           console.warn('[flags] initFlags failed, using defaults:', error?.message);
         }
         fetchedFlags = { ...FLAG_DEFAULTS };
+        // Do not latch a failure: allow a later initFlags() call to retry
+        // rather than permanently locking the session onto defaults.
+        initPromise = null;
       }
     })();
   }

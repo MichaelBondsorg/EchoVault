@@ -32,6 +32,11 @@ export const STAGES = {
 };
 
 // Only these meta fields are ever persisted or logged — never content.
+//
+// KEEP IN SYNC with functions/src/telemetry/stageLog.js's META_WHITELIST —
+// that server-side copy is this list plus modelId/uidHash/uid (server-only
+// fields with no client-side equivalent). Adding a field here that other
+// pipeline stages need server-side should also be added there.
 const META_WHITELIST = [
   'durationMs',
   'bytes',

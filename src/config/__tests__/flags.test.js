@@ -111,6 +111,36 @@ describe('config/flags', () => {
 
       expect(getDocMock).toHaveBeenCalledTimes(1);
     });
+
+    it('does not latch a failure: a later call after a failed init retries and picks up the doc', async () => {
+      vi.spyOn(console, 'warn').mockImplementation(() => {});
+      getDocMock.mockRejectedValueOnce(new Error('unauthenticated'));
+
+      await initFlags(fakeDb);
+      expect(getFlag('coreFirstSave')).toBe(false); // still defaults after the failure
+
+      getDocMock.mockResolvedValueOnce({
+        exists: () => true,
+        data: () => ({ coreFirstSave: true }),
+      });
+      await initFlags(fakeDb);
+
+      expect(getDocMock).toHaveBeenCalledTimes(2);
+      expect(getFlag('coreFirstSave')).toBe(true);
+    });
+
+    it('a successful init latches: a later call does not re-fetch', async () => {
+      getDocMock.mockResolvedValue({
+        exists: () => true,
+        data: () => ({ coreFirstSave: true }),
+      });
+
+      await initFlags(fakeDb);
+      await initFlags(fakeDb);
+
+      expect(getDocMock).toHaveBeenCalledTimes(1);
+      expect(getFlag('coreFirstSave')).toBe(true);
+    });
   });
 
   describe('getFlag after initFlags resolves', () => {

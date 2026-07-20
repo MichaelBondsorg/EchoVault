@@ -561,9 +561,6 @@ export default function App() {
   // Auth
   useEffect(() => {
     console.log('[Engram] Setting up auth listener...');
-    // Fire-and-forget: feature flags must never block first paint. getFlag()
-    // falls back to defaults/localStorage until this resolves.
-    initFlags(db);
     const init = async () => {
       if (typeof window !== 'undefined' && typeof window.__initial_auth_token !== 'undefined' && window.__initial_auth_token) {
         try {
@@ -577,6 +574,15 @@ export default function App() {
     init();
     return onAuthStateChanged(auth, (user) => {
       console.log('[Engram] Auth state changed:', user ? `User: ${user.uid}` : 'No user');
+      if (user) {
+        // Fire-and-forget: feature flags must never block first paint.
+        // getFlag() falls back to defaults/localStorage until this
+        // resolves. Triggered here (not before auth) because config/flags
+        // requires an authenticated read per firestore.rules — firing it
+        // earlier would read unauthenticated, get denied, and (pre-fix)
+        // permanently lock the session onto defaults.
+        initFlags(db);
+      }
       setUser(user);
     });
   }, []);
