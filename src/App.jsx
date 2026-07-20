@@ -49,6 +49,7 @@ import { checkCrisisKeywords, checkWarningIndicators, checkLongitudinalRisk } fr
 import { retrofitEntriesInBackground } from './services/entries';
 import { buildCoreEntry } from './services/entries/buildCoreEntry';
 import { runPostSaveEnrichment } from './services/entries/enrichmentRunner';
+import { runPostSavePipelines } from './services/entries/postSavePipeline';
 import { queueEntry, resetStuckSyncing } from './services/offline';
 import { initializeSyncOrchestrator, triggerSync } from './services/sync/syncOrchestrator';
 import { ownerStorageKey } from './services/storage/ownerScopedStorage';
@@ -1021,7 +1022,7 @@ export default function App() {
     const firePostSaveProcessing = ({ ref, localAnalysis, related, recent }) => {
       // Signal extraction (non-blocking, parallel to analysis)
       // This extracts temporal signals for the DetectedStrip UI
-      (async () => {
+      const runSignals = async () => {
         try {
           console.log('[Signals] Starting signal extraction for entry:', ref.id);
           const result = await processEntrySignals(
@@ -1046,11 +1047,11 @@ export default function App() {
           // Signal extraction failure shouldn't break the app - log and continue
           console.error('[Signals] Signal extraction failed:', signalError);
         }
-      })();
+      };
 
       // Nexus 2.0 insight update (non-blocking, parallel)
       // Updates thread associations and marks insights as stale for regeneration
-      (async () => {
+      const runNexus = async () => {
         try {
           console.log('[Nexus] Updating insights for new entry:', ref.id);
           await updateInsightsForNewEntry(
@@ -1064,10 +1065,11 @@ export default function App() {
           // Nexus failure shouldn't break the app
           console.error('[Nexus] Insight update failed:', nexusError);
         }
-      })();
+      };
 
-      // Analysis pipeline (existing logic)
-      (async () => {
+      // Analysis pipeline (existing logic). Skipped when the server owns
+      // analysis (flag: serverAnalysisOrchestrator) — see runPostSavePipelines.
+      const runAnalysisChain = async () => {
         try {
           console.time('⏱️ Classification');
           const classifyResult = await classifyEntry(finalTex);
@@ -1275,7 +1277,15 @@ export default function App() {
             console.error('Even fallback update failed:', fallbackError);
           }
         }
-      })();
+      };
+
+      // Signals + nexus always run (not yet server-owned). The analysis chain
+      // is skipped when serverAnalysisOrchestrator is on — the server-side
+      // onEntryCreatedAnalysis trigger owns classify/analyze/insight/context
+      // end-to-end and publishes the same fields; the entries onSnapshot
+      // listener (see the Data Feed effect above) delivers the update to the
+      // UI, so no popup is shown from this client path when the flag is on.
+      runPostSavePipelines({ runSignals, runNexus, runAnalysisChain, getFlag });
     };
 
     // Core-first save (flag: coreFirstSave): persist the DURABLE core entry
