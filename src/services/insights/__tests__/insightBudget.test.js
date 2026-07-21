@@ -171,6 +171,45 @@ describe('applyInsightBudget', () => {
     expect(result).toEqual([]);
   });
 
+  it('pins calendar-day (not rolling-24h) day-count semantics: a 2h-old entry on the previous calendar date does not count as "today", but a 20h-old entry on the same calendar date does', () => {
+    // Case 1: shortly after local midnight, an entry only 2 hours old is on
+    // the PREVIOUS calendar date. A naive "within the last 24h" day-count
+    // would wrongly treat this as "shown today" and block quiet mode's
+    // 1/day cap; the correct calendar-day check must not.
+    const nowJustAfterMidnight = new Date(2026, 6, 20, 0, 30, 0).getTime();
+    const twoHoursAgoPrevDate = {
+      id: 'prev-date-2h-ago',
+      title: 'Prev date',
+      theme: null,
+      shownAt: new Date(nowJustAfterMidnight - 2 * 60 * 60 * 1000).toISOString(),
+    };
+
+    const resultCase1 = applyInsightBudget(
+      [insight({ id: 'a' })],
+      { mode: 'quiet', shownLog: [twoHoursAgoPrevDate], now: nowJustAfterMidnight },
+    );
+    expect(resultCase1).toHaveLength(1); // not blocked: not "today"
+
+    // Case 2: late in the local day, an entry 20 hours old is still on the
+    // SAME calendar date. A naive rolling-24h check would agree here too
+    // (20h < 24h), so this alone isn't discriminating — paired with case 1
+    // above (2h old but a different date), together they pin calendar-day
+    // semantics rather than a rolling window.
+    const nowLateInDay = new Date(2026, 6, 20, 23, 0, 0).getTime();
+    const twentyHoursAgoSameDate = {
+      id: 'same-date-20h-ago',
+      title: 'Same date',
+      theme: null,
+      shownAt: new Date(nowLateInDay - 20 * 60 * 60 * 1000).toISOString(),
+    };
+
+    const resultCase2 = applyInsightBudget(
+      [insight({ id: 'b' })],
+      { mode: 'quiet', shownLog: [twentyHoursAgoSameDate], now: nowLateInDay },
+    );
+    expect(resultCase2).toEqual([]); // blocked: is "today", quiet's 1/day cap already used
+  });
+
   it('returns [] when the day quota is already exhausted even though the week quota has room', () => {
     const shownLog = Array.from({ length: 2 }, (_, i) => shownEntry({ id: `today${i}`, daysAgo: 0, hour: 1 + i }));
     const insights = [insight({ id: 'a' })];

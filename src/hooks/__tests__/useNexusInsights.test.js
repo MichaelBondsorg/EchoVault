@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { renderHook, waitFor } from '@testing-library/react';
+import { renderHook, waitFor, act } from '@testing-library/react';
 
 const orchestratorMocks = {
   getCachedInsights: vi.fn(),
@@ -70,6 +70,23 @@ describe('useNexusInsights - Insight Budget wiring (flag off)', () => {
     expect(budgetMocks.applyInsightBudget).not.toHaveBeenCalled();
     expect(budgetMocks.recordShownInsights).not.toHaveBeenCalled();
   });
+
+  it('is a byte-identical (reference-equal) passthrough of the pre-budget array, not a copy that merely matches by value', async () => {
+    flagValue = false;
+    const { result, rerender } = renderHook(() => useNexusInsights(USER, { autoRefresh: false }));
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    const firstInsights = result.current.insights;
+
+    // Force another render with no state change (activeInsights/
+    // historyInsights/learningData all stay the same references): the
+    // pre-budget array (allInsights) is memoized, so on the flag-off path
+    // `insights` must be the EXACT SAME array object, not a fresh copy that
+    // simply happens to contain the same ids/values.
+    act(() => { rerender(); });
+
+    expect(result.current.insights).toBe(firstInsights);
+  });
 });
 
 describe('useNexusInsights - Insight Budget wiring (flag on)', () => {
@@ -115,5 +132,25 @@ describe('useNexusInsights - Insight Budget wiring (flag on)', () => {
 
     // No new ids appeared, so no further recordShownInsights calls.
     expect(budgetMocks.recordShownInsights).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not re-record an id already present in the persisted shownLog (persistent guard across remounts)', async () => {
+    flagValue = true;
+    // i1 was already shown and persisted in a previous mount/session — the
+    // ref-based same-mount guard alone (a fresh empty Set on every mount)
+    // would NOT catch this; only checking the freshly-read shownLog does.
+    budgetMocks.readShownLog.mockResolvedValue([
+      { id: 'i1', theme: null, title: 'One', shownAt: '2026-07-19T00:00:00.000Z' },
+    ]);
+    budgetMocks.applyInsightBudget.mockImplementation((insights) => insights);
+
+    const { result } = renderHook(() => useNexusInsights(USER, { autoRefresh: false }));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    await waitFor(() => expect(budgetMocks.readShownLog).toHaveBeenCalled());
+
+    await waitFor(() => expect(budgetMocks.recordShownInsights).toHaveBeenCalled());
+    const [, , recordedArg] = budgetMocks.recordShownInsights.mock.calls[0];
+    expect(recordedArg.map((i) => i.id)).not.toContain('i1');
+    expect(recordedArg.map((i) => i.id).sort()).toEqual(['i2', 'i3']);
   });
 });

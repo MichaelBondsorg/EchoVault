@@ -119,10 +119,15 @@ service cloud.firestore {
         // (Server grant/revoke callables run with admin creds and bypass this.)
         //
         // settings/insightBudget (PRD R1 Insight Budget) gates how many
-        // insights the Nexus surfaces show per day. `mode` must be one of the
-        // three tiers; `shownLog` is an optional list field reserved for a
-        // later task (per-day shown-insight ledger) and, when present, must
-        // be a list.
+        // insights the Nexus surfaces show per day. `mode`, when present, must
+        // be one of the three tiers — but it is NOT required on every write:
+        // `recordShownInsights` (Task 12) writes `{shownLog, updatedAt}` via a
+        // merge on a doc that may not have a persisted mode yet (client
+        // default is 'balanced', read separately), so a mode-less write must
+        // be allowed. `request.resource.data` is the post-merge document, so
+        // an already-persisted mode is still validated on every subsequent
+        // write that surfaces it. `shownLog` is a list field (per-day
+        // shown-insight ledger) and, when present, must be a list.
         //
         // settings/spacePrefs (PRD R1 Context Spaces) remembers the user's
         // last explicit capture-Space selection; `lastCaptureSpaceId` is
@@ -138,7 +143,7 @@ service cloud.firestore {
           && (
             settingId != 'insightBudget' || (
               request.resource.data.keys().hasOnly(['mode', 'updatedAt', 'shownLog'])
-              && request.resource.data.mode in ['quiet', 'balanced', 'exploratory']
+              && (!('mode' in request.resource.data) || request.resource.data.mode in ['quiet', 'balanced', 'exploratory'])
               && (!('shownLog' in request.resource.data) || request.resource.data.shownLog is list)
             )
           )

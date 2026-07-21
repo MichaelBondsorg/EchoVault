@@ -695,10 +695,23 @@ describe('Insight Budget settings rules', () => {
     await assertFails(setDoc(ref, { mode: 'balanced', updatedAt: 'now', shownLog: 'not-a-list' }));
   });
 
-  it('denies a write missing mode', async () => {
+  it('allows a mode-less write (recordShownInsights writing shownLog to a doc with no persisted mode yet)', async () => {
     const db = testEnv.authenticatedContext(USER_ID).firestore();
     const ref = doc(db, userPath(USER_ID), 'settings', 'insightBudget');
-    await assertFails(setDoc(ref, { updatedAt: 'now' }));
+    await assertSucceeds(setDoc(ref, { updatedAt: 'now', shownLog: [] }, { merge: true }));
+  });
+
+  it('allows a mode-less write with no shownLog either (bare updatedAt)', async () => {
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    const ref = doc(db, userPath(USER_ID), 'settings', 'insightBudget');
+    await assertSucceeds(setDoc(ref, { updatedAt: 'now' }));
+  });
+
+  it('still denies an invalid mode on a later write, even after an earlier mode-less shownLog write', async () => {
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    const ref = doc(db, userPath(USER_ID), 'settings', 'insightBudget');
+    await assertSucceeds(setDoc(ref, { updatedAt: 'now', shownLog: [] }, { merge: true }));
+    await assertFails(setDoc(ref, { mode: 'unlimited', updatedAt: 'now2' }, { merge: true }));
   });
 
   it('denies an unexpected extra key', async () => {

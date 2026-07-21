@@ -8,7 +8,7 @@
  * based on user feedback history.
  */
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { getCachedInsights, generateInsights } from '../services/nexus/orchestrator';
 import { getAllPatternLearning } from '../services/basicInsights/feedbackLearning';
 import { getFlag } from '../config/flags';
@@ -195,8 +195,13 @@ export const useNexusInsights = (user, options = {}) => {
     return null;
   };
 
-  // Combine active + history, dedupe, filter by confidence and learning
-  const allInsights = (() => {
+  // Combine active + history, dedupe, filter by confidence and learning.
+  // Memoized (Task 12 follow-up) so the array reference is stable across
+  // re-renders that don't touch activeInsights/historyInsights/learningData
+  // — this is what makes the Insight Budget's flag-off path a genuine,
+  // reference-identical passthrough rather than one that merely happens to
+  // contain equal values.
+  const allInsights = useMemo(() => {
     const seenIds = new Set();
     const combined = [];
 
@@ -251,7 +256,8 @@ export const useNexusInsights = (user, options = {}) => {
 
       return confidence >= 0.5;
     });
-  })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeInsights, historyInsights, learningData]);
 
   // Insight Budget gate (Task 12). Order: feedback suppression (above,
   // insightLearning) -> 90-day near-dup vs shownLog -> day/week cap, all
@@ -262,13 +268,22 @@ export const useNexusInsights = (user, options = {}) => {
     ? applyInsightBudget(allInsights, { mode: budgetMode, shownLog, now: Date.now() })
     : allInsights;
 
-  // Record what's actually displayed, once per distinct id per mount (ref
-  // guard survives re-renders without re-recording the same insight).
+  // Record what's actually displayed. Guarded two ways: the ref dedupes
+  // within this mount (budgetedInsights is a new array every render), and
+  // checking against the freshly-read `shownLog` dedupes across mounts —
+  // otherwise a remount (fresh ref, empty Set) would re-record ids already
+  // persisted from a previous session/mount.
   useEffect(() => {
     if (!user?.uid || !getFlag('insightBudget')) return;
 
+    const alreadyPersisted = new Set(
+      (shownLog || []).map((entry) => entry?.id).filter(Boolean)
+    );
+
     const toRecord = budgetedInsights.filter(
-      (insight) => insight?.id && !recordedShownIdsRef.current.has(insight.id)
+      (insight) => insight?.id
+        && !recordedShownIdsRef.current.has(insight.id)
+        && !alreadyPersisted.has(insight.id)
     );
     if (toRecord.length === 0) return;
 
@@ -276,7 +291,7 @@ export const useNexusInsights = (user, options = {}) => {
     recordShownInsights(db, user.uid, toRecord).catch((err) => {
       console.warn('[useNexusInsights] Failed to record shown insights:', err);
     });
-  }, [budgetedInsights, user?.uid]);
+  }, [budgetedInsights, shownLog, user?.uid]);
 
   // Get primary insight
   const primaryInsight = activeInsights.find(i => i.priority === 1) || activeInsights[0];
