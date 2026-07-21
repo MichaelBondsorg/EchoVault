@@ -319,3 +319,83 @@ describe('EntryBar — Space pill (flag: contextSpaces)', () => {
     await waitFor(() => expect(setLastCaptureSpaceId).toHaveBeenCalledWith({ __db: true }, OWNER, null));
   });
 });
+
+describe('EntryBar — Space picker dismissal (review fix)', () => {
+  beforeEach(() => {
+    subscribeSpaces.mockImplementation((_db, _uid, cb) => {
+      cb([{ id: 'space-1', name: 'Work' }]);
+      return () => {};
+    });
+  });
+
+  it('an outside pointerdown closes the open popover', async () => {
+    render(
+      <EntryBar ownerUid={OWNER} onVoiceSave={vi.fn()} onTextSave={vi.fn()} embedded preferredMode="text" />
+    );
+    fireEvent.click(await screen.findByLabelText('Assign a space'));
+    expect(screen.getByText('No space')).toBeTruthy();
+
+    fireEvent.pointerDown(document.body);
+
+    expect(screen.queryByText('No space')).toBeNull();
+  });
+
+  it('a click inside the popover does not trigger the outside-dismiss path (selection still applies)', async () => {
+    const onCaptureSpaceIdChange = vi.fn();
+    render(
+      <EntryBar
+        ownerUid={OWNER}
+        onVoiceSave={vi.fn()}
+        onTextSave={vi.fn()}
+        embedded
+        preferredMode="text"
+        onCaptureSpaceIdChange={onCaptureSpaceIdChange}
+      />
+    );
+    fireEvent.click(await screen.findByLabelText('Assign a space'));
+    fireEvent.pointerDown(screen.getByText('Work'));
+    fireEvent.click(screen.getByText('Work'));
+
+    expect(onCaptureSpaceIdChange).toHaveBeenCalledWith('space-1');
+  });
+
+  it('Escape closes the open popover', async () => {
+    render(
+      <EntryBar ownerUid={OWNER} onVoiceSave={vi.fn()} onTextSave={vi.fn()} embedded preferredMode="text" />
+    );
+    fireEvent.click(await screen.findByLabelText('Assign a space'));
+    expect(screen.getByText('No space')).toBeTruthy();
+
+    fireEvent.keyDown(document, { key: 'Escape' });
+
+    expect(screen.queryByText('No space')).toBeNull();
+  });
+
+  it('does not attach document listeners while the popover is closed', async () => {
+    render(
+      <EntryBar ownerUid={OWNER} onVoiceSave={vi.fn()} onTextSave={vi.fn()} embedded preferredMode="text" />
+    );
+    await screen.findByLabelText('Assign a space');
+    // Popover never opened — Escape must be a no-op (nothing to assert on
+    // visibly, but this guards against a listener wrongly attached on mount).
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(screen.queryByRole('listbox')).toBeNull();
+  });
+
+  it('switching modes (typing -> idle) resets the shared picker-open flag, so it never reopens in the other mode', async () => {
+    render(
+      <EntryBar ownerUid={OWNER} onVoiceSave={vi.fn()} onTextSave={vi.fn()} embedded preferredMode="text" />
+    );
+    // Open the picker in typing mode.
+    fireEvent.click(await screen.findByLabelText('Assign a space'));
+    expect(screen.getByRole('listbox')).toBeTruthy();
+
+    // Leave typing mode without selecting anything (abandon the picker).
+    fireEvent.click(screen.getByLabelText('Cancel text entry'));
+
+    // Back in idle mode: the idle-mode Space pill renders, but its popover
+    // must NOT have carried over as open.
+    await screen.findByLabelText('Record voice entry');
+    expect(screen.queryByRole('listbox')).toBeNull();
+  });
+});

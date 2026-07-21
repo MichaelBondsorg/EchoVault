@@ -10,6 +10,7 @@ import { audioVault } from '../../services/audio/audioVault';
 import { getFlag } from '../../config/flags';
 import { db } from '../../config/firebase';
 import { subscribeSpaces, setLastCaptureSpaceId } from '../../services/spaces/spacesService';
+import { useDismissablePopover } from '../../hooks/useDismissablePopover';
 import { Button, Chip } from '../cloud';
 
 /**
@@ -19,11 +20,17 @@ import { Button, Chip } from '../cloud';
  * affordance), with a lightweight absolutely-positioned popover listing
  * active spaces + "No space". Entirely local to EntryBar; only rendered
  * when the `contextSpaces` flag is on.
+ *
+ * Dismissal (review fix): an outside tap or Escape closes the popover via
+ * `useDismissablePopover` — see `onDismiss`. EntryBar also resets
+ * `spacePickerOpen` on every mode change so an abandoned popover never
+ * reopens over the other mode's controls.
  */
-const SpacePill = ({ spaces, selectedId, onSelect, open, onToggle }) => {
+const SpacePill = ({ spaces, selectedId, onSelect, open, onToggle, onDismiss }) => {
   const selected = spaces.find((s) => s.id === selectedId) || null;
+  const containerRef = useDismissablePopover(open, onDismiss);
   return (
-    <div className="relative inline-block">
+    <div className="relative inline-block" ref={containerRef}>
       <Chip
         as="button"
         type="button"
@@ -117,6 +124,14 @@ const EntryBar = ({
   useEffect(() => {
     onStateChange?.(mode);
   }, [mode, onStateChange]);
+
+  // Review fix: the Space popover is rendered in both the typing and idle
+  // branches but shares one `spacePickerOpen` flag — without this reset, a
+  // picker left open in one mode would reopen (and wedge) over the other
+  // mode's controls after a mode transition.
+  useEffect(() => {
+    setSpacePickerOpen(false);
+  }, [mode]);
 
   // Cleanup on unmount
   useEffect(() => {
@@ -507,6 +522,7 @@ const EntryBar = ({
                     onSelect={handleSelectSpace}
                     open={spacePickerOpen}
                     onToggle={() => setSpacePickerOpen((prev) => !prev)}
+                    onDismiss={() => setSpacePickerOpen(false)}
                   />
                 </div>
               )}
@@ -616,6 +632,7 @@ const EntryBar = ({
                   onSelect={handleSelectSpace}
                   open={spacePickerOpen}
                   onToggle={() => setSpacePickerOpen((prev) => !prev)}
+                  onDismiss={() => setSpacePickerOpen(false)}
                 />
               </div>
             )}

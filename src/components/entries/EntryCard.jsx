@@ -13,6 +13,7 @@ import { getFlag } from '../../config/flags';
 import { db } from '../../config/firebase';
 import { useUser } from '../../stores';
 import { subscribeSpaces } from '../../services/spaces/spacesService';
+import { useDismissablePopover } from '../../hooks/useDismissablePopover';
 import { Chip } from '../cloud';
 import ProvenanceDisclosure from '../ui/ProvenanceDisclosure';
 import IntentSuggestionTray from './IntentSuggestionTray';
@@ -24,11 +25,15 @@ import IntentSuggestionTray from './IntentSuggestionTray';
  * `onSelect` with the entry's own updateDoc payload, `{spaceId, updatedAt}`
  * — and nothing else ever changes (createdAt/effectiveDate/transcription
  * stay untouched).
+ *
+ * Dismissal (review fix): an outside tap or Escape closes the popover via
+ * the shared `useDismissablePopover` hook.
  */
-const SpaceChip = ({ spaces, selectedId, onSelect, open, onToggle }) => {
+const SpaceChip = ({ spaces, selectedId, onSelect, open, onToggle, onDismiss }) => {
   const selected = spaces.find((s) => s.id === selectedId) || null;
+  const containerRef = useDismissablePopover(open, onDismiss);
   return (
-    <div className="relative inline-block">
+    <div className="relative inline-block" ref={containerRef}>
       <Chip
         as="button"
         type="button"
@@ -491,6 +496,7 @@ const EntryCard = ({ entry, onDelete, onUpdate }) => {
               onSelect={handleSpaceSelect}
               open={spacePickerOpen}
               onToggle={() => setSpacePickerOpen((prev) => !prev)}
+              onDismiss={() => setSpacePickerOpen(false)}
             />
           )}
           {/* LAY-001: Limit visible tags to prevent overflow */}

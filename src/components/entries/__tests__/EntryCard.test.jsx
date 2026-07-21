@@ -138,3 +138,42 @@ describe('EntryCard — Space chip display + re-scoping', () => {
     expect(payload).not.toHaveProperty('transcription');
   });
 });
+
+describe('EntryCard — Space chip popover dismissal (review fix)', () => {
+  beforeEach(() => {
+    subscribeSpaces.mockImplementation((_db, _uid, cb) => {
+      cb([{ id: 'space-1', name: 'Work' }]);
+      return () => {};
+    });
+  });
+
+  it('an outside pointerdown closes the open popover', () => {
+    render(<EntryCard entry={baseEntry()} onDelete={vi.fn()} onUpdate={vi.fn()} />);
+    fireEvent.click(screen.getByLabelText('Assign a space'));
+    expect(screen.getByText('No space')).toBeTruthy();
+
+    fireEvent.pointerDown(document.body);
+
+    expect(screen.queryByText('No space')).toBeNull();
+  });
+
+  it('Escape closes the open popover', () => {
+    render(<EntryCard entry={baseEntry()} onDelete={vi.fn()} onUpdate={vi.fn()} />);
+    fireEvent.click(screen.getByLabelText('Assign a space'));
+    expect(screen.getByText('No space')).toBeTruthy();
+
+    fireEvent.keyDown(document, { key: 'Escape' });
+
+    expect(screen.queryByText('No space')).toBeNull();
+  });
+
+  it('a click inside the popover does not get treated as outside (selection still applies)', () => {
+    const onUpdate = vi.fn();
+    render(<EntryCard entry={baseEntry()} onDelete={vi.fn()} onUpdate={onUpdate} />);
+    fireEvent.click(screen.getByLabelText('Assign a space'));
+    fireEvent.pointerDown(screen.getByText('Work'));
+    fireEvent.click(screen.getByText('Work'));
+
+    expect(onUpdate).toHaveBeenCalledWith('entry-1', expect.objectContaining({ spaceId: 'space-1' }));
+  });
+});
