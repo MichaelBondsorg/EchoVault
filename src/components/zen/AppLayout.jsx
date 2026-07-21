@@ -21,6 +21,7 @@ import { UnifiedConversationWithSuspense as UnifiedConversation } from '../lazy'
 
 import EntryComposer from '../capture/EntryComposer';
 import CaptureReliabilityCenter from '../capture/CaptureReliabilityCenter';
+import CapturedToast from '../capture/CapturedToast';
 import PrivacyCenter from '../privacy/PrivacyCenter';
 
 /**
@@ -445,6 +446,8 @@ const AppLayout = ({
         onClick={() => aiProcessingEnabled ? setShowCompanion(true) : onRequestAiConsent?.()}
         hasNewInsight={false}
       />
+
+      <CapturedToast />
 
       <BottomNavbar onNewEntry={handleTextClick} />
 
