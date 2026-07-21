@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { doc, getDoc, setDoc, updateDoc, onSnapshot } from 'firebase/firestore';
 import { db } from '../config/firebase';
 import { APP_COLLECTION_ID } from '../config/constants';
-import { getFlag } from '../config/flags';
+import { getFlag, initFlags } from '../config/flags';
 
 /**
  * Widget definitions for the Bento dashboard
@@ -129,10 +129,35 @@ export function useDashboardLayout(userId) {
   // explicitly removed. Docs written before this field existed have no
   // `removedDefaults` at all — treated as empty (see onSnapshot handler).
   const [removedDefaults, setRemovedDefaults] = useState([]);
+  // True once initFlags(db) has resolved for this hook instance (success or
+  // caught failure — see flags.js, it never rejects). getFlag() is
+  // synchronous and always usable, but silently falls back to
+  // FLAG_DEFAULTS/localStorage until initFlags resolves. Without this, the
+  // availableWidgets effect below (gated on flags via WIDGET_DEFINITIONS'
+  // `flags` field) would compute once against stale defaults on mount and
+  // never get a chance to recheck once the real values arrive, since its
+  // only other dep (`layout`) doesn't change when flags do. Same M1-fix
+  // pattern as App.jsx's `flagsReady` (see App.jsx:233-241): include a
+  // readiness flag in the deps of any effect that reads getFlag(). initFlags
+  // is idempotent/cached across callers (App.jsx already fires it on auth),
+  // so calling it again here is a safe no-op fetch-wise.
+  const [flagsReady, setFlagsReady] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    initFlags(db).then(() => {
+      if (!cancelled) setFlagsReady(true);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // Calculate which widgets are available to add (not in current layout,
   // and gated behind any flags the widget definition declares — every flag
-  // in `flags` must be on, per getFlag).
+  // in `flags` must be on, per getFlag). Depends on flagsReady (M1 fix, see
+  // above) so a cold start where flags are still loading gets exactly one
+  // recheck once they finish.
   useEffect(() => {
     const currentWidgetIds = layout.map(w => w.id);
     const available = ALL_AVAILABLE_WIDGETS.filter(id => {
@@ -140,7 +165,7 @@ export function useDashboardLayout(userId) {
       return requiredFlags.every(flag => getFlag(flag)) && !currentWidgetIds.includes(id);
     });
     setAvailableWidgets(available);
-  }, [layout]);
+  }, [layout, flagsReady]);
 
   // Load user's dashboard preferences from Firestore
   useEffect(() => {

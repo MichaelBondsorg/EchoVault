@@ -18,9 +18,11 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { renderHook, waitFor, act } from '@testing-library/react';
 
 let flagValues = {};
-vi.mock('../../config/flags', () => ({
+const flagsMocks = {
   getFlag: vi.fn((name) => flagValues[name] ?? false),
-}));
+  initFlags: vi.fn(() => Promise.resolve()),
+};
+vi.mock('../../config/flags', () => flagsMocks);
 
 vi.mock('../../config/firebase', () => ({ db: {} }));
 
@@ -63,6 +65,7 @@ beforeEach(() => {
   firestoreMocks.onSnapshot.mockImplementation(() => () => {});
   firestoreMocks.setDoc.mockResolvedValue(undefined);
   firestoreMocks.getDoc.mockResolvedValue({ exists: () => false, data: () => undefined });
+  flagsMocks.initFlags.mockImplementation(() => Promise.resolve());
 });
 
 describe('WIDGET_DEFINITIONS flags', () => {
@@ -145,6 +148,43 @@ describe('availableWidgets flag filtering', () => {
   });
 });
 
+describe('availableWidgets recomputes once flags finish loading (M1-fix pattern)', () => {
+  it('adds a flag-gated widget to availableWidgets once initFlags resolves after mount', async () => {
+    // Simulate a cold start where initFlags(db) is still in flight when the
+    // dashboard mounts: getFlag falls back to stale/default values (both
+    // flags off) until the deferred promise below resolves.
+    let resolveInitFlags;
+    flagsMocks.initFlags.mockImplementation(
+      () => new Promise((resolve) => { resolveInitFlags = resolve; })
+    );
+    flagValues = { openLoops: false, intentExtraction: false };
+
+    const handler = captureSnapshotHandler();
+    const { result } = renderHook(() => useDashboardLayout(USER_ID));
+
+    act(() => {
+      handler.fire(fakeSnapshot(true, {
+        layout: [{ id: 'hero_card', type: 'hero', size: '2x1' }],
+        removedDefaults: ['open_loops'],
+      }));
+    });
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    // Before flags resolve: gated widget correctly computed as unavailable.
+    expect(result.current.availableWidgets).not.toContain('open_loops');
+
+    // Now the real flag values arrive (e.g. a slow config/flags read) —
+    // flip the underlying values and resolve the same promise the hook is
+    // awaiting for readiness.
+    flagValues = { openLoops: true, intentExtraction: true };
+    await act(async () => {
+      resolveInitFlags();
+    });
+
+    await waitFor(() => expect(result.current.availableWidgets).toContain('open_loops'));
+  });
+});
+
 describe('non-destructive default-layout merge on load', () => {
   it('appends a newly-shipped default widget missing from an old saved layout', async () => {
     const handler = captureSnapshotHandler();
@@ -224,6 +264,29 @@ describe('non-destructive default-layout merge on load', () => {
     // Other defaults not deliberately removed still merge back in.
     expect(ids).toContain('open_loops');
     expect(ids).toContain('quick_stats');
+  });
+
+  it('does not strip an id already present in the saved layout even when removedDefaults is stale (merge is add-only; resetLayout leaves removedDefaults untouched)', async () => {
+    const handler = captureSnapshotHandler();
+    const { result } = renderHook(() => useDashboardLayout(USER_ID));
+
+    act(() => {
+      // Mirrors exactly what resetLayout() writes: the full default layout,
+      // with a `removedDefaults` entry left over from before the reset
+      // (resetLayout doesn't clear it). Since the merge only ever ADDS
+      // defaults missing from `savedIds` — it never subtracts ids already
+      // present in data.layout — the stale suppression entry must stay
+      // inert and open_loops must remain in the merged layout.
+      handler.fire(fakeSnapshot(true, {
+        layout: DEFAULT_DASHBOARD_LAYOUT,
+        removedDefaults: ['open_loops'],
+      }));
+    });
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    const ids = result.current.layout.map((w) => w.id);
+    expect(ids).toEqual(DEFAULT_DASHBOARD_LAYOUT.map((w) => w.id));
+    expect(ids).toContain('open_loops');
   });
 });
 
