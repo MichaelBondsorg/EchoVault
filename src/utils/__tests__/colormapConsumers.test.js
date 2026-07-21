@@ -7,11 +7,11 @@ import path from 'path';
  *
  * These tests verify that EntryCard, InsightsPanel, and DailySummaryModal
  * have been migrated from off-palette (rainbow) Tailwind color classes.
- * InsightsPanel and DailySummaryModal still route through the centralized
- * colorMap.js semantic color system. EntryCard.jsx was further migrated
- * (Cloud redesign C4) off colorMap.js entirely — its entry-type/entity
- * badges use local Cloud-token styling instead — see the note on its
- * "no longer imports colorMap.js" test below.
+ * InsightsPanel still routes through the centralized colorMap.js semantic
+ * color system. EntryCard.jsx (Cloud redesign C4) and DailySummaryModal.jsx
+ * (R2 Task 6) were further migrated off colorMap.js entirely — their
+ * entry-type/entity badges use local Cloud-token styling instead — see the
+ * notes on their respective "no longer imports colorMap.js" tests below.
  */
 
 const readComponent = (relativePath) => {
@@ -290,8 +290,14 @@ describe('Section 07: colorMap Consumer Verification', () => {
       expect(violations).toEqual([]);
     });
 
-    it('should import colorMap functions', () => {
-      expect(source).toMatch(/import\s+.*from\s+['"].*colorMap['"]/);
+    // NOTE (Cloud redesign R2 Task 6, 2026-07-21): DailySummaryModal.jsx's
+    // entry-type badge used to render via colorMap.js's getEntryTypeColors(),
+    // which is why this suite originally asserted the colorMap import. It
+    // was replaced with the same local Cloud-token badge styling EntryCard.jsx
+    // (C4) established — single neutral bg-divider/text-secondary-foreground
+    // treatment — so DailySummaryModal.jsx no longer imports colorMap.js.
+    it('no longer imports colorMap.js (entry-type badge migrated to Cloud tokens)', () => {
+      expect(source).not.toMatch(/from\s+['"].*colorMap['"]/);
     });
   });
 });

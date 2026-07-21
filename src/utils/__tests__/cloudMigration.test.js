@@ -319,6 +319,16 @@ export const MIGRATED = [
   // same "new file, already clean" precedent as RecentEntriesWidget/
   // StreakCelebration, so it doesn't change the offender count.
   'src/components/zen/widgets/OpenLoopsWidget.jsx',
+  // R2 Task 6 (2026-07-21): DailySummaryModal.jsx (App.jsx's legacy
+  // day-summary flow, distinct from the already-migrated D4a
+  // zen/DaySummaryModal.jsx) — restyled in place (NOT moved onto the cloud
+  // `Drawer`, matching CrisisSoftBlockModal's precedent for centered-overlay
+  // modals kept in their own structure), scrim via bg-[var(--overlay)]. Its
+  // entry-type badge dropped colorMap.js's getEntryTypeColors() for the
+  // single neutral Cloud badge treatment (bg-divider/text-secondary-
+  // foreground) established by EntryCard.jsx (C4) — the caveat flagged as
+  // out-of-scope in D4a's MIGRATED comment is now resolved.
+  'src/components/modals/DailySummaryModal.jsx',
 ];
 
 // --- Ratchet: how many non-migrated .jsx files still use legacy palette classes ---
@@ -371,7 +381,10 @@ export const MIGRATED = [
 // all fully cleaned and moved to MIGRATED. StreakCelebration.jsx is a new
 // file (already clean), so it doesn't change the offender count. Budget
 // drops 56 -> 53.
-export const LEGACY_BUDGET = 53;
+// R2 Task 6 (2026-07-21): DailySummaryModal.jsx was 1 of the 53 offenders
+// (warm/hearth/lavender classes); fully cleaned and moved to MIGRATED.
+// Budget drops 53 -> 52.
+export const LEGACY_BUDGET = 52;
 
 function collectJsxFiles(dir) {
   const out = [];
