@@ -10,6 +10,7 @@ import {
   captureObjectPath,
   ALLOWED_UPLOAD_MIME_TYPES,
   UPLOAD_TICKET_TTL_MS,
+  SPACE_ID_HEADER,
 } from '../uploadTicket.js';
 
 const OP_ID = '11111111-2222-4333-8444-555555555555';
@@ -131,6 +132,80 @@ describe('issueCaptureUploadTicketCore', () => {
     await expect(
       issueCaptureUploadTicketCore({ uid: '', operationId: OP_ID, mimeType: 'audio/mp4' }, { storage: s.storage })
     ).rejects.toMatchObject({ code: 'unauthenticated' });
+  });
+
+  describe('spaceId (R2 plan task 5 — background-capture upload header)', () => {
+    it('SPACE_ID_HEADER is the x-goog-meta convention', () => {
+      expect(SPACE_ID_HEADER).toBe('x-goog-meta-space-id');
+    });
+
+    it('signs spaceId into extensionHeaders and echoes it in requiredHeaders when provided', async () => {
+      const result = await issueCaptureUploadTicketCore(
+        { uid: 'user-1', operationId: OP_ID, mimeType: 'audio/mp4', spaceId: 'work-space_1' },
+        { storage: s.storage }
+      );
+      const opts = s.getSignedUrl.mock.calls[0][0];
+      expect(opts.extensionHeaders).toEqual({ [SPACE_ID_HEADER]: 'work-space_1' });
+      expect(result.requiredHeaders).toEqual({
+        'Content-Type': 'audio/mp4',
+        [SPACE_ID_HEADER]: 'work-space_1',
+      });
+    });
+
+    it('does NOT sign or require the space-id header when spaceId is absent (unscoped capture, legacy identity)', async () => {
+      const result = await issueCaptureUploadTicketCore(
+        { uid: 'user-1', operationId: OP_ID, mimeType: 'audio/mp4' },
+        { storage: s.storage }
+      );
+      const opts = s.getSignedUrl.mock.calls[0][0];
+      expect(opts.extensionHeaders).toBeUndefined();
+      expect(result.requiredHeaders).toEqual({ 'Content-Type': 'audio/mp4' });
+      expect(result.requiredHeaders[SPACE_ID_HEADER]).toBeUndefined();
+    });
+
+    it('does NOT sign or require the space-id header when spaceId is explicitly null', async () => {
+      const result = await issueCaptureUploadTicketCore(
+        { uid: 'user-1', operationId: OP_ID, mimeType: 'audio/mp4', spaceId: null },
+        { storage: s.storage }
+      );
+      expect(result.requiredHeaders[SPACE_ID_HEADER]).toBeUndefined();
+    });
+
+    it('combines spaceId signing with capturedAt/captureTimezone provenance', async () => {
+      const result = await issueCaptureUploadTicketCore(
+        {
+          uid: 'user-1', operationId: OP_ID, mimeType: 'audio/mp4',
+          capturedAt: '2026-07-20T10:00:00Z', captureTimezone: 'America/Los_Angeles',
+          spaceId: 'work',
+        },
+        { storage: s.storage }
+      );
+      expect(result.requiredHeaders).toEqual({
+        'Content-Type': 'audio/mp4',
+        'x-goog-meta-captured-at': '2026-07-20T10:00:00Z',
+        'x-goog-meta-capture-timezone': 'America/Los_Angeles',
+        [SPACE_ID_HEADER]: 'work',
+      });
+    });
+
+    it('rejects an invalid spaceId — adversarial: too long, empty, disallowed chars, non-string', async () => {
+      const bad = ['', 'a'.repeat(41), 'has spaces', 'has/slash', 'has:colon', 'emoji-🚀', 123, {}];
+      for (const spaceId of bad) {
+        await expect(
+          issueCaptureUploadTicketCore({ uid: 'u', operationId: OP_ID, mimeType: 'audio/mp4', spaceId }, { storage: s.storage })
+        ).rejects.toMatchObject({ code: 'invalid-argument' });
+      }
+      expect(s.getSignedUrl).not.toHaveBeenCalled();
+    });
+
+    it('accepts the boundary lengths (1 char and 40 chars)', async () => {
+      await expect(
+        issueCaptureUploadTicketCore({ uid: 'u', operationId: OP_ID, mimeType: 'audio/mp4', spaceId: 'a' }, { storage: s.storage })
+      ).resolves.toBeTruthy();
+      await expect(
+        issueCaptureUploadTicketCore({ uid: 'u', operationId: OP_ID, mimeType: 'audio/mp4', spaceId: 'a'.repeat(40) }, { storage: s.storage })
+      ).resolves.toBeTruthy();
+    });
   });
 });
 

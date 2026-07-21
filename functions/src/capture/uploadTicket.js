@@ -34,9 +34,19 @@ const ISO_8601_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]
 
 // Custom-metadata header names sent on the PUT. GCS stores each `x-goog-meta-X`
 // header as custom metadata under the key `X` (prefix stripped, lowercased) —
-// see onAudioUploaded.js, which reads `captured-at` / `capture-timezone`.
+// see onAudioUploaded.js, which reads `captured-at` / `capture-timezone` /
+// `space-id`.
 const CAPTURED_AT_HEADER = 'x-goog-meta-captured-at';
 const CAPTURE_TZ_HEADER = 'x-goog-meta-capture-timezone';
+// Context Space (PRD R1 Context Spaces / R2 plan task 5) the capture was
+// started in. Exported so the (future) client ticket caller can name it
+// explicitly rather than re-deriving the `x-goog-meta-*` convention.
+export const SPACE_ID_HEADER = 'x-goog-meta-space-id';
+
+// Same charset/length convention as spacesService's spaceId validation
+// (alphanumeric + `_`/`-`, 1-40 chars) — this header is interpolated into
+// GCS custom metadata, not a path, but stays conservative regardless.
+const SPACE_ID_RE = /^[A-Za-z0-9_-]{1,40}$/;
 
 /** Validate an IANA timezone id via Intl (throws RangeError for unknown ids). */
 function isValidTimezone(tz) {
@@ -73,14 +83,19 @@ export function captureObjectPath(uid, operationId) {
  * @param {string} args.mimeType         Requested audio MIME type — MUST be allowed.
  * @param {string} [args.capturedAt]     Capture instant, strict ISO-8601 with offset/Z.
  * @param {string} [args.captureTimezone] IANA timezone id (validated via Intl).
+ * @param {string} [args.spaceId]        Context Space (R1) the capture was started in —
+ *                                        1-40 chars of [A-Za-z0-9_-]. Omitted from the
+ *                                        signature entirely when absent (unscoped capture
+ *                                        is the default; same no-null-stuffing rule as
+ *                                        buildCoreEntry's spaceId).
  * @param {object} deps
  * @param {object} deps.storage          admin Storage instance (getStorage()).
  * @param {Function} [deps.now]          Clock injection for tests; defaults to Date.now.
  * @returns {Promise<{uploadUrl:string, objectPath:string, expiresAt:string, requiredHeaders:object}>}
- * @throws {HttpsError} invalid-argument on bad operationId / mimeType / provenance.
+ * @throws {HttpsError} invalid-argument on bad operationId / mimeType / provenance / spaceId.
  */
 export async function issueCaptureUploadTicketCore(
-  { uid, operationId, mimeType, capturedAt, captureTimezone },
+  { uid, operationId, mimeType, capturedAt, captureTimezone, spaceId },
   { storage, now = () => Date.now() }
 ) {
   if (!uid || typeof uid !== 'string') {
@@ -111,6 +126,13 @@ export async function issueCaptureUploadTicketCore(
     extensionHeaders[CAPTURE_TZ_HEADER] = captureTimezone;
     requiredHeaders[CAPTURE_TZ_HEADER] = captureTimezone;
   }
+  if (spaceId !== undefined && spaceId !== null) {
+    if (typeof spaceId !== 'string' || !SPACE_ID_RE.test(spaceId)) {
+      throw new HttpsError('invalid-argument', 'spaceId must be 1-40 chars of [A-Za-z0-9_-]');
+    }
+    extensionHeaders[SPACE_ID_HEADER] = spaceId;
+    requiredHeaders[SPACE_ID_HEADER] = spaceId;
+  }
 
   const objectPath = captureObjectPath(uid, operationId);
   const expiresAtMs = now() + UPLOAD_TICKET_TTL_MS;
@@ -137,4 +159,4 @@ export async function issueCaptureUploadTicketCore(
   };
 }
 
-export default { issueCaptureUploadTicketCore, captureObjectPath, ALLOWED_UPLOAD_MIME_TYPES, CAPTURE_UPLOAD_PREFIX, UPLOAD_TICKET_TTL_MS };
+export default { issueCaptureUploadTicketCore, captureObjectPath, ALLOWED_UPLOAD_MIME_TYPES, CAPTURE_UPLOAD_PREFIX, UPLOAD_TICKET_TTL_MS, SPACE_ID_HEADER };

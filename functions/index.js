@@ -1156,10 +1156,10 @@ export const issueCaptureUploadTicket = onCall(
     const userId = request.auth.uid;
     await assertAiConsent(db, userId);
 
-    const { operationId, mimeType, capturedAt, captureTimezone } = request.data || {};
+    const { operationId, mimeType, capturedAt, captureTimezone, spaceId } = request.data || {};
 
     const ticket = await issueCaptureUploadTicketCore(
-      { uid: userId, operationId, mimeType, capturedAt, captureTimezone },
+      { uid: userId, operationId, mimeType, capturedAt, captureTimezone, spaceId },
       { storage: getStorage() }
     );
 
