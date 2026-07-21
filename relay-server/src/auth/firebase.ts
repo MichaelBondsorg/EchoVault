@@ -199,10 +199,17 @@ export const updateUserUsage = async (
 
 /**
  * Get user's recent entries for RAG context
+ *
+ * @param spaceId - Context Space (R1) to scope the query to (R2 plan task
+ *   5). undefined/null (default) is identity — the query is byte-identical
+ *   to before this parameter existed (no `where` clause added). When set,
+ *   adds `.where('spaceId', '==', spaceId)` using the composite index
+ *   `(spaceId ASC, createdAt DESC)` provisioned in R1.
  */
 export const getRecentEntries = async (
   userId: string,
-  limit: number = 5
+  limit: number = 5,
+  spaceId?: string | null
 ): Promise<Array<{
   id: string;
   effectiveDate: string;
@@ -217,8 +224,10 @@ export const getRecentEntries = async (
     .doc(userId)
     .collection('entries');
 
-  const snapshot = await entriesRef
-    .orderBy('createdAt', 'desc')
+  const snapshot = await (spaceId
+    ? entriesRef.where('spaceId', '==', spaceId).orderBy('createdAt', 'desc')
+    : entriesRef.orderBy('createdAt', 'desc')
+  )
     .limit(limit)
     .get();
 
@@ -401,6 +410,10 @@ export const searchEntries = async (
     dateHint?: string;
     entityType?: 'person' | 'goal' | 'situation' | 'event' | 'place' | 'any';
     limit?: number;
+    // Context Space (R1) to scope the search to (R2 plan task 5).
+    // undefined/null (default) is identity — no `where` clause added, query
+    // byte-identical to before this option existed.
+    spaceId?: string | null;
   }
 ): Promise<Array<{
   id: string;
@@ -423,15 +436,21 @@ export const searchEntries = async (
   const queryLower = query.toLowerCase();
   const queryWords = queryLower.split(/\s+/).filter(w => w.length > 2);
 
+  // Scope to a single Context Space when provided (composite index
+  // `(spaceId ASC, createdAt DESC)` from R1 covers the default branch below).
+  const scopedRef = options?.spaceId
+    ? entriesRef.where('spaceId', '==', options.spaceId)
+    : entriesRef;
+
   // Get entries to search through
   // For now, search through recent entries (could be optimized with full-text index later)
-  let baseQuery = entriesRef.orderBy('createdAt', 'desc');
+  let baseQuery = scopedRef.orderBy('createdAt', 'desc');
 
   // If date hint provided, try to filter by date range
   if (options?.dateHint) {
     const dateRange = parseDateHint(options.dateHint);
     if (dateRange) {
-      baseQuery = entriesRef
+      baseQuery = scopedRef
         .where('effectiveDate', '>=', dateRange.start)
         .where('effectiveDate', '<=', dateRange.end)
         .orderBy('effectiveDate', 'desc');

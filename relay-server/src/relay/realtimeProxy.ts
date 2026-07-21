@@ -223,7 +223,7 @@ const handleToolCall = async (sessionId: string, event: any): Promise<void> => {
 
       // TODO: Implement actual RAG search
       // For now, return a placeholder
-      const result = await searchMemory(sessionState.userId, args);
+      const result = await searchMemory(sessionState.userId, args, sessionState.spaceId);
 
       // Send tool result back to OpenAI
       openaiWs.send(
@@ -250,7 +250,8 @@ const handleToolCall = async (sessionId: string, event: any): Promise<void> => {
  */
 const searchMemory = async (
   userId: string,
-  args: { query: string; date_hint?: string; entity_type?: string }
+  args: { query: string; date_hint?: string; entity_type?: string },
+  spaceId?: string | null
 ): Promise<string> => {
   try {
     console.log(`[RAG] Searching for "${args.query}" (date: ${args.date_hint || 'any'}, type: ${args.entity_type || 'any'})`);
@@ -259,6 +260,7 @@ const searchMemory = async (
       dateHint: args.date_hint,
       entityType: args.entity_type as 'person' | 'goal' | 'situation' | 'event' | 'place' | 'any' | undefined,
       limit: 3,
+      spaceId,
     });
 
     if (results.length === 0) {

@@ -48,6 +48,10 @@ export const ClientMessageSchema = z.discriminatedUnion('type', [
     type: z.literal('start_session'),
     mode: z.enum(['realtime', 'standard']),
     sessionType: z.string().optional(),
+    // Context Space (R1) active in the client at session start (R2 plan task
+    // 5). null/omitted is identity — legacy, unscoped behavior; the relay
+    // adds no `where('spaceId', ...)` clause to its Firestore queries.
+    spaceId: z.string().nullable().optional(),
   }),
 ]);
 
@@ -146,6 +150,10 @@ export interface SessionState {
   userId: string;
   mode: ProcessingMode;
   sessionType?: GuidedSessionType | 'free';
+  // Context Space (R1) this session is scoped to, from the client's
+  // start_session message (R2 plan task 5). null = unscoped/"All spaces" —
+  // identity, same as every session before this field existed.
+  spaceId: string | null;
   transcript: string;
   sequenceId: number;
   startTime: number;

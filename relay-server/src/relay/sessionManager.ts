@@ -89,7 +89,8 @@ export const checkUsageLimits = async (
  */
 export const createSession = async (
   userId: string,
-  sessionType: GuidedSessionType | 'free' = 'free'
+  sessionType: GuidedSessionType | 'free' = 'free',
+  spaceId: string | null = null
 ): Promise<{ session: SessionState; error?: string }> => {
   // Check for existing session
   const existingSessionId = userSessions.get(userId);
@@ -116,6 +117,7 @@ export const createSession = async (
     userId,
     mode,
     sessionType,
+    spaceId,
     transcript: '',
     sequenceId: 0,
     startTime: now,
@@ -253,7 +255,7 @@ export const loadSessionContext = async (
   try {
     const [recentEntries, activeGoals, openSituations, moodTrajectory] =
       await Promise.all([
-        getRecentEntries(session.userId, 5),
+        getRecentEntries(session.userId, 5, session.spaceId),
         getActiveGoals(session.userId),
         getOpenSituations(session.userId),
         getMoodTrajectory(session.userId),

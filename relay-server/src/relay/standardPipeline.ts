@@ -293,7 +293,7 @@ const handleToolCallsAndRespond = async (
       try {
         const args = JSON.parse(toolCall.function.arguments);
         // TODO: Implement actual RAG search
-        const result = await searchMemory(session.sessionState.userId, args);
+        const result = await searchMemory(session.sessionState.userId, args, session.sessionState.spaceId);
         toolResults.push({
           role: 'tool',
           tool_call_id: toolCall.id,
@@ -345,7 +345,8 @@ const handleToolCallsAndRespond = async (
  */
 const searchMemory = async (
   userId: string,
-  args: { query: string; date_hint?: string; entity_type?: string }
+  args: { query: string; date_hint?: string; entity_type?: string },
+  spaceId?: string | null
 ): Promise<string> => {
   try {
     console.log(`[RAG] Searching for "${args.query}" (date: ${args.date_hint || 'any'}, type: ${args.entity_type || 'any'})`);
@@ -354,6 +355,7 @@ const searchMemory = async (
       dateHint: args.date_hint,
       entityType: args.entity_type as 'person' | 'goal' | 'situation' | 'event' | 'place' | 'any' | undefined,
       limit: 3,
+      spaceId,
     });
 
     if (results.length === 0) {

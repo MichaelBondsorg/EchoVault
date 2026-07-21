@@ -408,7 +408,7 @@ async function handleMessage(
 
   switch (message.type) {
     case 'start_session': {
-      await handleStartSession(ws, userId, message.mode, message.sessionType);
+      await handleStartSession(ws, userId, message.mode, message.sessionType, message.spaceId);
       break;
     }
 
@@ -446,7 +446,8 @@ async function handleStartSession(
   ws: WebSocket,
   userId: string,
   requestedMode: 'realtime' | 'standard',
-  sessionType?: string
+  sessionType?: string,
+  spaceId?: string | null
 ): Promise<void> {
   const typedSessionType = (sessionType || 'free') as GuidedSessionType | 'free';
 
@@ -468,7 +469,7 @@ async function handleStartSession(
 
   try {
     // Create session
-    const { session, error } = await createSession(userId, typedSessionType);
+    const { session, error } = await createSession(userId, typedSessionType, spaceId ?? null);
 
     if (error === 'Session already exists') {
       // Resume existing session
