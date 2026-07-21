@@ -12,7 +12,7 @@ vi.mock('../../ai/gemini', () => ({ analyzeJournalEntryCloud: vi.fn() }));
 vi.mock('../../../config/firebase', () => ({ askJournalAIFn: vi.fn() }));
 
 const { askJournalAIFn } = await import('../../../config/firebase');
-const { getSmartChatContext, askJournalAI } = await import('../index');
+const { getSmartChatContext, askJournalAI, generateDaySummary } = await import('../index');
 
 // Identical embedding across all entries -> similarity 1.0 for every one of
 // them pre-filter, so this deliberately maximizes semantic-match leakage risk.
@@ -88,6 +88,65 @@ describe('askJournalAI - scope filter seam', () => {
     askJournalAIFn.mockClear();
     await askJournalAI(entries, 'What did Sarah say about the launch?', SHARED_EMBEDDING);
     const withoutScopeArg = askJournalAIFn.mock.calls[0][0].entriesContext;
+
+    expect(withNullScope).toEqual(withoutScopeArg);
+  });
+});
+
+// generateDaySummary(dayEntries, scope) — the "30-Day Journey" modal summary
+// (a SEPARATE function from prompts/index.js's generateDaySummary), called
+// by src/components/zen/DaySummaryModal.jsx:74 with no scope arg today.
+function mixedDayCorpus() {
+  const createdAt = new Date('2026-07-20T12:00:00Z');
+  return [
+    { id: 'work-1', spaceId: 'work', text: 'Shipped the Q3 launch roadmap at work', createdAt },
+    { id: 'personal-1', spaceId: 'personal', text: 'Had a lovely dinner about the wedding', createdAt },
+    { id: 'unscoped-1', text: 'Legacy entry mentioning the launch again', createdAt },
+  ];
+}
+
+describe('generateDaySummary (30-Day Journey) - scope filter seam', () => {
+  it('Work-scoped call never embeds Personal-space or unscoped entry text into the AI context', async () => {
+    askJournalAIFn.mockResolvedValue({ data: { response: 'A good day.' } });
+    const dayEntries = mixedDayCorpus();
+
+    await generateDaySummary(dayEntries, { spaceId: 'work' });
+
+    expect(askJournalAIFn).toHaveBeenCalledTimes(1);
+    const { question } = askJournalAIFn.mock.calls[0][0];
+    expect(question).toContain('Shipped the Q3 launch roadmap at work');
+    expect(question).not.toContain('lovely dinner about the wedding');
+    expect(question).not.toContain('Legacy entry mentioning the launch again');
+  });
+
+  it('unscoped (legacy) call DOES surface all three entries — anchor proving the corpus would leak without the filter', async () => {
+    askJournalAIFn.mockResolvedValue({ data: { response: 'A good day.' } });
+    const dayEntries = mixedDayCorpus();
+
+    await generateDaySummary(dayEntries);
+
+    expect(askJournalAIFn).toHaveBeenCalledTimes(1);
+    const { question } = askJournalAIFn.mock.calls[0][0];
+    expect(question).toContain('Shipped the Q3 launch roadmap at work');
+    expect(question).toContain('lovely dinner about the wedding');
+    expect(question).toContain('Legacy entry mentioning the launch again');
+  });
+
+  it('Work-scoped call over an all-Personal/unscoped corpus returns null (nothing left after filtering)', async () => {
+    const dayEntries = mixedDayCorpus().filter((e) => e.id !== 'work-1');
+    const result = await generateDaySummary(dayEntries, { spaceId: 'work' });
+    expect(result).toBeNull();
+    expect(askJournalAIFn).not.toHaveBeenCalled();
+  });
+
+  it('null scope preserves legacy behavior: identical to omitting the scope arg', async () => {
+    askJournalAIFn.mockResolvedValue({ data: { response: 'A good day.' } });
+    const dayEntries = mixedDayCorpus();
+
+    const withoutScopeArg = await generateDaySummary(dayEntries);
+    askJournalAIFn.mockClear();
+    askJournalAIFn.mockResolvedValue({ data: { response: 'A good day.' } });
+    const withNullScope = await generateDaySummary(dayEntries, null);
 
     expect(withNullScope).toEqual(withoutScopeArg);
   });

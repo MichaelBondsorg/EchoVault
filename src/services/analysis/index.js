@@ -355,15 +355,21 @@ export const getSmartChatContext = async (entries, question, questionEmbedding, 
  * Used by the 30-Day Journey modal
  *
  * @param {Array} dayEntries - All entries for the day
+ * @param {{spaceId: string}|null} [scope] - Context Space scope. Applied
+ *   FIRST, before the entries-context text is built or any health/mood
+ *   aggregation runs, so a Work-scoped call can never embed a
+ *   Personal-space or unscoped entry's text into the AI context. null
+ *   (default) is identity — legacy, unscoped behavior.
  * @returns {Object} - { summary, moodDrivers, themes }
  */
-export const generateDaySummary = async (dayEntries) => {
-  if (!dayEntries || dayEntries.length === 0) {
+export const generateDaySummary = async (dayEntries, scope = null) => {
+  const scopedEntries = filterEntriesByScope(dayEntries || [], scope);
+  if (scopedEntries.length === 0) {
     return null;
   }
 
   // Build context from day's entries with health and environment data
-  const entriesContext = dayEntries.map(e => {
+  const entriesContext = scopedEntries.map(e => {
     const time = e.effectiveDate || e.createdAt;
     const d = time?.toDate?.() || new Date(time);
     const timeStr = d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
@@ -379,13 +385,13 @@ export const generateDaySummary = async (dayEntries) => {
   }).join('\n\n---\n\n');
 
   // Get aggregate health and environment context for the day
-  const dayHealth = dayEntries.find(e => e.healthContext)?.healthContext;
-  const dayEnv = dayEntries.find(e => e.environmentContext)?.environmentContext;
+  const dayHealth = scopedEntries.find(e => e.healthContext)?.healthContext;
+  const dayEnv = scopedEntries.find(e => e.environmentContext)?.environmentContext;
   const healthSummary = formatHealthDetailed(dayHealth);
   const envSummary = formatEnvironmentDetailed(dayEnv);
 
   // Calculate average mood
-  const moodScores = dayEntries
+  const moodScores = scopedEntries
     .filter(e => e.analysis?.mood_score !== undefined)
     .map(e => e.analysis.mood_score);
   const avgMood = moodScores.length > 0
@@ -425,14 +431,14 @@ ${entriesContext}`,
     return {
       summary,
       avgMood,
-      entryCount: dayEntries.length
+      entryCount: scopedEntries.length
     };
   } catch (e) {
     console.error('generateDaySummary error:', e);
     return {
       summary: 'Unable to generate summary at this time.',
       avgMood,
-      entryCount: dayEntries.length
+      entryCount: scopedEntries.length
     };
   }
 };

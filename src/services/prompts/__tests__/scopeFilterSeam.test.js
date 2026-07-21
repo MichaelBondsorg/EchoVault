@@ -55,6 +55,23 @@ describe('generateDashboardPrompts - scope filter seam', () => {
     expect(prompts.some((p) => p.prompt?.includes('ship feature'))).toBe(true);
   });
 
+  it('unscoped (legacy) call DOES surface the personal/unscoped goal content — anchor proving the scoped negatives above are not vacuous', async () => {
+    const entries = [
+      { id: 'work-1', category: 'work', spaceId: 'work-space', tags: ['@goal:ship_feature'], text: 'Shipping the feature', createdAt: new Date() },
+      { id: 'personal-1', category: 'work', spaceId: 'personal-space', tags: ['@goal:secret_personal_goal'], text: 'Secret personal goal', createdAt: new Date() },
+      { id: 'unscoped-1', category: 'work', tags: ['@goal:unscoped_goal'], text: 'Unscoped entry', createdAt: new Date() },
+    ];
+    callGemini.mockResolvedValue(JSON.stringify(['q1', 'q2', 'q3']));
+
+    await generateDashboardPrompts(entries, 'work');
+
+    expect(callGemini).toHaveBeenCalledTimes(1);
+    const promptArg = callGemini.mock.calls[0][0];
+    expect(promptArg).toContain('ship feature');
+    expect(promptArg).toContain('secret personal goal');
+    expect(promptArg).toContain('unscoped goal');
+  });
+
   it('null scope preserves legacy behavior: identical to omitting the scope arg', async () => {
     const entries = [
       { id: 'work-1', category: 'work', spaceId: 'work-space', tags: ['@goal:ship_feature'], text: 'Shipping the feature', createdAt: new Date() },
