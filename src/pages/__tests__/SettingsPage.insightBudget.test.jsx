@@ -1,9 +1,9 @@
 /**
  * SettingsPage Insight Budget mode selector tests
- * Tests flag-gating, UI rendering, mode selection, and persistence.
+ * Tests flag-gating, UI rendering, mode selection, persistence, and error recovery.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import SettingsPage from '../SettingsPage';
 import * as insightBudgetService from '../../services/insights/insightBudget';
 import * as flagsModule from '../../config/flags';
@@ -143,6 +143,9 @@ describe('SettingsPage - Insight Budget Mode Selector', () => {
 
       await waitFor(() => {
         const balancedChip = screen.getByText('Balanced');
+        // Chip component does not expose aria-pressed; relying on className
+        // coupling (bg-accent-deep applied when selected=true). If Chip.jsx
+        // adds aria-pressed support, this assertion should migrate to use it.
         expect(balancedChip.className).toContain('bg-accent-deep');
       });
     });
@@ -232,6 +235,37 @@ describe('SettingsPage - Insight Budget Mode Selector', () => {
         );
       });
     });
+
+    it('reverts UI to persisted mode when setBudgetMode rejects', async () => {
+      // Start with balanced selected
+      insightBudgetService.readBudgetMode.mockResolvedValue('balanced');
+      // setBudgetMode fails on selection
+      insightBudgetService.setBudgetMode.mockRejectedValueOnce(
+        new Error('Failed to save')
+      );
+      // readBudgetMode returns the persisted mode (balanced) on fallback
+      insightBudgetService.readBudgetMode.mockResolvedValueOnce('balanced');
+
+      render(<SettingsPage {...defaultProps} />);
+
+      // Wait for initial load
+      await waitFor(() => {
+        expect(screen.getByText('Balanced').className).toContain('bg-accent-deep');
+      });
+
+      // Try to select quiet; setBudgetMode will reject
+      const quietChip = screen.getByText('Quiet');
+      fireEvent.click(quietChip);
+
+      // UI should attempt the change (optimistic)
+      // but then revert to balanced after the error
+      await waitFor(() => {
+        expect(insightBudgetService.readBudgetMode).toHaveBeenCalledTimes(2);
+      });
+
+      // Verify balanced is highlighted again (reverted)
+      expect(screen.getByText('Balanced').className).toContain('bg-accent-deep');
+    });
   });
 
   describe('Initial Load', () => {
@@ -257,15 +291,41 @@ describe('SettingsPage - Insight Budget Mode Selector', () => {
 
       await waitFor(() => {
         const balancedChip = screen.getByText('Balanced');
+        // See comment in "highlights the current mode chip" test about className coupling.
         expect(balancedChip.className).toContain('bg-accent-deep');
       });
     });
+
+    it('still renders row with default balanced when readBudgetMode fails on mount', async () => {
+      flagsModule.getFlag = vi.fn((flag) => flag === 'insightBudget' ? true : false);
+      // readBudgetMode fails on mount
+      insightBudgetService.readBudgetMode.mockRejectedValueOnce(
+        new Error('Failed to load')
+      );
+
+      render(<SettingsPage {...defaultProps} />);
+
+      // Row still renders with Insight frequency visible even after load failure
+      await waitFor(() => {
+        expect(screen.getByText('Insight frequency')).toBeTruthy();
+      });
+
+      // Balanced should be selected by default (fallback when load fails)
+      const balancedChip = screen.getByText('Balanced');
+      // See comment in "highlights the current mode chip" test about className coupling.
+      expect(balancedChip.className).toContain('bg-accent-deep');
+
+      // Verify readBudgetMode was called and failed gracefully
+      expect(insightBudgetService.readBudgetMode).toHaveBeenCalledWith(
+        expect.any(Object),
+        'test-uid'
+      );
+
+      // Verify the error was logged (no throw), so app remains usable
+      // by confirming all three chips are present and interactive
+      expect(screen.getByText('Quiet')).toBeTruthy();
+      expect(screen.getByText('Balanced')).toBeTruthy();
+      expect(screen.getByText('Exploratory')).toBeTruthy();
+    });
   });
 });
-
-// Helper function for within queries
-function within(element) {
-  return {
-    getByText: (text) => Array.from(element.querySelectorAll('*')).find(el => el.textContent.includes(text)),
-  };
-}
