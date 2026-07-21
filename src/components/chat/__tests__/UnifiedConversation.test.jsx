@@ -390,4 +390,52 @@ describe('UnifiedConversation — voice connect waits for scope resolution (no r
     expect(mockVoiceConnect).toHaveBeenCalledTimes(1);
     expect(mockVoiceConnect).toHaveBeenCalledWith('free', 'realtime', 'space-1');
   });
+
+  // Re-review finding (task 5): subscribeSpaces' onSnapshot builds a FRESH
+  // array per snapshot, and Firestore commonly double-delivers (cache-then-
+  // server) on a fresh listener. A re-fire before the in-flight
+  // getLastCaptureSpaceId promise settles runs the FIRST invocation's
+  // cleanup (cancelled = true); the second invocation early-returns on the
+  // one-shot ref guard, so no replacement promise is ever created. When the
+  // orphaned first promise finally resolves, `cancelled` is true — if
+  // settlement itself were gated on `!cancelled` (as it used to be),
+  // `defaultScopeSettled` would NEVER flip true, `scopeReady` would be
+  // stuck false forever, and voice would never connect. This test proves
+  // settlement survives the re-fire even though the (now-stale) scope
+  // application is correctly suppressed.
+  it('a spaces snapshot re-fire before the default-scope load settles does not strand scopeReady — voice still connects once the orphaned load resolves', async () => {
+    const spacesCtrl = deferredSubscribeSpaces();
+    const defaultScopeCtrl = deferredGetLastCaptureSpaceId();
+    render(<UnifiedConversation userId={USER_ID} onClose={vi.fn()} />);
+
+    fireEvent.click(await screen.findByText('Voice Conversation'));
+    expect(mockVoiceConnect).not.toHaveBeenCalled();
+
+    // First snapshot (non-empty) starts the one-shot default-scope load.
+    spacesCtrl.deliver([{ id: 'space-1', name: 'Work' }]);
+    await Promise.resolve();
+    expect(mockVoiceConnect).not.toHaveBeenCalled();
+    expect(getLastCaptureSpaceId).toHaveBeenCalledTimes(1);
+
+    // Firestore double-delivers: a fresh array reference (same content)
+    // arrives before the load resolves. This re-fires the effect, running
+    // invocation 1's cleanup (cancelled = true); the ref guard blocks a
+    // replacement promise, so getLastCaptureSpaceId is NOT called again.
+    spacesCtrl.deliver([{ id: 'space-1', name: 'Work' }]);
+    await Promise.resolve();
+    expect(mockVoiceConnect).not.toHaveBeenCalled();
+    expect(getLastCaptureSpaceId).toHaveBeenCalledTimes(1);
+
+    // The orphaned first promise resolves. Its scope application is
+    // correctly suppressed by cancellation (never applied), but
+    // settlement must still fire unconditionally so scopeReady unblocks.
+    // Connect proceeds with the live effectiveScope (still unscoped, since
+    // the loaded scope was never applied) rather than hanging forever.
+    await defaultScopeCtrl.resolve('space-1');
+
+    await waitFor(() =>
+      expect(mockVoiceConnect).toHaveBeenCalledWith('free', 'realtime', null)
+    );
+    expect(mockVoiceConnect).toHaveBeenCalledTimes(1);
+  });
 });

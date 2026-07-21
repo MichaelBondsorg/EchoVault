@@ -218,7 +218,22 @@ const UnifiedConversation = ({
         // (or anything else gated on scopeReady) forever.
       })
       .finally(() => {
-        if (!cancelled) setDefaultScopeSettled(true);
+        // Settlement is UNCONDITIONAL (not gated on `cancelled`), unlike the
+        // `.then` above which applies the loaded scope. The one-shot
+        // `scopeDefaultLoadedRef` guard means this is the only promise ever
+        // created for this userId, so it's also the only signal that will
+        // ever flip `defaultScopeSettled`. `subscribeSpaces` delivers a
+        // fresh array on every snapshot (and Firestore commonly double-
+        // delivers cache-then-server on a new listener); a re-fire of this
+        // effect before this promise settles runs THIS invocation's cleanup
+        // (cancelled = true) while the ref guard blocks any replacement
+        // promise from being created. If settlement were also gated on
+        // `!cancelled`, that re-fire would permanently strand
+        // `defaultScopeSettled` at false — and with it `scopeReady` and
+        // voice-connect — even though this promise still resolves. React 18
+        // setState-after-unmount is a safe no-op, and settlement is an
+        // idempotent boolean, so firing it unconditionally is safe.
+        setDefaultScopeSettled(true);
       });
     return () => { cancelled = true; };
   }, [contextSpacesOn, userId, spaces]);
