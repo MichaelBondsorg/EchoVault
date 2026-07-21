@@ -132,6 +132,10 @@ service cloud.firestore {
         // settings/spacePrefs (PRD R1 Context Spaces) remembers the user's
         // last explicit capture-Space selection; `lastCaptureSpaceId` is
         // either a space id (string) or null (no space remembered / unscoped).
+        //
+        // settings/revisitPrefs (R2 Gentle Revisit) records whether the user
+        // has opted in to resurfaced-content prompts; `enabled` must be a
+        // bool when the doc is written.
         allow write: if isOwner(userId)
           && settingId != 'subscription'
           && (
@@ -151,6 +155,12 @@ service cloud.firestore {
             settingId != 'spacePrefs' || (
               request.resource.data.keys().hasOnly(['lastCaptureSpaceId', 'updatedAt'])
               && (request.resource.data.lastCaptureSpaceId is string || request.resource.data.lastCaptureSpaceId == null)
+            )
+          )
+          && (
+            settingId != 'revisitPrefs' || (
+              request.resource.data.keys().hasOnly(['enabled', 'optInAt', 'updatedAt'])
+              && request.resource.data.enabled is bool
             )
           );
       }
@@ -265,6 +275,71 @@ service cloud.firestore {
         allow create, update: if isOwner(userId)
           && request.resource.data.keys().hasAll(['token', 'platform'])
           && request.resource.data.keys().size() <= 5;
+      }
+
+      // NEW (R2): Source exclusions (user excludes an entry/pattern-type from
+      // a given surface, permanently). Owner may read/create/delete — there
+      // is NO update: deleting the exclusion doc IS the "restore" action, a
+      // client can never edit an exclusion in place.
+      match /source_exclusions/{id} {
+        allow read: if isOwner(userId);
+        allow create: if isOwner(userId)
+          && request.resource.data.keys().hasOnly(['entryId', 'appliesTo', 'reason', 'permanent', 'createdAt'])
+          && request.resource.data.entryId is string
+          && request.resource.data.appliesTo is string
+          && request.resource.data.reason in ['wrong_source', 'excluded_by_user']
+          && request.resource.data.permanent == true;
+        allow delete: if isOwner(userId);
+      }
+
+      // NEW (R2): Reflection Recipes (user-defined, reusable question sets
+      // that drive recipe_run reflections). Owner has full CRUD, shape-
+      // validated on create/update.
+      match /recipes/{id} {
+        allow read, delete: if isOwner(userId);
+        allow create, update: if isOwner(userId)
+          && request.resource.data.keys().hasOnly(['name', 'questions', 'scope', 'timeRangeDays', 'cadence', 'state', 'definitionVersion', 'createdAt', 'updatedAt'])
+          && request.resource.data.name.size() <= 60
+          && request.resource.data.questions is list && request.resource.data.questions.size() <= 5
+          && request.resource.data.state in ['active', 'archived']
+          && request.resource.data.cadence in ['manual'];
+      }
+
+      // NEW (R2): Reflections (generated output — either a recipe_run against
+      // a Recipe above, or a session_brief). Owner has full CRUD, shape-
+      // validated on create/update.
+      match /reflections/{id} {
+        allow read, delete: if isOwner(userId);
+        allow create, update: if isOwner(userId)
+          && request.resource.data.keys().hasOnly(['kind', 'recipeId', 'definitionVersion', 'scope', 'period', 'title', 'blocks', 'status', 'createdAt', 'updatedAt'])
+          && request.resource.data.kind in ['recipe_run', 'session_brief']
+          && request.resource.data.status in ['draft', 'final'];
+      }
+
+      // NEW (R2): Gentle Revisit exclusions (user opts a dimension — entry,
+      // date, person, tag, space, or an entire family of resurfaced content —
+      // out of future revisit surfacing). Owner may read/create/delete — NO
+      // update: delete = restore, same pattern as source_exclusions above.
+      match /revisit_exclusions/{id} {
+        allow read: if isOwner(userId);
+        allow create: if isOwner(userId)
+          && request.resource.data.keys().hasOnly(['dimension', 'value', 'reason', 'permanent', 'createdAt', 'expiresAt'])
+          && request.resource.data.dimension in ['entry', 'date', 'person', 'tag', 'space', 'family']
+          && request.resource.data.reason in ['never_show', 'less_like_this', 'hidden_dim'];
+        allow delete: if isOwner(userId);
+      }
+
+      // NEW (R2): Gentle Revisit queue (server-computed candidates for
+      // resurfacing). NO client create — only the server (Admin SDK, via the
+      // catch-all below) may enqueue candidates. Owner may read/delete their
+      // own queue entries, and may update ONLY the status (marking an item
+      // shown/dismissed) plus updatedAt — every other field is immutable
+      // from the client.
+      match /revisit_queue/{id} {
+        allow read, delete: if isOwner(userId);
+        allow update: if isOwner(userId)
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'updatedAt'])
+          && request.resource.data.status in ['shown', 'dismissed'];
       }
     }
 

@@ -760,3 +760,421 @@ describe('Space prefs settings rules', () => {
     await assertFails(setDoc(ref, { lastCaptureSpaceId: 'space1', updatedAt: 'now' }));
   });
 });
+
+// --- Source exclusions collection rules (R2) -------------------------------
+
+describe('Source exclusions collection rules', () => {
+  const validExclusion = {
+    entryId: 'entry-1',
+    appliesTo: 'all',
+    reason: 'wrong_source',
+    permanent: true,
+    createdAt: 'now',
+  };
+
+  it('allows the owner to create a well-formed source exclusion', async () => {
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    await assertSucceeds(setDoc(doc(db, userPath(USER_ID), 'source_exclusions', 'ex1'), validExclusion));
+  });
+
+  it('allows the owner to read and delete their own source exclusion', async () => {
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    const ref = doc(db, userPath(USER_ID), 'source_exclusions', 'ex1');
+    await assertSucceeds(setDoc(ref, validExclusion));
+    await assertSucceeds(getDoc(ref));
+    await assertSucceeds(deleteDoc(ref));
+  });
+
+  it('denies an update (delete is the only way to restore)', async () => {
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    const ref = doc(db, userPath(USER_ID), 'source_exclusions', 'ex-noupdate');
+    await assertSucceeds(setDoc(ref, validExclusion));
+    await assertFails(updateDoc(ref, { reason: 'excluded_by_user' }));
+  });
+
+  it('accepts appliesTo as a specific patternType string, not just "all"', async () => {
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    const ref = doc(db, userPath(USER_ID), 'source_exclusions', 'ex-pattern');
+    await assertSucceeds(setDoc(ref, { ...validExclusion, appliesTo: 'weekly_mood_dip' }));
+  });
+
+  it('denies a non-string entryId', async () => {
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    const ref = doc(db, userPath(USER_ID), 'source_exclusions', 'ex-badentry');
+    await assertFails(setDoc(ref, { ...validExclusion, entryId: 123 }));
+  });
+
+  it('denies a non-string appliesTo', async () => {
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    const ref = doc(db, userPath(USER_ID), 'source_exclusions', 'ex-badapplies');
+    await assertFails(setDoc(ref, { ...validExclusion, appliesTo: 42 }));
+  });
+
+  it('denies an unknown reason', async () => {
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    const ref = doc(db, userPath(USER_ID), 'source_exclusions', 'ex-badreason');
+    await assertFails(setDoc(ref, { ...validExclusion, reason: 'because' }));
+  });
+
+  it('denies permanent set to false (or any non-true value)', async () => {
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    const ref = doc(db, userPath(USER_ID), 'source_exclusions', 'ex-badpermanent');
+    await assertFails(setDoc(ref, { ...validExclusion, permanent: false }));
+  });
+
+  it('denies an unexpected extra key', async () => {
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    const ref = doc(db, userPath(USER_ID), 'source_exclusions', 'ex-junk');
+    await assertFails(setDoc(ref, { ...validExclusion, note: 'hacked' }));
+  });
+
+  it('denies another user reading, creating, or deleting a source exclusion', async () => {
+    const ownerDb = testEnv.authenticatedContext(USER_ID).firestore();
+    const ownerRef = doc(ownerDb, userPath(USER_ID), 'source_exclusions', 'ex-cross');
+    await assertSucceeds(setDoc(ownerRef, validExclusion));
+
+    const db = testEnv.authenticatedContext(OTHER_USER_ID).firestore();
+    const ref = doc(db, userPath(USER_ID), 'source_exclusions', 'ex-cross');
+    await assertFails(getDoc(ref));
+    await assertFails(setDoc(ref, validExclusion));
+    await assertFails(deleteDoc(ref));
+  });
+});
+
+// --- Recipes collection rules (R2 Reflection Recipes) ----------------------
+
+describe('Recipes collection rules', () => {
+  const validRecipe = {
+    name: 'Weekly check-in',
+    questions: ['What went well?', 'What was hard?'],
+    scope: 'all',
+    timeRangeDays: 7,
+    cadence: 'manual',
+    state: 'active',
+    definitionVersion: 1,
+    createdAt: 'now',
+    updatedAt: 'now',
+  };
+
+  it('allows the owner to create a well-formed recipe', async () => {
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    await assertSucceeds(setDoc(doc(db, userPath(USER_ID), 'recipes', 'r1'), validRecipe));
+  });
+
+  it('allows the owner to read, update, and delete their own recipe', async () => {
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    const ref = doc(db, userPath(USER_ID), 'recipes', 'r1');
+    await assertSucceeds(setDoc(ref, validRecipe));
+    await assertSucceeds(getDoc(ref));
+    await assertSucceeds(updateDoc(ref, { state: 'archived', updatedAt: 'later' }));
+    await assertSucceeds(deleteDoc(ref));
+  });
+
+  it('denies a name over 60 characters', async () => {
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    const ref = doc(db, userPath(USER_ID), 'recipes', 'r-toolong');
+    await assertFails(setDoc(ref, { ...validRecipe, name: 'x'.repeat(61) }));
+  });
+
+  it('denies a non-list questions field', async () => {
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    const ref = doc(db, userPath(USER_ID), 'recipes', 'r-badquestions');
+    await assertFails(setDoc(ref, { ...validRecipe, questions: 'not-a-list' }));
+  });
+
+  it('denies more than 5 questions', async () => {
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    const ref = doc(db, userPath(USER_ID), 'recipes', 'r-toomanyquestions');
+    await assertFails(setDoc(ref, { ...validRecipe, questions: ['q1', 'q2', 'q3', 'q4', 'q5', 'q6'] }));
+  });
+
+  it('denies an unknown state', async () => {
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    const ref = doc(db, userPath(USER_ID), 'recipes', 'r-badstate');
+    await assertFails(setDoc(ref, { ...validRecipe, state: 'deleted' }));
+  });
+
+  it('denies an unknown cadence (only manual is supported in v1)', async () => {
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    const ref = doc(db, userPath(USER_ID), 'recipes', 'r-badcadence');
+    await assertFails(setDoc(ref, { ...validRecipe, cadence: 'weekly' }));
+  });
+
+  it('denies an unexpected extra key', async () => {
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    const ref = doc(db, userPath(USER_ID), 'recipes', 'r-junk');
+    await assertFails(setDoc(ref, { ...validRecipe, color: 'blue' }));
+  });
+
+  it('denies another user reading, creating, updating, or deleting a recipe', async () => {
+    const ownerDb = testEnv.authenticatedContext(USER_ID).firestore();
+    const ownerRef = doc(ownerDb, userPath(USER_ID), 'recipes', 'r-cross');
+    await assertSucceeds(setDoc(ownerRef, validRecipe));
+
+    const db = testEnv.authenticatedContext(OTHER_USER_ID).firestore();
+    const ref = doc(db, userPath(USER_ID), 'recipes', 'r-cross');
+    await assertFails(getDoc(ref));
+    await assertFails(setDoc(ref, validRecipe));
+    await assertFails(updateDoc(ref, { state: 'archived' }));
+    await assertFails(deleteDoc(ref));
+  });
+});
+
+// --- Reflections collection rules (R2) --------------------------------------
+
+describe('Reflections collection rules', () => {
+  const validReflection = {
+    kind: 'recipe_run',
+    recipeId: 'r1',
+    definitionVersion: 1,
+    scope: 'all',
+    period: { start: '2026-07-14', end: '2026-07-21' },
+    title: 'Weekly check-in — Jul 21',
+    blocks: [{ question: 'What went well?', answer: 'Slept better.' }],
+    status: 'draft',
+    createdAt: 'now',
+    updatedAt: 'now',
+  };
+
+  it('allows the owner to create a well-formed reflection', async () => {
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    await assertSucceeds(setDoc(doc(db, userPath(USER_ID), 'reflections', 'ref1'), validReflection));
+  });
+
+  it('allows the owner to read, update, and delete their own reflection', async () => {
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    const ref = doc(db, userPath(USER_ID), 'reflections', 'ref1');
+    await assertSucceeds(setDoc(ref, validReflection));
+    await assertSucceeds(getDoc(ref));
+    await assertSucceeds(updateDoc(ref, { status: 'final', updatedAt: 'later' }));
+    await assertSucceeds(deleteDoc(ref));
+  });
+
+  it('allows a session_brief kind reflection (no recipeId)', async () => {
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    const ref = doc(db, userPath(USER_ID), 'reflections', 'ref-brief');
+    await assertSucceeds(setDoc(ref, { ...validReflection, kind: 'session_brief', recipeId: null }));
+  });
+
+  it('denies an unknown kind', async () => {
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    const ref = doc(db, userPath(USER_ID), 'reflections', 'ref-badkind');
+    await assertFails(setDoc(ref, { ...validReflection, kind: 'summary' }));
+  });
+
+  it('denies an unknown status', async () => {
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    const ref = doc(db, userPath(USER_ID), 'reflections', 'ref-badstatus');
+    await assertFails(setDoc(ref, { ...validReflection, status: 'published' }));
+  });
+
+  it('denies an unexpected extra key', async () => {
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    const ref = doc(db, userPath(USER_ID), 'reflections', 'ref-junk');
+    await assertFails(setDoc(ref, { ...validReflection, hacked: true }));
+  });
+
+  it('denies another user reading, creating, updating, or deleting a reflection', async () => {
+    const ownerDb = testEnv.authenticatedContext(USER_ID).firestore();
+    const ownerRef = doc(ownerDb, userPath(USER_ID), 'reflections', 'ref-cross');
+    await assertSucceeds(setDoc(ownerRef, validReflection));
+
+    const db = testEnv.authenticatedContext(OTHER_USER_ID).firestore();
+    const ref = doc(db, userPath(USER_ID), 'reflections', 'ref-cross');
+    await assertFails(getDoc(ref));
+    await assertFails(setDoc(ref, validReflection));
+    await assertFails(updateDoc(ref, { status: 'final' }));
+    await assertFails(deleteDoc(ref));
+  });
+});
+
+// --- Revisit exclusions collection rules (R2 Gentle Revisit) ----------------
+
+describe('Revisit exclusions collection rules', () => {
+  const validExclusion = {
+    dimension: 'entry',
+    value: 'entry-1',
+    reason: 'never_show',
+    permanent: true,
+    createdAt: 'now',
+    expiresAt: null,
+  };
+
+  it('allows the owner to create a well-formed revisit exclusion', async () => {
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    await assertSucceeds(setDoc(doc(db, userPath(USER_ID), 'revisit_exclusions', 'rex1'), validExclusion));
+  });
+
+  it('allows the owner to read and delete their own revisit exclusion', async () => {
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    const ref = doc(db, userPath(USER_ID), 'revisit_exclusions', 'rex1');
+    await assertSucceeds(setDoc(ref, validExclusion));
+    await assertSucceeds(getDoc(ref));
+    await assertSucceeds(deleteDoc(ref));
+  });
+
+  it('denies an update (delete is the only way to restore)', async () => {
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    const ref = doc(db, userPath(USER_ID), 'revisit_exclusions', 'rex-noupdate');
+    await assertSucceeds(setDoc(ref, validExclusion));
+    await assertFails(updateDoc(ref, { reason: 'less_like_this' }));
+  });
+
+  it('allows every supported dimension', async () => {
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    for (const dimension of ['entry', 'date', 'person', 'tag', 'space', 'family']) {
+      const ref = doc(db, userPath(USER_ID), 'revisit_exclusions', `rex-dim-${dimension}`);
+      await assertSucceeds(setDoc(ref, { ...validExclusion, dimension }));
+    }
+  });
+
+  it('denies an unknown dimension', async () => {
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    const ref = doc(db, userPath(USER_ID), 'revisit_exclusions', 'rex-baddim');
+    await assertFails(setDoc(ref, { ...validExclusion, dimension: 'topic' }));
+  });
+
+  it('denies an unknown reason', async () => {
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    const ref = doc(db, userPath(USER_ID), 'revisit_exclusions', 'rex-badreason');
+    await assertFails(setDoc(ref, { ...validExclusion, reason: 'because' }));
+  });
+
+  it('denies an unexpected extra key', async () => {
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    const ref = doc(db, userPath(USER_ID), 'revisit_exclusions', 'rex-junk');
+    await assertFails(setDoc(ref, { ...validExclusion, note: 'hacked' }));
+  });
+
+  it('denies another user reading, creating, or deleting a revisit exclusion', async () => {
+    const ownerDb = testEnv.authenticatedContext(USER_ID).firestore();
+    const ownerRef = doc(ownerDb, userPath(USER_ID), 'revisit_exclusions', 'rex-cross');
+    await assertSucceeds(setDoc(ownerRef, validExclusion));
+
+    const db = testEnv.authenticatedContext(OTHER_USER_ID).firestore();
+    const ref = doc(db, userPath(USER_ID), 'revisit_exclusions', 'rex-cross');
+    await assertFails(getDoc(ref));
+    await assertFails(setDoc(ref, validExclusion));
+    await assertFails(deleteDoc(ref));
+  });
+});
+
+// --- Revisit queue collection rules (R2 Gentle Revisit, server-written) -----
+
+// Seed a server-created revisit_queue candidate (bypassing rules, as the
+// Admin SDK does) so we can exercise the client update/read/delete contract
+// against it.
+async function seedRevisitQueueItem(id, status, extra = {}) {
+  await testEnv.withSecurityRulesDisabled(async (context) => {
+    const db = context.firestore();
+    await setDoc(doc(db, userPath(USER_ID), 'revisit_queue', id), {
+      entryId: 'entry-1',
+      dimension: 'entry',
+      status,
+      score: 0.5,
+      createdAt: 'seed',
+      updatedAt: 'seed',
+      ...extra,
+    });
+  });
+}
+
+describe('Revisit queue collection rules', () => {
+  it('denies a client CREATE (only the server may enqueue candidates)', async () => {
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    const ref = doc(db, userPath(USER_ID), 'revisit_queue', 'forged');
+    await assertFails(setDoc(ref, { entryId: 'entry-1', status: 'pending' }));
+  });
+
+  it('allows the owner to read their own queue item', async () => {
+    await seedRevisitQueueItem('rq-read', 'pending');
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    await assertSucceeds(getDoc(doc(db, userPath(USER_ID), 'revisit_queue', 'rq-read')));
+  });
+
+  it('allows the owner to delete their own queue item', async () => {
+    await seedRevisitQueueItem('rq-del', 'pending');
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    await assertSucceeds(deleteDoc(doc(db, userPath(USER_ID), 'revisit_queue', 'rq-del')));
+  });
+
+  it('ALLOWS updating status to shown, touching only status/updatedAt', async () => {
+    await seedRevisitQueueItem('rq-shown', 'pending');
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    await assertSucceeds(updateDoc(doc(db, userPath(USER_ID), 'revisit_queue', 'rq-shown'), {
+      status: 'shown',
+      updatedAt: 'now',
+    }));
+  });
+
+  it('ALLOWS updating status to dismissed, touching only status/updatedAt', async () => {
+    await seedRevisitQueueItem('rq-dismissed', 'shown');
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    await assertSucceeds(updateDoc(doc(db, userPath(USER_ID), 'revisit_queue', 'rq-dismissed'), {
+      status: 'dismissed',
+      updatedAt: 'now',
+    }));
+  });
+
+  it('FORBIDS an unknown status value', async () => {
+    await seedRevisitQueueItem('rq-badstatus', 'pending');
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    await assertFails(updateDoc(doc(db, userPath(USER_ID), 'revisit_queue', 'rq-badstatus'), {
+      status: 'archived',
+      updatedAt: 'now',
+    }));
+  });
+
+  it('FORBIDS touching a field other than status/updatedAt', async () => {
+    await seedRevisitQueueItem('rq-tamper', 'pending');
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    await assertFails(updateDoc(doc(db, userPath(USER_ID), 'revisit_queue', 'rq-tamper'), {
+      status: 'shown',
+      updatedAt: 'now',
+      score: 0.99,
+    }));
+  });
+
+  it('denies another user reading, updating, or deleting a queue item', async () => {
+    await seedRevisitQueueItem('rq-cross', 'pending');
+    const db = testEnv.authenticatedContext(OTHER_USER_ID).firestore();
+    const ref = doc(db, userPath(USER_ID), 'revisit_queue', 'rq-cross');
+    await assertFails(getDoc(ref));
+    await assertFails(updateDoc(ref, { status: 'shown', updatedAt: 'now' }));
+    await assertFails(deleteDoc(ref));
+  });
+});
+
+// --- Revisit prefs settings rules (settings/revisitPrefs shape, R2) --------
+
+describe('Revisit prefs settings rules', () => {
+  it('allows owner to write a valid revisitPrefs shape', async () => {
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    const ref = doc(db, userPath(USER_ID), 'settings', 'revisitPrefs');
+    await assertSucceeds(setDoc(ref, { enabled: true, optInAt: 'now', updatedAt: 'now' }));
+  });
+
+  it('allows owner to write revisitPrefs with enabled false', async () => {
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    const ref = doc(db, userPath(USER_ID), 'settings', 'revisitPrefs');
+    await assertSucceeds(setDoc(ref, { enabled: false, updatedAt: 'now' }));
+  });
+
+  it('denies a non-bool enabled', async () => {
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    const ref = doc(db, userPath(USER_ID), 'settings', 'revisitPrefs');
+    await assertFails(setDoc(ref, { enabled: 'yes', updatedAt: 'now' }));
+  });
+
+  it('denies an unexpected extra key', async () => {
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    const ref = doc(db, userPath(USER_ID), 'settings', 'revisitPrefs');
+    await assertFails(setDoc(ref, { enabled: true, updatedAt: 'now', hacked: true }));
+  });
+
+  it('denies another user writing the revisitPrefs doc', async () => {
+    const db = testEnv.authenticatedContext(OTHER_USER_ID).firestore();
+    const ref = doc(db, userPath(USER_ID), 'settings', 'revisitPrefs');
+    await assertFails(setDoc(ref, { enabled: true, updatedAt: 'now' }));
+  });
+});

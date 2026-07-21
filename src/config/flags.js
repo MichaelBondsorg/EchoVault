@@ -28,6 +28,11 @@ export const FLAG_DEFAULTS = {
   openLoops: false,
   contextSpaces: false,
   insightBudget: false,
+  insightReceipts: false,
+  voiceChapters: false,
+  reflectionRecipes: false,
+  sessionPrep: false,
+  gentleRevisit: false,
 };
 
 const LOCAL_OVERRIDE_PREFIX = 'engram:flag:';

@@ -48,6 +48,11 @@ describe('config/flags', () => {
         openLoops: false,
         contextSpaces: false,
         insightBudget: false,
+        insightReceipts: false,
+        voiceChapters: false,
+        reflectionRecipes: false,
+        sessionPrep: false,
+        gentleRevisit: false,
       });
     });
 
@@ -61,6 +66,26 @@ describe('config/flags', () => {
 
     it('provides default false for insightBudget flag', () => {
       expect(FLAG_DEFAULTS.insightBudget).toBe(false);
+    });
+
+    it('provides default false for insightReceipts flag', () => {
+      expect(FLAG_DEFAULTS.insightReceipts).toBe(false);
+    });
+
+    it('provides default false for voiceChapters flag', () => {
+      expect(FLAG_DEFAULTS.voiceChapters).toBe(false);
+    });
+
+    it('provides default false for reflectionRecipes flag', () => {
+      expect(FLAG_DEFAULTS.reflectionRecipes).toBe(false);
+    });
+
+    it('provides default false for sessionPrep flag', () => {
+      expect(FLAG_DEFAULTS.sessionPrep).toBe(false);
+    });
+
+    it('provides default false for gentleRevisit flag', () => {
+      expect(FLAG_DEFAULTS.gentleRevisit).toBe(false);
     });
   });
 
