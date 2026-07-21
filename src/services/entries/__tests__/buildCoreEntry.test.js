@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { buildCoreEntry } from '../buildCoreEntry';
 
 const baseArgs = (overrides = {}) => ({
@@ -137,5 +137,95 @@ describe('buildCoreEntry', () => {
     expect(entry.createdOnPlatform).toBe('ios');
     expect(typeof entry.createdAt.toDate).toBe('function'); // Firestore Timestamp
     expect(typeof entry.effectiveDate.toDate).toBe('function');
+  });
+});
+
+describe('buildCoreEntry — Voice Chapters (Task 14)', () => {
+  const chapterArgs = (overrides = {}) => baseArgs({
+    text: 'Chapter one stuff. Chapter two stuff.',
+    transcription: { rawTranscript: 'Chapter one stuff, um, chapter two stuff.' },
+    chapters: [
+      { startMs: 0, title: 'Chapter One', text: 'Chapter one stuff.' },
+      { startMs: 12000, title: 'Chapter Two', text: 'Chapter two stuff.' },
+    ],
+    audioDurationMs: 20000,
+    ...overrides,
+  });
+
+  it('computes charStart/charEnd offsets and attaches transcription.chapters', () => {
+    const entry = buildCoreEntry(chapterArgs());
+    expect(entry.transcription.chapters).toEqual([
+      { id: 'ch_0', index: 0, startMs: 0, title: 'Chapter One', charStart: 0, charEnd: 18 },
+      { id: 'ch_1', index: 1, startMs: 12000, title: 'Chapter Two', charStart: 19, charEnd: 37 },
+    ]);
+  });
+
+  it('sets top-level audioDurationMs when provided', () => {
+    const entry = buildCoreEntry(chapterArgs());
+    expect(entry.audioDurationMs).toBe(20000);
+  });
+
+  it('omits transcription.chapters and audioDurationMs entirely when absent (no null-stuffing)', () => {
+    const entry = buildCoreEntry(baseArgs({ transcription: { rawTranscript: 'raw words' } }));
+    expect(entry.transcription).not.toHaveProperty('chapters');
+    expect(entry).not.toHaveProperty('audioDurationMs');
+  });
+
+  it('never touches transcription.rawTranscript/cleanedTranscript when chapters are supplied', () => {
+    const entry = buildCoreEntry(chapterArgs());
+    expect(entry.transcription.rawTranscript).toBe('Chapter one stuff, um, chapter two stuff.');
+    expect(entry.transcription.cleanedTranscript).toBe('Chapter one stuff. Chapter two stuff.');
+  });
+
+  it('handles duplicate paragraph text by walking forward from the previous chapter end', () => {
+    const entry = buildCoreEntry(chapterArgs({
+      text: 'I said hello. Then I said hello again.',
+      transcription: { rawTranscript: 'I said hello. Then I said hello again.' },
+      chapters: [
+        { startMs: 0, title: 'First Hello', text: 'I said hello.' },
+        { startMs: 5000, title: 'Second Hello', text: 'Then I said hello again.' },
+      ],
+    }));
+    // "I said hello." would match at index 0 if searched from 0 again — but the
+    // walk must resume AFTER the first chapter's end, landing chapter two at
+    // its real (later) position, not re-finding an earlier duplicate.
+    expect(entry.transcription.chapters[0]).toMatchObject({ charStart: 0, charEnd: 13 });
+    expect(entry.transcription.chapters[1]).toMatchObject({ charStart: 14, charEnd: 38 });
+    expect(entry.text.slice(14, 38)).toBe('Then I said hello again.');
+  });
+
+  it('saves WITHOUT chapters when the offset walk fails (text mismatch), and logs once', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const entry = buildCoreEntry(chapterArgs({
+      chapters: [
+        { startMs: 0, title: 'Chapter One', text: 'This text does not appear in the transcript at all.' },
+        { startMs: 12000, title: 'Chapter Two', text: 'Chapter two stuff.' },
+      ],
+    }));
+    expect(entry.transcription).not.toHaveProperty('chapters');
+    // Save still succeeds — the rest of the entry is fully intact.
+    expect(entry.text).toBe('Chapter one stuff. Chapter two stuff.');
+    expect(entry.transcription.rawTranscript).toBe('Chapter one stuff, um, chapter two stuff.');
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    warnSpy.mockRestore();
+  });
+
+  it('does not attempt chapters when there is no transcription (typed entry)', () => {
+    const entry = buildCoreEntry(baseArgs({
+      transcription: null,
+      chapters: [{ startMs: 0, title: 'X', text: 'A durable thought' }],
+      audioDurationMs: 1000,
+    }));
+    expect(entry).not.toHaveProperty('transcription');
+    // audioDurationMs is independent capture metadata — still recorded even
+    // if chapters can't be (no rawTranscript to anchor offsets to).
+    expect(entry.audioDurationMs).toBe(1000);
+  });
+
+  it('ignores a non-positive/invalid audioDurationMs', () => {
+    expect(buildCoreEntry(baseArgs({ audioDurationMs: 0 }))).not.toHaveProperty('audioDurationMs');
+    expect(buildCoreEntry(baseArgs({ audioDurationMs: -5 }))).not.toHaveProperty('audioDurationMs');
+    expect(buildCoreEntry(baseArgs({ audioDurationMs: NaN }))).not.toHaveProperty('audioDurationMs');
+    expect(buildCoreEntry(baseArgs({ audioDurationMs: null }))).not.toHaveProperty('audioDurationMs');
   });
 });

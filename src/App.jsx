@@ -928,7 +928,10 @@ export default function App() {
         null,
         entry.voiceTone ?? null,
         entry.rawTranscript ?? null,
-        entry.operationId ?? null
+        entry.operationId ?? null,
+        null,
+        entry.chapters ?? null,
+        entry.durationMs ?? null
       );
       // The recording (if this crisis entry came from voice) was deliberately
       // left unlinked in the vault until the entry actually existed — link it
@@ -985,7 +988,14 @@ export default function App() {
     // check, rely on). Lets a caller (AppLayout, for the OpenLoopsWidget
     // "Answer" flow) learn the actual new entry id without this function's
     // return value ever needing to carry it.
-    onEntryRef = null
+    onEntryRef = null,
+    // Voice Chapters (Task 14, flag: voiceChapters) — additive: server-
+    // validated chapters array (or null) + this recording's total duration.
+    // Only meaningful on the core-first save path (buildCoreEntry); the
+    // legacy inline-entryData branches below don't build chapters (dormant —
+    // coreFirstSave defaults on).
+    chapters = null,
+    durationMs = null
   ) => {
     if (!user) return;
 
@@ -1418,6 +1428,12 @@ export default function App() {
           // selection. null when unscoped/flag-off; buildCoreEntry omits the
           // field entirely in that case (same rule as category).
           spaceId: captureSpaceId,
+          // Voice Chapters (Task 14, flag: voiceChapters) — server-validated
+          // chapters (or null) + this recording's total duration. buildCoreEntry
+          // computes char offsets and omits transcription.chapters entirely on
+          // a failed offset walk; never blocks this save either way.
+          chapters,
+          audioDurationMs: durationMs,
         });
 
         console.time('⏱️ Firestore save (core-first)');
@@ -1808,7 +1824,13 @@ export default function App() {
   const saveEntry = async (textInput, voiceTone = null, options = {}) => {
     // onEntryRef: optional side-channel, see doSaveEntry's jsdoc — additive,
     // never changes this function's own 'deferred'/'saved' return contract.
-    const { recordingId, rawTranscript = null, operationId = null, onEntryRef = null } = options;
+    // chapters/durationMs: Voice Chapters (Task 14, flag: voiceChapters) —
+    // additive, threaded straight through to buildCoreEntry; absent/null on
+    // typed entries and voice entries without markers.
+    const {
+      recordingId, rawTranscript = null, operationId = null, onEntryRef = null,
+      chapters = null, durationMs = null,
+    } = options;
     if (!user) return;
     setProcessing(true);
     console.log('[SaveEntry] Starting save process, text length:', textInput.length, 'hasVoiceTone:', !!voiceTone);
@@ -1825,7 +1847,11 @@ export default function App() {
         recordingId,
         // operationId travels with the deferred entry so the crisis-confirm
         // save writes it onto the entry doc and completes the capture op.
-        operationId
+        operationId,
+        // Voice Chapters (Task 14) — must survive the crisis-deferred save
+        // just like rawTranscript/voiceTone above.
+        chapters,
+        durationMs,
       });
       setCrisisModal(true);
       setProcessing(false);
@@ -1837,7 +1863,7 @@ export default function App() {
     // runner (see doSaveEntry). Skip the 45s temporal await entirely and go
     // straight to the durable core write.
     if (getFlag('coreFirstSave')) {
-      return await doSaveEntry(textInput, false, null, null, voiceTone, rawTranscript, operationId, onEntryRef);
+      return await doSaveEntry(textInput, false, null, null, voiceTone, rawTranscript, operationId, onEntryRef, chapters, durationMs);
     }
 
     // Detect temporal context (Phase 2)
@@ -1879,11 +1905,13 @@ export default function App() {
         voiceTone,
         rawTranscript,
         operationId,
-        onEntryRef
+        onEntryRef,
+        chapters,
+        durationMs
       );
     } catch (e) {
       console.error('Temporal detection failed, saving normally:', e);
-      return await doSaveEntry(textInput, false, null, null, voiceTone, rawTranscript, operationId, onEntryRef);
+      return await doSaveEntry(textInput, false, null, null, voiceTone, rawTranscript, operationId, onEntryRef, chapters, durationMs);
     }
   };
 
@@ -2130,7 +2158,7 @@ export default function App() {
         }
       }
 
-      const { transcript, rawTranscript = transcript, toneAnalysis } = result;
+      const { transcript, rawTranscript = transcript, toneAnalysis, chapters = null } = result;
       console.log('[Transcription] Result:', {
         hasToneAnalysis: !!toneAnalysis,
         toneEnergy: toneAnalysis?.energy,
@@ -2168,7 +2196,12 @@ export default function App() {
         recordingId,
         rawTranscript,
         operationId,
-        onEntryRef
+        onEntryRef,
+        // Voice Chapters (Task 14, flag: voiceChapters) — chapters is the raw
+        // server-validated array (or null); durationMs is this recording's
+        // total length, captured alongside markers (Task 13).
+        chapters,
+        durationMs,
       });
       console.log('[Transcription] saveEntry completed with result:', saveResult);
       // Only link (and thereby clear it from the recovery banner) once the

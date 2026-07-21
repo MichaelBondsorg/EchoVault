@@ -1031,11 +1031,19 @@ export const transcribeEntry = onCall(
 
     const userId = request.auth.uid;
     await assertAiConsent(db, userId);
-    const { base64, mimeType, properNouns = [], operationId = null } = request.data;
+    const {
+      base64, mimeType, properNouns = [], operationId = null,
+      // Voice Chapters (Task 14, flag: voiceChapters) — markers are canonical
+      // [{tMs}] (Task 13); omit-when-absent all the way through, so a caller
+      // that never sends them gets byte-identical behavior to before.
+      markers = [], durationMs = null,
+    } = request.data;
 
     if (!base64 || !mimeType) {
       throw new HttpsError('invalid-argument', 'Audio data and mimeType are required');
     }
+
+    const markerCount = Array.isArray(markers) ? markers.length : 0;
 
     const gemKey = geminiApiKey.value();
     const oaiKey = openaiApiKey.value();
@@ -1064,7 +1072,7 @@ export const transcribeEntry = onCall(
           {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(buildGeminiRequestBody(base64, mimeType, properNouns)),
+            body: JSON.stringify(buildGeminiRequestBody(base64, mimeType, properNouns, markers, durationMs)),
             signal: AbortSignal.timeout(TRANSCRIBE_TIMEOUT_MS)
           }
         );
@@ -1072,14 +1080,17 @@ export const transcribeEntry = onCall(
         if (geminiRes.status === 429) {
           console.warn('[transcribeEntry] Gemini rate limited, falling back to Whisper', { userId, status: geminiRes.status });
         } else if (geminiRes.ok) {
-          const parsed = parseFusedResponse(await geminiRes.json());
+          const parsed = parseFusedResponse(await geminiRes.json(), { markerCount });
           if (parsed && parsed.transcript) {
             logTranscribeEnd('gemini');
             return {
               rawTranscript: parsed.rawTranscript,
               transcript: parsed.transcript,
               toneAnalysis: parsed.toneAnalysis,
-              engine: 'gemini'
+              engine: 'gemini',
+              // Metadata-only, best-effort — a failed/mismatched parse never
+              // blocks transcription itself (see extractChapters).
+              chapters: parsed.chapters ?? null
             };
           }
           if (parsed && parsed.transcript === '') {
@@ -1124,7 +1135,8 @@ export const transcribeEntry = onCall(
         return { error: 'API_NO_CONTENT' }; // call succeeded, no speech detected
       }
       logTranscribeEnd('whisper');
-      return { rawTranscript: transcript, transcript, toneAnalysis: null, engine: 'whisper' };
+      // Whisper has no audio-aligned segmentation ability — chapters always null.
+      return { rawTranscript: transcript, transcript, toneAnalysis: null, engine: 'whisper', chapters: null };
     } catch (error) {
       console.error('[transcribeEntry] both engines failed', {
         userId, audioBytes: base64?.length, mimeType, err: error?.message

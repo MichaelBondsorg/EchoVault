@@ -24,6 +24,48 @@
 import { Timestamp } from 'firebase/firestore';
 
 /**
+ * Voice Chapters (Task 14, flag: voiceChapters) — turns the server's
+ * marker-aligned chapters (each `{startMs, title, text}`, already validated
+ * server-side to reconstruct the transcript when joined — see
+ * `functions/src/transcription/fusedTranscription.js#extractChapters`) into
+ * char offsets into the ACTUAL stored cleaned-transcript string.
+ *
+ * Walks forward with `indexOf(chapterText, cursor)`, resuming from the
+ * previous chapter's end each time — never re-searching from 0 — so a
+ * transcript with duplicate/repeated phrasing (e.g. two chapters that both
+ * start "I said hello...") still lands each chapter at its real, later
+ * position instead of re-matching an earlier occurrence.
+ *
+ * Returns null (never throws) if any chapter's text can't be found in order —
+ * chapters are metadata layered on top of an already-successful
+ * transcription/save; a failed walk must never block the entry save.
+ */
+function computeChapterOffsets(rawChapters, text) {
+  if (typeof text !== 'string' || !text || !Array.isArray(rawChapters) || rawChapters.length === 0) {
+    return null;
+  }
+  let cursor = 0;
+  const result = [];
+  for (let index = 0; index < rawChapters.length; index++) {
+    const chapterText = rawChapters[index]?.text;
+    if (typeof chapterText !== 'string' || !chapterText) return null;
+    const charStart = text.indexOf(chapterText, cursor);
+    if (charStart === -1) return null;
+    const charEnd = charStart + chapterText.length;
+    result.push({
+      id: `ch_${index}`,
+      index,
+      startMs: Number(rawChapters[index].startMs) || 0,
+      title: typeof rawChapters[index].title === 'string' ? rawChapters[index].title : '',
+      charStart,
+      charEnd,
+    });
+    cursor = charEnd;
+  }
+  return result;
+}
+
+/**
  * @param {Object} args
  * @param {string} args.text                Final entry text (reply-context already prepended).
  * @param {string} [args.category]          Entry category ('cat'); omitted when falsy.
@@ -50,6 +92,17 @@ import { Timestamp } from 'firebase/firestore';
  *                                          null/absent — entries are unscoped by default; only an
  *                                          explicit selection sets this (see EntryBar's capture
  *                                          pill / spacesService.getLastCaptureSpaceId).
+ * @param {Array<{startMs:number,title:string,text:string}>|null} [args.chapters]
+ *                                          Voice Chapters (Task 14, flag: voiceChapters) — raw
+ *                                          marker-aligned chapters from the transcription response
+ *                                          (server already validated their joined text reconstructs
+ *                                          the transcript). Offsets are computed here against the
+ *                                          stored cleaned transcript; a failed offset walk omits
+ *                                          `transcription.chapters` entirely rather than blocking
+ *                                          the save. Ignored when there's no transcription.
+ * @param {number|null} [args.audioDurationMs]  Total recording duration (ms), captured alongside
+ *                                          markers (Task 13). Independent of chapters succeeding —
+ *                                          omitted (no null-stuffing) unless a positive finite number.
  * @returns {Object} The core entry object to persist FIRST via addDoc.
  */
 export function buildCoreEntry({
@@ -64,6 +117,8 @@ export function buildCoreEntry({
   voiceTone = null,
   operationId,
   spaceId,
+  chapters = null,
+  audioDurationMs = null,
 } = {}) {
   const aiProcessingConsent = typeof consentSnapshot === 'boolean'
     ? consentSnapshot
@@ -120,6 +175,27 @@ export function buildCoreEntry({
       schemaVersion: 1,
       correctedByUser: false,
     };
+
+    // Voice Chapters (Task 14, flag: voiceChapters) — metadata only. A
+    // failed/mismatched offset walk NEVER blocks the save; it just omits
+    // transcription.chapters (logged once so it's visible without breaking
+    // capture).
+    if (Array.isArray(chapters) && chapters.length > 0) {
+      const computed = computeChapterOffsets(chapters, entry.transcription.cleanedTranscript);
+      if (computed) {
+        entry.transcription.chapters = computed;
+      } else {
+        console.warn('[buildCoreEntry] Chapter offset walk failed — saving without chapters', {
+          chapterCount: chapters.length,
+        });
+      }
+    }
+  }
+
+  // Independent of chapters succeeding — duration is capture metadata
+  // (Task 13), useful for the audio player even without a valid segmentation.
+  if (Number.isFinite(audioDurationMs) && audioDurationMs > 0) {
+    entry.audioDurationMs = audioDurationMs;
   }
 
   if (voiceTone) {

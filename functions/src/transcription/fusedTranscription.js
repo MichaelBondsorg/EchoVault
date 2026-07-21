@@ -53,11 +53,53 @@ const normalizeProperNouns = (properNouns) =>
     .filter((value) => value.length > 0 && value.length <= 80)))
     .slice(0, 50);
 
-export function buildGeminiRequestBody(base64, mimeType, properNouns = []) {
+// Voice Chapters (Task 14, flag: voiceChapters). Markers are captured
+// client-side (Task 13) as canonical [{tMs}]; normalize/sort/dedupe defensively
+// here since the prompt's chapter count and startMs list derive directly from
+// this list.
+const normalizeMarkers = (markers) => Array.from(new Set(
+  (Array.isArray(markers) ? markers : [])
+    .map((m) => Number(m?.tMs))
+    .filter((ms) => Number.isFinite(ms) && ms >= 0)
+)).sort((a, b) => a - b);
+
+const formatTimestamp = (ms) => {
+  const totalSec = Math.max(0, Math.round(ms / 1000));
+  const m = Math.floor(totalSec / 60);
+  const s = totalSec % 60;
+  return `${m}:${String(s).padStart(2, '0')}`;
+};
+
+// Additive-only prompt block appended when markers are present. The
+// no-marker prompt (TRANSCRIPTION_PROMPT, optionally + proper-noun
+// dictionary) is untouched byte-for-byte — see the byte-identity test.
+const buildChapterMarkerBlock = (markerTimestamps, durationMs) => {
+  const chapterCount = markerTimestamps.length + 1;
+  const markerLines = markerTimestamps
+    .map((ms) => `- ${formatTimestamp(ms)} (${ms}ms)`)
+    .join('\n');
+  const durationLine = Number.isFinite(durationMs) && durationMs > 0
+    ? `\nRecording duration: ${formatTimestamp(durationMs)} (${durationMs}ms).`
+    : '';
+  const startMsList = [0, ...markerTimestamps].join(', ');
+
+  return `The user marked chapter boundaries at these points while recording:
+${markerLines}${durationLine}
+
+Segment the transcript into exactly ${chapterCount} chapters at these marked positions (the first chapter begins at the start of the audio, before the first marker). Return an additional "chapters" field in the JSON, alongside rawTranscript/transcript/toneAnalysis: an array of exactly ${chapterCount} objects shaped { "startMs": <number>, "title": "<a 2-4 word chapter title>", "text": "<the exact portion of the cleaned transcript spoken in this chapter>" }, using startMs values [${startMsList}] in order. Concatenating all chapters' "text" values in order must reproduce the "transcript" field exactly. You can hear the audio, so use what's actually being said near each marked timestamp to choose the precise word boundary — word-level timestamps are not required.`;
+};
+
+export function buildGeminiRequestBody(base64, mimeType, properNouns = [], markers = [], durationMs = null) {
   const dictionary = normalizeProperNouns(properNouns);
-  const prompt = dictionary.length
+  let prompt = dictionary.length
     ? `${TRANSCRIPTION_PROMPT}\n\nKNOWN PROPER NOUN SPELLINGS:\n${dictionary.join(', ')}`
     : TRANSCRIPTION_PROMPT;
+
+  const markerTimestamps = normalizeMarkers(markers);
+  if (markerTimestamps.length > 0) {
+    prompt = `${prompt}\n\n${buildChapterMarkerBlock(markerTimestamps, durationMs)}`;
+  }
+
   return {
     contents: [{
       parts: [
@@ -80,7 +122,33 @@ export const cleanTranscriptArtifacts = (value) => value
   .replace(/[ \t]{2,}/g, ' ')
   .trim();
 
-export function parseFusedResponse(geminiJson) {
+const normalizeWhitespace = (value) => (typeof value === 'string' ? value.replace(/\s+/g, ' ').trim() : '');
+
+// Voice Chapters (Task 14): STRICT, fail-to-null validation. Chapter
+// segmentation is a nice-to-have on top of a transcription that has ALREADY
+// succeeded — any shape mismatch or a joined-text drift from the transcript
+// means we drop chapters entirely rather than risk showing a wrong/misleading
+// segmentation. Never throws; never affects the caller's transcript/toneAnalysis.
+function extractChapters(rawChapters, markerCount, transcript) {
+  if (!Array.isArray(rawChapters) || rawChapters.length !== markerCount + 1) return null;
+
+  const chapters = [];
+  for (const c of rawChapters) {
+    if (!c || typeof c !== 'object') return null;
+    const startMs = Number(c.startMs);
+    if (!Number.isFinite(startMs) || startMs < 0) return null;
+    if (typeof c.title !== 'string' || !c.title.trim()) return null;
+    if (typeof c.text !== 'string' || !c.text.trim()) return null;
+    chapters.push({ startMs, title: c.title.trim(), text: c.text.trim() });
+  }
+
+  const joined = normalizeWhitespace(chapters.map((c) => c.text).join(' '));
+  if (joined !== normalizeWhitespace(transcript)) return null;
+
+  return chapters;
+}
+
+export function parseFusedResponse(geminiJson, { markerCount = 0 } = {}) {
   const text = geminiJson?.candidates?.[0]?.content?.parts?.[0]?.text || '';
   const jsonMatch = text.match(/\{[\s\S]*\}/);
   if (!jsonMatch) return null;
@@ -110,7 +178,16 @@ export function parseFusedResponse(geminiJson) {
     };
   }
 
-  return { rawTranscript, transcript, toneAnalysis };
+  const result = { rawTranscript, transcript, toneAnalysis };
+
+  // Only attach a `chapters` key at all when markers were actually requested
+  // — keeps the no-marker response shape byte-for-byte identical to before
+  // Task 14 (see the no-speech contract test).
+  if (markerCount > 0) {
+    result.chapters = extractChapters(parsed.chapters, markerCount, transcript);
+  }
+
+  return result;
 }
 
 /**
@@ -129,6 +206,9 @@ export function parseFusedResponse(geminiJson) {
  * @param {string} args.base64            Audio bytes, base64-encoded.
  * @param {string} args.mimeType          Audio MIME type (audio/mp4, audio/webm, ...).
  * @param {string[]} [args.properNouns]   Known proper-noun spellings.
+ * @param {Array<{tMs:number}>} [args.markers]  Voice Chapters (Task 14, flag:
+ *   voiceChapters) marker timestamps; omit/empty for no chapter segmentation.
+ * @param {number|null} [args.durationMs] Total recording duration, for the prompt.
  * @param {string|null} [args.gemKey]     Gemini API key (primary engine).
  * @param {string|null} [args.oaiKey]     OpenAI API key (Whisper fallback).
  * @param {number} [args.timeoutMs]       Per-call network timeout.
@@ -138,6 +218,8 @@ export async function runFusedTranscription({
   base64,
   mimeType,
   properNouns = [],
+  markers = [],
+  durationMs = null,
   gemKey = null,
   oaiKey = null,
   timeoutMs = FUSED_TRANSCRIBE_TIMEOUT_MS,
@@ -148,6 +230,8 @@ export async function runFusedTranscription({
     return { error: 'API_ERROR' };
   }
 
+  const markerCount = Array.isArray(markers) ? markers.length : 0;
+
   // 1. Primary: fused Gemini call (transcript + tone in one pass).
   if (gemKey) {
     try {
@@ -156,7 +240,7 @@ export async function runFusedTranscription({
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(buildGeminiRequestBody(base64, mimeType, properNouns)),
+          body: JSON.stringify(buildGeminiRequestBody(base64, mimeType, properNouns, markers, durationMs)),
           signal: AbortSignal.timeout(timeoutMs),
         }
       );
@@ -164,13 +248,17 @@ export async function runFusedTranscription({
       if (geminiRes.status === 429) {
         // rate limited — fall through to Whisper
       } else if (geminiRes.ok) {
-        const parsed = parseFusedResponse(await geminiRes.json());
+        const parsed = parseFusedResponse(await geminiRes.json(), { markerCount });
         if (parsed && parsed.transcript) {
           return {
             rawTranscript: parsed.rawTranscript,
             transcript: parsed.transcript,
             toneAnalysis: parsed.toneAnalysis,
             engine: 'gemini',
+            // Chapters are metadata-only, best-effort: a failed/mismatched
+            // parse never blocks the transcription itself — chapters is just
+            // null in that case (see extractChapters).
+            chapters: parsed.chapters ?? null,
           };
         }
         if (parsed && parsed.transcript === '') {
@@ -203,7 +291,8 @@ export async function runFusedTranscription({
     if (!transcript) {
       return { error: 'API_NO_CONTENT' }; // call succeeded, no speech detected
     }
-    return { rawTranscript: transcript, transcript, toneAnalysis: null, engine: 'whisper' };
+    // Whisper has no audio-aligned segmentation ability — chapters always null.
+    return { rawTranscript: transcript, transcript, toneAnalysis: null, engine: 'whisper', chapters: null };
   } catch (error) {
     return { error: 'API_EXCEPTION' };
   }

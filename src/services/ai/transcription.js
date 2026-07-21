@@ -172,14 +172,26 @@ export const transcribeAudioWithTone = async (base64, mimeType, maxRetries = 3) 
  * Fused transcription via Cloud Function (Gemini audio-in: transcript + tone
  * in one call, Whisper fallback server-side). Same return contract as
  * transcribeAudioWithTone: {transcript, toneAnalysis} or an error-code string.
+ *
+ * Voice Chapters (Task 14, flag: voiceChapters): `markers`/`durationMs` are
+ * omitted from the request entirely when there are no markers — a caller that
+ * never passes them (or passes an empty array) gets the exact same request
+ * payload as before Task 14. When markers ARE present, the server may return
+ * a validated `chapters` array (or null on a failed/mismatched parse); that
+ * is forwarded through as `result.chapters`, but the `chapters` key itself is
+ * only added to the returned object when markers were actually sent — so the
+ * no-markers return shape is unchanged too.
  */
 export const transcribeEntryFused = async (
   base64,
   mimeType,
   maxRetries = 3,
-  properNouns = []
+  properNouns = [],
+  markers = [],
+  durationMs = null
 ) => {
   let lastError = null;
+  const hasMarkers = Array.isArray(markers) && markers.length > 0;
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
@@ -189,7 +201,14 @@ export const transcribeEntryFused = async (
         await sleep(backoffMs);
       }
 
-      const result = await transcribeEntryFn({ base64, mimeType, properNouns });
+      const payload = { base64, mimeType, properNouns };
+      if (hasMarkers) {
+        payload.markers = markers;
+        if (Number.isFinite(durationMs) && durationMs > 0) {
+          payload.durationMs = durationMs;
+        }
+      }
+      const result = await transcribeEntryFn(payload);
 
       if (result.data?.error) {
         const errorCode = result.data.error;
@@ -200,7 +219,7 @@ export const transcribeEntryFused = async (
         continue;
       }
 
-      const { transcript, rawTranscript = transcript, toneAnalysis } = result.data || {};
+      const { transcript, rawTranscript = transcript, toneAnalysis, chapters } = result.data || {};
       if (!transcript) {
         // Terminal, not retryable: silent/near-silent audio produces the
         // same empty result on every attempt, so burning the retry budget
@@ -214,9 +233,17 @@ export const transcribeEntryFused = async (
       console.log('Fused transcription result:', {
         transcriptLength: transcript.length,
         engine: result.data?.engine,
-        hasToneAnalysis: !!toneAnalysis
+        hasToneAnalysis: !!toneAnalysis,
+        hasChapters: Array.isArray(chapters)
       });
-      return { rawTranscript, transcript, toneAnalysis: toneAnalysis || null };
+      return {
+        rawTranscript,
+        transcript,
+        toneAnalysis: toneAnalysis || null,
+        // Only present when markers were sent (chapters was requested) —
+        // keeps the no-markers return shape identical to before Task 14.
+        ...(hasMarkers ? { chapters: chapters ?? null } : {})
+      };
     } catch (e) {
       console.error(`Fused transcription exception (attempt ${attempt + 1}):`, e);
       lastError = e;

@@ -46,6 +46,20 @@ describe('buildMeaningfulEditFields', () => {
     expect(fields).not.toHaveProperty('transcription');
     expect(fields).not.toHaveProperty('text');
   });
+
+  // Task 14 (Voice Chapters): transcription.chapters is capture-time
+  // provenance, same as rawTranscript/cleanedTranscript above — a meaningful
+  // text edit must never invalidate or touch it (chapter offsets stay valid
+  // for the ORIGINAL cleaned transcript; a corrected entry.text diverging
+  // from it is a pre-existing, separate concern this invariant doesn't own).
+  it('never touches transcription.chapters or any transcription.* key (extended invariant)', () => {
+    const increment = (n) => ({ __increment: n });
+    const fields = buildMeaningfulEditFields({ nextSignalExtractionVersion: 2, increment });
+    const touchesTranscription = Object.keys(fields).some((key) => key === 'transcription' || key.startsWith('transcription.'));
+    expect(touchesTranscription).toBe(false);
+    expect(fields).not.toHaveProperty('transcription.chapters');
+    expect(fields).not.toHaveProperty('audioDurationMs');
+  });
 });
 
 // Approximates handleEntryUpdate's (App.jsx) branch decision end-to-end using
