@@ -46,6 +46,10 @@ export const queueEntry = async (ownerUid, entryData) => {
   const entry = await saveOfflineEntry(ownerUid, {
     text: entryData.text,
     category: entryData.category || null,
+    // Context Space (flag: contextSpaces) selected at capture time. Only set
+    // when a space was explicitly chosen — same no-null-stuffing rule as
+    // category/buildCoreEntry: unscoped is the default, never `spaceId: null`.
+    ...(entryData.spaceId ? { spaceId: entryData.spaceId } : {}),
     transcriptionText: entryData.transcriptionText || null,
     localAnalysis: entryData.localAnalysis || null,
     healthContext: entryData.healthContext || null,

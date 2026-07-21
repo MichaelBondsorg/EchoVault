@@ -69,7 +69,10 @@ export const processEntry = async (entryData, options = {}) => {
     environmentContext: entryData.environmentContext || null,
     voiceTone: entryData.voiceTone || null,
     createdAt: new Date().toISOString(),
-    platform
+    platform,
+    // Context Space (flag: contextSpaces) — only set when a space was
+    // explicitly selected, same no-null-stuffing rule as buildCoreEntry.
+    ...(entryData.spaceId ? { spaceId: entryData.spaceId } : {})
   };
 
   // NATIVE + OFFLINE: Local analysis + queue for sync

@@ -572,6 +572,13 @@ export default function App() {
       const data = removeUndefined({
         text: entryData.text,
         category: entryData.category || undefined,
+        // Context Space (flag: contextSpaces) — carried through from the
+        // offline-queued record (offlineManager.queueEntry now preserves
+        // it). removeUndefined strips this when absent, same no-null-
+        // stuffing convention as buildCoreEntry.js:106-111 on the online
+        // path. Without this line, an entry captured offline with a
+        // selected Space synced unscoped — this was the known R1 blocker.
+        spaceId: entryData.spaceId || undefined,
         createdAt: Timestamp.fromDate(createdAtDate),
         effectiveDate: Timestamp.fromDate(effectiveDate),
         analysisStatus: aiConsent ? 'pending' : 'disabled',
@@ -1080,6 +1087,10 @@ export default function App() {
         environmentContext: null,
         aiProcessingConsent: aiProcessingEnabled,
         voiceTone,
+        // Context Space (flag: contextSpaces) — same capture-pill selection
+        // threaded into buildCoreEntry on the online path; queueEntry omits
+        // it entirely when null (no null-stuffing).
+        spaceId: captureSpaceId,
         transcription: rawTranscript ? {
           rawTranscript,
           cleanedTranscript: finalTex,
@@ -1507,7 +1518,10 @@ export default function App() {
             safety_flagged: safetyFlagged || undefined,
             safety_user_response: safetyUserResponse || undefined,
             has_warning_indicators: hasWarning || undefined,
-            platform
+            platform,
+            // Context Space — this is the failed-online-save fallback queue,
+            // same selection buildCoreEntry attempted above; must not be lost.
+            spaceId: captureSpaceId,
           });
           queuedLocally = true;
           triggerSync().catch(() => {});
@@ -1807,7 +1821,10 @@ export default function App() {
           safety_flagged: safetyFlagged || undefined,
           safety_user_response: safetyUserResponse || undefined,
           has_warning_indicators: hasWarning || undefined,
-          platform
+          platform,
+          // Context Space — legacy (non-core-first) save-failure fallback
+          // queue; must not silently drop the capture pill's selection.
+          spaceId: captureSpaceId,
         });
         queuedLocally = true;
         triggerSync().catch(() => {});
