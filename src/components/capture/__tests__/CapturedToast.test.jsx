@@ -169,6 +169,80 @@ describe('CapturedToast - Edit', () => {
     expect(setIntentUserText).toHaveBeenCalledWith({ __db: true }, 'user-1', 'new-1', 'call the dentist tomorrow');
     expect(screen.queryByText(/Captured:/)).toBeNull();
   });
+
+  it('edit then Cancel reverts to the confirm view and re-arms a fresh 6s auto-dismiss', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2024, 0, 15, 10, 0, 0, 0));
+    withSubscribe();
+    render(<CapturedToast />);
+
+    vi.setSystemTime(new Date(2024, 0, 15, 10, 0, 1, 0));
+    act(() => {
+      emit([intent({ id: 'new-1', createdAt: new Date(2024, 0, 15, 10, 0, 1, 0).toISOString() })]);
+    });
+
+    fireEvent.click(screen.getByText('Edit'));
+    expect(screen.getByLabelText('Edit captured text')).toBeTruthy();
+
+    fireEvent.click(screen.getByText('Cancel'));
+
+    expect(screen.queryByLabelText('Edit captured text')).toBeNull();
+    expect(screen.getByText('Captured: call the dentist')).toBeTruthy();
+    expect(setIntentUserText).not.toHaveBeenCalled();
+
+    // The auto-dismiss timer was re-armed fresh from the cancel point, not
+    // left over from before Edit was tapped: not yet dismissed just under 6s.
+    act(() => {
+      vi.advanceTimersByTime(5999);
+    });
+    expect(screen.getByText('Captured: call the dentist')).toBeTruthy();
+
+    act(() => {
+      vi.advanceTimersByTime(1);
+    });
+    expect(screen.queryByText(/Captured:/)).toBeNull();
+    expect(dismissIntent).not.toHaveBeenCalled();
+  });
+
+  it('an edit abandoned for 30s reverts without saving, then the normal 6s flow resumes and advances the queue', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2024, 0, 15, 10, 0, 0, 0));
+    withSubscribe();
+    render(<CapturedToast />);
+
+    vi.setSystemTime(new Date(2024, 0, 15, 10, 0, 1, 0));
+    act(() => {
+      emit([
+        intent({ id: 'first', sourceSpan: { text: 'first capture' }, createdAt: new Date(2024, 0, 15, 10, 0, 1, 0).toISOString() }),
+        intent({ id: 'second', sourceSpan: { text: 'second capture' }, createdAt: new Date(2024, 0, 15, 10, 0, 2, 0).toISOString() }),
+      ]);
+    });
+
+    expect(screen.getByText('Captured: first capture')).toBeTruthy();
+
+    fireEvent.click(screen.getByText('Edit'));
+    const input = screen.getByLabelText('Edit captured text');
+    fireEvent.change(input, { target: { value: 'partial edit, never saved' } });
+
+    // Walk away: the 30s abandonment safety net fires.
+    act(() => {
+      vi.advanceTimersByTime(30000);
+    });
+
+    // Reverted to the confirm view for the same (still-first) item; partial
+    // text was never saved.
+    expect(screen.queryByLabelText('Edit captured text')).toBeNull();
+    expect(screen.getByText('Captured: first capture')).toBeTruthy();
+    expect(setIntentUserText).not.toHaveBeenCalled();
+
+    // Normal 6s auto-dismiss flow resumes from the revert point and advances
+    // the queue to the next session-new intent.
+    act(() => {
+      vi.advanceTimersByTime(6000);
+    });
+    expect(screen.queryByText('Captured: first capture')).toBeNull();
+    expect(screen.getByText('Captured: second capture')).toBeTruthy();
+  });
 });
 
 describe('CapturedToast - auto-dismiss', () => {
@@ -212,6 +286,32 @@ describe('CapturedToast - auto-dismiss', () => {
     });
     // No second dismiss/advance triggered by the stale timer.
     expect(dismissIntent).toHaveBeenCalledTimes(1);
+  });
+
+  it('queue of 2: the first auto-dismisses via the 6s timer, then the second appears', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2024, 0, 15, 10, 0, 0, 0));
+    withSubscribe();
+    render(<CapturedToast />);
+
+    vi.setSystemTime(new Date(2024, 0, 15, 10, 0, 1, 0));
+    act(() => {
+      emit([
+        intent({ id: 'first', sourceSpan: { text: 'first capture' }, createdAt: new Date(2024, 0, 15, 10, 0, 1, 0).toISOString() }),
+        intent({ id: 'second', sourceSpan: { text: 'second capture' }, createdAt: new Date(2024, 0, 15, 10, 0, 2, 0).toISOString() }),
+      ]);
+    });
+
+    expect(screen.getByText('Captured: first capture')).toBeTruthy();
+
+    act(() => {
+      vi.advanceTimersByTime(6000);
+    });
+
+    expect(screen.queryByText('Captured: first capture')).toBeNull();
+    expect(screen.getByText('Captured: second capture')).toBeTruthy();
+    expect(dismissIntent).not.toHaveBeenCalled();
+    expect(setIntentUserText).not.toHaveBeenCalled();
   });
 });
 

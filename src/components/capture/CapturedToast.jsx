@@ -10,6 +10,10 @@ import {
 } from '../../services/intents/intentClient';
 
 const AUTO_DISMISS_MS = 6000;
+// Safety net for an abandoned edit (user taps Edit and walks away): revert
+// to the confirm view without saving partial text, then let the normal
+// auto-dismiss flow resume from that point.
+const EDIT_ABANDON_MS = 30000;
 
 /** Display text: userText (user-edited) wins over the raw source span. */
 function captureText(intent) {
@@ -29,8 +33,12 @@ function captureText(intent) {
  *
  * One row at a time: additional session-new intents queue FIFO (oldest
  * capture first) and appear after the current one resolves — via Undo
- * (dismissIntent), Edit (inline input -> setIntentUserText), or a 6s
- * auto-dismiss timer that clears on unmount/interaction.
+ * (dismissIntent), Edit (inline input -> setIntentUserText or Cancel to
+ * revert), or a 6s auto-dismiss timer that clears on unmount/interaction.
+ * Entering Edit swaps the 6s auto-dismiss for a 30s abandonment safety net:
+ * if the user taps Edit and never confirms/cancels, the edit reverts on its
+ * own (partial text is never saved) and the normal 6s flow resumes from
+ * there, so the row/queue can never stall indefinitely.
  *
  * Non-modal: no backdrop, fixed to the bottom above the tab bar, and the
  * wrapper is `pointer-events-none` so it never intercepts clicks outside its
@@ -91,12 +99,25 @@ const CapturedToast = () => {
     setQueue((prev) => prev.slice(1));
   }, []);
 
+  /** Revert from the edit view to the confirm view without saving. */
+  const cancelEdit = useCallback(() => {
+    setEditing(false);
+    setEditText('');
+  }, []);
+
+  // Arms the timer appropriate to the current mode whenever the head-of-queue
+  // item or edit mode changes: a 6s auto-dismiss in the confirm view, or a
+  // 30s abandonment safety net while editing. Re-running on every `editing`
+  // flip means both a manual Cancel and the 30s abandonment timeout itself
+  // (which calls cancelEdit) land back on a *fresh* 6s auto-dismiss, armed
+  // from that revert point rather than any leftover budget.
   useEffect(() => {
     if (!current) return undefined;
-    timerRef.current = setTimeout(advance, AUTO_DISMISS_MS);
+    clearAutoDismiss();
+    timerRef.current = setTimeout(editing ? cancelEdit : advance, editing ? EDIT_ABANDON_MS : AUTO_DISMISS_MS);
     return clearAutoDismiss;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [current, advance]);
+  }, [current, editing, advance, cancelEdit]);
 
   const handleUndo = () => {
     if (uid && current) dismissIntent(db, uid, current.id);
@@ -104,7 +125,6 @@ const CapturedToast = () => {
   };
 
   const handleEditStart = () => {
-    clearAutoDismiss();
     setEditText(captureText(current));
     setEditing(true);
   };
@@ -135,6 +155,13 @@ const CapturedToast = () => {
               className="shrink-0 text-sm font-medium text-accent-deep"
             >
               Save
+            </button>
+            <button
+              type="button"
+              onClick={cancelEdit}
+              className="shrink-0 text-sm font-medium text-muted-foreground"
+            >
+              Cancel
             </button>
           </>
         ) : (
