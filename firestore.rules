@@ -299,7 +299,7 @@ service cloud.firestore {
         allow read, delete: if isOwner(userId);
         allow create, update: if isOwner(userId)
           && request.resource.data.keys().hasOnly(['name', 'questions', 'scope', 'timeRangeDays', 'cadence', 'state', 'definitionVersion', 'createdAt', 'updatedAt'])
-          && request.resource.data.name.size() <= 60
+          && request.resource.data.name is string && request.resource.data.name.size() <= 60
           && request.resource.data.questions is list && request.resource.data.questions.size() <= 5
           && request.resource.data.state in ['active', 'archived']
           && request.resource.data.cadence in ['manual'];
@@ -313,6 +313,8 @@ service cloud.firestore {
         allow create, update: if isOwner(userId)
           && request.resource.data.keys().hasOnly(['kind', 'recipeId', 'definitionVersion', 'scope', 'period', 'title', 'blocks', 'status', 'createdAt', 'updatedAt'])
           && request.resource.data.kind in ['recipe_run', 'session_brief']
+          && request.resource.data.title is string
+          && request.resource.data.blocks is list
           && request.resource.data.status in ['draft', 'final'];
       }
 
@@ -325,6 +327,7 @@ service cloud.firestore {
         allow create: if isOwner(userId)
           && request.resource.data.keys().hasOnly(['dimension', 'value', 'reason', 'permanent', 'createdAt', 'expiresAt'])
           && request.resource.data.dimension in ['entry', 'date', 'person', 'tag', 'space', 'family']
+          && request.resource.data.value is string
           && request.resource.data.reason in ['never_show', 'less_like_this', 'hidden_dim'];
         allow delete: if isOwner(userId);
       }

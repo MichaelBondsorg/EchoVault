@@ -876,6 +876,18 @@ describe('Recipes collection rules', () => {
     await assertFails(setDoc(ref, { ...validRecipe, name: 'x'.repeat(61) }));
   });
 
+  it('denies a non-string (list) name', async () => {
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    const ref = doc(db, userPath(USER_ID), 'recipes', 'r-namelist');
+    await assertFails(setDoc(ref, { ...validRecipe, name: ['x'] }));
+  });
+
+  it('denies a non-string (map) name', async () => {
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    const ref = doc(db, userPath(USER_ID), 'recipes', 'r-namemap');
+    await assertFails(setDoc(ref, { ...validRecipe, name: { a: 1 } }));
+  });
+
   it('denies a non-list questions field', async () => {
     const db = testEnv.authenticatedContext(USER_ID).firestore();
     const ref = doc(db, userPath(USER_ID), 'recipes', 'r-badquestions');
@@ -968,6 +980,18 @@ describe('Reflections collection rules', () => {
     await assertFails(setDoc(ref, { ...validReflection, status: 'published' }));
   });
 
+  it('denies a non-string title', async () => {
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    const ref = doc(db, userPath(USER_ID), 'reflections', 'ref-badtitle');
+    await assertFails(setDoc(ref, { ...validReflection, title: ['x'] }));
+  });
+
+  it('denies a non-list blocks field', async () => {
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    const ref = doc(db, userPath(USER_ID), 'reflections', 'ref-badblocks');
+    await assertFails(setDoc(ref, { ...validReflection, blocks: 'not-a-list' }));
+  });
+
   it('denies an unexpected extra key', async () => {
     const db = testEnv.authenticatedContext(USER_ID).firestore();
     const ref = doc(db, userPath(USER_ID), 'reflections', 'ref-junk');
@@ -1038,6 +1062,12 @@ describe('Revisit exclusions collection rules', () => {
     const db = testEnv.authenticatedContext(USER_ID).firestore();
     const ref = doc(db, userPath(USER_ID), 'revisit_exclusions', 'rex-badreason');
     await assertFails(setDoc(ref, { ...validExclusion, reason: 'because' }));
+  });
+
+  it('denies a non-string value', async () => {
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    const ref = doc(db, userPath(USER_ID), 'revisit_exclusions', 'rex-badvalue');
+    await assertFails(setDoc(ref, { ...validExclusion, value: 123 }));
   });
 
   it('denies an unexpected extra key', async () => {
