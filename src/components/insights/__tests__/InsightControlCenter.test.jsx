@@ -274,6 +274,22 @@ describe('InsightControlCenter — Muted insight families', () => {
     expect(removeExclusion).toHaveBeenCalledWith(UID, 'pe-1');
   });
 
+  it('reverts the optimistic removal when removeExclusion rejects', async () => {
+    defaultMocks();
+    removeExclusion.mockRejectedValueOnce(new Error('firestore down'));
+    renderCenter();
+    await waitFor(() => expect(screen.getByText(/sleep mood correlation/i)).toBeTruthy());
+
+    const row = screen.getByText(/sleep mood correlation/i).closest('.flex');
+    fireEvent.click(within(row).getByRole('button', { name: /show again/i }));
+
+    expect(screen.queryByText(/sleep mood correlation/i)).toBeNull();
+
+    await waitFor(() => {
+      expect(screen.getByText(/sleep mood correlation/i)).toBeTruthy();
+    });
+  });
+
   it('reverts optimistic removal when liftSuppression signals failure', async () => {
     defaultMocks();
     liftSuppression.mockResolvedValueOnce(false);
