@@ -317,7 +317,84 @@ gcloud firestore indexes composite create \
 ```
 
 **Growth gate:** the eval fixture set
-(`functions/src/intents/__evals__/fixtures.json`) is a 62-example starter that
+(`functions/src/intents/__evals__/fixtures.json`) is a 67-example starter that
 locks the contract (zero hard-negatives active, active precision 1.0). Before
 `intentExtraction` defaults ON in prod, grow it to ≥500 real (consented,
 de-identified) examples at ≥97% active precision. See that dir's `README.md`.
+
+## R1 flags (Open Loops / Context Spaces / Insight Budget)
+
+The R1 plan (`docs/superpowers/plans/2026-07-20-trustworthy-capture-and-intelligence.md`,
+batches R1-1..R1-4) shipped three more client flags, all **default OFF**,
+independent of each other and of `intentExtraction` above (though Open Loops
+has no effect unless `intentExtraction` is also on, since loops are a kind of
+intent). Same mechanism as the rest of this table: `config/flags` doc, no
+deploy required, `src/config/flags.js` `FLAG_DEFAULTS`.
+
+| Flag | Default | What it gates | Turning it OFF restores |
+|---|---|---|---|
+| `openLoops` | `false` | `OpenLoopsWidget` (home surface: due/upcoming open-loop intents, max 3 due, answer/snooze/close) and `IntentSuggestionTray` on `EntryCard` (suggested-intent keep/edit/no-thanks tray). | No open-loop surfaces render at all — extraction (if `intentExtraction` is on) still writes `open_loop` intent docs server-side, they are simply never shown. Nothing is deleted; flipping back on immediately re-surfaces the same due/suggested loops. |
+| `contextSpaces` | `false` | Space-scoped capture (capture pill + card space chip), `SpaceManager` (Settings), the Ask Journal scope chip, and the strict `filterEntriesByScope` gate at all 7 retrieval seams (client `getSmartChatContext`/`askJournalAI`/both `generateDaySummary` functions/`companionContext`/`prompts` index/nexus `fetchRecentEntries`; server `buildRecentContext`, flag-gated separately server-side). | All-spaces (legacy) retrieval everywhere — every seam's `scope` argument is only ever non-null when a caller explicitly passes one, and no UI surface passes one while this flag is off. Existing `spaceId` fields on entries are untouched; they simply stop being read as a filter. |
+| `insightBudget` | `false` | The daily/weekly cap + 90-day near-dup suppression in `applyInsightBudget` (`src/services/insights/insightBudget.js`) gating Nexus proactive home insights, and the mode selector (quiet/balanced/exploratory) in Settings. | Unbounded insight surfacing — every confidence/provenance-gated insight the orchestrator produces is shown, as before this flag existed. `settings/insightBudget` (mode + shownLog) is untouched; flipping back on resumes gating from the existing shownLog rather than a blank slate. |
+
+**Composite indexes added for R1** (recorded in `firestore.indexes.json`;
+`firebase.json` deliberately does not wire `firestore.indexes` — see the
+model-registry index note above for why. Create manually if a fresh
+environment needs them):
+
+```
+# Due/upcoming open-loop queries (subscribeDueOpenLoops / subscribeUpcomingOpenLoops)
+gcloud firestore indexes composite create \
+  --project=echo-vault-app --collection-group=intents \
+  --field-config field-path=kind,order=ascending \
+  --field-config field-path=state,order=ascending \
+  --field-config field-path=targetAt,order=ascending
+
+# Suggestion tray per entry (subscribeSuggestedIntentsForEntry)
+gcloud firestore indexes composite create \
+  --project=echo-vault-app --collection-group=intents \
+  --field-config field-path=entryId,order=ascending \
+  --field-config field-path=state,order=ascending
+
+# Space-scoped entry queries (reassignEntriesSpace and any future space-filtered list view)
+gcloud firestore indexes composite create \
+  --project=echo-vault-app --collection-group=entries \
+  --field-config field-path=spaceId,order=ascending \
+  --field-config field-path=createdAt,order=descending
+```
+
+**Spaces archive-flow support notes.** `archiveSpace` never deletes a space
+doc (`firestore.rules` forbids delete on `spaces`) — it only flips
+`state: 'archived'`. The archive UI (`SpaceManager.jsx`) always routes
+through a 3-option sheet before archiving: **Move entries** (pick another
+active space → `reassignEntriesSpace(from, to)` then `archiveSpace(from)`),
+**Keep unscoped** (`reassignEntriesSpace(from, null)` then
+`archiveSpace(from)`), or **Cancel** (closes the sheet, no service call at
+all). `reassignEntriesSpace` only ever writes `{spaceId, updatedAt}` onto
+each moved entry, in batches of 200 — journal content (`text`, `createdAt`,
+`effectiveDate`, `transcription`, etc.) is never touched by any archive-flow
+path (see `src/__tests__/validationMatrix.test.js` Matrix row "Reassigning a
+space only ever touches spaceId + updatedAt"). Archived spaces stay
+selectable in historical data (existing entries keep their `spaceId` even
+after the space is archived) but drop out of `subscribeSpaces` (which
+filters `state == 'active'`) and out of new-capture space pickers.
+
+**Known gap: offline `queueEntry` drops the selected `spaceId`.**
+`src/services/offline/offlineManager.js`'s `queueEntry` builds its stored
+payload from an explicit field whitelist that does not include `spaceId` —
+an entry captured while offline with a space selected loses that selection
+once it syncs (the synced entry lands unscoped). This is a **pre-existing
+gap, not new R1 breakage** (Context Spaces predates offline queueing having
+any space awareness at all), but it means space assignment is not fully
+durable across the offline path yet. **Must be fixed before `contextSpaces`
+defaults ON for users who journal offline** — add `spaceId` to the
+whitelist in `queueEntry` (and confirm the sync path forwards it through to
+the eventual online entry create) as a prerequisite, not a follow-up.
+
+**Digest/report cross-space limitation.** The weekly digest and any
+generated report remain **cross-space** (unscoped, all-entries) through R1 —
+`filterEntriesByScope` was applied at the 7 interactive retrieval seams
+listed above, but digest/report generation was explicitly out of scope for
+this pass. A Work-space user will still see Personal-space content
+summarized in their digest until R2's receipts/space-treatment work lands
+(see `PROJECT_STATUS.md` Active Work).

@@ -84,10 +84,64 @@ vi.mock('@capacitor/core', () => ({
 // comment for exactly where).
 const revokeAiProcessingFn = vi.fn();
 const grantAiProcessingFn = vi.fn();
+// R1 rows (8-11 below) exercise spacesService.js / intentClient.js /
+// analysis/index.js's getSmartChatContext — all of which import a handful of
+// the modular Firestore SDK's named exports from this SAME resolved module
+// (config/firebase.js). `firestoreMocks` is a generic, argument-tagging
+// fake (modeled on src/services/spaces/__tests__/spacesService.test.js's own
+// mock): each function just records/tags its arguments; the row that needs
+// specific return data configures it via mockResolvedValueOnce/
+// mockReturnValueOnce in its own test body. Consentservice/operationStore/etc
+// (Rows 1-6) never import any of these names, so adding them here cannot
+// affect those rows (see the comment above them for why that's provably true).
+let autoIdCounter = 0;
+function makeFirestoreBatch() {
+  return {
+    set: vi.fn(),
+    update: vi.fn(),
+    delete: vi.fn(),
+    commit: vi.fn(async () => {}),
+  };
+}
+const firestoreMocks = {
+  collection: vi.fn((_db, path) => ({ __col: path })),
+  doc: vi.fn((...args) => {
+    if (args.length === 1) {
+      // Auto-id doc ref generated from a collection ref: doc(collectionRef)
+      const col = args[0];
+      autoIdCounter += 1;
+      return { __doc: `${col.__col}/auto-${autoIdCounter}` };
+    }
+    const [, path, id] = args;
+    return { __doc: `${path}/${id}` };
+  }),
+  query: vi.fn((...args) => ({ __query: args })),
+  where: vi.fn((f, op, v) => ({ __where: [f, op, v] })),
+  orderBy: vi.fn((f, dir) => ({ __orderBy: [f, dir] })),
+  limit: vi.fn((n) => ({ __limit: n })),
+  onSnapshot: vi.fn(() => () => {}),
+  addDoc: vi.fn(async () => ({ id: 'auto-id' })),
+  updateDoc: vi.fn(async () => {}),
+  getDoc: vi.fn(async () => ({ exists: () => false, data: () => undefined })),
+  getDocs: vi.fn(async () => ({ docs: [] })),
+  setDoc: vi.fn(async () => {}),
+  writeBatch: vi.fn(() => makeFirestoreBatch()),
+};
+const askJournalAIFn = vi.fn();
 vi.mock('../config/firebase', () => ({
   revokeAiProcessingFn: (...args) => revokeAiProcessingFn(...args),
   grantAiProcessingFn: (...args) => grantAiProcessingFn(...args),
+  askJournalAIFn: (...args) => askJournalAIFn(...args),
+  ...firestoreMocks,
 }));
+// Row 8's getSmartChatContext import graph pulls in ai/gemini.js (unused by
+// the function actually under test) — stub it so importing analysis/index.js
+// never touches a real provider callable. Row 11's insightBudget.js pulls in
+// nexus/orchestrator.js's isDuplicateInsight for near-dup suppression; stub
+// it to a fixed "never a dupe" so the budget-cap math is what's on trial,
+// not orchestrator's similarity heuristics (covered separately).
+vi.mock('../services/ai/gemini', () => ({ analyzeJournalEntryCloud: vi.fn() }));
+vi.mock('../services/nexus/orchestrator', () => ({ isDuplicateInsight: vi.fn(() => false) }));
 
 // localStorage backing store. src/test/setup.js replaces window.localStorage
 // with plain vi.fn() no-op stubs; drive them with an in-memory Map so the
@@ -538,5 +592,259 @@ describe('Matrix row: User edits transcript', () => {
   it('a non-meaningful edit (punctuation/typo only) is NOT flagged as requiring re-extraction', async () => {
     const { hasTextMeaningfullyChanged } = await import('../services/entries/entryCorrectionFields.js');
     expect(hasTextMeaningfullyChanged('went to the gym today', 'went to the gym today.')).toBe(false);
+  });
+});
+
+// ===========================================================================
+// Row 7: Dismissed open loop does not reappear after re-extraction (R1 Task 1)
+// ===========================================================================
+describe('Matrix row: Dismissed open loop survives re-extraction', () => {
+  // Minimal in-memory Firestore fake matching the shape
+  // functions/src/intents/extractIntents.js expects (entryRef.parent.parent.
+  // collection(name), collection.where(...).get(), collection.doc(id),
+  // db.batch()/commit()). Mirrors the fake in
+  // functions/src/intents/__tests__/extractIntents.test.js, trimmed to only
+  // what this one row needs.
+  function makeFakeFirestore() {
+    const store = new Map();
+    function matches(data, field, op, value) {
+      if (op === 'in') return Array.isArray(value) && value.includes(data[field]);
+      return data[field] === value;
+    }
+    function makeDocRef(path) {
+      return {
+        path,
+        id: path.split('/').pop(),
+        get parent() { return makeColRef(path.split('/').slice(0, -1).join('/')); },
+        collection(name) { return makeColRef(`${path}/${name}`); },
+        async get() {
+          if (path === 'config/flags') return { exists: true, data: () => ({}) };
+          const data = store.get(path);
+          return { exists: data !== undefined, data: () => data };
+        },
+      };
+    }
+    function makeColRef(path) {
+      return {
+        path,
+        get parent() { return makeDocRef(path.split('/').slice(0, -1).join('/')); },
+        doc(id) { return makeDocRef(`${path}/${id}`); },
+        where(field, op, value) {
+          return {
+            async get() {
+              const docs = [];
+              for (const [p, data] of store.entries()) {
+                if (p.startsWith(`${path}/`) && p.split('/').length === path.split('/').length + 1) {
+                  if (matches(data, field, op, value)) docs.push({ id: p.split('/').pop(), data: () => data });
+                }
+              }
+              return { forEach: (fn) => docs.forEach(fn), size: docs.length, empty: docs.length === 0 };
+            },
+          };
+        },
+      };
+    }
+    const db = {
+      batch() {
+        const ops = [];
+        return {
+          set(ref, data, opts) { ops.push({ type: 'set', ref, data, opts }); },
+          delete(ref) { ops.push({ type: 'delete', ref }); },
+          async commit() {
+            for (const op of ops) {
+              if (op.type === 'delete') { store.delete(op.ref.path); continue; }
+              const prev = op.opts?.merge ? store.get(op.ref.path) || {} : {};
+              store.set(op.ref.path, { ...prev, ...op.data });
+            }
+          },
+        };
+      },
+      doc: (p) => makeDocRef(p),
+    };
+    return { db, store };
+  }
+
+  it('a dismissed open_loop intent is never resurrected by a later re-extraction of the same entry, using the real extraction+policy modules', async () => {
+    const { _clearFlagCacheForTest } = await import('../../functions/src/shared/flags.js');
+    _clearFlagCacheForTest();
+    const { runIntentExtraction, normalizeCandidates } = await import('../../functions/src/intents/extractIntents.js');
+    const { INTENT_ATTRIBUTE_KEYS } = await import('../../functions/src/intents/intentSchema.js');
+
+    function attrs(overrides = {}) {
+      const base = {};
+      for (const k of INTENT_ATTRIBUTE_KEYS) base[k] = false;
+      return { ...base, ...overrides };
+    }
+
+    const { db, store } = makeFakeFirestore();
+    const USER_BASE = 'artifacts/app/users/loop-user';
+    const entryRef = db.doc(`${USER_BASE}/entries/e1`);
+    const text = 'Ask me tomorrow how the meeting went.';
+    const buildCandidates = () => async () => normalizeCandidates([
+      {
+        kind: 'open_loop',
+        text: 'Ask me tomorrow how the meeting went',
+        attributes: attrs({ agency: true, unfinished: true }),
+        confidence: 0.8,
+        explicitCommand: true,
+      },
+    ], text);
+
+    // v1: normal extraction creates an active open_loop intent.
+    await runIntentExtraction({
+      db, entryRef, entry: { id: 'e1', text, entryInputVersion: 1 }, modelId: 'm', apiKey: 'k', extractCandidates: buildCandidates(),
+    });
+    const intentPath = [...store.keys()].find((p) => p.includes('/intents/'));
+    expect(store.get(intentPath).state).toBe('active');
+    expect(store.get(intentPath).kind).toBe('open_loop');
+
+    // The user dismisses it client-side (same write shape
+    // intentClient.dismissIntent produces: state -> 'dismissed').
+    store.set(intentPath, { ...store.get(intentPath), state: 'dismissed', userText: 'not relevant anymore' });
+    const beforeReExtraction = store.get(intentPath);
+
+    // A later edit bumps entryInputVersion; the entry is re-extracted with the
+    // SAME candidate (same evidence span -> same deterministic id).
+    const result = await runIntentExtraction({
+      db, entryRef, entry: { id: 'e1', text, entryInputVersion: 2 }, modelId: 'm', apiKey: 'k', extractCandidates: buildCandidates(),
+    });
+
+    const afterReExtraction = store.get(intentPath);
+    expect(afterReExtraction.state).toBe('dismissed'); // never resurrected
+    expect(afterReExtraction.userText).toBe('not relevant anymore'); // user-set field preserved
+    expect(afterReExtraction.inputVersion).toBe(2); // only the reap-relevant marker bumped
+    // Confirm the merge touched ONLY inputVersion/updatedAt.
+    const { inputVersion: _iv1, updatedAt: _ua1, ...restBefore } = beforeReExtraction;
+    const { inputVersion: _iv2, updatedAt: _ua2, ...restAfter } = afterReExtraction;
+    expect(restAfter).toEqual(restBefore);
+    expect(result.extractedTasks).toEqual([]); // dismissed loop never resurfaces via the legacy compat list
+  });
+});
+
+// ===========================================================================
+// Row 8: Work-scoped question retrieves zero Personal candidates (R1 Task 10)
+// ===========================================================================
+describe('Matrix row: Work-scoped chat retrieval never surfaces Personal/unscoped candidates', () => {
+  it('getSmartChatContext (scopeFilter applied first) never returns a Personal-space or unscoped id, even when it is the strongest semantic/tag match', async () => {
+    const { getSmartChatContext } = await import('../services/analysis/index.js');
+
+    // Identical embedding on every entry -> similarity 1.0 for all three
+    // pre-filter, maximizing semantic-match leakage risk if the filter were
+    // applied after candidate selection instead of before it.
+    const SHARED_EMBEDDING = [1, 0, 0];
+    const entries = [
+      { id: 'work-1', spaceId: 'work', text: 'Roadmap sync with Sarah', tags: ['@person:sarah'], embedding: SHARED_EMBEDDING },
+      { id: 'personal-1', spaceId: 'personal', text: 'Dinner with Sarah about the wedding', tags: ['@person:sarah'], embedding: SHARED_EMBEDDING },
+      { id: 'unscoped-1', text: 'Legacy entry mentioning Sarah', tags: ['@person:sarah'], embedding: SHARED_EMBEDDING },
+    ];
+
+    const result = await getSmartChatContext(entries, 'What did Sarah say?', SHARED_EMBEDDING, { spaceId: 'work' });
+    const ids = result.map((e) => e.id);
+
+    expect(ids).toEqual(['work-1']);
+    expect(ids).not.toContain('personal-1');
+    expect(ids).not.toContain('unscoped-1');
+  });
+});
+
+// ===========================================================================
+// Row 9: Space change alters only spaceId (R1 Task 8)
+// ===========================================================================
+describe('Matrix row: Reassigning a space only ever touches spaceId + updatedAt', () => {
+  it('reassignEntriesSpace writes ONLY {spaceId, updatedAt} onto each moved entry — every other field untouched', async () => {
+    const { reassignEntriesSpace } = await import('../services/spaces/spacesService.js');
+
+    const entryDoc = {
+      id: 'entry-1',
+      data: () => ({
+        spaceId: 'work',
+        text: 'Original entry text',
+        createdAt: '2026-01-01T00:00:00.000Z',
+        effectiveDate: '2026-01-01T00:00:00.000Z',
+        transcription: { rawTranscript: 'raw audio text' },
+      }),
+    };
+    firestoreMocks.getDocs.mockResolvedValueOnce({ docs: [entryDoc] });
+    const batch = { update: vi.fn(), set: vi.fn(), delete: vi.fn(), commit: vi.fn(async () => {}) };
+    firestoreMocks.writeBatch.mockReturnValueOnce(batch);
+
+    const total = await reassignEntriesSpace({}, 'user-1', 'work', 'personal');
+
+    expect(total).toBe(1);
+    expect(batch.update).toHaveBeenCalledTimes(1);
+    const [, payload] = batch.update.mock.calls[0];
+    expect(Object.keys(payload).sort()).toEqual(['spaceId', 'updatedAt']);
+    expect(payload.spaceId).toBe('personal');
+    expect(batch.commit).toHaveBeenCalledTimes(1);
+  });
+});
+
+// ===========================================================================
+// Row 10: Closing an open loop leaves the source entry untouched (R1 Task 4)
+// ===========================================================================
+describe('Matrix row: Closing/answering an open loop never touches the source entry', () => {
+  it('answerLoop only updates the intent doc + appends a user_decisions record — no /entries/ write of any kind', async () => {
+    const { answerLoop } = await import('../services/intents/intentClient.js');
+
+    await answerLoop({}, 'user-1', 'intent-1', 'entry-42');
+
+    expect(firestoreMocks.updateDoc).toHaveBeenCalledTimes(1);
+    const [ref, payload] = firestoreMocks.updateDoc.mock.calls[0];
+    expect(ref.__doc).toBe('artifacts/echo-vault-v5-fresh/users/user-1/intents/intent-1');
+    expect(ref.__doc).not.toContain('/entries/');
+    expect(payload.state).toBe('completed_state');
+    expect(payload.outcome).toEqual(expect.objectContaining({ kind: 'answered', answerEntryId: 'entry-42' }));
+
+    // The decision append targets user_decisions — again never /entries/.
+    expect(firestoreMocks.addDoc).toHaveBeenCalledTimes(1);
+    const [colRef, decision] = firestoreMocks.addDoc.mock.calls[0];
+    expect(colRef.__col).toBe('artifacts/echo-vault-v5-fresh/users/user-1/user_decisions');
+    expect(decision.action).toBe('answered');
+    expect(decision.targetId).toBe('intent-1');
+  });
+});
+
+// ===========================================================================
+// Row 11: Insight budget cap never exceeded across a simulated day (R1 Task 12)
+// ===========================================================================
+describe('Matrix row: Insight budget cap holds across a simulated day of repeated calls', () => {
+  it('quiet mode (max 1/day) never lets more than 1 insight through across 5 same-day surface refreshes', async () => {
+    const { applyInsightBudget } = await import('../services/insights/insightBudget.js');
+
+    const dayStart = new Date(2026, 6, 20, 9, 0, 0).getTime();
+    let shownLog = [];
+    let totalShownToday = 0;
+
+    for (let i = 0; i < 5; i += 1) {
+      const callNow = dayStart + i * 60 * 60 * 1000; // an hour apart, same calendar day
+      const candidates = [0, 1, 2].map((n) => ({
+        id: `insight-${i}-${n}`,
+        title: `Insight ${i}-${n}`,
+        confidence: 0.9,
+        generatedAt: new Date(callNow).toISOString(),
+      }));
+      const shown = applyInsightBudget(candidates, { mode: 'quiet', shownLog, now: callNow });
+      totalShownToday += shown.length;
+      // Simulate recordShownInsights: append what was actually displayed.
+      shownLog = [...shownLog, ...shown.map((s) => ({ id: s.id, title: s.title, shownAt: new Date(callNow).toISOString() }))];
+    }
+
+    // quiet = {maxHomePerDay:1}. Never exceeded no matter how many times the
+    // gate is called, or how many fresh candidates are offered each time.
+    expect(totalShownToday).toBeLessThanOrEqual(1);
+  });
+
+  it('the gate never widens to "fill the quota" with a near-duplicate — zero survivors stays zero, even with allowance left', async () => {
+    const { isDuplicateInsight } = await import('../services/nexus/orchestrator');
+    isDuplicateInsight.mockReturnValueOnce(true); // this one candidate is judged a dupe (single call, self-restoring)
+
+    const { applyInsightBudget } = await import('../services/insights/insightBudget.js');
+    const now = Date.now();
+    const shown = applyInsightBudget(
+      [{ id: 'dup-1', title: 'Same thing again', confidence: 0.95, generatedAt: new Date(now).toISOString() }],
+      { mode: 'exploratory', shownLog: [], now },
+    );
+
+    expect(shown).toEqual([]); // full daily allowance (4) was available; still zero
   });
 });

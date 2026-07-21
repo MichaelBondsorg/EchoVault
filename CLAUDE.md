@@ -576,6 +576,22 @@ Flags: `src/config/flags.js`. Runbook: `docs/quality/trustworthy-capture-runbook
 Device checklist: `docs/quality/device-validation-matrix.md`. Tests:
 `src/__tests__/validationMatrix.test.js`.
 
+**R1 (Open Loops / Context Spaces / Insight Budget), shipped behind flags
+`openLoops`/`contextSpaces`/`insightBudget` (all default OFF, independent):**
+open-loop intents (a precision-first kind alongside `task`, see
+`functions/src/intents/`) surface via `OpenLoopsWidget` and
+`IntentSuggestionTray`, never notify in v1, and are in-app only; dismissal is
+final (no restore) and survives re-extraction. Context Spaces scope entries
+via `spaceId` (`src/services/spaces/spacesService.js`, archive-not-delete)
+and are enforced with a strict filter (`src/services/spaces/scopeFilter.js`)
+at every retrieval seam — a Work-scoped call never surfaces Personal/unscoped
+content — except the digest/reports, which stay cross-space until R2. Insight
+Budget (`src/services/insights/insightBudget.js`) hard-caps proactive home
+insights per day/week by mode (quiet/balanced/exploratory) and never lowers
+confidence gates to fill the quota. Known gap: offline `queueEntry` drops the
+selected `spaceId` — fix before `contextSpaces` defaults on. Full detail:
+runbook's "R1 flags" section above.
+
 ## Crash Reporting
 
 The crash reporting service (`src/services/crashReporting.js`) provides Firebase Crashlytics integration.

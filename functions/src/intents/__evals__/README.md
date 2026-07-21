@@ -56,7 +56,7 @@ negatives: it proves the policy **never** promotes on confidence alone.
 
 ## Growth gate
 
-This starter set (~62 examples) exists to lock the contract in code. Before the
+This starter set (67 examples) exists to lock the contract in code. Before the
 `intentExtraction` flag defaults **on** in production, the fixture set must grow
 to **≥ 500 examples** drawn from real (consented, de-identified) entries, and
 the policy must hold **≥ 97% active precision** on that set with **zero**
