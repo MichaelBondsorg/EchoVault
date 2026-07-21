@@ -8,9 +8,17 @@
  * based on user feedback history.
  */
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { getCachedInsights, generateInsights } from '../services/nexus/orchestrator';
 import { getAllPatternLearning } from '../services/basicInsights/feedbackLearning';
+import { getFlag } from '../config/flags';
+import { db } from '../config/firebase';
+import {
+  readBudgetMode,
+  readShownLog,
+  applyInsightBudget,
+  recordShownInsights,
+} from '../services/insights/insightBudget';
 
 /**
  * Hook for accessing Nexus insights
@@ -32,6 +40,9 @@ export const useNexusInsights = (user, options = {}) => {
   const [dataStatus, setDataStatus] = useState(null);
   const [lastGenerated, setLastGenerated] = useState(null);
   const [learningData, setLearningData] = useState(new Map());
+  const [budgetMode, setBudgetModeState] = useState('balanced');
+  const [shownLog, setShownLogState] = useState([]);
+  const recordedShownIdsRef = useRef(new Set());
 
   // Load feedback learning data
   useEffect(() => {
@@ -47,6 +58,33 @@ export const useNexusInsights = (user, options = {}) => {
     };
 
     loadLearning();
+  }, [user?.uid]);
+
+  // Load Insight Budget mode + shownLog once per mount (Task 12). Flag off
+  // -> this never runs, and the hook's output is the untouched, pre-budget
+  // path (see budgetedInsights below).
+  useEffect(() => {
+    if (!user?.uid || !getFlag('insightBudget')) return;
+
+    let cancelled = false;
+
+    const loadBudget = async () => {
+      try {
+        const [mode, log] = await Promise.all([
+          readBudgetMode(db, user.uid),
+          readShownLog(db, user.uid),
+        ]);
+        if (!cancelled) {
+          setBudgetModeState(mode);
+          setShownLogState(log);
+        }
+      } catch (err) {
+        console.warn('[useNexusInsights] Failed to load insight budget:', err);
+      }
+    };
+
+    loadBudget();
+    return () => { cancelled = true; };
   }, [user?.uid]);
 
   // Load cached insights on mount
@@ -215,6 +253,31 @@ export const useNexusInsights = (user, options = {}) => {
     });
   })();
 
+  // Insight Budget gate (Task 12). Order: feedback suppression (above,
+  // insightLearning) -> 90-day near-dup vs shownLog -> day/week cap, all
+  // inside applyInsightBudget. Flag off -> untouched, byte-identical
+  // passthrough of allInsights (never reimplements or partially applies the
+  // gate when the flag is off).
+  const budgetedInsights = getFlag('insightBudget')
+    ? applyInsightBudget(allInsights, { mode: budgetMode, shownLog, now: Date.now() })
+    : allInsights;
+
+  // Record what's actually displayed, once per distinct id per mount (ref
+  // guard survives re-renders without re-recording the same insight).
+  useEffect(() => {
+    if (!user?.uid || !getFlag('insightBudget')) return;
+
+    const toRecord = budgetedInsights.filter(
+      (insight) => insight?.id && !recordedShownIdsRef.current.has(insight.id)
+    );
+    if (toRecord.length === 0) return;
+
+    toRecord.forEach((insight) => recordedShownIdsRef.current.add(insight.id));
+    recordShownInsights(db, user.uid, toRecord).catch((err) => {
+      console.warn('[useNexusInsights] Failed to record shown insights:', err);
+    });
+  }, [budgetedInsights, user?.uid]);
+
   // Get primary insight
   const primaryInsight = activeInsights.find(i => i.priority === 1) || activeInsights[0];
 
@@ -228,8 +291,10 @@ export const useNexusInsights = (user, options = {}) => {
   const isCalibrating = !!calibrationInsight;
 
   return {
-    // State - allInsights includes active + history with confidence ≥50%
-    insights: allInsights,
+    // State - budgetedInsights is allInsights (active + history, confidence
+    // ≥50%) further gated by the Insight Budget when insightBudget is on;
+    // flag off -> identical to allInsights.
+    insights: budgetedInsights,
     activeInsights,
     historyInsights,
     primaryInsight,
@@ -246,8 +311,8 @@ export const useNexusInsights = (user, options = {}) => {
     getInsightsByType,
 
     // Helpers
-    hasInsights: allInsights.length > 0,
-    insightCount: allInsights.length,
+    hasInsights: budgetedInsights.length > 0,
+    insightCount: budgetedInsights.length,
     activeCount: activeInsights.length,
     historyCount: historyInsights.length
   };

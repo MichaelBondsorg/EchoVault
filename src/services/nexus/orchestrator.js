@@ -1054,8 +1054,12 @@ const extractInsightTheme = (insight) => {
 /**
  * Check if an insight is too similar to any existing insights
  * Uses three methods: title similarity, content similarity, and theme matching
+ *
+ * Exported (Task 12, Insight Budget) so `insightBudget.js` can reuse this
+ * similarity check for 90-day near-duplicate suppression against the
+ * shown-insight ledger, instead of reimplementing it.
  */
-const isDuplicateInsight = (newInsight, existingInsights, threshold = 0.6) => {
+export const isDuplicateInsight = (newInsight, existingInsights, threshold = 0.6) => {
   if (!newInsight || !existingInsights?.length) return false;
 
   const newTitle = newInsight.title || '';
