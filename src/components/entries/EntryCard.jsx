@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
+import { deleteField } from 'firebase/firestore';
 import {
   Trash2, Calendar, Edit2, Check, RefreshCw, Lightbulb, Wind, Sparkles,
   Brain, Info, Footprints, Clipboard, X, Compass, Tag,
@@ -19,6 +20,7 @@ import { Chip } from '../cloud';
 import SpacePicker from '../spaces/SpacePicker';
 import ProvenanceDisclosure from '../ui/ProvenanceDisclosure';
 import IntentSuggestionTray from './IntentSuggestionTray';
+import ChapterHeader from './ChapterHeader';
 
 /**
  * SpaceChip — Context Space re-scoping affordance for a saved entry (PRD R1
@@ -164,6 +166,64 @@ const PrimaryReadinessMetric = ({ healthContext }) => {
 // tests, but it's just a re-export, not a second copy of the mapping.
 const getMoodDotColor = accentForMood;
 
+// --- Voice Chapters (R2 Task 15, flag: voiceChapters) ---------------------
+//
+// Pure helpers for chapter array edits. All three UI actions (rename, merge,
+// remove) funnel through these so the "id stays 'ch_'+newIndex" renumbering
+// rule lives in exactly one place. Chapter objects are never mutated in
+// place — every helper returns a fresh array.
+
+// Re-derive `id`/`index` for every chapter after a splice so they stay a
+// dense, deterministic 0..n-1 sequence (id === 'ch_' + its new index).
+const reindexChapters = (chapters) => chapters.map((c, i) => ({ ...c, id: `ch_${i}`, index: i }));
+
+// Merges the chapter at `chapterId` into its immediate predecessor: the
+// predecessor's charEnd absorbs the merged chapter's charEnd (its title is
+// left as-is — merging extends what a chapter covers, it doesn't rename
+// it), then the merged chapter is spliced out and the array is reindexed.
+// No-op (returns `chapters` unchanged) if `chapterId` is the first chapter
+// or isn't found — there is no previous chapter to merge into.
+function mergeChapterWithPrevious(chapters, chapterId) {
+  const idx = chapters.findIndex((c) => c.id === chapterId);
+  if (idx <= 0) return chapters;
+  const next = chapters.slice();
+  next[idx - 1] = { ...next[idx - 1], charEnd: next[idx].charEnd };
+  next.splice(idx, 1);
+  return reindexChapters(next);
+}
+
+// "Remove marker" on the FIRST chapter has no predecessor to fold into, so
+// it folds FORWARD instead: the first chapter's header disappears and the
+// (new) first chapter absorbs its charStart, keeping its own title. When
+// there's only one chapter left, there is nothing left to fold into —
+// returns `null` as a sentinel telling the caller to remove the whole
+// `transcription.chapters` field rather than write an empty array (no
+// stuffing, PRD acceptance: removing never deletes text/audio).
+function removeFirstChapterMarker(chapters) {
+  if (chapters.length <= 1) return null;
+  const next = chapters.slice(1);
+  next[0] = { ...next[0], charStart: chapters[0].charStart };
+  return reindexChapters(next);
+}
+
+// Degrade gracefully once the entry's text has been edited after
+// chaptering: offsets are only trustworthy while they stay in-bounds,
+// non-overlapping, and in forward order. Any violation (most commonly
+// charEnd > text.length after a shortening edit) means the chapters no
+// longer describe this text — the caller falls back to the legacy render.
+function chaptersMatchText(chapters, text) {
+  if (typeof text !== 'string') return false;
+  let prevEnd = 0;
+  for (const c of chapters) {
+    if (typeof c.charStart !== 'number' || typeof c.charEnd !== 'number') return false;
+    if (c.charStart < 0 || c.charEnd > text.length) return false;
+    if (c.charEnd <= c.charStart) return false;
+    if (c.charStart < prevEnd) return false;
+    prevEnd = c.charEnd;
+  }
+  return true;
+}
+
 const EntryCard = ({ entry, onDelete, onUpdate }) => {
   const [editing, setEditing] = useState(false);
   const [title, setTitle] = useState(entry.title);
@@ -232,6 +292,50 @@ const EntryCard = ({ entry, onDelete, onUpdate }) => {
       });
     }
     setSpacePickerOpen(false);
+  };
+
+  // Voice Chapters (R2 Task 15, flag: voiceChapters) — chaptered body render
+  // + per-chapter actions. `chaptersActive` requires BOTH the flag and a
+  // non-empty chapters array; when either is missing the legacy paragraph
+  // render below is byte-identical to the pre-Task-15 markup (no wrapper,
+  // no fallback line — nothing new renders at all). `chaptersValid` catches
+  // the case where the entry's text was edited after chaptering (offsets no
+  // longer describe `entry.text`) so a chaptered render never slices
+  // garbage — it degrades to the legacy render plus one quiet line instead
+  // of crashing.
+  const rawChapters = entry.transcription?.chapters;
+  const chaptersActive = getFlag('voiceChapters') && Array.isArray(rawChapters) && rawChapters.length > 0;
+  const chaptersValid = chaptersActive && chaptersMatchText(rawChapters, entry.text);
+
+  // Every chapter action writes ONLY `transcription.chapters` — never text,
+  // rawTranscript, createdAt, or anything else (PRD acceptance: removing a
+  // chapter marker never deletes text/audio). Dot-path key so the existing
+  // onUpdate -> updateDoc plumbing (App.jsx#handleEntryUpdate) applies it as
+  // a targeted nested-field write, same as any other updateDoc call.
+  const handleChapterRename = (chapterId, title) => {
+    const chapters = entry.transcription?.chapters || [];
+    const next = chapters.map((c) => (c.id === chapterId ? { ...c, title } : c));
+    onUpdate(entry.id, { 'transcription.chapters': next });
+  };
+
+  const handleChapterMerge = (chapterId) => {
+    const chapters = entry.transcription?.chapters || [];
+    const next = mergeChapterWithPrevious(chapters, chapterId);
+    onUpdate(entry.id, { 'transcription.chapters': next });
+  };
+
+  const handleChapterRemove = (chapterId) => {
+    const chapters = entry.transcription?.chapters || [];
+    const idx = chapters.findIndex((c) => c.id === chapterId);
+    if (idx < 0) return;
+    if (idx === 0) {
+      const next = removeFirstChapterMarker(chapters);
+      // Only chapter left — removing it removes the whole field (no
+      // empty-array stuffing) rather than leaving `chapters: []` behind.
+      onUpdate(entry.id, { 'transcription.chapters': next === null ? deleteField() : next });
+    } else {
+      onUpdate(entry.id, { 'transcription.chapters': mergeChapterWithPrevious(chapters, chapterId) });
+    }
   };
 
   const cardStyle = isTask
@@ -786,11 +890,40 @@ const EntryCard = ({ entry, onDelete, onUpdate }) => {
 
       {/* TXT-002: Added max-w-prose for optimal line length (50-75 characters) */}
       {/* TXT-003: Improved line-height and paragraph spacing for readability */}
-      <div className="text-secondary-foreground text-sm whitespace-pre-wrap leading-7 font-body max-w-prose [&>*]:mb-3">
-        {entry.text?.split(/\n\n+/).map((paragraph, i) => (
-          <p key={i} className={i > 0 ? 'mt-4' : ''}>{paragraph}</p>
-        )) || entry.text}
-      </div>
+      {/* Voice Chapters (R2 Task 15, flag: voiceChapters): when the flag is
+          on AND the entry has valid chapters, the body renders as chaptered
+          sections instead of one flat paragraph run. Flag off, no chapters,
+          or invalid (edited-text) offsets all fall through to the original
+          markup below, byte-identical. */}
+      {chaptersActive && chaptersValid ? (
+        <div className="text-secondary-foreground text-sm whitespace-pre-wrap leading-7 font-body max-w-prose">
+          {rawChapters.map((chapter, i) => (
+            <div key={chapter.id} className={i > 0 ? 'mt-5' : ''}>
+              <ChapterHeader
+                chapter={chapter}
+                isFirst={i === 0}
+                onRename={(title) => handleChapterRename(chapter.id, title)}
+                onMergeWithPrevious={() => handleChapterMerge(chapter.id)}
+                onRemove={() => handleChapterRemove(chapter.id)}
+              />
+              <div className="[&>*]:mb-3">
+                {entry.text.slice(chapter.charStart, chapter.charEnd).split(/\n\n+/).map((paragraph, pi) => (
+                  <p key={pi} className={pi > 0 ? 'mt-4' : ''}>{paragraph}</p>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="text-secondary-foreground text-sm whitespace-pre-wrap leading-7 font-body max-w-prose [&>*]:mb-3">
+          {entry.text?.split(/\n\n+/).map((paragraph, i) => (
+            <p key={i} className={i > 0 ? 'mt-4' : ''}>{paragraph}</p>
+          )) || entry.text}
+        </div>
+      )}
+      {chaptersActive && !chaptersValid && (
+        <p className="text-[11px] text-muted-foreground italic mt-1">Chapters no longer match edited text</p>
+      )}
 
       {/* Extracted Tasks for mixed entries */}
       {isMixed && entry.extracted_tasks && entry.extracted_tasks.length > 0 && (
