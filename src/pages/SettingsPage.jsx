@@ -12,6 +12,7 @@ import { initAccent, setAccent } from '../utils/accent';
 import { initDarkMode, cleanupDarkMode, toggleDarkMode } from '../utils/darkMode';
 import { useDarkMode } from '../hooks/useDarkMode';
 import { useUiStore, useBackgroundMotion } from '../stores/uiStore';
+import { readBudgetMode, setBudgetMode } from '../services/insights/insightBudget';
 
 // Cloud Settings accent picker options (CLOUD-DESIGN-SPEC.md §7/§5: "22px
 // swatch circles"). Fill colors come from theme-invariant CSS custom
@@ -72,6 +73,8 @@ const SettingsPage = ({
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState(null);
   const [accentName, setAccentName] = useState('blue');
+  const [budgetMode, setBudgetModeState] = useState('balanced');
+  const [budgetModeLoading, setBudgetModeLoading] = useState(false);
 
   const dark = useDarkMode();
   const backgroundMotion = useBackgroundMotion();
@@ -95,9 +98,41 @@ const SettingsPage = ({
     setAccentName(initAccent(user?.uid));
   }, [user?.uid]);
 
+  // Load the user's insight budget mode preference when the component mounts
+  // or the user changes.
+  useEffect(() => {
+    if (!user?.uid || !getFlag('insightBudget')) {
+      return;
+    }
+    setBudgetModeLoading(true);
+    readBudgetMode(db, user.uid)
+      .then((mode) => {
+        setBudgetModeState(mode);
+      })
+      .catch((err) => {
+        console.error('Failed to load budget mode:', err);
+      })
+      .finally(() => {
+        setBudgetModeLoading(false);
+      });
+  }, [user?.uid]);
+
   const chooseAccent = (nextAccent) => {
     const applied = setAccent(nextAccent, user?.uid);
     if (applied) setAccentName(applied);
+  };
+
+  const handleBudgetModeChange = async (mode) => {
+    if (!user?.uid) return;
+    setBudgetModeState(mode);
+    try {
+      await setBudgetMode(db, user.uid, mode);
+    } catch (err) {
+      console.error('Failed to set budget mode:', err);
+      // Revert to previous mode on error
+      const fallback = await readBudgetMode(db, user.uid);
+      setBudgetModeState(fallback);
+    }
   };
 
   const handleDarkModeChange = (checked) => {
@@ -444,8 +479,52 @@ const SettingsPage = ({
       <div className="space-y-2">
         <SectionLabel className="px-1">AI &amp; Privacy</SectionLabel>
         <Card className="overflow-hidden">
-          {aiPrivacyItems.map((item, i) => renderNavRow(item, i === aiPrivacyItems.length - 1))}
+          {aiPrivacyItems.map((item, i) => renderNavRow(item, i === aiPrivacyItems.length - 1 && !getFlag('insightBudget')))}
+          {getFlag('insightBudget') && (
+            <CardRow className={aiPrivacyItems.length > 0 ? 'border-t border-divider' : ''}>
+              <div className="min-w-0 flex-1">
+                <p className="text-[13.5px] font-medium text-foreground">Insight frequency</p>
+                <p className="text-sm text-muted-foreground">Control how many insights you see</p>
+              </div>
+              <div className="flex shrink-0 gap-2">
+                <Chip
+                  as="button"
+                  selected={budgetMode === 'quiet'}
+                  onClick={() => handleBudgetModeChange('quiet')}
+                  disabled={budgetModeLoading}
+                  title="Only the clearest, rarest insights"
+                >
+                  Quiet
+                </Chip>
+                <Chip
+                  as="button"
+                  selected={budgetMode === 'balanced'}
+                  onClick={() => handleBudgetModeChange('balanced')}
+                  disabled={budgetModeLoading}
+                  title="A few well-supported insights — the default"
+                >
+                  Balanced
+                </Chip>
+                <Chip
+                  as="button"
+                  selected={budgetMode === 'exploratory'}
+                  onClick={() => handleBudgetModeChange('exploratory')}
+                  disabled={budgetModeLoading}
+                  title="More ideas, including tentative ones"
+                >
+                  Exploratory
+                </Chip>
+              </div>
+            </CardRow>
+          )}
         </Card>
+        {getFlag('insightBudget') && (
+          <div className="px-4 py-2 text-xs text-muted-foreground space-y-1">
+            <p><strong>Quiet:</strong> Only the clearest, rarest insights</p>
+            <p><strong>Balanced:</strong> A few well-supported insights — the default</p>
+            <p><strong>Exploratory:</strong> More ideas, including tentative ones</p>
+          </div>
+        )}
       </div>
 
       {/* APP */}
