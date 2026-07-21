@@ -24,6 +24,8 @@ import CaptureReliabilityCenter from '../capture/CaptureReliabilityCenter';
 import CapturedToast from '../capture/CapturedToast';
 import PrivacyCenter from '../privacy/PrivacyCenter';
 import SpaceManager from '../spaces/SpaceManager';
+import InsightControlCenter from '../insights/InsightControlCenter';
+import { getFlag } from '../../config/flags';
 
 /**
  * AppLayout - Main application shell with Zen & Bento navigation
@@ -100,6 +102,7 @@ const AppLayout = ({
   const [showReliabilityCenter, setShowReliabilityCenter] = useState(false);
   const [showPrivacyCenter, setShowPrivacyCenter] = useState(false);
   const [showSpaceManager, setShowSpaceManager] = useState(false);
+  const [showControlCenter, setShowControlCenter] = useState(false);
   const [entryMode, setEntryMode] = useState('text'); // 'voice' or 'text'
   const [isFreshEntry, setIsFreshEntry] = useState(true); // true = FAB entry, false = responding to prompt
   const [currentPrompt, setCurrentPrompt] = useState(null); // Track prompt being answered for auto-dismiss
@@ -429,6 +432,7 @@ const AppLayout = ({
                 onOpenReliability={() => setShowReliabilityCenter(true)}
                 onOpenPrivacy={() => setShowPrivacyCenter(true)}
                 onOpenSpaces={() => setShowSpaceManager(true)}
+                onOpenControlCenter={() => setShowControlCenter(true)}
                 onOpenSafetyPlan={onShowSafetyPlan}
                 onOpenExport={onShowExport}
                 onRequestNotifications={onRequestNotifications}
@@ -563,6 +567,19 @@ const AppLayout = ({
         <SpaceManager
           uid={user?.uid}
           onClose={() => setShowSpaceManager(false)}
+        />
+      )}
+
+      {/* Insight Control Center (R2 Task 12) — double-gated on the flag (not
+          just the nav row that's the only way to flip showControlCenter
+          true): if `insightReceipts` is off, this never mounts even if
+          state were somehow set, mirroring ReceiptSheet's own flag-gated
+          mount site in InsightsPage.jsx. */}
+      {getFlag('insightReceipts') && showControlCenter && (
+        <InsightControlCenter
+          uid={user?.uid}
+          entries={entries}
+          onClose={() => setShowControlCenter(false)}
         />
       )}
 

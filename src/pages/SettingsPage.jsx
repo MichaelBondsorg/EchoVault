@@ -62,6 +62,7 @@ const SettingsPage = ({
   onOpenReliability,
   onOpenPrivacy,
   onOpenSpaces,
+  onOpenControlCenter,
   onRequestNotifications,
   onLogout,
   notificationPermission,
@@ -231,6 +232,15 @@ const SettingsPage = ({
     },
   ];
 
+  // Insight Control Center (flag: insightReceipts, R2 Task 12) — reversible
+  // controls over exclusions/muted families/recompute. Flag-gated: filtered
+  // out entirely when off, same convention as `contextSpacesItem` below.
+  const controlCenterItem = {
+    label: 'Insight Control Center',
+    description: 'Excluded sources, muted families, and recompute',
+    onClick: onOpenControlCenter,
+  };
+
   const aiPrivacyItems = [
     {
       label: 'Privacy & AI',
@@ -242,6 +252,7 @@ const SettingsPage = ({
       description: 'Control AI pattern detection',
       onClick: onOpenNexusSettings,
     },
+    getFlag('insightReceipts') && controlCenterItem,
     {
       label: 'People & Things',
       description: 'Edit names, relationships, and entities',
@@ -263,7 +274,7 @@ const SettingsPage = ({
       onClick: () => setShowDeleteConfirm(true),
       destructive: true,
     },
-  ];
+  ].filter(Boolean);
 
   const notificationsItem = {
     label: 'Notifications',
