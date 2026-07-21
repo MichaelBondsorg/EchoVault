@@ -77,25 +77,40 @@ export function snoozeUntilIso(option, now = new Date()) {
   return d.toISOString();
 }
 
+// Sentinel strings the composer's save chain (App.jsx's saveEntry/
+// doSaveEntry/handleAudioWrapper) is documented to resolve to when a save
+// genuinely completed but no real entry id is available on this call —
+// never an id, must never be written into `answerEntryId` as if it were one.
+const NON_ID_SAVE_SENTINELS = new Set(['saved', 'deferred']);
+
 /**
- * Normalize whatever the composer's save resolved to into a real entry id
- * or null. The underlying save chain (App.jsx's saveEntry/doSaveEntry/
- * handleAudioWrapper) has its own long-standing return contract of the
- * sentinel strings 'saved'/'deferred' (or undefined on some early-return
- * paths) — those must never be written into `outcome.answerEntryId` as if
- * they were an id. The real id (when available) now arrives via a separate
- * onEntryRef side-channel threaded through AppLayout, but this stays
- * defensive against any sentinel value still reaching here.
+ * Decide whether an open loop may close, from whatever AppLayout's
+ * onVoiceSave/onTextSave wrapper resolved the "Answer" composer save to
+ * (see AppLayout.jsx — the actual value EntryComposer's onEntrySaved, and
+ * therefore this callback, receives).
+ *
+ * I1: a loop must NOT close when the answer entry never saved. AppLayout's
+ * wrapper reports three outcomes: a real Firestore id string (success —
+ * close and link it), the sentinel 'deferred' (saved but no id available on
+ * this call — e.g. the documented crisis-deferred flow — close with no
+ * linked id), or `false` (save failed or threw — do NOT close). This stays
+ * defensive against the legacy 'saved' sentinel too, and treats anything
+ * else unrecognized (undefined, null, thrown-away values) the same as
+ * `false` — fail safe, never close on an outcome we don't understand.
+ *
+ * @param {string|'deferred'|false|null|undefined} savedResult
+ * @returns {{shouldClose: boolean, entryId: string|null}}
  */
-function normalizeSavedEntryId(savedResult) {
-  if (typeof savedResult === 'string') {
-    if (savedResult === 'saved' || savedResult === 'deferred') return null;
-    return savedResult;
+function resolveAnswerOutcome(savedResult) {
+  if (typeof savedResult === 'string' && !NON_ID_SAVE_SENTINELS.has(savedResult)) {
+    return { shouldClose: true, entryId: savedResult };
   }
-  if (savedResult && typeof savedResult === 'object' && typeof savedResult.id === 'string') {
-    return savedResult.id;
+  if (savedResult === 'deferred' || savedResult === 'saved') {
+    return { shouldClose: true, entryId: null };
   }
-  return null;
+  // false, undefined, null, or anything else unrecognized: fail safe — do
+  // NOT close the loop.
+  return { shouldClose: false, entryId: null };
 }
 
 /**
@@ -103,14 +118,22 @@ function normalizeSavedEntryId(savedResult) {
  *
  * Shows up to 3 due open-loop intents (subscribeDueOpenLoops), each with
  * neutral due phrasing and four actions: Answer (opens the capture composer
- * with a quiet context chip via `onAnswerLoop`, then closes the loop with
- * the saved entry id), Snooze (tonight/tomorrow/next week), Close, and
+ * with a quiet context chip via `onAnswerLoop`, then closes the loop — with
+ * the saved entry id when one is available — only if the answer entry
+ * actually saved; a save failure leaves the loop due, see
+ * `resolveAnswerOutcome`), Snooze (tonight/tomorrow/next week), Close, and
  * Dismiss ("Don't revisit"). A "+N upcoming" footer expands to a read-only
  * list of not-yet-due loops with dismiss only.
  *
  * Renders nothing (absence is correct, no placeholder) when the
  * `openLoops`/`intentExtraction` flags are off, or when there are no due
  * loops. In-app only — no notification code here.
+ *
+ * The due subscription's `now` boundary is captured once at subscribe time
+ * (see `subscribeDueOpenLoops`); `refreshNonce` re-keys that effect on
+ * document visibility (foregrounding) and every 5 minutes while visible, so
+ * a loop that becomes due while the app stays open in the background still
+ * appears without needing a full remount.
  */
 const OpenLoopsWidget = ({
   size = '2x1',
@@ -127,11 +150,37 @@ const OpenLoopsWidget = ({
   const [showUpcoming, setShowUpcoming] = useState(false);
   const [snoozeMenuId, setSnoozeMenuId] = useState(null);
 
+  // I2: subscribeDueOpenLoops bakes `now` into its Firestore query at
+  // subscribe time and never refreshes it — a loop that becomes due while
+  // this widget stays mounted (app left open/backgrounded across midnight,
+  // a snooze target passing, etc.) would never appear until something else
+  // forced a remount. refreshNonce re-keys the subscribe effect below (a
+  // fresh onSnapshot listener re-evaluates `now` at creation) whenever the
+  // tab/app comes back to the foreground, and every 5 minutes while it stays
+  // foregrounded, so due loops surface without needing a full remount.
+  const [refreshNonce, setRefreshNonce] = useState(0);
+
+  useEffect(() => {
+    if (!flagsOn) return undefined;
+    const bumpNonce = () => setRefreshNonce((n) => n + 1);
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'visible') bumpNonce();
+    };
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    const intervalId = setInterval(() => {
+      if (document.visibilityState === 'visible') bumpNonce();
+    }, 5 * 60 * 1000);
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+      clearInterval(intervalId);
+    };
+  }, [flagsOn]);
+
   useEffect(() => {
     if (!flagsOn || !uid) return undefined;
     const unsubscribe = subscribeDueOpenLoops(db, uid, setDueLoops, () => setDueLoops([]));
     return unsubscribe;
-  }, [flagsOn, uid]);
+  }, [flagsOn, uid, refreshNonce]);
 
   useEffect(() => {
     if (!flagsOn || !uid) return undefined;
@@ -146,7 +195,12 @@ const OpenLoopsWidget = ({
   const handleAnswer = (loop) => {
     if (!uid) return;
     onAnswerLoop?.(loopText(loop), (savedResult) => {
-      answerLoop(db, uid, loop.id, normalizeSavedEntryId(savedResult));
+      // I1: only close the loop when the answer entry actually saved (a real
+      // id, or the documented "saved with no id available" cases) — a save
+      // failure must leave the loop due, with no error UI beyond whatever
+      // the save path itself already surfaced (e.g. App.jsx's alert()).
+      const { shouldClose, entryId } = resolveAnswerOutcome(savedResult);
+      if (shouldClose) answerLoop(db, uid, loop.id, entryId);
     });
   };
 

@@ -1,5 +1,5 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { render, screen, fireEvent, act } from '@testing-library/react';
 
 const getFlag = vi.fn();
 vi.mock('../../../../config/flags', () => ({ getFlag: (...a) => getFlag(...a) }));
@@ -185,13 +185,13 @@ describe('OpenLoopsWidget - close & dismiss', () => {
 });
 
 describe('OpenLoopsWidget - answer wiring', () => {
-  // The composer's save chain (App.jsx saveEntry/doSaveEntry/handleAudioWrapper)
-  // never resolves to a bare entry id — its long-standing return contract is
-  // the sentinel strings 'saved'/'deferred' (or undefined on some early-return
-  // paths). The REAL id (when the online save path fires) arrives via a
-  // separate onEntryRef side-channel threaded through AppLayout, which is
-  // what actually reaches the `onSaved` callback here. These tests simulate
-  // each production-shaped value the callback can actually receive.
+  // AppLayout's onVoiceSave/onTextSave wrapper (see AppLayout.jsx) is what
+  // actually calls the `onSaved` callback passed to `onAnswerLoop` here, and
+  // it resolves to exactly one of: a real Firestore entry id string, the
+  // sentinel 'deferred' (save genuinely completed but no id is available —
+  // e.g. the documented crisis-deferred flow), or `false` (save failed or
+  // threw). I1: only the first two may close the loop; `false` (and any
+  // other unrecognized value) must NOT — the intent stays due.
   it('answer opens the composer via onAnswerLoop with the loop text', () => {
     dueWith([loop({ id: 'l1', sourceSpan: { text: 'call the dentist' } })]);
     const onAnswerLoop = vi.fn();
@@ -202,7 +202,7 @@ describe('OpenLoopsWidget - answer wiring', () => {
     expect(onAnswerLoop).toHaveBeenCalledWith('call the dentist', expect.any(Function));
   });
 
-  it('wires a real entry id (from the onEntryRef side-channel) through to answerLoop', () => {
+  it('wires a real entry id through to answerLoop and closes the loop', () => {
     dueWith([loop({ id: 'l1', sourceSpan: { text: 'call the dentist' } })]);
     const onAnswerLoop = vi.fn();
     render(<OpenLoopsWidget onAnswerLoop={onAnswerLoop} />);
@@ -214,19 +214,19 @@ describe('OpenLoopsWidget - answer wiring', () => {
     expect(answerLoop).toHaveBeenCalledWith({ __db: true }, 'user-1', 'l1', 'AbCdEf123456');
   });
 
-  it('never writes the "saved" sentinel into answerEntryId', () => {
+  it('never writes the legacy "saved" sentinel into answerEntryId, but still closes the loop', () => {
     dueWith([loop({ id: 'l1', sourceSpan: { text: 'call the dentist' } })]);
     const onAnswerLoop = vi.fn();
     render(<OpenLoopsWidget onAnswerLoop={onAnswerLoop} />);
     fireEvent.click(screen.getByLabelText('Answer'));
 
     const onSaved = onAnswerLoop.mock.calls[0][1];
-    onSaved('saved'); // saveEntry/doSaveEntry's own return contract, not an id
+    onSaved('saved'); // defensive: AppLayout no longer emits this, but guard it anyway
 
     expect(answerLoop).toHaveBeenCalledWith({ __db: true }, 'user-1', 'l1', null);
   });
 
-  it('never writes the "deferred" sentinel (crisis flow) into answerEntryId', () => {
+  it('closes the loop with no linked id on the "deferred" sentinel (crisis flow)', () => {
     dueWith([loop({ id: 'l1', sourceSpan: { text: 'call the dentist' } })]);
     const onAnswerLoop = vi.fn();
     render(<OpenLoopsWidget onAnswerLoop={onAnswerLoop} />);
@@ -238,7 +238,20 @@ describe('OpenLoopsWidget - answer wiring', () => {
     expect(answerLoop).toHaveBeenCalledWith({ __db: true }, 'user-1', 'l1', null);
   });
 
-  it('treats undefined (early-return save paths) as null, not a sentinel', () => {
+  it('I1: does NOT call answerLoop when the save failed (false) — the loop stays due', () => {
+    dueWith([loop({ id: 'l1', sourceSpan: { text: 'call the dentist' } })]);
+    const onAnswerLoop = vi.fn();
+    render(<OpenLoopsWidget onAnswerLoop={onAnswerLoop} />);
+    fireEvent.click(screen.getByLabelText('Answer'));
+
+    const onSaved = onAnswerLoop.mock.calls[0][1];
+    onSaved(false);
+
+    expect(answerLoop).not.toHaveBeenCalled();
+    expect(screen.getByText('call the dentist')).toBeTruthy();
+  });
+
+  it('I1: does NOT call answerLoop on undefined (fail-safe default) — the loop stays due', () => {
     dueWith([loop({ id: 'l1', sourceSpan: { text: 'call the dentist' } })]);
     const onAnswerLoop = vi.fn();
     render(<OpenLoopsWidget onAnswerLoop={onAnswerLoop} />);
@@ -247,13 +260,71 @@ describe('OpenLoopsWidget - answer wiring', () => {
     const onSaved = onAnswerLoop.mock.calls[0][1];
     onSaved(undefined);
 
-    expect(answerLoop).toHaveBeenCalledWith({ __db: true }, 'user-1', 'l1', null);
+    expect(answerLoop).not.toHaveBeenCalled();
+    expect(screen.getByText('call the dentist')).toBeTruthy();
   });
 
   it('does nothing if onAnswerLoop is not provided', () => {
     dueWith([loop({ id: 'l1', sourceSpan: { text: 'call the dentist' } })]);
     render(<OpenLoopsWidget />);
     expect(() => fireEvent.click(screen.getByLabelText('Answer'))).not.toThrow();
+  });
+});
+
+describe('OpenLoopsWidget - I2: due-loop foreground/visibility resubscribe', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('re-invokes subscribeDueOpenLoops on visibilitychange when the tab becomes visible', () => {
+    dueWith([loop({ id: 'l1', sourceSpan: { text: 'call the dentist' } })]);
+    render(<OpenLoopsWidget />);
+    expect(subscribeDueOpenLoops).toHaveBeenCalledTimes(1);
+
+    Object.defineProperty(document, 'visibilityState', { value: 'visible', configurable: true });
+    act(() => { document.dispatchEvent(new Event('visibilitychange')); });
+
+    expect(subscribeDueOpenLoops).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not re-subscribe on visibilitychange when the tab becomes hidden', () => {
+    dueWith([loop({ id: 'l1', sourceSpan: { text: 'call the dentist' } })]);
+    render(<OpenLoopsWidget />);
+    expect(subscribeDueOpenLoops).toHaveBeenCalledTimes(1);
+
+    Object.defineProperty(document, 'visibilityState', { value: 'hidden', configurable: true });
+    act(() => { document.dispatchEvent(new Event('visibilitychange')); });
+
+    expect(subscribeDueOpenLoops).toHaveBeenCalledTimes(1);
+  });
+
+  it('re-invokes subscribeDueOpenLoops every 5 minutes while visible (fake timers)', () => {
+    vi.useFakeTimers();
+    Object.defineProperty(document, 'visibilityState', { value: 'visible', configurable: true });
+    dueWith([loop({ id: 'l1', sourceSpan: { text: 'call the dentist' } })]);
+    render(<OpenLoopsWidget />);
+    expect(subscribeDueOpenLoops).toHaveBeenCalledTimes(1);
+
+    act(() => { vi.advanceTimersByTime(5 * 60 * 1000); });
+    expect(subscribeDueOpenLoops).toHaveBeenCalledTimes(2);
+
+    act(() => { vi.advanceTimersByTime(5 * 60 * 1000); });
+    expect(subscribeDueOpenLoops).toHaveBeenCalledTimes(3);
+  });
+
+  it('cleans up the visibilitychange listener and interval on unmount', () => {
+    vi.useFakeTimers();
+    Object.defineProperty(document, 'visibilityState', { value: 'visible', configurable: true });
+    dueWith([loop({ id: 'l1', sourceSpan: { text: 'call the dentist' } })]);
+    const { unmount } = render(<OpenLoopsWidget />);
+    expect(subscribeDueOpenLoops).toHaveBeenCalledTimes(1);
+
+    unmount();
+    act(() => { vi.advanceTimersByTime(5 * 60 * 1000); });
+    document.dispatchEvent(new Event('visibilitychange'));
+
+    // No further (re-)subscriptions after unmount.
+    expect(subscribeDueOpenLoops).toHaveBeenCalledTimes(1);
   });
 });
 

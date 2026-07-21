@@ -229,6 +229,17 @@ export default function App() {
   // read+set this via props; doSaveEntry below reads it via closure.
   const [captureSpaceId, setCaptureSpaceId] = useState(null);
 
+  // True once the fire-and-forget initFlags(db) call below has resolved
+  // (success or caught failure — see flags.js, it never rejects). getFlag()
+  // is synchronous and always usable, but it silently falls back to
+  // FLAG_DEFAULTS until this resolves; effects that gate one-time behavior
+  // on a flag (e.g. the captureSpaceId restore effect below) must wait for
+  // this, or a cold start where initFlags is still in flight reads a false
+  // default for `contextSpaces` and — since that effect's deps don't
+  // otherwise change — never gets a chance to re-check once the real value
+  // arrives (M1 fix).
+  const [flagsReady, setFlagsReady] = useState(false);
+
   useEffect(() => {
     if (!user?.uid) {
       setNeedsAiConsent(false);
@@ -633,8 +644,11 @@ export default function App() {
         // resolves. Triggered here (not before auth) because config/flags
         // requires an authenticated read per firestore.rules — firing it
         // earlier would read unauthenticated, get denied, and (pre-fix)
-        // permanently lock the session onto defaults.
-        initFlags(db);
+        // permanently lock the session onto defaults. initFlags never
+        // rejects (see flags.js), so this .then always fires and flips
+        // flagsReady — the signal effects gated on a flag value can depend
+        // on to re-check once the real value has actually loaded (M1 fix).
+        initFlags(db).then(() => setFlagsReady(true));
       }
       setUser(user);
     });
@@ -644,14 +658,23 @@ export default function App() {
   // space once we know who's signed in. Fire-and-forget, never blocks first
   // paint; with contextSpaces off (or no user) this simply stays null —
   // zero behavior change for anyone not using Spaces.
+  //
+  // Depends on flagsReady (M1 fix): on a cold start, auth can resolve before
+  // initFlags(db) does, so the first run of this effect can see
+  // getFlag('contextSpaces') still on its FLAG_DEFAULTS fallback (false)
+  // even when the remote doc has it on. Without flagsReady in the deps, uid
+  // doesn't change again and this effect would never get a second chance to
+  // check the real value — the restore silently never happens for that
+  // session. Adding flagsReady re-runs the effect exactly once more, right
+  // after flags actually finish loading.
   useEffect(() => {
-    if (!user?.uid || !getFlag('contextSpaces')) return undefined;
+    if (!user?.uid || !flagsReady || !getFlag('contextSpaces')) return undefined;
     let cancelled = false;
     getLastCaptureSpaceId(db, user.uid)
       .then((id) => { if (!cancelled) setCaptureSpaceId(id); })
       .catch(() => {});
     return () => { cancelled = true; };
-  }, [user?.uid]);
+  }, [user?.uid, flagsReady]);
 
   // Data Feed
   useEffect(() => {
@@ -2178,7 +2201,14 @@ export default function App() {
         // completes the op without re-transcribing.
         operationSettled = true;
       }
-      return saveResult === 'saved';
+      // The crisis-deferred case must reach the caller distinguishably from
+      // a genuine failure (I1) — persistPendingEntry finishes this save on
+      // a later turn with no live listener, so it is a real (eventual) save,
+      // not a failure. Preserve it as the string 'deferred' instead of
+      // collapsing it into the same `false` a real failure returns; the
+      // `saveResult === 'saved'` / `'deferred'` checks above are unaffected,
+      // they compare against `saveResult`, not this return value.
+      return saveResult === 'deferred' ? 'deferred' : saveResult === 'saved';
     } catch (error) {
       console.error('[Transcription] handleAudioWrapper error:', error);
       console.error('[Transcription] Error details:', {

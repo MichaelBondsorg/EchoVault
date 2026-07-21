@@ -324,7 +324,7 @@ de-identified) examples at ≥97% active precision. See that dir's `README.md`.
 
 ## R1 flags (Open Loops / Context Spaces / Insight Budget)
 
-The R1 plan (`docs/superpowers/plans/2026-07-20-trustworthy-capture-and-intelligence.md`,
+The R1 plan (`docs/superpowers/plans/2026-07-20-r1-follow-through.md`,
 batches R1-1..R1-4) shipped three more client flags, all **default OFF**,
 independent of each other and of `intentExtraction` above (though Open Loops
 has no effect unless `intentExtraction` is also on, since loops are a kind of
@@ -390,6 +390,40 @@ durable across the offline path yet. **Must be fixed before `contextSpaces`
 defaults ON for users who journal offline** — add `spaceId` to the
 whitelist in `queueEntry` (and confirm the sync path forwards it through to
 the eventual online entry create) as a prerequisite, not a follow-up.
+
+**Known gap: no client sends `space-id` GCS metadata yet.**
+`functions/src/capture/onAudioUploaded.js` (background-upload finalize
+handler) already defensively reads a `space-id` custom object metadata key
+off the uploaded GCS object and threads it through to
+`buildBackgroundCoreEntry` as `spaceId` — but nothing upstream can actually
+populate that key today. `functions/src/capture/uploadTicket.js`
+(`issueCaptureUploadTicketCore`, the `issueCaptureUploadTicket` callable)
+only accepts and V4-signs `capturedAt` / `captureTimezone` as optional
+`x-goog-meta-*` extension headers; it has no `spaceId` parameter at all, so
+there is no signed header for a client to even send. On top of that, no
+client (web or native) currently calls `issueCaptureUploadTicket` in the
+first place — the native background-upload vertical slice's client half
+isn't wired up yet. Until both the ticket function gains a signed
+`space-id` header and a client sends it, every background-uploaded voice
+entry lands **unscoped** regardless of the capture pill's selection at
+record time. Lower risk than it sounds today because `nativeBackgroundUpload`
+(the flag gating the background-upload vertical slice itself) is **also
+default OFF** — but both gaps must be closed together before either flag
+defaults on for a user who journals with Context Spaces active.
+
+**Clarifying: only Ask Journal passes a scope in R1.** The strict
+`filterEntriesByScope` gate is wired at all 7 retrieval seams listed above
+(client `getSmartChatContext`/`askJournalAI`/both `generateDaySummary`
+functions/`companionContext`/`prompts` index/nexus `fetchRecentEntries`;
+server `buildRecentContext`), so every seam is capable of scoping and none
+of them can leak across an explicit scope boundary if one is ever passed.
+In R1, however, **Ask Journal is the only caller that actually passes a
+non-null scope** — day summaries, dashboard prompts, and the nexus insight
+pipeline all accept a `scope` argument but have no UI surface wired to
+supply one yet. Those surfaces therefore remain cross-space (unscoped) in
+practice through R1, by design, not by omission; wiring a scoped caller
+into each is R2 work (see the digest/report limitation below, which is the
+same shape of gap for a different set of surfaces).
 
 **Digest/report cross-space limitation.** The weekly digest and any
 generated report remain **cross-space** (unscoped, all-entries) through R1 —

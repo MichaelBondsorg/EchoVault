@@ -472,26 +472,42 @@ const AppLayout = ({
         onVoiceSave={async (base64, mime, options) => {
           // Capture the REAL Firestore doc id via the onEntryRef side-channel
           // (see App.jsx doSaveEntry's jsdoc) instead of relying on
-          // handleAudioWrapper's own return value, which is just a boolean
-          // ('saved' vs not) — never a usable entry id. This is what
-          // EntryComposer's onEntrySaved (e.g. OpenLoopsWidget's "Answer"
-          // flow -> answerLoop) actually receives.
+          // handleAudioWrapper's own return value, which never carries a
+          // usable entry id. This is what EntryComposer's onEntrySaved (e.g.
+          // OpenLoopsWidget's "Answer" flow -> answerLoop) actually receives.
+          //
+          // I1: OpenLoopsWidget must not close a loop when the answer entry
+          // never saved, so this wrapper reports three distinct outcomes
+          // instead of coercing everything to an id-or-null:
+          //  - a real Firestore id string (savedEntryId fired) — success.
+          //  - the sentinel 'deferred' — the save genuinely completed with no
+          //    id available on this call: either the offline-queue path
+          //    (handleAudioWrapper resolves `true`, no online addDoc ran) or
+          //    the documented crisis-deferred flow (resolves the string
+          //    'deferred' — App.jsx's persistPendingEntry finishes the save
+          //    on a later turn with no live listener left to hand an id to).
+          //  - `false` — the save genuinely failed or threw; the loop must
+          //    stay open (see OpenLoopsWidget's handleAnswer).
           let savedEntryId = null;
-          await handleEntrySubmitted(onAudioSubmit, base64, mime, {
+          const outcome = await handleEntrySubmitted(onAudioSubmit, base64, mime, {
             ...options,
             onEntryRef: (id) => { savedEntryId = id; },
           });
-          return savedEntryId;
+          if (savedEntryId) return savedEntryId;
+          return (outcome === true || outcome === 'deferred') ? 'deferred' : false;
         }}
         onTextSave={async (text) => {
-          // Same real-id capture as onVoiceSave above — saveEntry's own
-          // return value here is the sentinel string 'saved'/'deferred',
-          // never an entry id.
+          // Same real-id capture and three-outcome contract as onVoiceSave
+          // above. saveEntry's own return value here is 'saved' (including
+          // the offline-queue no-id case), the crisis sentinel 'deferred',
+          // or undefined (no user, or a save that failed even the offline
+          // fallback) — only undefined means a genuine failure.
           let savedEntryId = null;
-          await handleEntrySubmitted(onTextSubmit, text, null, {
+          const outcome = await handleEntrySubmitted(onTextSubmit, text, null, {
             onEntryRef: (id) => { savedEntryId = id; },
           });
-          return savedEntryId;
+          if (savedEntryId) return savedEntryId;
+          return (outcome === 'deferred' || outcome === 'saved') ? 'deferred' : false;
         }}
         processing={processing}
         aiProcessingEnabled={aiProcessingEnabled}
