@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { doc, getDoc, setDoc, updateDoc, onSnapshot } from 'firebase/firestore';
 import { db } from '../config/firebase';
 import { APP_COLLECTION_ID } from '../config/constants';
+import { getFlag } from '../config/flags';
 
 /**
  * Widget definitions for the Bento dashboard
@@ -31,6 +32,7 @@ export const WIDGET_DEFINITIONS = {
     description: 'Follow-ups you set aside, ready when you are',
     defaultSize: '2x1',
     icon: 'Clock',
+    flags: ['openLoops', 'intentExtraction'],
   },
   quick_stats: {
     id: 'quick_stats',
@@ -121,11 +123,22 @@ export function useDashboardLayout(userId) {
   const [isLoading, setIsLoading] = useState(true);
   const [isEditMode, setIsEditMode] = useState(false);
   const [error, setError] = useState(null);
+  // Deliberately-removed default widget ids, persisted on the same
+  // preferences/dashboard doc (`removedDefaults` field) so the
+  // non-destructive merge below never resurrects a default the user
+  // explicitly removed. Docs written before this field existed have no
+  // `removedDefaults` at all — treated as empty (see onSnapshot handler).
+  const [removedDefaults, setRemovedDefaults] = useState([]);
 
-  // Calculate which widgets are available to add (not in current layout)
+  // Calculate which widgets are available to add (not in current layout,
+  // and gated behind any flags the widget definition declares — every flag
+  // in `flags` must be on, per getFlag).
   useEffect(() => {
     const currentWidgetIds = layout.map(w => w.id);
-    const available = ALL_AVAILABLE_WIDGETS.filter(id => !currentWidgetIds.includes(id));
+    const available = ALL_AVAILABLE_WIDGETS.filter(id => {
+      const requiredFlags = WIDGET_DEFINITIONS[id]?.flags ?? [];
+      return requiredFlags.every(flag => getFlag(flag)) && !currentWidgetIds.includes(id);
+    });
     setAvailableWidgets(available);
   }, [layout]);
 
@@ -152,12 +165,27 @@ export function useDashboardLayout(userId) {
       (snapshot) => {
         if (snapshot.exists()) {
           const data = snapshot.data();
+          const removed = Array.isArray(data.removedDefaults) ? data.removedDefaults : [];
+          setRemovedDefaults(removed);
+
           if (data.layout && Array.isArray(data.layout)) {
-            setLayout(data.layout);
+            // Non-destructive merge: a saved layout from before a widget
+            // shipped as a new default should transparently gain it,
+            // without ever writing back to Firestore here (in-memory
+            // only — the merged value only persists once the user takes
+            // an action like addWidget/removeWidget/reorderWidgets).
+            const savedIds = new Set(data.layout.map(w => w.id));
+            const removedIds = new Set(removed);
+            const mergedLayout = [
+              ...data.layout,
+              ...DEFAULT_DASHBOARD_LAYOUT.filter(d => !savedIds.has(d.id) && !removedIds.has(d.id)),
+            ];
+            setLayout(mergedLayout);
           }
         } else {
           // New user - use default layout and save it
           setLayout(DEFAULT_DASHBOARD_LAYOUT);
+          setRemovedDefaults([]);
           // Don't save yet - let them use the default first
         }
         setIsLoading(false);
@@ -174,9 +202,14 @@ export function useDashboardLayout(userId) {
   }, [userId]);
 
   /**
-   * Save layout to Firestore
+   * Save layout to Firestore.
+   * @param {Array} newLayout
+   * @param {string[]} [removedDefaultsOverride] - When provided, also
+   *   writes the `removedDefaults` field (e.g. after removeWidget adds a
+   *   default's id, or addWidget clears one). Omitted entirely otherwise
+   *   so `{merge: true}` leaves whatever is already on the doc untouched.
    */
-  const saveLayout = useCallback(async (newLayout) => {
+  const saveLayout = useCallback(async (newLayout, removedDefaultsOverride) => {
     if (!userId) return;
 
     const preferencesRef = doc(
@@ -189,11 +222,16 @@ export function useDashboardLayout(userId) {
       'dashboard'
     );
 
+    const payload = {
+      layout: newLayout,
+      updatedAt: new Date(),
+    };
+    if (removedDefaultsOverride !== undefined) {
+      payload.removedDefaults = removedDefaultsOverride;
+    }
+
     try {
-      await setDoc(preferencesRef, {
-        layout: newLayout,
-        updatedAt: new Date(),
-      }, { merge: true });
+      await setDoc(preferencesRef, payload, { merge: true });
       console.log('[useDashboardLayout] Layout saved');
     } catch (err) {
       console.error('[useDashboardLayout] Error saving layout:', err);
@@ -227,8 +265,17 @@ export function useDashboardLayout(userId) {
 
     const newLayout = [...layout, newWidget];
     setLayout(newLayout);
-    await saveLayout(newLayout);
-  }, [layout, saveLayout]);
+
+    // Re-adding a previously-removed default must clear its suppression —
+    // otherwise the next load's merge would immediately re-hide it.
+    if (removedDefaults.includes(widgetId)) {
+      const newRemovedDefaults = removedDefaults.filter(id => id !== widgetId);
+      setRemovedDefaults(newRemovedDefaults);
+      await saveLayout(newLayout, newRemovedDefaults);
+    } else {
+      await saveLayout(newLayout);
+    }
+  }, [layout, removedDefaults, saveLayout]);
 
   /**
    * Remove a widget from the dashboard
@@ -243,8 +290,19 @@ export function useDashboardLayout(userId) {
 
     const newLayout = layout.filter(w => w.id !== widgetId);
     setLayout(newLayout);
-    await saveLayout(newLayout);
-  }, [layout, saveLayout]);
+
+    // Only track suppression for actual defaults — non-default widgets
+    // aren't part of the merge and don't need an entry, which keeps
+    // removedDefaults from growing junk.
+    const isDefaultWidget = DEFAULT_DASHBOARD_LAYOUT.some(d => d.id === widgetId);
+    if (isDefaultWidget && !removedDefaults.includes(widgetId)) {
+      const newRemovedDefaults = [...removedDefaults, widgetId];
+      setRemovedDefaults(newRemovedDefaults);
+      await saveLayout(newLayout, newRemovedDefaults);
+    } else {
+      await saveLayout(newLayout);
+    }
+  }, [layout, removedDefaults, saveLayout]);
 
   /**
    * Reorder widgets in the dashboard

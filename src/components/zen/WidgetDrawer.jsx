@@ -7,6 +7,7 @@ import { WIDGET_DEFINITIONS } from '../../hooks/useDashboardLayout';
 const WIDGET_ICONS = {
   hero_card: Sun,
   prompt_card: Sparkles,
+  open_loops: Clock,
   quick_stats: BarChart3,
   mood_heatmap: Calendar,
   ongoing_stories: GitBranch,
