@@ -15,16 +15,17 @@ import { useUser } from '../../stores';
 import { subscribeSpaces } from '../../services/spaces/spacesService';
 import { useDismissablePopover } from '../../hooks/useDismissablePopover';
 import { Chip } from '../cloud';
+import SpacePicker from '../spaces/SpacePicker';
 import ProvenanceDisclosure from '../ui/ProvenanceDisclosure';
 import IntentSuggestionTray from './IntentSuggestionTray';
 
 /**
  * SpaceChip — Context Space re-scoping affordance for a saved entry (PRD R1
  * Context Spaces, plan task 9). Mirrors EntryBar's SpacePill (same popover
- * pattern), but writes back to the entry itself: selecting a space calls
- * `onSelect` with the entry's own updateDoc payload, `{spaceId, updatedAt}`
- * — and nothing else ever changes (createdAt/effectiveDate/transcription
- * stay untouched).
+ * pattern, now the shared `SpacePicker` — R2 task 4), but writes back to
+ * the entry itself: selecting a space calls `onSelect` with the entry's
+ * own updateDoc payload, `{spaceId, updatedAt}` — and nothing else ever
+ * changes (createdAt/effectiveDate/transcription stay untouched).
  *
  * Dismissal (review fix): an outside tap or Escape closes the popover via
  * the shared `useDismissablePopover` hook.
@@ -47,33 +48,13 @@ const SpaceChip = ({ spaces, selectedId, onSelect, open, onToggle, onDismiss }) 
         {selected && <span>{selected.name}</span>}
       </Chip>
       {open && (
-        <div
-          role="listbox"
-          aria-label="Choose a space"
-          className="absolute left-0 z-40 mt-1 min-w-[140px] rounded-xl border border-border bg-card p-1 shadow-soft-lg"
-        >
-          <button
-            type="button"
-            role="option"
-            aria-selected={selectedId == null}
-            onClick={() => onSelect(null)}
-            className={`block w-full rounded-lg px-2 py-1.5 text-left text-xs ${selectedId == null ? 'bg-accent-wash text-accent-deep' : 'text-secondary-foreground hover:bg-divider'}`}
-          >
-            No space
-          </button>
-          {spaces.map((space) => (
-            <button
-              key={space.id}
-              type="button"
-              role="option"
-              aria-selected={space.id === selectedId}
-              onClick={() => onSelect(space.id)}
-              className={`block w-full rounded-lg px-2 py-1.5 text-left text-xs ${space.id === selectedId ? 'bg-accent-wash text-accent-deep' : 'text-secondary-foreground hover:bg-divider'}`}
-            >
-              {space.name}
-            </button>
-          ))}
-        </div>
+        <SpacePicker
+          spaces={spaces}
+          selectedSpaceId={selectedId}
+          onSelect={onSelect}
+          defaultLabel="No space"
+          align="left"
+        />
       )}
     </div>
   );

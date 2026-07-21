@@ -67,6 +67,7 @@ import {
 import MarkdownLite from '../ui/MarkdownLite';
 import VoiceRecorder from '../input/VoiceRecorder';
 import BreathingExercise from '../shelter/BreathingExercise';
+import SpacePicker from '../spaces/SpacePicker';
 import { SectionLabel, Button, Chip } from '../cloud';
 
 // Audio synthesis
@@ -1114,33 +1115,14 @@ const UnifiedConversation = ({
                   <span>{selectedScopeSpace ? selectedScopeSpace.name : 'All spaces'}</span>
                 </Chip>
                 {scopePickerOpen && (
-                  <div
-                    role="listbox"
-                    aria-label="Choose Ask Journal scope"
-                    className="absolute left-0 z-40 mt-1 min-w-[140px] rounded-xl border border-border bg-card p-1 shadow-soft-lg"
-                  >
-                    <button
-                      type="button"
-                      role="option"
-                      aria-selected={scope == null}
-                      onClick={() => handleSelectScope(null)}
-                      className={`block w-full rounded-lg px-2 py-1.5 text-left text-xs ${scope == null ? 'bg-accent-wash text-accent-deep' : 'text-secondary-foreground hover:bg-divider'}`}
-                    >
-                      All spaces
-                    </button>
-                    {spaces.map((space) => (
-                      <button
-                        key={space.id}
-                        type="button"
-                        role="option"
-                        aria-selected={scope?.spaceId === space.id}
-                        onClick={() => handleSelectScope(space.id)}
-                        className={`block w-full rounded-lg px-2 py-1.5 text-left text-xs ${scope?.spaceId === space.id ? 'bg-accent-wash text-accent-deep' : 'text-secondary-foreground hover:bg-divider'}`}
-                      >
-                        {space.name}
-                      </button>
-                    ))}
-                  </div>
+                  <SpacePicker
+                    spaces={spaces}
+                    selectedSpaceId={scope?.spaceId ?? null}
+                    onSelect={handleSelectScope}
+                    defaultLabel="All spaces"
+                    align="left"
+                    ariaLabel="Choose Ask Journal scope"
+                  />
                 )}
               </div>
             )}

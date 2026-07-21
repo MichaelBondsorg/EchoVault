@@ -173,3 +173,126 @@ describe('SpaceManager — archive flow (3-option sheet)', () => {
     expect(archiveSpace).not.toHaveBeenCalled();
   });
 });
+
+// SpaceManager renders TWO stacked `role="dialog"` overlays while the
+// archive sheet is open (the full-screen manager underneath, the 3-option
+// sheet on top). Nested simultaneous `aria-modal="true"` dialogs are an
+// a11y anti-pattern (screen readers/focus traps can't tell which one is
+// actually modal) — R2 task 4 fixes this: while the sheet is open, the
+// outer dialog gets `aria-hidden="true"` + `inert` and drops its
+// `aria-modal`, so only the sheet is "the" modal at any given time.
+describe('SpaceManager — nested-dialog a11y (archive sheet)', () => {
+  const outerDialog = () => screen.getByText('Organize your journal').closest('[role="dialog"]');
+  const innerDialog = () => screen.getByRole('dialog', { name: /Archive/i });
+
+  it('the outer dialog keeps aria-modal="true" and has no aria-hidden/inert while the sheet is closed', async () => {
+    withSpaces([{ id: 'space-1', name: 'Work', state: 'active' }]);
+    render(<SpaceManager uid={UID} onClose={vi.fn()} />);
+    await screen.findByText('Work');
+
+    const outer = outerDialog();
+    expect(outer).toHaveAttribute('aria-modal', 'true');
+    expect(outer).not.toHaveAttribute('aria-hidden');
+    expect(outer).not.toHaveAttribute('inert');
+  });
+
+  it('only one aria-modal="true" node exists while the archive sheet is open', async () => {
+    withSpaces([{ id: 'space-1', name: 'Work', state: 'active' }]);
+    render(<SpaceManager uid={UID} onClose={vi.fn()} />);
+
+    fireEvent.click(await screen.findByLabelText('Archive Work'));
+
+    expect(document.querySelectorAll('[aria-modal="true"]')).toHaveLength(1);
+    expect(innerDialog()).toHaveAttribute('aria-modal', 'true');
+  });
+
+  it('the outer dialog gets aria-hidden="true" and inert while the archive sheet is open', async () => {
+    withSpaces([{ id: 'space-1', name: 'Work', state: 'active' }]);
+    render(<SpaceManager uid={UID} onClose={vi.fn()} />);
+
+    const outer = outerDialog();
+    fireEvent.click(await screen.findByLabelText('Archive Work'));
+
+    expect(outer).toHaveAttribute('aria-hidden', 'true');
+    expect(outer).toHaveAttribute('inert');
+    expect(outer).not.toHaveAttribute('aria-modal', 'true');
+  });
+
+  it('the outer dialog reverts (aria-modal restored, aria-hidden/inert removed) once the sheet closes', async () => {
+    withSpaces([{ id: 'space-1', name: 'Work', state: 'active' }]);
+    render(<SpaceManager uid={UID} onClose={vi.fn()} />);
+    const outer = outerDialog();
+
+    fireEvent.click(await screen.findByLabelText('Archive Work'));
+    expect(outer).toHaveAttribute('aria-hidden', 'true');
+
+    fireEvent.click(screen.getByText('Cancel'));
+
+    expect(outer).toHaveAttribute('aria-modal', 'true');
+    expect(outer).not.toHaveAttribute('aria-hidden');
+    expect(outer).not.toHaveAttribute('inert');
+    expect(document.querySelectorAll('[aria-modal="true"]')).toHaveLength(1);
+  });
+});
+
+describe('SpaceManager — archive sheet Escape order + focus return', () => {
+  it('Escape closes the inner sheet first, WITHOUT closing the outer dialog (onClose not called)', async () => {
+    withSpaces([{ id: 'space-1', name: 'Work', state: 'active' }]);
+    const onClose = vi.fn();
+    render(<SpaceManager uid={UID} onClose={onClose} />);
+
+    fireEvent.click(await screen.findByLabelText('Archive Work'));
+    expect(screen.getByText(/^Archive/)).toBeTruthy();
+
+    fireEvent.keyDown(document, { key: 'Escape' });
+
+    expect(screen.queryByText(/^Archive/)).toBeNull();
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('a second Escape (sheet already closed) closes the outer dialog via onClose', async () => {
+    withSpaces([{ id: 'space-1', name: 'Work', state: 'active' }]);
+    const onClose = vi.fn();
+    render(<SpaceManager uid={UID} onClose={onClose} />);
+
+    fireEvent.click(await screen.findByLabelText('Archive Work'));
+    fireEvent.keyDown(document, { key: 'Escape' }); // closes inner
+    expect(onClose).not.toHaveBeenCalled();
+
+    fireEvent.keyDown(document, { key: 'Escape' }); // closes outer
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('Escape on the outer dialog (no sheet open) calls onClose directly', async () => {
+    withSpaces([{ id: 'space-1', name: 'Work', state: 'active' }]);
+    const onClose = vi.fn();
+    render(<SpaceManager uid={UID} onClose={onClose} />);
+    await screen.findByText('Work');
+
+    fireEvent.keyDown(document, { key: 'Escape' });
+
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('focus returns to the archive trigger button when the sheet closes via Cancel', async () => {
+    withSpaces([{ id: 'space-1', name: 'Work', state: 'active' }]);
+    render(<SpaceManager uid={UID} onClose={vi.fn()} />);
+
+    const trigger = await screen.findByLabelText('Archive Work');
+    fireEvent.click(trigger);
+    fireEvent.click(screen.getByText('Cancel'));
+
+    expect(document.activeElement).toBe(trigger);
+  });
+
+  it('focus returns to the archive trigger button when the sheet closes via Escape', async () => {
+    withSpaces([{ id: 'space-1', name: 'Work', state: 'active' }]);
+    render(<SpaceManager uid={UID} onClose={vi.fn()} />);
+
+    const trigger = await screen.findByLabelText('Archive Work');
+    fireEvent.click(trigger);
+    fireEvent.keyDown(document, { key: 'Escape' });
+
+    expect(document.activeElement).toBe(trigger);
+  });
+});

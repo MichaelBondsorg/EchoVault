@@ -12,14 +12,16 @@ import { db } from '../../config/firebase';
 import { subscribeSpaces, setLastCaptureSpaceId } from '../../services/spaces/spacesService';
 import { useDismissablePopover } from '../../hooks/useDismissablePopover';
 import { Button, Chip } from '../cloud';
+import SpacePicker from '../spaces/SpacePicker';
 
 /**
  * SpacePill — capture-time Context Space picker (PRD R1 Context Spaces,
  * plan task 9). A small tappable Chip showing the currently selected
  * Space's name (or nothing when unscoped — the icon alone is the tap
  * affordance), with a lightweight absolutely-positioned popover listing
- * active spaces + "No space". Entirely local to EntryBar; only rendered
- * when the `contextSpaces` flag is on.
+ * active spaces + "No space" (the shared `SpacePicker`, R2 task 4).
+ * Entirely local to EntryBar; only rendered when the `contextSpaces` flag
+ * is on.
  *
  * Dismissal (review fix): an outside tap or Escape closes the popover via
  * `useDismissablePopover` — see `onDismiss`. EntryBar also resets
@@ -43,33 +45,13 @@ const SpacePill = ({ spaces, selectedId, onSelect, open, onToggle, onDismiss }) 
         {selected && <span>{selected.name}</span>}
       </Chip>
       {open && (
-        <div
-          role="listbox"
-          aria-label="Choose a space"
-          className="absolute right-0 z-40 mt-1 min-w-[140px] rounded-xl border border-border bg-card p-1 shadow-soft-lg"
-        >
-          <button
-            type="button"
-            role="option"
-            aria-selected={selectedId == null}
-            onClick={() => onSelect(null)}
-            className={`block w-full rounded-lg px-2 py-1.5 text-left text-xs ${selectedId == null ? 'bg-accent-wash text-accent-deep' : 'text-secondary-foreground hover:bg-divider'}`}
-          >
-            No space
-          </button>
-          {spaces.map((space) => (
-            <button
-              key={space.id}
-              type="button"
-              role="option"
-              aria-selected={space.id === selectedId}
-              onClick={() => onSelect(space.id)}
-              className={`block w-full rounded-lg px-2 py-1.5 text-left text-xs ${space.id === selectedId ? 'bg-accent-wash text-accent-deep' : 'text-secondary-foreground hover:bg-divider'}`}
-            >
-              {space.name}
-            </button>
-          ))}
-        </div>
+        <SpacePicker
+          spaces={spaces}
+          selectedSpaceId={selectedId}
+          onSelect={onSelect}
+          defaultLabel="No space"
+          align="right"
+        />
       )}
     </div>
   );
