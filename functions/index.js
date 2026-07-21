@@ -1043,8 +1043,6 @@ export const transcribeEntry = onCall(
       throw new HttpsError('invalid-argument', 'Audio data and mimeType are required');
     }
 
-    const markerCount = Array.isArray(markers) ? markers.length : 0;
-
     const gemKey = geminiApiKey.value();
     const oaiKey = openaiApiKey.value();
 
@@ -1080,7 +1078,7 @@ export const transcribeEntry = onCall(
         if (geminiRes.status === 429) {
           console.warn('[transcribeEntry] Gemini rate limited, falling back to Whisper', { userId, status: geminiRes.status });
         } else if (geminiRes.ok) {
-          const parsed = parseFusedResponse(await geminiRes.json(), { markerCount });
+          const parsed = parseFusedResponse(await geminiRes.json(), { markers, durationMs });
           if (parsed && parsed.transcript) {
             logTranscribeEnd('gemini');
             return {

@@ -177,7 +177,7 @@ describe('buildCoreEntry — Voice Chapters (Task 14)', () => {
     expect(entry.transcription.cleanedTranscript).toBe('Chapter one stuff. Chapter two stuff.');
   });
 
-  it('handles duplicate paragraph text by walking forward from the previous chapter end', () => {
+  it('resumes from the previous chapter end even when neither chapter text repeats elsewhere', () => {
     const entry = buildCoreEntry(chapterArgs({
       text: 'I said hello. Then I said hello again.',
       transcription: { rawTranscript: 'I said hello. Then I said hello again.' },
@@ -192,6 +192,73 @@ describe('buildCoreEntry — Voice Chapters (Task 14)', () => {
     expect(entry.transcription.chapters[0]).toMatchObject({ charStart: 0, charEnd: 13 });
     expect(entry.transcription.chapters[1]).toMatchObject({ charStart: 14, charEnd: 38 });
     expect(entry.text.slice(14, 38)).toBe('Then I said hello again.');
+  });
+
+  // Task 14 review — Important 2a: the test above never actually exercises
+  // cursor-resumption, because neither chapter's TEXT repeats anywhere else
+  // in the transcript — a non-resuming `indexOf(text, 0)` would land in
+  // exactly the same place. This fixture has chapter text that genuinely
+  // repeats verbatim ("I said hello." appears twice), so a naive
+  // always-search-from-0 walk would compute the SAME charStart (0) for both
+  // chapter one and chapter two. Assert the offsets are strictly increasing.
+  it('genuinely repeated chapter text still lands each occurrence at its real, later position', () => {
+    const entry = buildCoreEntry(chapterArgs({
+      text: 'I said hello. I said hello. Then more.',
+      transcription: { rawTranscript: 'I said hello. I said hello. Then more.' },
+      chapters: [
+        { startMs: 0, title: 'First', text: 'I said hello.' },
+        { startMs: 4000, title: 'Second', text: 'I said hello.' },
+        { startMs: 8000, title: 'Third', text: 'Then more.' },
+      ],
+    }));
+    const [ch0, ch1, ch2] = entry.transcription.chapters;
+    expect(ch0.charStart).toBe(0);
+    expect(ch0.charEnd).toBe(13);
+    // A non-cursor-resuming indexOf would ALSO compute charStart 0 here.
+    expect(ch1.charStart).toBe(14);
+    expect(ch1.charEnd).toBe(27);
+    expect(ch2.charStart).toBe(28);
+    expect(ch2.charEnd).toBe(38);
+    // Strictly increasing — no chapter's offsets ever move backward or repeat.
+    expect(ch0.charStart).toBeLessThan(ch1.charStart);
+    expect(ch1.charStart).toBeLessThan(ch2.charStart);
+  });
+
+  // Task 14 review — Important 2b: the server's join validation normalizes
+  // whitespace before comparing, so a chapter response that PASSED
+  // validation can still carry internal whitespace that doesn't byte-match
+  // the client's stored cleaned transcript. The walk must fall back to a
+  // whitespace-tolerant search rather than failing the whole chapter set.
+  it('falls back to a whitespace-tolerant search when raw indexOf fails due to internal whitespace drift', () => {
+    const entry = buildCoreEntry(chapterArgs({
+      text: 'I really enjoy long walks on the beach. Then I go home.',
+      transcription: { rawTranscript: 'I really enjoy long walks on the beach, um, then I go home.' },
+      chapters: [
+        { startMs: 0, title: 'Walks', text: 'I  really enjoy   long walks on the beach.' }, // extra internal spaces
+        { startMs: 5000, title: 'Home', text: 'Then I go home.' },
+      ],
+    }));
+    expect(entry.transcription.chapters).not.toBeUndefined();
+    expect(entry.transcription.chapters[0]).toMatchObject({ charStart: 0, charEnd: 39 });
+    expect(entry.transcription.chapters[1]).toMatchObject({ charStart: 40, charEnd: 55 });
+    expect(entry.text.slice(40, 55)).toBe('Then I go home.');
+  });
+
+  it('still omits chapters when the tolerant search ALSO fails (genuinely unmatchable text) — save proceeds', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const entry = buildCoreEntry(chapterArgs({
+      text: 'I really enjoy long walks on the beach. Then I go home.',
+      transcription: { rawTranscript: 'I really enjoy long walks on the beach, um, then I go home.' },
+      chapters: [
+        { startMs: 0, title: 'Walks', text: 'This sentence appears nowhere near the transcript.' },
+        { startMs: 5000, title: 'Home', text: 'Then I go home.' },
+      ],
+    }));
+    expect(entry.transcription).not.toHaveProperty('chapters');
+    // Save still succeeds — the rest of the entry is fully intact.
+    expect(entry.text).toBe('I really enjoy long walks on the beach. Then I go home.');
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    warnSpy.mockRestore();
   });
 
   it('saves WITHOUT chapters when the offset walk fails (text mismatch), and logs once', () => {

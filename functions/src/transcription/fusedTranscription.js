@@ -63,6 +63,26 @@ const normalizeMarkers = (markers) => Array.from(new Set(
     .filter((ms) => Number.isFinite(ms) && ms >= 0)
 )).sort((a, b) => a - b);
 
+// Voice Chapters (Task 14 review — Important 3 + MINOR): THE single source of
+// truth for chapter boundary timestamps. Every one of the prompt builder, the
+// response validator, and the startMs overwrite derives its boundary count
+// and values from this SAME list, so they can never disagree.
+//
+// - Drops any marker beyond the recording's duration (MINOR review fix): a
+//   marker firing after the last audio byte (e.g. a trailing tap right as
+//   the recording stopped) can't bound a real chapter.
+// - Always prepends an implicit boundary at 0 (every recording's first
+//   chapter starts there), then dedupes+sorts — a marker the user tapped at
+//   exactly 0ms must NOT produce two boundaries at 0. Previously the chapter
+//   count was unconditionally `markers.length + 1`, silently double-counting
+//   that case (see the 0ms-marker regression test).
+export const computeChapterBoundaries = (markers, durationMs = null) => {
+  const hasDuration = Number.isFinite(durationMs) && durationMs > 0;
+  const markerTimestamps = normalizeMarkers(markers)
+    .filter((ms) => !hasDuration || ms <= durationMs);
+  return Array.from(new Set([0, ...markerTimestamps])).sort((a, b) => a - b);
+};
+
 const formatTimestamp = (ms) => {
   const totalSec = Math.max(0, Math.round(ms / 1000));
   const m = Math.floor(totalSec / 60);
@@ -73,15 +93,17 @@ const formatTimestamp = (ms) => {
 // Additive-only prompt block appended when markers are present. The
 // no-marker prompt (TRANSCRIPTION_PROMPT, optionally + proper-noun
 // dictionary) is untouched byte-for-byte — see the byte-identity test.
-const buildChapterMarkerBlock = (markerTimestamps, durationMs) => {
-  const chapterCount = markerTimestamps.length + 1;
-  const markerLines = markerTimestamps
+const buildChapterMarkerBlock = (boundaries, durationMs) => {
+  const chapterCount = boundaries.length;
+  // boundaries[0] is always the implicit 0 — only list the ones the user
+  // actually tapped (or that survived duration-clamping) as marker lines.
+  const markerLines = boundaries.slice(1)
     .map((ms) => `- ${formatTimestamp(ms)} (${ms}ms)`)
     .join('\n');
   const durationLine = Number.isFinite(durationMs) && durationMs > 0
     ? `\nRecording duration: ${formatTimestamp(durationMs)} (${durationMs}ms).`
     : '';
-  const startMsList = [0, ...markerTimestamps].join(', ');
+  const startMsList = boundaries.join(', ');
 
   return `The user marked chapter boundaries at these points while recording:
 ${markerLines}${durationLine}
@@ -97,7 +119,8 @@ export function buildGeminiRequestBody(base64, mimeType, properNouns = [], marke
 
   const markerTimestamps = normalizeMarkers(markers);
   if (markerTimestamps.length > 0) {
-    prompt = `${prompt}\n\n${buildChapterMarkerBlock(markerTimestamps, durationMs)}`;
+    const boundaries = computeChapterBoundaries(markers, durationMs);
+    prompt = `${prompt}\n\n${buildChapterMarkerBlock(boundaries, durationMs)}`;
   }
 
   return {
@@ -129,8 +152,8 @@ const normalizeWhitespace = (value) => (typeof value === 'string' ? value.replac
 // succeeded — any shape mismatch or a joined-text drift from the transcript
 // means we drop chapters entirely rather than risk showing a wrong/misleading
 // segmentation. Never throws; never affects the caller's transcript/toneAnalysis.
-function extractChapters(rawChapters, markerCount, transcript) {
-  if (!Array.isArray(rawChapters) || rawChapters.length !== markerCount + 1) return null;
+function extractChapters(rawChapters, boundaries, transcript) {
+  if (!Array.isArray(rawChapters) || rawChapters.length !== boundaries.length) return null;
 
   const chapters = [];
   for (const c of rawChapters) {
@@ -139,16 +162,22 @@ function extractChapters(rawChapters, markerCount, transcript) {
     if (!Number.isFinite(startMs) || startMs < 0) return null;
     if (typeof c.title !== 'string' || !c.title.trim()) return null;
     if (typeof c.text !== 'string' || !c.text.trim()) return null;
-    chapters.push({ startMs, title: c.title.trim(), text: c.text.trim() });
+    chapters.push({ title: c.title.trim(), text: c.text.trim() });
   }
 
   const joined = normalizeWhitespace(chapters.map((c) => c.text).join(' '));
   if (joined !== normalizeWhitespace(transcript)) return null;
 
-  return chapters;
+  // Voice Chapters (Task 14 review — Important 1): markers are GROUND TRUTH
+  // for startMs, never Gemini's echo. Gemini hears the audio and picks the
+  // precise word boundary for title/text, but the boundary TIMESTAMP itself
+  // must always be exactly what the user tapped (or 0 for the first
+  // chapter) — overwrite whatever value Gemini echoed back with the
+  // canonical `boundaries` list computed from the real markers.
+  return chapters.map((c, i) => ({ startMs: boundaries[i], ...c }));
 }
 
-export function parseFusedResponse(geminiJson, { markerCount = 0 } = {}) {
+export function parseFusedResponse(geminiJson, { markers = [], durationMs = null } = {}) {
   const text = geminiJson?.candidates?.[0]?.content?.parts?.[0]?.text || '';
   const jsonMatch = text.match(/\{[\s\S]*\}/);
   if (!jsonMatch) return null;
@@ -183,8 +212,10 @@ export function parseFusedResponse(geminiJson, { markerCount = 0 } = {}) {
   // Only attach a `chapters` key at all when markers were actually requested
   // — keeps the no-marker response shape byte-for-byte identical to before
   // Task 14 (see the no-speech contract test).
-  if (markerCount > 0) {
-    result.chapters = extractChapters(parsed.chapters, markerCount, transcript);
+  const hasMarkers = Array.isArray(markers) && markers.length > 0;
+  if (hasMarkers) {
+    const boundaries = computeChapterBoundaries(markers, durationMs);
+    result.chapters = extractChapters(parsed.chapters, boundaries, transcript);
   }
 
   return result;
@@ -230,8 +261,6 @@ export async function runFusedTranscription({
     return { error: 'API_ERROR' };
   }
 
-  const markerCount = Array.isArray(markers) ? markers.length : 0;
-
   // 1. Primary: fused Gemini call (transcript + tone in one pass).
   if (gemKey) {
     try {
@@ -248,7 +277,7 @@ export async function runFusedTranscription({
       if (geminiRes.status === 429) {
         // rate limited — fall through to Whisper
       } else if (geminiRes.ok) {
-        const parsed = parseFusedResponse(await geminiRes.json(), { markerCount });
+        const parsed = parseFusedResponse(await geminiRes.json(), { markers, durationMs });
         if (parsed && parsed.transcript) {
           return {
             rawTranscript: parsed.rawTranscript,

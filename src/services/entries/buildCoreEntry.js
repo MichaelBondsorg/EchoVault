@@ -23,6 +23,39 @@
  */
 import { Timestamp } from 'firebase/firestore';
 
+// Voice Chapters (Task 14 review — Important 2b): the server's join
+// validation (extractChapters in fusedTranscription.js) normalizes
+// whitespace before comparing joined chapter text against the transcript —
+// so a chapter response that PASSED server validation can still carry
+// internal whitespace (collapsed/extra spaces) that doesn't byte-match the
+// client's stored cleaned transcript. Escapes regex specials per token and
+// joins tokens with `\s+` so token-level content still matches even when the
+// whitespace between tokens differs.
+const escapeRegExpToken = (token) => token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+/**
+ * Locate `chapterText` in `text` starting at-or-after `cursor`. Tries an
+ * exact `indexOf` first (fast path, preserves prior behavior byte-for-byte);
+ * only falls back to a whitespace-tolerant regex search when the exact match
+ * fails. Returns `null` (never throws) if neither search finds it — the
+ * caller's fail-safe (no chapters) still applies.
+ */
+function findChapterText(text, chapterText, cursor) {
+  const exactIndex = text.indexOf(chapterText, cursor);
+  if (exactIndex !== -1) {
+    return { start: exactIndex, end: exactIndex + chapterText.length };
+  }
+
+  const tokens = chapterText.trim().split(/\s+/).filter(Boolean);
+  if (tokens.length === 0) return null;
+  const pattern = tokens.map(escapeRegExpToken).join('\\s+');
+  const tolerantSearch = new RegExp(pattern, 'g');
+  tolerantSearch.lastIndex = cursor;
+  const match = tolerantSearch.exec(text);
+  if (!match) return null;
+  return { start: match.index, end: match.index + match[0].length };
+}
+
 /**
  * Voice Chapters (Task 14, flag: voiceChapters) — turns the server's
  * marker-aligned chapters (each `{startMs, title, text}`, already validated
@@ -36,9 +69,15 @@ import { Timestamp } from 'firebase/firestore';
  * start "I said hello...") still lands each chapter at its real, later
  * position instead of re-matching an earlier occurrence.
  *
- * Returns null (never throws) if any chapter's text can't be found in order —
- * chapters are metadata layered on top of an already-successful
- * transcription/save; a failed walk must never block the entry save.
+ * Task 14 review (Important 2b): the server's join validation normalizes
+ * whitespace before comparing, so a chapter that PASSED that validation can
+ * still fail a raw `indexOf` here (collapsed/extra internal spaces). When
+ * the exact match fails, `findChapterText` retries with a whitespace-
+ * tolerant regex (chapter text tokens joined by `\s+`) before giving up.
+ *
+ * Returns null (never throws) if any chapter's text can't be found in order,
+ * by either search — chapters are metadata layered on top of an already-
+ * successful transcription/save; a failed walk must never block the save.
  */
 function computeChapterOffsets(rawChapters, text) {
   if (typeof text !== 'string' || !text || !Array.isArray(rawChapters) || rawChapters.length === 0) {
@@ -49,9 +88,9 @@ function computeChapterOffsets(rawChapters, text) {
   for (let index = 0; index < rawChapters.length; index++) {
     const chapterText = rawChapters[index]?.text;
     if (typeof chapterText !== 'string' || !chapterText) return null;
-    const charStart = text.indexOf(chapterText, cursor);
-    if (charStart === -1) return null;
-    const charEnd = charStart + chapterText.length;
+    const match = findChapterText(text, chapterText, cursor);
+    if (!match) return null;
+    const { start: charStart, end: charEnd } = match;
     result.push({
       id: `ch_${index}`,
       index,

@@ -2103,8 +2103,17 @@ export default function App() {
           .filter((tag) => typeof tag === 'string' && tag.startsWith('@person:'))
           .map((tag) => tag.slice('@person:'.length).replace(/_/g, ' '))
       ])).slice(0, 50);
+      // Voice Chapters (Task 14, flag: voiceChapters) — markers/durationMs
+      // (destructured from options above) MUST be forwarded here: this is
+      // the only call site that invokes transcribeEntryFused, and its
+      // markers/durationMs params (positions 5/6) are what let the server
+      // build the chapters contract at all. Dropping them here silently
+      // disables chapter segmentation end-to-end even though every layer
+      // below (transcription.js, fusedTranscription.js, buildCoreEntry.js)
+      // is fully wired — see transcription.test.js's "markers / chapters"
+      // describe block for the call-contract this depends on.
       const result = USE_FUSED_TRANSCRIPTION
-        ? await transcribeEntryFused(base64, mime, 3, properNouns)
+        ? await transcribeEntryFused(base64, mime, 3, properNouns, markers, durationMs)
         : await transcribeAudioWithTone(base64, mime);
       console.log('[Transcription] API call completed in', Date.now() - startTime, 'ms');
 

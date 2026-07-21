@@ -150,5 +150,33 @@ describe('runFusedTranscription', () => {
       expect(result.engine).toBe('whisper');
       expect(result.chapters).toBeNull();
     });
+
+    // Task 14 review — Important 1 + Important 3/MINOR, end-to-end: a marker
+    // beyond durationMs is dropped from the canonical boundary list (MINOR),
+    // and Gemini's echoed startMs is overwritten with that canonical value
+    // (Important 1) even though this request only sent ONE marker within
+    // range plus one beyond it.
+    it('drops an out-of-range marker and overwrites drifted startMs with canonical boundaries', async () => {
+      const fetchImpl = vi.fn().mockResolvedValue(geminiOk({
+        rawTranscript: 'Part one. Part two.',
+        transcript: 'Part one. Part two.',
+        toneAnalysis: null,
+        chapters: [
+          { startMs: 42, title: 'Part One', text: 'Part one.' }, // drifted from 0
+          { startMs: 5310, title: 'Part Two', text: 'Part two.' }, // drifted from 5000
+        ],
+      }));
+
+      const result = await runFusedTranscription({
+        base64: 'QUJD', mimeType: 'audio/mp4', gemKey: 'g', oaiKey: 'o', fetchImpl,
+        markers: [{ tMs: 5000 }, { tMs: 99999 }], durationMs: 9000, // 99999 is beyond durationMs
+      });
+
+      expect(result.engine).toBe('gemini');
+      expect(result.chapters).toEqual([
+        { startMs: 0, title: 'Part One', text: 'Part one.' },
+        { startMs: 5000, title: 'Part Two', text: 'Part two.' },
+      ]);
+    });
   });
 });

@@ -2,7 +2,8 @@ import { describe, it, expect } from 'vitest';
 import {
   TRANSCRIPTION_PROMPT,
   buildGeminiRequestBody,
-  parseFusedResponse
+  parseFusedResponse,
+  computeChapterBoundaries
 } from '../fusedTranscription.js';
 
 const wrap = (text) => ({ candidates: [{ content: { parts: [{ text }] } }] });
@@ -124,7 +125,7 @@ describe('parseFusedResponse — chapters (Task 14)', () => {
     chapters,
   });
 
-  it('returns no chapters key when markerCount is 0 (default) — exact no-marker contract preserved', () => {
+  it('returns no chapters key when no markers were sent (default) — exact no-marker contract preserved', () => {
     const result = parseFusedResponse(wrap('{"transcript":"","toneAnalysis":null}'));
     expect(result).toEqual({ rawTranscript: '', transcript: '', toneAnalysis: null });
     expect(result).not.toHaveProperty('chapters');
@@ -136,7 +137,7 @@ describe('parseFusedResponse — chapters (Task 14)', () => {
         { startMs: 0, title: 'Chapter One', text: 'Chapter one stuff.' },
         { startMs: 12000, title: 'Chapter Two', text: 'Chapter two stuff.' },
       ]))),
-      { markerCount: 1 }
+      { markers: [{ tMs: 12000 }] }
     );
     expect(result.chapters).toEqual([
       { startMs: 0, title: 'Chapter One', text: 'Chapter one stuff.' },
@@ -150,18 +151,18 @@ describe('parseFusedResponse — chapters (Task 14)', () => {
         { startMs: 0, title: 'Chapter One', text: '  Chapter one stuff.  ' },
         { startMs: 12000, title: 'Chapter Two', text: 'Chapter  two stuff.' },
       ]))),
-      { markerCount: 1 }
+      { markers: [{ tMs: 12000 }] }
     );
     expect(result.chapters).not.toBeNull();
     expect(result.chapters).toHaveLength(2);
   });
 
-  it('rejects a chapter count that does not equal markerCount + 1 -> null', () => {
+  it('rejects a chapter count that does not equal the canonical boundary count -> null', () => {
     const result = parseFusedResponse(
       wrap(JSON.stringify(chapterPayload([
         { startMs: 0, title: 'Only One', text: 'Chapter one stuff. Chapter two stuff.' },
       ]))),
-      { markerCount: 1 } // expects 2 chapters, got 1
+      { markers: [{ tMs: 12000 }] } // boundaries [0, 12000] -> expects 2 chapters, got 1
     );
     expect(result.chapters).toBeNull();
     // transcription itself must still succeed even though chapters failed
@@ -174,7 +175,7 @@ describe('parseFusedResponse — chapters (Task 14)', () => {
         { startMs: 0, title: 'Chapter One', text: 'Totally different opening.' },
         { startMs: 12000, title: 'Chapter Two', text: 'Chapter two stuff.' },
       ]))),
-      { markerCount: 1 }
+      { markers: [{ tMs: 12000 }] }
     );
     expect(result.chapters).toBeNull();
     expect(result.transcript).toBe('Chapter one stuff. Chapter two stuff.');
@@ -186,13 +187,81 @@ describe('parseFusedResponse — chapters (Task 14)', () => {
         { startMs: 0, title: 'Chapter One' /* missing text */ },
         { startMs: 12000, title: 'Chapter Two', text: 'Chapter two stuff.' },
       ]))),
-      { markerCount: 1 }
+      { markers: [{ tMs: 12000 }] }
     );
     expect(result.chapters).toBeNull();
   });
 
   it('rejects a non-array/absent chapters field when markers were requested -> null', () => {
-    const result = parseFusedResponse(wrap(JSON.stringify(chapterPayload(undefined))), { markerCount: 1 });
+    const result = parseFusedResponse(wrap(JSON.stringify(chapterPayload(undefined))), { markers: [{ tMs: 12000 }] });
     expect(result.chapters).toBeNull();
+  });
+
+  // Task 14 review — Important 1: markers are ground truth for startMs, not
+  // Gemini's echo. A validated (count+join OK) response whose per-chapter
+  // startMs has drifted from the real marker timestamps must have those
+  // values OVERWRITTEN with the canonical boundary list before being stored.
+  it('overwrites drifted Gemini-echoed startMs values with the canonical boundary list', () => {
+    const result = parseFusedResponse(
+      wrap(JSON.stringify(chapterPayload([
+        { startMs: 137, title: 'Chapter One', text: 'Chapter one stuff.' }, // drifted from 0
+        { startMs: 11842, title: 'Chapter Two', text: 'Chapter two stuff.' }, // drifted from 12000
+      ]))),
+      { markers: [{ tMs: 12000 }] }
+    );
+    expect(result.chapters).toEqual([
+      { startMs: 0, title: 'Chapter One', text: 'Chapter one stuff.' },
+      { startMs: 12000, title: 'Chapter Two', text: 'Chapter two stuff.' },
+    ]);
+  });
+});
+
+// Task 14 review — Important 3 (+ MINOR): computeChapterBoundaries is the
+// single shared source of truth for chapter boundary counts/values across
+// the prompt builder, the response validator, and the startMs overwrite.
+describe('computeChapterBoundaries (Task 14 review)', () => {
+  it('prepends an implicit 0 boundary and sorts/dedupes marker timestamps', () => {
+    expect(computeChapterBoundaries([{ tMs: 5000 }, { tMs: 12000 }])).toEqual([0, 5000, 12000]);
+    expect(computeChapterBoundaries([{ tMs: 12000 }, { tMs: 5000 }, { tMs: 5000 }])).toEqual([0, 5000, 12000]);
+  });
+
+  it('does NOT duplicate the boundary when the user tapped a marker at exactly 0ms', () => {
+    // Before the fix this produced [0, 0] (chapterCount markers.length+1 = 2);
+    // the canonical boundary list must collapse to a single 0.
+    expect(computeChapterBoundaries([{ tMs: 0 }])).toEqual([0]);
+    expect(computeChapterBoundaries([{ tMs: 0 }, { tMs: 5000 }])).toEqual([0, 5000]);
+  });
+
+  it('MINOR: drops markers beyond durationMs when durationMs is known', () => {
+    expect(computeChapterBoundaries([{ tMs: 5000 }, { tMs: 99999 }], 9000)).toEqual([0, 5000]);
+    // Exactly at the boundary is kept (<=, not <).
+    expect(computeChapterBoundaries([{ tMs: 9000 }], 9000)).toEqual([0, 9000]);
+  });
+
+  it('does not clamp when durationMs is absent/invalid', () => {
+    expect(computeChapterBoundaries([{ tMs: 99999 }], null)).toEqual([0, 99999]);
+    expect(computeChapterBoundaries([{ tMs: 99999 }], 0)).toEqual([0, 99999]);
+    expect(computeChapterBoundaries([{ tMs: 99999 }], -1)).toEqual([0, 99999]);
+  });
+
+  it('returns just [0] for no/invalid markers', () => {
+    expect(computeChapterBoundaries([])).toEqual([0]);
+    expect(computeChapterBoundaries(undefined)).toEqual([0]);
+  });
+});
+
+describe('buildGeminiRequestBody — 0ms marker boundary count (Task 14 review, Important 3)', () => {
+  it('a single marker tapped at 0ms produces a 1-chapter instruction, not 2', () => {
+    const body = buildGeminiRequestBody('QUJD', 'audio/webm', [], [{ tMs: 0 }], null);
+    const text = body.contents[0].parts[1].text;
+    expect(text).toContain('exactly 1 chapters');
+    expect(text).toContain('[0]');
+  });
+
+  it('a normal marker set is unaffected — boundary count still markers.length + 1', () => {
+    const body = buildGeminiRequestBody('QUJD', 'audio/webm', [], [{ tMs: 5000 }, { tMs: 12000 }], null);
+    const text = body.contents[0].parts[1].text;
+    expect(text).toContain('exactly 3 chapters');
+    expect(text).toContain('[0, 5000, 12000]');
   });
 });
