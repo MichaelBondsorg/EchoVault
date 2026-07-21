@@ -24,7 +24,7 @@ vi.mock('../../../../services/intents/intentClient', () => ({
   dismissIntent: (...a) => dismissIntent(...a),
 }));
 
-const { default: OpenLoopsWidget, formatDueSince } = await import('../OpenLoopsWidget');
+const { default: OpenLoopsWidget, formatDueSince, snoozeUntilIso } = await import('../OpenLoopsWidget');
 
 function loop(overrides = {}) {
   return {
@@ -51,8 +51,15 @@ beforeEach(() => {
 });
 
 describe('OpenLoopsWidget - visibility gating', () => {
-  it('renders null when either flag is off', () => {
+  it('renders null when openLoops is off (intentExtraction on)', () => {
     getFlag.mockImplementation((flag) => flag !== 'openLoops');
+    dueWith([loop()]);
+    const { container } = render(<OpenLoopsWidget />);
+    expect(container.firstChild).toBeNull();
+  });
+
+  it('renders null when intentExtraction is off (openLoops on) — reverse flag combination', () => {
+    getFlag.mockImplementation((flag) => flag !== 'intentExtraction');
     dueWith([loop()]);
     const { container } = render(<OpenLoopsWidget />);
     expect(container.firstChild).toBeNull();
@@ -119,6 +126,44 @@ describe('OpenLoopsWidget - snooze', () => {
     expect(snoozeLoop).toHaveBeenCalledWith({ __db: true }, 'user-1', 'l1', expect.any(String));
     expect(screen.queryByText('call the dentist')).toBeNull();
   });
+
+  it('"Tonight" after 20:00 local rolls over to tomorrow 20:00, not a past instant', () => {
+    // Fake clock at 21:00 local on a fixed date.
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2024, 0, 15, 21, 0, 0, 0)); // Jan 15 2024, 21:00
+    try {
+      dueWith([loop({ id: 'l1', sourceSpan: { text: 'call the dentist' } })]);
+      render(<OpenLoopsWidget />);
+
+      fireEvent.click(screen.getByLabelText('Snooze'));
+      fireEvent.click(screen.getByText('Tonight'));
+
+      expect(snoozeLoop).toHaveBeenCalledTimes(1);
+      const untilIso = snoozeLoop.mock.calls[0][3];
+      const until = new Date(untilIso);
+      const now = new Date();
+      expect(until.getTime()).toBeGreaterThan(now.getTime()); // never a past instant
+      expect(until.getDate()).toBe(16); // rolled to tomorrow
+      expect(until.getHours()).toBe(20);
+      expect(until.getMinutes()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('snoozeUntilIso("tonight") stays today when called before 20:00', () => {
+    const now = new Date(2024, 0, 15, 14, 0, 0, 0); // 14:00
+    const until = new Date(snoozeUntilIso('tonight', now));
+    expect(until.getDate()).toBe(15);
+    expect(until.getHours()).toBe(20);
+  });
+
+  it('snoozeUntilIso("tonight") rolls to tomorrow when called after 20:00', () => {
+    const now = new Date(2024, 0, 15, 21, 0, 0, 0); // 21:00
+    const until = new Date(snoozeUntilIso('tonight', now));
+    expect(until.getDate()).toBe(16);
+    expect(until.getHours()).toBe(20);
+  });
 });
 
 describe('OpenLoopsWidget - close & dismiss', () => {
@@ -140,7 +185,14 @@ describe('OpenLoopsWidget - close & dismiss', () => {
 });
 
 describe('OpenLoopsWidget - answer wiring', () => {
-  it('answer opens the composer via onAnswerLoop with the loop text, and wires the saved entry id through answerLoop', () => {
+  // The composer's save chain (App.jsx saveEntry/doSaveEntry/handleAudioWrapper)
+  // never resolves to a bare entry id — its long-standing return contract is
+  // the sentinel strings 'saved'/'deferred' (or undefined on some early-return
+  // paths). The REAL id (when the online save path fires) arrives via a
+  // separate onEntryRef side-channel threaded through AppLayout, which is
+  // what actually reaches the `onSaved` callback here. These tests simulate
+  // each production-shaped value the callback can actually receive.
+  it('answer opens the composer via onAnswerLoop with the loop text', () => {
     dueWith([loop({ id: 'l1', sourceSpan: { text: 'call the dentist' } })]);
     const onAnswerLoop = vi.fn();
     render(<OpenLoopsWidget onAnswerLoop={onAnswerLoop} />);
@@ -148,12 +200,54 @@ describe('OpenLoopsWidget - answer wiring', () => {
     fireEvent.click(screen.getByLabelText('Answer'));
 
     expect(onAnswerLoop).toHaveBeenCalledWith('call the dentist', expect.any(Function));
+  });
 
-    // Simulate the composer saving successfully and reporting the new entry id.
+  it('wires a real entry id (from the onEntryRef side-channel) through to answerLoop', () => {
+    dueWith([loop({ id: 'l1', sourceSpan: { text: 'call the dentist' } })]);
+    const onAnswerLoop = vi.fn();
+    render(<OpenLoopsWidget onAnswerLoop={onAnswerLoop} />);
+    fireEvent.click(screen.getByLabelText('Answer'));
+
     const onSaved = onAnswerLoop.mock.calls[0][1];
-    onSaved('entry-123');
+    onSaved('AbCdEf123456'); // a real Firestore auto-id shape, never a sentinel string
 
-    expect(answerLoop).toHaveBeenCalledWith({ __db: true }, 'user-1', 'l1', 'entry-123');
+    expect(answerLoop).toHaveBeenCalledWith({ __db: true }, 'user-1', 'l1', 'AbCdEf123456');
+  });
+
+  it('never writes the "saved" sentinel into answerEntryId', () => {
+    dueWith([loop({ id: 'l1', sourceSpan: { text: 'call the dentist' } })]);
+    const onAnswerLoop = vi.fn();
+    render(<OpenLoopsWidget onAnswerLoop={onAnswerLoop} />);
+    fireEvent.click(screen.getByLabelText('Answer'));
+
+    const onSaved = onAnswerLoop.mock.calls[0][1];
+    onSaved('saved'); // saveEntry/doSaveEntry's own return contract, not an id
+
+    expect(answerLoop).toHaveBeenCalledWith({ __db: true }, 'user-1', 'l1', null);
+  });
+
+  it('never writes the "deferred" sentinel (crisis flow) into answerEntryId', () => {
+    dueWith([loop({ id: 'l1', sourceSpan: { text: 'call the dentist' } })]);
+    const onAnswerLoop = vi.fn();
+    render(<OpenLoopsWidget onAnswerLoop={onAnswerLoop} />);
+    fireEvent.click(screen.getByLabelText('Answer'));
+
+    const onSaved = onAnswerLoop.mock.calls[0][1];
+    onSaved('deferred');
+
+    expect(answerLoop).toHaveBeenCalledWith({ __db: true }, 'user-1', 'l1', null);
+  });
+
+  it('treats undefined (early-return save paths) as null, not a sentinel', () => {
+    dueWith([loop({ id: 'l1', sourceSpan: { text: 'call the dentist' } })]);
+    const onAnswerLoop = vi.fn();
+    render(<OpenLoopsWidget onAnswerLoop={onAnswerLoop} />);
+    fireEvent.click(screen.getByLabelText('Answer'));
+
+    const onSaved = onAnswerLoop.mock.calls[0][1];
+    onSaved(undefined);
+
+    expect(answerLoop).toHaveBeenCalledWith({ __db: true }, 'user-1', 'l1', null);
   });
 
   it('does nothing if onAnswerLoop is not provided', () => {

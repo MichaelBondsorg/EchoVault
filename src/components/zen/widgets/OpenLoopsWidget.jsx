@@ -53,11 +53,20 @@ const SNOOZE_OPTIONS = [
   { key: 'next week', label: 'Next week' },
 ];
 
-/** Compute the target ISO instant for a snooze option, local time. */
-function snoozeUntilIso(option, now = new Date()) {
+/**
+ * Compute the target ISO instant for a snooze option, local time.
+ * `now` is injectable for testing; defaults to the real current time.
+ *
+ * 'tonight' rolls to tomorrow 20:00 if it's already past 20:00 local —
+ * otherwise "tonight" would resolve to a past instant, which
+ * `subscribeDueOpenLoops` treats as already-elapsed (`snoozedUntil <= now`),
+ * so the loop would just reappear immediately instead of being snoozed.
+ */
+export function snoozeUntilIso(option, now = new Date()) {
   const d = new Date(now);
   if (option === 'tonight') {
     d.setHours(20, 0, 0, 0);
+    if (d <= now) d.setDate(d.getDate() + 1);
   } else if (option === 'tomorrow') {
     d.setDate(d.getDate() + 1);
     d.setHours(9, 0, 0, 0);
@@ -66,6 +75,27 @@ function snoozeUntilIso(option, now = new Date()) {
     d.setHours(9, 0, 0, 0);
   }
   return d.toISOString();
+}
+
+/**
+ * Normalize whatever the composer's save resolved to into a real entry id
+ * or null. The underlying save chain (App.jsx's saveEntry/doSaveEntry/
+ * handleAudioWrapper) has its own long-standing return contract of the
+ * sentinel strings 'saved'/'deferred' (or undefined on some early-return
+ * paths) — those must never be written into `outcome.answerEntryId` as if
+ * they were an id. The real id (when available) now arrives via a separate
+ * onEntryRef side-channel threaded through AppLayout, but this stays
+ * defensive against any sentinel value still reaching here.
+ */
+function normalizeSavedEntryId(savedResult) {
+  if (typeof savedResult === 'string') {
+    if (savedResult === 'saved' || savedResult === 'deferred') return null;
+    return savedResult;
+  }
+  if (savedResult && typeof savedResult === 'object' && typeof savedResult.id === 'string') {
+    return savedResult.id;
+  }
+  return null;
 }
 
 /**
@@ -116,10 +146,7 @@ const OpenLoopsWidget = ({
   const handleAnswer = (loop) => {
     if (!uid) return;
     onAnswerLoop?.(loopText(loop), (savedResult) => {
-      const savedEntryId = typeof savedResult === 'string'
-        ? savedResult
-        : (savedResult?.id ?? null);
-      answerLoop(db, uid, loop.id, savedEntryId);
+      answerLoop(db, uid, loop.id, normalizeSavedEntryId(savedResult));
     });
   };
 

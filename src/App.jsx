@@ -894,6 +894,11 @@ export default function App() {
     if (!entry) return;
     setPendingEntry(null);
     try {
+      // No onEntryRef here (see doSaveEntry's jsdoc): this is the deferred
+      // crisis-confirm save, resolved on a separate screen/turn after the
+      // composer that originally captured the entry has already closed and
+      // cleared its onEntrySaved callback — there is no live listener left
+      // to hand a real id to by the time this runs.
       const result = await doSaveEntry(
         entry.text,
         entry.safetyFlagged ?? true,
@@ -950,7 +955,15 @@ export default function App() {
     temporalContext = null,
     voiceTone = null,
     rawTranscript = null,
-    operationId = null
+    operationId = null,
+    // Optional, additive side-channel: fired with the real Firestore doc id
+    // the moment addDoc resolves (online paths only — never awaited, never
+    // changes this function's own 'saved'/'deferred' return contract that
+    // existing callers, e.g. handleAudioWrapper's `saveResult === 'saved'`
+    // check, rely on). Lets a caller (AppLayout, for the OpenLoopsWidget
+    // "Answer" flow) learn the actual new entry id without this function's
+    // return value ever needing to carry it.
+    onEntryRef = null
   ) => {
     if (!user) return;
 
@@ -1381,6 +1394,9 @@ export default function App() {
         const ref = await addDoc(collection(db, 'artifacts', APP_COLLECTION_ID, 'users', user.uid, 'entries'), entryData);
         console.timeEnd('⏱️ Firestore save (core-first)');
         console.timeEnd('⏱️ TOTAL: Save entry to Firestore');
+        if (onEntryRef) {
+          try { onEntryRef(ref.id); } catch (_) { /* best-effort side-channel, never blocks the save */ }
+        }
 
         // Streak celebration — identical gating to the legacy path: never
         // celebrate a safety-flagged or warning-bearing entry.
@@ -1671,6 +1687,9 @@ export default function App() {
       const ref = await addDoc(collection(db, 'artifacts', APP_COLLECTION_ID, 'users', user.uid, 'entries'), entryData);
       console.timeEnd('⏱️ Firestore save');
       console.timeEnd('⏱️ TOTAL: Save entry to Firestore');
+      if (onEntryRef) {
+        try { onEntryRef(ref.id); } catch (_) { /* best-effort side-channel, never blocks the save */ }
+      }
 
       // Streak celebration (D4b, CLOUD-DESIGN-SPEC.md §7): the just-saved
       // entry isn't in `entries` yet (the Firestore onSnapshot listener that
@@ -1760,7 +1779,9 @@ export default function App() {
   };
 
   const saveEntry = async (textInput, voiceTone = null, options = {}) => {
-    const { recordingId, rawTranscript = null, operationId = null } = options;
+    // onEntryRef: optional side-channel, see doSaveEntry's jsdoc — additive,
+    // never changes this function's own 'deferred'/'saved' return contract.
+    const { recordingId, rawTranscript = null, operationId = null, onEntryRef = null } = options;
     if (!user) return;
     setProcessing(true);
     console.log('[SaveEntry] Starting save process, text length:', textInput.length, 'hasVoiceTone:', !!voiceTone);
@@ -1789,7 +1810,7 @@ export default function App() {
     // runner (see doSaveEntry). Skip the 45s temporal await entirely and go
     // straight to the durable core write.
     if (getFlag('coreFirstSave')) {
-      return await doSaveEntry(textInput, false, null, null, voiceTone, rawTranscript, operationId);
+      return await doSaveEntry(textInput, false, null, null, voiceTone, rawTranscript, operationId, onEntryRef);
     }
 
     // Detect temporal context (Phase 2)
@@ -1830,11 +1851,12 @@ export default function App() {
         temporal.detected ? temporal : null,
         voiceTone,
         rawTranscript,
-        operationId
+        operationId,
+        onEntryRef
       );
     } catch (e) {
       console.error('Temporal detection failed, saving normally:', e);
-      return await doSaveEntry(textInput, false, null, null, voiceTone, rawTranscript, operationId);
+      return await doSaveEntry(textInput, false, null, null, voiceTone, rawTranscript, operationId, onEntryRef);
     }
   };
 
@@ -1885,7 +1907,10 @@ export default function App() {
   }, []);
 
   const handleAudioWrapper = async (base64, mime, options = {}) => {
-    const { existingRecordingId, nativeDraftId, operationId: resumeOperationId } = options;
+    // onEntryRef: optional side-channel forwarded through to saveEntry/
+    // doSaveEntry, see doSaveEntry's jsdoc — additive, never changes this
+    // function's own boolean return contract.
+    const { existingRecordingId, nativeDraftId, operationId: resumeOperationId, onEntryRef = null } = options;
     if (!aiProcessingEnabled) {
       setNeedsAiConsent(true);
       return false;
@@ -2097,7 +2122,8 @@ export default function App() {
       const saveResult = await saveEntry(transcript, toneAnalysis, {
         recordingId,
         rawTranscript,
-        operationId
+        operationId,
+        onEntryRef
       });
       console.log('[Transcription] saveEntry completed with result:', saveResult);
       // Only link (and thereby clear it from the recovery banner) once the

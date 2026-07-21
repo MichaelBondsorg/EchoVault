@@ -461,8 +461,30 @@ const AppLayout = ({
         mode={entryMode}
         onModeChange={setEntryMode}
         onClose={handleCloseEntryModal}
-        onVoiceSave={(base64, mime, options) => handleEntrySubmitted(onAudioSubmit, base64, mime, options)}
-        onTextSave={(text) => handleEntrySubmitted(onTextSubmit, text)}
+        onVoiceSave={async (base64, mime, options) => {
+          // Capture the REAL Firestore doc id via the onEntryRef side-channel
+          // (see App.jsx doSaveEntry's jsdoc) instead of relying on
+          // handleAudioWrapper's own return value, which is just a boolean
+          // ('saved' vs not) — never a usable entry id. This is what
+          // EntryComposer's onEntrySaved (e.g. OpenLoopsWidget's "Answer"
+          // flow -> answerLoop) actually receives.
+          let savedEntryId = null;
+          await handleEntrySubmitted(onAudioSubmit, base64, mime, {
+            ...options,
+            onEntryRef: (id) => { savedEntryId = id; },
+          });
+          return savedEntryId;
+        }}
+        onTextSave={async (text) => {
+          // Same real-id capture as onVoiceSave above — saveEntry's own
+          // return value here is the sentinel string 'saved'/'deferred',
+          // never an entry id.
+          let savedEntryId = null;
+          await handleEntrySubmitted(onTextSubmit, text, null, {
+            onEntryRef: (id) => { savedEntryId = id; },
+          });
+          return savedEntryId;
+        }}
         processing={processing}
         aiProcessingEnabled={aiProcessingEnabled}
         onRequestAiConsent={onRequestAiConsent}
