@@ -63,6 +63,7 @@ const SettingsPage = ({
   onOpenPrivacy,
   onOpenSpaces,
   onOpenControlCenter,
+  onOpenRecipes,
   onRequestNotifications,
   onLogout,
   notificationPermission,
@@ -291,7 +292,22 @@ const SettingsPage = ({
     description: 'Organize entries into spaces and scope Ask Journal',
     onClick: onOpenSpaces,
   };
-  const appNavRows = [getFlag('contextSpaces') && contextSpacesItem, notificationsItem].filter(Boolean);
+
+  // Reflection Recipes (flag: reflectionRecipes, R2 Task 17) — reusable
+  // question sets run on demand against your own entries. Flag-gated: this
+  // row is filtered out entirely when off, same convention as
+  // `contextSpacesItem` above.
+  const recipesItem = {
+    label: 'Reflection Recipes',
+    description: 'Ask a set of questions across your entries, on demand',
+    onClick: onOpenRecipes,
+  };
+
+  const appNavRows = [
+    getFlag('contextSpaces') && contextSpacesItem,
+    getFlag('reflectionRecipes') && recipesItem,
+    notificationsItem,
+  ].filter(Boolean);
 
   // Shared row renderer for the simple label/description/chevron nav items
   // across HEALTH & DATA, AI & PRIVACY, and the APP section's Notifications

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { X, ChevronDown, ChevronUp } from 'lucide-react';
+import { X } from 'lucide-react';
 import {
   Drawer,
   DrawerContent,
@@ -11,6 +11,7 @@ import {
   DialogDescription,
   SectionLabel,
 } from '../cloud';
+import SourceList from './SourceList';
 import { recordFeedbackAndLearn } from '../../services/basicInsights/feedbackLearning';
 import { recordInsightEngagement } from '../../services/analytics/insightEngagement';
 import { excludeSource } from '../../services/insights/sourceExclusions';
@@ -260,7 +261,6 @@ const ReceiptSheet = ({
   onFeedback,
   onExcludeSource,
 }) => {
-  const [expandedSourceId, setExpandedSourceId] = useState(null);
   const [confirmEntryId, setConfirmEntryId] = useState(null);
   const [busy, setBusy] = useState(false);
 
@@ -268,7 +268,6 @@ const ReceiptSheet = ({
   const isOpen = Boolean(open && receipt);
 
   const handleClose = () => {
-    setExpandedSourceId(null);
     setConfirmEntryId(null);
     onClose?.();
   };
@@ -402,71 +401,31 @@ const ReceiptSheet = ({
                 {/* 6. Sources */}
                 <div>
                   <SectionLabel>Sources</SectionLabel>
-                  {(receipt.sources || []).length === 0 ? (
-                    <p className="mt-1 text-sm text-muted-foreground">No individual entries cited.</p>
-                  ) : (
-                    <div className="mt-2 space-y-2">
-                      {receipt.sources.map((source) => {
-                        const fullEntry = entriesById?.[source.entryId];
-                        const isExpanded = expandedSourceId === source.entryId;
-                        const sourceDate = formatDate(source.date);
-                        return (
-                          <div
-                            key={source.entryId}
-                            className="rounded-xl border border-border bg-background p-3"
-                          >
-                            <button
-                              type="button"
-                              onClick={() => setExpandedSourceId(isExpanded ? null : source.entryId)}
-                              className="flex w-full items-start justify-between gap-2 text-left"
-                            >
-                              <div className="min-w-0 flex-1">
-                                {sourceDate && (
-                                  <p className="text-xs text-muted-foreground">{sourceDate}</p>
-                                )}
-                                <p className="mt-0.5 text-sm text-secondary-foreground break-words">
-                                  {source.excerpt || 'No excerpt available'}
-                                </p>
-                              </div>
-                              {fullEntry && (
-                                isExpanded ? (
-                                  <ChevronUp size={14} className="mt-0.5 shrink-0 text-muted-foreground" aria-hidden="true" />
-                                ) : (
-                                  <ChevronDown size={14} className="mt-0.5 shrink-0 text-muted-foreground" aria-hidden="true" />
-                                )
-                              )}
-                            </button>
-
-                            {isExpanded && fullEntry && (
-                              <p className="mt-2 whitespace-pre-line border-t border-divider pt-2 text-sm text-secondary-foreground">
-                                {fullEntry.content || fullEntry.text}
-                              </p>
-                            )}
-
-                            <div className="mt-2 flex items-center gap-4">
-                              <button
-                                type="button"
-                                onClick={() => handleWrongSource(source.entryId)}
-                                disabled={busy}
-                                className="relative inline-flex min-h-[28px] items-center text-xs font-medium text-accent-deep before:absolute before:-inset-2 before:content-[''] disabled:opacity-50"
-                              >
-                                Wrong source
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => setConfirmEntryId(source.entryId)}
-                                disabled={busy}
-                                className="relative inline-flex min-h-[28px] items-center text-xs font-medium text-muted-foreground before:absolute before:-inset-2 before:content-[''] disabled:opacity-50"
-                              >
-                                Exclude source
-                              </button>
-                            </div>
-                          </div>
-                        );
-                      })}
-                      <p className="text-xs text-muted-foreground">{RECOMPUTE_COPY}</p>
-                    </div>
-                  )}
+                  <SourceList
+                    sources={receipt.sources || []}
+                    entriesById={entriesById}
+                    renderActions={(source) => (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => handleWrongSource(source.entryId)}
+                          disabled={busy}
+                          className="relative inline-flex min-h-[28px] items-center text-xs font-medium text-accent-deep before:absolute before:-inset-2 before:content-[''] disabled:opacity-50"
+                        >
+                          Wrong source
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setConfirmEntryId(source.entryId)}
+                          disabled={busy}
+                          className="relative inline-flex min-h-[28px] items-center text-xs font-medium text-muted-foreground before:absolute before:-inset-2 before:content-[''] disabled:opacity-50"
+                        >
+                          Exclude source
+                        </button>
+                      </>
+                    )}
+                    footer={<p className="text-xs text-muted-foreground">{RECOMPUTE_COPY}</p>}
+                  />
                 </div>
 
                 {/* 7. Alternatives — from evidence.narrative[1:], when present */}

@@ -25,6 +25,7 @@ import CapturedToast from '../capture/CapturedToast';
 import PrivacyCenter from '../privacy/PrivacyCenter';
 import SpaceManager from '../spaces/SpaceManager';
 import InsightControlCenter from '../insights/InsightControlCenter';
+import RecipesScreen from '../reflections/RecipesScreen';
 import { getFlag } from '../../config/flags';
 
 /**
@@ -103,6 +104,7 @@ const AppLayout = ({
   const [showPrivacyCenter, setShowPrivacyCenter] = useState(false);
   const [showSpaceManager, setShowSpaceManager] = useState(false);
   const [showControlCenter, setShowControlCenter] = useState(false);
+  const [showRecipes, setShowRecipes] = useState(false);
   const [entryMode, setEntryMode] = useState('text'); // 'voice' or 'text'
   const [isFreshEntry, setIsFreshEntry] = useState(true); // true = FAB entry, false = responding to prompt
   const [currentPrompt, setCurrentPrompt] = useState(null); // Track prompt being answered for auto-dismiss
@@ -433,6 +435,7 @@ const AppLayout = ({
                 onOpenPrivacy={() => setShowPrivacyCenter(true)}
                 onOpenSpaces={() => setShowSpaceManager(true)}
                 onOpenControlCenter={() => setShowControlCenter(true)}
+                onOpenRecipes={() => setShowRecipes(true)}
                 onOpenSafetyPlan={onShowSafetyPlan}
                 onOpenExport={onShowExport}
                 onRequestNotifications={onRequestNotifications}
@@ -580,6 +583,17 @@ const AppLayout = ({
           uid={user?.uid}
           entries={entries}
           onClose={() => setShowControlCenter(false)}
+        />
+      )}
+
+      {/* Reflection Recipes (R2 Task 17) — double-gated on the flag (not
+          just the nav row that's the only way to flip showRecipes true),
+          mirroring Insight Control Center's own mount site above. */}
+      {getFlag('reflectionRecipes') && showRecipes && (
+        <RecipesScreen
+          uid={user?.uid}
+          entries={entries}
+          onClose={() => setShowRecipes(false)}
         />
       )}
 
