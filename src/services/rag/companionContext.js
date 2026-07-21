@@ -15,6 +15,7 @@
 import { cosineSimilarity } from '../ai/embeddings';
 import { getMemoryGraph, formatMemoryForContext } from '../memory';
 import { getSessionBuffer, formatBufferForContext, isExpired } from '../memory/sessionBuffer';
+import { filterEntriesByScope } from '../spaces/scopeFilter';
 
 /**
  * Estimate token count for text/object
@@ -141,6 +142,9 @@ const findByEntity = (entries, queryEntities, limit = 10) => {
  * @param {number[]} params.queryEmbedding - Vector embedding of query
  * @param {Object[]} params.entries - All user entries
  * @param {string} params.category - Category filter
+ * @param {{spaceId: string}|null} [params.scope] - Context Space scope,
+ *   applied AFTER the category filter (both compose). null (default) is
+ *   identity — legacy, unscoped behavior.
  * @param {Object} params.sessionBuffer - Optional session buffer override
  * @param {number} params.maxTokens - Token budget (default: 4500)
  * @returns {Object} Context for companion chat
@@ -151,6 +155,7 @@ export const getCompanionContext = async ({
   queryEmbedding,
   entries,
   category = null,
+  scope = null,
   sessionBuffer = null,
   maxTokens = 4500 // Reduced from 8000 per Gemini feedback
 }) => {
@@ -164,10 +169,12 @@ export const getCompanionContext = async ({
   };
   const includedEntryIds = new Set(); // For de-duplication
 
-  // Filter entries by category if specified
-  const filteredEntries = category
+  // Filter entries by category if specified, then by Context Space scope
+  // (both compose — strict scoping is never bypassed by category filtering).
+  const categoryFilteredEntries = category
     ? entries.filter(e => e.category === category)
     : entries;
+  const filteredEntries = filterEntriesByScope(categoryFilteredEntries, scope);
 
   // ==========================================
   // TIER 1: Memory Graph (always included)

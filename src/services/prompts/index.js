@@ -1,6 +1,7 @@
 import { callGemini } from '../ai';
 import { computeMoodTrajectory, detectCyclicalPatterns } from '../analysis';
 import { generateProactiveContext, computeActivitySentiment } from '../nexus/compat';
+import { filterEntriesByScope } from '../spaces/scopeFilter';
 
 /**
  * Prompt Priority Hierarchy:
@@ -403,9 +404,13 @@ const generateProactivePrompts = (entries, category) => {
 /**
  * Main function to generate dashboard prompts
  * Returns 1-3 prompts based on priority hierarchy
+ *
+ * @param {{spaceId: string}|null} [scope] - Context Space scope, applied
+ *   AFTER the category filter (both compose). null (default) is identity —
+ *   legacy, unscoped behavior.
  */
-export const generateDashboardPrompts = async (entries, category = 'personal') => {
-  const categoryEntries = entries.filter(e => e.category === category);
+export const generateDashboardPrompts = async (entries, category = 'personal', scope = null) => {
+  const categoryEntries = filterEntriesByScope(entries.filter(e => e.category === category), scope);
   const allPrompts = [];
 
   // Priority 1: Future follow-ups (HIGHEST - user mentioned being nervous/excited about today's events)
@@ -471,14 +476,20 @@ export const generateDashboardPrompts = async (entries, category = 'personal') =
 
 /**
  * Generate the day summary with sections for the dashboard
+ *
+ * @param {{spaceId: string}|null} [scope] - Context Space scope, applied
+ *   AFTER the category filter (both compose), to both today's entries and
+ *   the wider allEntries pool. null (default) is identity — legacy,
+ *   unscoped behavior.
  */
-export const generateDaySummary = async (todayEntries, allEntries, category) => {
-  if (todayEntries.length === 0) return null;
+export const generateDaySummary = async (todayEntries, allEntries, category, scope = null) => {
+  const scopedTodayEntries = filterEntriesByScope(todayEntries, scope);
+  if (scopedTodayEntries.length === 0) return null;
 
-  const categoryEntries = allEntries.filter(e => e.category === category);
+  const categoryEntries = filterEntriesByScope(allEntries.filter(e => e.category === category), scope);
   const recentEntries = categoryEntries.slice(0, 20);
 
-  const entriesContext = todayEntries.map((e, i) => {
+  const entriesContext = scopedTodayEntries.map((e, i) => {
     const time = e.createdAt instanceof Date
       ? e.createdAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
       : e.createdAt?.toDate?.().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) || '';
@@ -500,7 +511,7 @@ export const generateDaySummary = async (todayEntries, allEntries, category) => 
     .flatMap(e => e.extracted_tasks || [])
     .filter(t => !t.completed);
 
-  const todayTasks = todayEntries
+  const todayTasks = scopedTodayEntries
     .flatMap(e => e.extracted_tasks || []);
 
   const prompt = `Analyze today's journal entries and create a dashboard summary.

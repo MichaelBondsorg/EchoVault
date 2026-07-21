@@ -99,6 +99,45 @@ function makeDb(stored, flagFields = {}) {
   return db;
 }
 
+/**
+ * Chainable fake `entries` collection reference for the buildRecentContext
+ * scoped-query seam (Context Spaces, R1 plan task 10). Records every
+ * where/orderBy/limit call into `callLog` so tests can assert the where(...)
+ * clause is present ONLY when flag+spaceId both hold, and absent otherwise.
+ * `.get()` applies the recorded where() (if any) against `docs`.
+ */
+function makeEntriesCollection(uid, docs, callLog) {
+  const query = {
+    parent: { id: uid },
+    where(field, op, value) {
+      callLog.push({ type: 'where', field, op, value });
+      return query;
+    },
+    orderBy(field, dir) {
+      callLog.push({ type: 'orderBy', field, dir });
+      return query;
+    },
+    limit(n) {
+      callLog.push({ type: 'limit', n });
+      return query;
+    },
+    async get() {
+      const whereCall = callLog.find((c) => c.type === 'where');
+      const filtered = whereCall ? docs.filter((d) => d.data[whereCall.field] === whereCall.value) : docs;
+      return { forEach(cb) { filtered.forEach((d) => cb({ id: d.id, data: () => d.data })); } };
+    },
+  };
+  return query;
+}
+
+function makeEntryRefWithCollection(uid, docs, callLog) {
+  return {
+    updates: [],
+    async update(data) { this.updates.push(data); },
+    parent: makeEntriesCollection(uid, docs, callLog),
+  };
+}
+
 const goodClassification = { entry_type: 'reflection', confidence: 0.9, extracted_tasks: [] };
 const goodAnalysis = { title: 'A day', tags: ['calm'], mood_score: 0.7, framework: 'act', entry_type: 'reflection' };
 
@@ -421,6 +460,66 @@ describe('runEntryAnalysis - intent extraction seam (flag: intentExtraction)', (
     });
     expect(res.outcome).toBe('published');
     expect(db.txUpdates[0].analysisStatus).toBe('complete');
+  });
+});
+
+describe('runEntryAnalysis - scoped recent context (flag: contextSpaces, R1 plan task 10)', () => {
+  it('flag ON + entry.spaceId set: scopes buildRecentContext with a where(spaceId) clause', async () => {
+    const callLog = [];
+    const stored = { entryInputVersion: 1, text: 'hi', spaceId: 'work-space' };
+    const db = makeDb(stored, { contextSpaces: true });
+    const docs = [{ id: 'e0', data: { text: 'a work entry', spaceId: 'work-space' } }];
+    const entryRef = makeEntryRefWithCollection('userA', docs, callLog);
+
+    const res = await runEntryAnalysis({
+      db,
+      entryRef,
+      entry: { id: 'e1', entryInputVersion: 1, text: 'hi', spaceId: 'work-space' },
+      apiKeys: { gemini: 'g', openai: 'o' },
+      logStage: noopLogStage,
+    });
+
+    expect(res.outcome).toBe('published');
+    expect(callLog).toContainEqual({ type: 'where', field: 'spaceId', op: '==', value: 'work-space' });
+    expect(callLog).toContainEqual({ type: 'orderBy', field: 'createdAt', dir: 'desc' });
+    expect(callLog).toContainEqual({ type: 'limit', n: 15 });
+  });
+
+  it('flag OFF: legacy query — no where clause even though entry.spaceId is set', async () => {
+    const callLog = [];
+    const stored = { entryInputVersion: 1, text: 'hi', spaceId: 'work-space' };
+    const db = makeDb(stored); // no flag fields -> contextSpaces false (default)
+    const entryRef = makeEntryRefWithCollection('userA', [], callLog);
+
+    const res = await runEntryAnalysis({
+      db,
+      entryRef,
+      entry: { id: 'e1', entryInputVersion: 1, text: 'hi', spaceId: 'work-space' },
+      apiKeys: { gemini: 'g', openai: 'o' },
+      logStage: noopLogStage,
+    });
+
+    expect(res.outcome).toBe('published');
+    expect(callLog.some((c) => c.type === 'where')).toBe(false);
+    expect(callLog).toContainEqual({ type: 'orderBy', field: 'createdAt', dir: 'desc' });
+  });
+
+  it('flag ON but entry has no spaceId: legacy query — no where clause', async () => {
+    const callLog = [];
+    const stored = { entryInputVersion: 1, text: 'hi' };
+    const db = makeDb(stored, { contextSpaces: true });
+    const entryRef = makeEntryRefWithCollection('userA', [], callLog);
+
+    const res = await runEntryAnalysis({
+      db,
+      entryRef,
+      entry: { id: 'e1', entryInputVersion: 1, text: 'hi' },
+      apiKeys: { gemini: 'g', openai: 'o' },
+      logStage: noopLogStage,
+    });
+
+    expect(res.outcome).toBe('published');
+    expect(callLog.some((c) => c.type === 'where')).toBe(false);
   });
 });
 

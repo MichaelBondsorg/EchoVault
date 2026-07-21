@@ -3,6 +3,7 @@ import { cosineSimilarity } from '../ai/embeddings';
 import { askJournalAIFn } from '../../config/firebase';
 import { formatHealthForAI, formatHealthDetailed } from '../health/healthFormatter';
 import { formatEnvironmentForAI, formatEnvironmentDetailed } from '../environment/environmentFormatter';
+import { filterEntriesByScope } from '../spaces/scopeFilter';
 
 // Local analysis exports (for offline/iOS optimization)
 export { classify as classifyLocal, ENTRY_TYPES } from './localClassifier';
@@ -292,11 +293,21 @@ export const findEntriesByTag = (entries, tagPrefix) => {
 
 /**
  * Get smart chat context using semantic + tag-based matching
+ *
+ * @param {Array} entries - Candidate entries (pre-scope-filter)
+ * @param {string} question
+ * @param {number[]|null} questionEmbedding
+ * @param {{spaceId: string}|null} [scope] - Context Space scope. Applied
+ *   FIRST, before any semantic/tag/recent candidate selection, so a
+ *   Work-scoped call can never surface a Personal-space or unscoped entry.
+ *   null (default) is identity — legacy, unscoped behavior.
  */
-export const getSmartChatContext = async (entries, question, questionEmbedding) => {
+export const getSmartChatContext = async (entries, question, questionEmbedding, scope = null) => {
+  const scopedEntries = filterEntriesByScope(entries, scope);
+
   let semanticMatches = [];
   if (questionEmbedding) {
-    semanticMatches = entries
+    semanticMatches = scopedEntries
       .filter(e => e.embedding)
       .map(e => ({
         ...e,
@@ -310,24 +321,24 @@ export const getSmartChatContext = async (entries, question, questionEmbedding) 
   const questionLower = question.toLowerCase();
   const tagMatches = [];
 
-  const personMatches = entries.filter(e =>
+  const personMatches = scopedEntries.filter(e =>
     e.tags?.some(t => t.startsWith('@person:') && questionLower.includes(t.replace('@person:', '').replace('_', ' ')))
   );
   tagMatches.push(...personMatches);
 
-  const situationMatches = entries.filter(e =>
+  const situationMatches = scopedEntries.filter(e =>
     e.tags?.some(t => t.startsWith('@situation:') &&
       questionLower.split(' ').some(word => t.toLowerCase().includes(word) && word.length > 3))
   );
   tagMatches.push(...situationMatches);
 
-  const goalMatches = entries.filter(e =>
+  const goalMatches = scopedEntries.filter(e =>
     e.tags?.some(t => t.startsWith('@goal:') &&
       questionLower.split(' ').some(word => t.toLowerCase().includes(word) && word.length > 3))
   );
   tagMatches.push(...goalMatches);
 
-  const recentEntries = entries.slice(0, 5);
+  const recentEntries = scopedEntries.slice(0, 5);
 
   const allMatches = new Map();
   [...semanticMatches, ...tagMatches, ...recentEntries].forEach(e => {
@@ -429,9 +440,13 @@ ${entriesContext}`,
 /**
  * Ask the journal AI a question
  * Now uses Cloud Function
+ *
+ * @param {{spaceId: string}|null} [scope] - Context Space scope, threaded
+ *   through to getSmartChatContext, which applies it FIRST (before
+ *   semantic/tag/recent candidate selection). null (default) is identity.
  */
-export const askJournalAI = async (entries, question, questionEmbedding = null) => {
-  const relevantEntries = await getSmartChatContext(entries, question, questionEmbedding);
+export const askJournalAI = async (entries, question, questionEmbedding = null, scope = null) => {
+  const relevantEntries = await getSmartChatContext(entries, question, questionEmbedding, scope);
 
   const context = relevantEntries.map(e => {
     const date = e.createdAt instanceof Date ? e.createdAt : e.createdAt?.toDate?.() || new Date();

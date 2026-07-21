@@ -8,6 +8,7 @@
 import { doc, getDoc, setDoc, collection, query, orderBy, limit, getDocs, Timestamp } from 'firebase/firestore';
 import { db } from '../../config/firebase';
 import { APP_COLLECTION_ID } from '../../config/constants';
+import { filterEntriesByScope } from '../spaces/scopeFilter';
 
 // Layer 1
 import { detectPatternsInPeriod } from './layer1/patternDetector';
@@ -255,8 +256,16 @@ const needsRegeneration = (cached) => {
 
 /**
  * Fetch recent entries for a user
+ *
+ * @param {string} userId
+ * @param {number} [days] - unused by the query itself (kept for call-site
+ *   compatibility / documentation of intent); entries are capped by `limit`.
+ * @param {{spaceId: string}|null} [scope] - Context Space scope, applied
+ *   AFTER the Firestore fetch. null (default) is identity — Nexus stays
+ *   all-spaces in R1 (every current caller passes null/omits scope); this
+ *   param exists so R2 can wire a scoped Nexus without another seam change.
  */
-const fetchRecentEntries = async (userId, days = 30) => {
+export const fetchRecentEntries = async (userId, days = 30, scope = null) => {
   try {
     const entriesRef = collection(
       db, 'artifacts', APP_COLLECTION_ID, 'users', userId, 'entries'
@@ -269,7 +278,8 @@ const fetchRecentEntries = async (userId, days = 30) => {
     );
 
     const snapshot = await getDocs(q);
-    return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    const entries = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    return filterEntriesByScope(entries, scope);
   } catch (error) {
     console.error('[Orchestrator] Failed to fetch entries:', error);
     return [];

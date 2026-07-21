@@ -50,15 +50,27 @@ function pruneUndefined(obj) {
  * Best-effort recent-entries context string for the insight/context stages.
  * The client passes rich, pre-computed context; server-side we assemble a
  * lightweight recent-text window. Any read failure degrades to '' (no throw).
+ *
+ * Context Spaces (R1 plan task 10): when the `contextSpaces` server flag is
+ * on AND the entry being analyzed has a `spaceId`, the recent-context window
+ * is scoped to that space (`where('spaceId','==',entry.spaceId)`) so a
+ * Work-space entry's insight/context stages never see Personal-space text.
+ * Otherwise (flag off, or the entry is unscoped) the legacy all-entries
+ * query runs unchanged.
  */
-async function buildRecentContext(entryRef, currentId) {
+async function buildRecentContext(db, entryRef, currentId, entry) {
   try {
     const col = entryRef.parent;
     if (!col || typeof col.orderBy !== 'function') return '';
-    const snap = await col
-      .orderBy('createdAt', 'desc')
-      .limit(RECENT_CONTEXT_LIMIT)
-      .get();
+
+    const spaceId = entry?.spaceId;
+    const scoped = !!spaceId && (await getServerFlag(db, 'contextSpaces', false));
+
+    const q = scoped
+      ? col.where('spaceId', '==', spaceId).orderBy('createdAt', 'desc').limit(RECENT_CONTEXT_LIMIT)
+      : col.orderBy('createdAt', 'desc').limit(RECENT_CONTEXT_LIMIT);
+
+    const snap = await q.get();
     const parts = [];
     snap.forEach((doc) => {
       if (doc.id === currentId) return;
@@ -181,7 +193,7 @@ export async function runEntryAnalysis({ db, entryRef, entry, apiKeys, logStage 
 
   // Stage 2: analyze + (non-task) insight + enhanced context, in parallel.
   // The client skips insight/context for pure 'task' entries — mirror that.
-  const recentContext = entryType === 'task' ? '' : await buildRecentContext(entryRef, opId);
+  const recentContext = entryType === 'task' ? '' : await buildRecentContext(db, entryRef, opId, entry);
   const stageTasks = [analyzeEntry(gemini, text, entryType, entry?.userLocalHour ?? null, { modelId: analyzeModel })];
   if (entryType !== 'task') {
     stageTasks.push(generateInsight(gemini, text, recentContext, null, null, [], { modelId: insightModel }));
