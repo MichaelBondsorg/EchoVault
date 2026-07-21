@@ -169,6 +169,37 @@ describe('EntryBar — web draft recovery (mount, once per session)', () => {
     const adopt = recoverWebDrafts.mock.calls.find((c) => c[0] === owner)[1];
     await expect(adopt('base64data', 'audio/webm')).resolves.toBeNull();
   });
+
+  // CRITICAL (task-13 review): recoverWebDrafts's adopt callback used to
+  // ignore its 3rd arg (draft.markers) entirely, so a recovered draft's
+  // chapter markers were silently dropped on the recovery path even though
+  // they survived durably in IDB. This runs the REAL adopt callback wired up
+  // by EntryBar (audioVault mocked only at the module boundary) with a
+  // recovered draft carrying markers, and asserts they reach
+  // audioVault.saveRecording — normalized to the canonical [{tMs}] shape.
+  it('adopt callback forwards recovered markers to audioVault.saveRecording, normalized to [{tMs}]', async () => {
+    const owner = 'user-recovery-markers';
+    audioVault.saveRecording.mockResolvedValue({ id: 'rec_marked' });
+    render(<EntryBar ownerUid={owner} onVoiceSave={vi.fn()} onTextSave={vi.fn()} />);
+    await waitFor(() => expect(recoverWebDrafts).toHaveBeenCalledWith(owner, expect.any(Function)));
+
+    const adopt = recoverWebDrafts.mock.calls.find((c) => c[0] === owner)[1];
+    await expect(adopt('base64data', 'audio/webm', [1200, 3400])).resolves.toBe('rec_marked');
+    expect(audioVault.saveRecording).toHaveBeenCalledWith(
+      owner, 'base64data', 'audio/webm', { markers: [{ tMs: 1200 }, { tMs: 3400 }] }
+    );
+  });
+
+  it('adopt callback omits markers from saveRecording when the recovered draft had none (no empty-array stuffing)', async () => {
+    const owner = 'user-recovery-no-markers';
+    audioVault.saveRecording.mockResolvedValue({ id: 'rec_plain' });
+    render(<EntryBar ownerUid={owner} onVoiceSave={vi.fn()} onTextSave={vi.fn()} />);
+    await waitFor(() => expect(recoverWebDrafts).toHaveBeenCalledWith(owner, expect.any(Function)));
+
+    const adopt = recoverWebDrafts.mock.calls.find((c) => c[0] === owner)[1];
+    await expect(adopt('base64data', 'audio/webm', undefined)).resolves.toBe('rec_plain');
+    expect(audioVault.saveRecording).toHaveBeenCalledWith(owner, 'base64data', 'audio/webm');
+  });
 });
 
 describe('EntryBar — typed-draft autosave', () => {
@@ -300,7 +331,9 @@ describe('EntryBar — Voice Chapters (flag: voiceChapters)', () => {
     await waitFor(() => expect(onVoiceSave).toHaveBeenCalled());
 
     const [, , options] = onVoiceSave.mock.calls[0];
-    expect(options.markers).toEqual([expect.any(Number)]);
+    // Canonical shape (review fix, IMPORTANT): EntryBar normalizes markers to
+    // [{tMs}] before they leave the component, regardless of platform.
+    expect(options.markers).toEqual([{ tMs: expect.any(Number) }]);
     expect(typeof options.durationMs).toBe('number');
   });
 
@@ -331,7 +364,40 @@ describe('EntryBar — Voice Chapters (flag: voiceChapters)', () => {
     fireEvent.click(screen.getByLabelText('Stop recording'));
     await waitFor(() => expect(onVoiceSave).toHaveBeenCalled());
     const [, , options] = onVoiceSave.mock.calls[0];
-    expect(options.markers).toEqual([expect.any(Number)]);
+    expect(options.markers).toEqual([{ tMs: expect.any(Number) }]);
+  });
+
+  // MINOR (task-13 review): a second recording in the same EntryBar mount
+  // must not carry over markers/count from the first — recordingStartedAtRef
+  // and markersRef both get reset at the top of startRecording.
+  it('a second recording in the same mount resets markers — no carryover from the first', async () => {
+    const onVoiceSave = vi.fn().mockResolvedValue(true);
+    render(<EntryBar ownerUid={OWNER} onVoiceSave={onVoiceSave} onTextSave={vi.fn()} />);
+
+    // First recording: tap once, stop.
+    const recorder1 = await startFakeRecording();
+    fireEvent.click(screen.getByLabelText('Mark chapter'));
+    await waitFor(() => expect(appendMarker).toHaveBeenCalledTimes(1));
+    expect(screen.getByText(/Ch 1/)).toBeTruthy();
+    recorder1.ondataavailable({ data: new Blob(['chunk-0-'.repeat(20)]) });
+    fireEvent.click(screen.getByLabelText('Stop recording'));
+    await waitFor(() => expect(onVoiceSave).toHaveBeenCalledTimes(1));
+    expect(onVoiceSave.mock.calls[0][2].markers).toHaveLength(1);
+
+    // Second recording: badge starts fresh at "Ch 1" on the first tap in
+    // this recording, not "Ch 2" carried over from the first recording.
+    const recorder2 = await startFakeRecording();
+    fireEvent.click(screen.getByLabelText('Mark chapter'));
+    await waitFor(() => expect(appendMarker).toHaveBeenCalledTimes(2));
+    expect(screen.getByText(/Ch 1/)).toBeTruthy();
+    expect(screen.queryByText(/Ch 2/)).toBeNull();
+
+    recorder2.ondataavailable({ data: new Blob(['chunk-0-'.repeat(20)]) });
+    fireEvent.click(screen.getByLabelText('Stop recording'));
+    await waitFor(() => expect(onVoiceSave).toHaveBeenCalledTimes(2));
+    // Exactly 1 marker (this recording's tap only) — no carryover from the
+    // first recording's marker.
+    expect(onVoiceSave.mock.calls[1][2].markers).toHaveLength(1);
   });
 });
 

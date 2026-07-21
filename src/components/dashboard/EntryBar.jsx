@@ -5,6 +5,7 @@ import { Capacitor } from '@capacitor/core';
 import { CaptureService } from '../../services/capture/captureService';
 import { nativeCaptureAdapter } from '../../services/capture/nativeCaptureAdapter';
 import { appendChunk, appendMarker, deleteDraft, recoverWebDrafts } from '../../services/capture/webChunkStore';
+import { normalizeMarkers } from '../../services/capture/chapterMarkers';
 import { restoreDraft, writeDraft, clearDraft } from '../../services/capture/draftAutosave';
 import { audioVault } from '../../services/audio/audioVault';
 import { getFlag } from '../../config/flags';
@@ -186,9 +187,22 @@ const EntryBar = ({
     if (!getFlag('webChunkPersistence')) return;
     if (webChunkRecoveryOwners.has(ownerUid)) return;
     webChunkRecoveryOwners.add(ownerUid);
-    recoverWebDrafts(ownerUid, (base64, mime) =>
-      audioVault.saveRecording(ownerUid, base64, mime).then((result) => result?.id ?? null)
-    )
+    recoverWebDrafts(ownerUid, (base64, mime, markers) => {
+      // Voice Chapters (review fix, CRITICAL): the 3rd arg (draft.markers,
+      // raw web number[] shape from webChunkStore's meta record) used to be
+      // dropped on the floor here — a tab-kill recovery silently lost any
+      // chapter markers that had already survived durably in IDB. Normalize
+      // to the canonical [{tMs}] shape (see chapterMarkers.js) and mirror
+      // prepareDurableRecording's extras convention: only pass a 4th arg to
+      // saveRecording when there's something to add, so a marker-free
+      // recovery is byte-for-byte the pre-existing call. No durationMs here
+      // — recovered chunk drafts don't carry it, and it's omitted rather
+      // than stuffed in as 0/undefined.
+      const normalizedMarkers = normalizeMarkers(markers);
+      return audioVault
+        .saveRecording(ownerUid, base64, mime, ...(normalizedMarkers ? [{ markers: normalizedMarkers }] : []))
+        .then((result) => result?.id ?? null);
+    })
       .then((count) => count && console.log(`[Recording] recovered ${count} web draft(s)`))
       .catch((error) => console.warn('[Recording] web draft recovery failed:', error?.message));
   }, [ownerUid]);
@@ -366,9 +380,13 @@ const EntryBar = ({
           // threaded through when the flag is on and omitted entirely
           // (no empty-array/0 stuffing) when there's nothing to report, so a
           // flag-off or chapter-free recording's options are unchanged.
+          // Canonical shape: markersRef holds raw tMs numbers (web shape) —
+          // normalizeMarkers converts to [{tMs}] here, at the boundary,
+          // before anything leaves EntryBar (see chapterMarkers.js).
+          const normalizedMarkers = normalizeMarkers(markersRef.current);
           const chapterExtras = voiceChaptersOn
             ? {
-                ...(markersRef.current.length ? { markers: [...markersRef.current] } : {}),
+                ...(normalizedMarkers ? { markers: normalizedMarkers } : {}),
                 ...(recordingStartedAtRef.current != null
                   ? { durationMs: Date.now() - recordingStartedAtRef.current }
                   : {}),
@@ -463,9 +481,15 @@ const EntryBar = ({
       // (stored.markers/stored.durationMs, the durable ground truth) — only
       // threaded through when the flag is on, so a flag-off recording's
       // options are byte-for-byte what they were before this feature.
+      // Canonical shape: stored.markers already arrives as [{tMs}] (native
+      // shape), but this still goes through normalizeMarkers — same boundary
+      // function as the web path, so both platforms produce an identical
+      // downstream shape and any malformed sidecar data is tolerated the
+      // same way.
+      const normalizedMarkers = normalizeMarkers(stored.markers);
       const chapterExtras = voiceChaptersOn
         ? {
-            ...(stored.markers && stored.markers.length ? { markers: stored.markers } : {}),
+            ...(normalizedMarkers ? { markers: normalizedMarkers } : {}),
             ...(stored.durationMs != null ? { durationMs: stored.durationMs } : {}),
           }
         : {};

@@ -33,6 +33,15 @@ export const appendChunk = async (ownerUid, draftId, seq, blob, mimeType) => {
   if (!stores) return null;
 
   await reqP(stores.chunks.put({ ownerUid: owner, draftId, seq, blob, mimeType }));
+  // Read-merge-write, NOT a blind overwrite (review fix, CRITICAL): a naive
+  // put() here would silently drop `markers` on every single chunk flush —
+  // MediaRecorder fires ondataavailable roughly every second, and
+  // appendMarker (below) writes into this same `meta` record at tap time, so
+  // any marker tapped in the ~1s between chunks would be wiped by the very
+  // next chunk. get() + put() below run inside the ONE readwrite transaction
+  // opened above (`stores` came from a single withStores() call), so
+  // IndexedDB serializes them against any other transaction touching this
+  // record — no lost-update race between this and a concurrent appendMarker.
   const existingMeta = await reqP(stores.meta.get([owner, draftId]));
   await reqP(stores.meta.put({
     ownerUid: owner,
@@ -40,6 +49,7 @@ export const appendChunk = async (ownerUid, draftId, seq, blob, mimeType) => {
     mimeType,
     startedAt: existingMeta?.startedAt ?? Date.now(),
     lastSeq: seq,
+    ...(existingMeta?.markers ? { markers: existingMeta.markers } : {}),
   }));
   return true;
 };

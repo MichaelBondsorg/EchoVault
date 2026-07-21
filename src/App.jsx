@@ -2017,6 +2017,15 @@ export default function App() {
     // Durable operation record — the source of truth that survives an app kill
     // and drives idempotent launch resume. Reuse the existing op on a retry/
     // resume; otherwise create a fresh one now that the recording is durable.
+    // Review note (task-13): markers/durationMs are only ever WRITTEN below,
+    // in createOperation, when a fresh op is created. A REUSED op
+    // (resumeOperationId, or one found via findByRecordingId just below)
+    // keeps whatever markers it already has — this call's `options.markers`
+    // is never re-applied to it. That's deliberate, not a gap: the vault
+    // index entry (and the existing op record derived from it) is retry's
+    // source of truth for markers, so a stale/absent `options.markers` on
+    // some particular resume/retry call can never silently clobber markers
+    // that were already durably recorded on the original attempt.
     let operationId = resumeOperationId || null;
     if (!operationId && existingRecordingId) {
       const existingOp = await findByRecordingId(user.uid, recordingId).catch(() => null);

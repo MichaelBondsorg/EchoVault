@@ -1,16 +1,28 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { createFakeIndexedDb } from '../../../test/mocks/fakeIndexedDb';
-import { __resetCaptureDb } from '../idbCaptureDb';
 
 const OWNER = 'user-a';
 const OTHER_OWNER = 'user-b';
 
 let fakeIdb;
 
-beforeEach(() => {
+// __resetCaptureDb is deliberately re-imported dynamically here rather than
+// bound once via a static top-of-file import: several tests below call
+// vi.resetModules() (to exercise the "IndexedDB unavailable" no-op path),
+// which swaps in a brand-new module graph for subsequent `await
+// import('../webChunkStore')` calls. A static binding to __resetCaptureDb
+// captured BEFORE that swap would keep resetting the OLD, now-orphaned
+// idbCaptureDb module instance — silently leaving the ACTIVE module's cached
+// db connection (and whatever data the previous test wrote) in place across
+// tests, since import() itself doesn't automatically re-evaluate its own
+// deps just because THIS test cleared globals. Re-resolving it fresh here on
+// every beforeEach always targets whichever module instance is currently
+// live, so isolation holds even across a resetModules() boundary.
+beforeEach(async () => {
   fakeIdb = createFakeIndexedDb();
   globalThis.indexedDB = fakeIdb;
   globalThis.IDBKeyRange = fakeIdb.IDBKeyRange;
+  const { __resetCaptureDb } = await import('../idbCaptureDb');
   __resetCaptureDb();
 });
 
@@ -127,7 +139,7 @@ describe('webChunkStore', () => {
   it('is a no-op returning null when IndexedDB is unavailable', async () => {
     delete globalThis.indexedDB;
     delete globalThis.IDBKeyRange;
-    __resetCaptureDb();
+    (await import('../idbCaptureDb')).__resetCaptureDb();
     vi.resetModules();
     const { appendChunk, listDrafts, readDraftBlob, deleteDraft } = await import('../webChunkStore');
 
@@ -183,10 +195,47 @@ describe('webChunkStore', () => {
     it('is a no-op returning null when IndexedDB is unavailable', async () => {
       delete globalThis.indexedDB;
       delete globalThis.IDBKeyRange;
-      __resetCaptureDb();
+      (await import('../idbCaptureDb')).__resetCaptureDb();
       vi.resetModules();
       const { appendMarker } = await import('../webChunkStore');
       expect(await appendMarker(OWNER, 'draft-1', 1000)).toBeNull();
+    });
+
+    // CRITICAL (task-13 review): MediaRecorder flushes a chunk roughly every
+    // second via appendChunk, which used to blindly overwrite the whole
+    // `meta` record (put() with no read-merge) — wiping out any marker
+    // appendMarker had just written. These two tests pin the read-merge-write
+    // fix: a marker written before a chunk arrives must survive it.
+    it('appendChunk preserves a marker written just before it (chunk flush must never clobber markers)', async () => {
+      const { appendChunk, appendMarker } = await import('../webChunkStore');
+      await appendMarker(OWNER, 'draft-1', 800);
+      await appendChunk(OWNER, 'draft-1', 0, new Blob(['a']), 'audio/webm');
+
+      const db = await (await import('../idbCaptureDb')).openCaptureDb();
+      const tx = db.transaction(['meta'], 'readonly');
+      const meta = await new Promise((resolve, reject) => {
+        const req = tx.objectStore('meta').get([OWNER, 'draft-1']);
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error);
+      });
+      expect(meta.markers).toEqual([800]);
+    });
+
+    it('marker -> chunk -> marker -> chunk leaves both markers present (interleaved ~1s MediaRecorder flush)', async () => {
+      const { appendChunk, appendMarker } = await import('../webChunkStore');
+      await appendMarker(OWNER, 'draft-1', 500);
+      await appendChunk(OWNER, 'draft-1', 0, new Blob(['a']), 'audio/webm');
+      await appendMarker(OWNER, 'draft-1', 1600);
+      await appendChunk(OWNER, 'draft-1', 1, new Blob(['b']), 'audio/webm');
+
+      const db = await (await import('../idbCaptureDb')).openCaptureDb();
+      const tx = db.transaction(['meta'], 'readonly');
+      const meta = await new Promise((resolve, reject) => {
+        const req = tx.objectStore('meta').get([OWNER, 'draft-1']);
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error);
+      });
+      expect(meta.markers).toEqual([500, 1600]);
     });
 
     it('keeps markers isolated per owner', async () => {
