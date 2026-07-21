@@ -10,12 +10,13 @@ import { getCompanionContext } from '../../../services/rag/companionContext';
 // exercises the Ask Journal scope chip/selector (plan R1 task 11), so every
 // other subsystem is mocked to a minimal inert stand-in — none of it is
 // under test here.
+const { mockVoiceConnect } = vi.hoisted(() => ({ mockVoiceConnect: vi.fn() }));
 vi.mock('../../../hooks/useVoiceRelay', () => ({
   useVoiceRelay: () => ({
     status: 'disconnected',
     transcript: [],
     error: null,
-    connect: vi.fn(),
+    connect: mockVoiceConnect,
     disconnect: vi.fn(),
     startRecording: vi.fn(),
     endTurn: vi.fn(),
@@ -227,6 +228,50 @@ describe('UnifiedConversation — selected scope reaches the context call', () =
       expect(getCompanionContext).toHaveBeenCalledWith(
         expect.objectContaining({ scope: null })
       )
+    );
+  });
+});
+
+// R2 plan task 5: the voice relay session-init message must carry the same
+// Ask Journal scope used for text-chat's getCompanionContext call, so the
+// relay's server-side RAG never leaks cross-space content into a scoped
+// voice conversation either. `initialMode` is left at its PICKER default
+// here (unlike the describes above) so the "Voice Conversation" entry point
+// is on-screen without an extra mode switch; the default-scope-load effect
+// that feeds `effectiveScope` runs regardless of mode.
+describe('UnifiedConversation — voice relay session-init threads the active scope', () => {
+  it('passes the active space id as the third connect() arg when entering Voice mode', async () => {
+    withSpaces([{ id: 'space-1', name: 'Work' }]);
+    getLastCaptureSpaceId.mockResolvedValue('space-1');
+    render(<UnifiedConversation userId={USER_ID} onClose={vi.fn()} />);
+
+    fireEvent.click(await screen.findByText('Voice Conversation'));
+
+    await waitFor(() =>
+      expect(mockVoiceConnect).toHaveBeenCalledWith('free', 'realtime', 'space-1')
+    );
+  });
+
+  it('passes null when "All spaces" is the active scope (legacy identity)', async () => {
+    withSpaces([{ id: 'space-1', name: 'Work' }]);
+    getLastCaptureSpaceId.mockResolvedValue(null);
+    render(<UnifiedConversation userId={USER_ID} onClose={vi.fn()} />);
+
+    fireEvent.click(await screen.findByText('Voice Conversation'));
+
+    await waitFor(() =>
+      expect(mockVoiceConnect).toHaveBeenCalledWith('free', 'realtime', null)
+    );
+  });
+
+  it('passes null when the contextSpaces flag is off entirely', async () => {
+    getFlag.mockImplementation(() => false);
+    render(<UnifiedConversation userId={USER_ID} onClose={vi.fn()} />);
+
+    fireEvent.click(await screen.findByText('Voice Conversation'));
+
+    await waitFor(() =>
+      expect(mockVoiceConnect).toHaveBeenCalledWith('free', 'realtime', null)
     );
   });
 });

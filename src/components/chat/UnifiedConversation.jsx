@@ -245,7 +245,12 @@ const UnifiedConversation = ({
       console.log('[Voice] Entering voice mode, connecting...');
       voiceClearError();
       voiceClearTranscript();
-      voiceConnect('free', 'realtime');
+      // Thread the Ask Journal scope active at session start into the relay
+      // (R2 plan task 5) so voice's server-side RAG (get_memory tool, recent
+      // entries) never leaks cross-space content into a scoped conversation
+      // — same effectiveScope used for the text-chat getCompanionContext
+      // call above.
+      voiceConnect('free', 'realtime', effectiveScope?.spaceId ?? null);
     }
   }, [mode, voiceStatus]);
 

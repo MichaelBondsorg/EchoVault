@@ -54,8 +54,16 @@ export const useVoiceRelay = () => {
 
   /**
    * Connect to voice relay server
+   *
+   * @param {string} sessionType
+   * @param {string} requestedMode
+   * @param {string|null} [spaceId] - Context Space (R1) active for this
+   *   conversation at session start, forwarded to the relay in the
+   *   `start_session` message so server-side RAG (get_memory tool, recent
+   *   entries) can scope to it. null (default) is identity — legacy,
+   *   unscoped behavior; the relay adds no `where('spaceId', ...)` clause.
    */
-  const connect = useCallback(async (sessionType = 'free', requestedMode = 'realtime') => {
+  const connect = useCallback(async (sessionType = 'free', requestedMode = 'realtime', spaceId = null) => {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
       console.log('Already connected');
       return;
@@ -111,6 +119,7 @@ export const useVoiceRelay = () => {
           type: 'start_session',
           mode: requestedMode,
           sessionType,
+          spaceId,
         }));
 
         // Set up token refresh (every 50 minutes)

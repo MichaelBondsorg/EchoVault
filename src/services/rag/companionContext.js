@@ -177,15 +177,26 @@ export const getCompanionContext = async ({
   const filteredEntries = filterEntriesByScope(categoryFilteredEntries, scope);
 
   // ==========================================
-  // TIER 1: Memory Graph (always included)
+  // TIER 1: Memory Graph (always included, UNLESS scoped)
   // ==========================================
-  try {
-    const memory = await getMemoryGraph(userId, { excludeArchived: true });
-    context.memory = formatMemoryForContext(memory, 500);
+  // The memory graph (people/values/events) is derived across ALL of a
+  // user's entries — it has no per-Space boundary to filter by. Per R1's
+  // strict-scoping precedent (unscoped/cross-space content is excluded, not
+  // merged in), a scoped conversation omits Tier 1 entirely rather than
+  // silently leaking cross-space-derived memory. `scope: null` (the legacy,
+  // unscoped default) is untouched — same call, same output.
+  if (scope != null) {
+    context.memory = '(Long-term memory omitted: scoped conversation)';
     tokenBudget.used += estimateTokens(context.memory);
-  } catch (e) {
-    console.warn('Failed to load memory graph:', e);
-    context.memory = null;
+  } else {
+    try {
+      const memory = await getMemoryGraph(userId, { excludeArchived: true });
+      context.memory = formatMemoryForContext(memory, 500);
+      tokenBudget.used += estimateTokens(context.memory);
+    } catch (e) {
+      console.warn('Failed to load memory graph:', e);
+      context.memory = null;
+    }
   }
 
   // ==========================================
@@ -194,12 +205,22 @@ export const getCompanionContext = async ({
   const buffer = sessionBuffer || getSessionBuffer();
 
   if (buffer?.recentEntry && !isExpired(buffer.expiresAt)) {
-    context.sessionBuffer = formatBufferForContext(buffer);
-    tokenBudget.used += estimateTokens(context.sessionBuffer);
+    // Strict scoping (R1 precedent): when scoped, the just-captured entry is
+    // only surfaced if it belongs to the SAME Space. An entry with no
+    // spaceId (unscoped) is excluded, not permissively merged in. `scope:
+    // null` is identity — every recentEntry qualifies, exactly like before
+    // this fix.
+    const recentEntrySpaceId = buffer.recentEntry.spaceId ?? null;
+    const recentEntryInScope = scope == null || recentEntrySpaceId === scope.spaceId;
 
-    // Add to de-duplication set
-    if (buffer.recentEntry.id) {
-      includedEntryIds.add(buffer.recentEntry.id);
+    if (recentEntryInScope) {
+      context.sessionBuffer = formatBufferForContext(buffer);
+      tokenBudget.used += estimateTokens(context.sessionBuffer);
+
+      // Add to de-duplication set
+      if (buffer.recentEntry.id) {
+        includedEntryIds.add(buffer.recentEntry.id);
+      }
     }
   }
 
