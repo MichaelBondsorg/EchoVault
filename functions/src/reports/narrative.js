@@ -7,14 +7,19 @@
  */
 
 import { callGemini } from '../shared/gemini.js';
+import { getModel } from '../models/registry.js';
 
 /**
  * Generate a weekly digest using templates (no LLM).
  * @param {object} analyticsData - Pre-computed analytics
  * @param {object} nexusData - Nexus insights
+ * @param {Array<{id: string, moodScore: (number|null)}>} [entries] - Period's
+ *   entries (post source-exclusion filtering), used to populate entryRefs
+ *   receipts. Optional/defaults to [] for backward compatibility with
+ *   callers that only need narrative text.
  * @returns {Array<object>} sections
  */
-export function generateWeeklyTemplate(analyticsData, nexusData) {
+export function generateWeeklyTemplate(analyticsData, nexusData, entries = []) {
   const { entryCount = 0, moodAvg, moodTrend, topTheme } = analyticsData;
 
   // Summary bullets
@@ -34,6 +39,22 @@ export function generateWeeklyTemplate(analyticsData, nexusData) {
     ? insight.content || insight.description || 'No additional insights this week.'
     : 'Keep journaling to unlock insights about your patterns.';
 
+  // Receipts (entryRefs): which entries actually fed each section's builder.
+  // - summary: a period-level aggregate (entry count, mood avg, top theme)
+  //   computed over the whole period — not attributable to a subset, so it
+  //   falls back to the full period id list.
+  // - insight: the featured nexus insight isn't tagged with its source
+  //   entry id(s) in the data this template receives — also falls back to
+  //   the full period id list (documented gap, not a finer-grained read).
+  // - mood_trend: determinable exactly. It's the same entries
+  //   (moodScore != null) that generator.js used to build the sparkline
+  //   chartData for this section.
+  const periodEntryIds = entries.map(e => e.id).filter(Boolean);
+  const moodEntryIds = entries
+    .filter(e => e.moodScore !== null && e.moodScore !== undefined)
+    .map(e => e.id)
+    .filter(Boolean);
+
   return [
     {
       id: 'summary',
@@ -41,7 +62,7 @@ export function generateWeeklyTemplate(analyticsData, nexusData) {
       narrative: bullets.join(' '),
       chartData: null,
       entities: [],
-      entryRefs: [],
+      entryRefs: periodEntryIds,
     },
     {
       id: 'insight',
@@ -49,7 +70,7 @@ export function generateWeeklyTemplate(analyticsData, nexusData) {
       narrative: insightText,
       chartData: null,
       entities: [],
-      entryRefs: [],
+      entryRefs: periodEntryIds,
     },
     {
       id: 'mood_trend',
@@ -57,7 +78,7 @@ export function generateWeeklyTemplate(analyticsData, nexusData) {
       narrative: '',
       chartData: { type: 'sparkline', data: moodTrend || [] },
       entities: [],
-      entryRefs: [],
+      entryRefs: moodEntryIds,
     },
   ];
 }
@@ -93,23 +114,42 @@ const SECTION_CONFIGS = {
  * @param {'monthly'|'quarterly'|'annual'} cadence
  * @param {object} contextData - All gathered data
  * @param {string} apiKey - Gemini API key
+ * @param {object} db - Firestore instance (admin SDK), used to resolve the
+ *   'insight' workload model via the registry.
  * @returns {Promise<Array<object>>} sections
  */
-export async function generatePremiumNarrative(cadence, contextData, apiKey) {
+export async function generatePremiumNarrative(cadence, contextData, apiKey, db) {
   const sectionConfigs = SECTION_CONFIGS[cadence];
   if (!sectionConfigs) throw new Error(`Unknown cadence: ${cadence}`);
+
+  // Resolve once per report run (registry, workload 'insight') rather than
+  // hardcoding the Gemini model — mirrors the analysis orchestrator's
+  // pattern of a single resolution shared across every call this function
+  // makes (section narratives + month pre-summarization).
+  const model = await getModel(db, 'insight');
 
   // For quarterly/annual, pre-summarize by month first
   let synthesisContext = contextData;
   if (cadence === 'quarterly' || cadence === 'annual') {
-    synthesisContext = await preSummarizeByMonth(contextData, apiKey);
+    synthesisContext = await preSummarizeByMonth(contextData, apiKey, model);
   }
+
+  // Receipts (entryRefs): buildSectionPrompt() feeds every section the same
+  // excerpt sample (`entries.slice(0, 8)`, see below) — there's no
+  // per-section entry subset in this builder, so entryRefs is that same id
+  // list for every section, whether generation succeeded or fell back to
+  // the "could not be generated" placeholder (the prompt was still built
+  // and sent with these entries either way).
+  const sourceEntryIds = (synthesisContext.entries || [])
+    .slice(0, 8)
+    .map(e => e.id)
+    .filter(Boolean);
 
   const sections = [];
   for (const config of sectionConfigs) {
     try {
       const narrative = await generateSectionNarrative(
-        config, cadence, synthesisContext, apiKey
+        config, cadence, synthesisContext, apiKey, model
       );
       sections.push({
         id: config.id,
@@ -117,7 +157,7 @@ export async function generatePremiumNarrative(cadence, contextData, apiKey) {
         narrative,
         chartData: null,
         entities: [],
-        entryRefs: [],
+        entryRefs: sourceEntryIds,
       });
     } catch (e) {
       console.error(`[narrative] Failed to generate section ${config.id}:`, e.message);
@@ -127,7 +167,7 @@ export async function generatePremiumNarrative(cadence, contextData, apiKey) {
         narrative: 'This section could not be generated. Please try again later.',
         chartData: null,
         entities: [],
-        entryRefs: [],
+        entryRefs: sourceEntryIds,
       });
     }
   }
@@ -141,9 +181,9 @@ Focus on patterns, progress, and gentle observations. Never diagnose or prescrib
 Output ONLY the narrative text for the requested section. No JSON, no markdown headers.
 Keep each section to 150-300 words.`;
 
-async function generateSectionNarrative(config, cadence, contextData, apiKey) {
+async function generateSectionNarrative(config, cadence, contextData, apiKey, model) {
   const userPrompt = buildSectionPrompt(config, cadence, contextData);
-  const result = await callGeminiWithRetry(apiKey, SYSTEM_PROMPT, userPrompt);
+  const result = await callGeminiWithRetry(apiKey, SYSTEM_PROMPT, userPrompt, model);
   if (!result) throw new Error('Gemini returned null');
   return result.trim();
 }
@@ -186,7 +226,7 @@ function buildSectionPrompt(config, cadence, contextData) {
   return prompt;
 }
 
-async function preSummarizeByMonth(contextData, apiKey) {
+async function preSummarizeByMonth(contextData, apiKey, model) {
   const { entries = [] } = contextData;
 
   // Group entries by month
@@ -206,7 +246,8 @@ async function preSummarizeByMonth(contextData, apiKey) {
     const summary = await callGeminiWithRetry(
       apiKey,
       'Summarize these journal entries for one month in 2-3 sentences. Focus on themes, mood, and notable events.',
-      `Month: ${month}\n\nEntries:\n${excerpts}`
+      `Month: ${month}\n\nEntries:\n${excerpts}`,
+      model
     );
     summaries.push(`${month}: ${summary || 'No summary available.'}`);
   }
@@ -222,12 +263,14 @@ async function preSummarizeByMonth(contextData, apiKey) {
  * @param {string} apiKey
  * @param {string} systemPrompt
  * @param {string} userPrompt
+ * @param {string} [model] - Model id (registry-resolved). Falls through to
+ *   callGemini's own default when omitted.
  * @param {number} maxRetries
  * @returns {Promise<string|null>}
  */
-async function callGeminiWithRetry(apiKey, systemPrompt, userPrompt, maxRetries = 3) {
+async function callGeminiWithRetry(apiKey, systemPrompt, userPrompt, model, maxRetries = 3) {
   for (let attempt = 0; attempt < maxRetries; attempt++) {
-    const result = await callGemini(apiKey, systemPrompt, userPrompt);
+    const result = await callGemini(apiKey, systemPrompt, userPrompt, model);
     if (result) return result;
 
     if (attempt < maxRetries - 1) {

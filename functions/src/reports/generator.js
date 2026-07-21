@@ -11,6 +11,7 @@ import { APP_COLLECTION_ID } from '../shared/constants.js';
 import { generateWeeklyTemplate, generatePremiumNarrative } from './narrative.js';
 import { prepareMoodTrend, prepareCategoryBreakdown, prepareEntryFrequency } from './charts.js';
 import { filterForShareableContent } from './privacy.js';
+import { getModel } from '../models/registry.js';
 
 /**
  * Generate a report for a single user and period.
@@ -57,13 +58,18 @@ export async function generateReport(userId, cadence, periodStart, periodEnd, ge
   }
 
   try {
-    // Read all data in parallel
-    const [analyticsData, nexusData, signalData, entriesData, healthData] = await Promise.all([
+    // Read all data in parallel. `model` is resolved once per report run
+    // (registry, workload 'insight') regardless of cadence — weekly's
+    // template path doesn't call an LLM, but the metadata schema stays
+    // consistent across all cadences (mirrors the analysis orchestrator's
+    // "resolve once, stamp regardless of which branch used it" convention).
+    const [analyticsData, nexusData, signalData, entriesData, healthData, model] = await Promise.all([
       readAnalytics(db, userBase),
       readNexusData(db, userBase, periodStart, periodEnd),
       readSignalData(db, userBase, periodStart, periodEnd),
       readEntries(db, userBase, periodStart, periodEnd, cadence),
       readHealthData(db, userBase),
+      getModel(db, 'insight'),
     ]);
 
     // Prepare chart data
@@ -98,12 +104,20 @@ export async function generateReport(userId, cadence, periodStart, periodEnd, ge
     // Generate sections
     let sections;
     if (cadence === 'weekly') {
-      sections = generateWeeklyTemplate(contextData.analytics, nexusData);
+      // Pass entriesData (unfiltered by crisis-safety, but already
+      // exclusion-filtered by readEntries) so entryRefs receipts mirror
+      // exactly what fed entryCount/moodTrend above. Crisis-flagged ids can
+      // legitimately end up in entryRefs here — that's intentional: the
+      // owner's personal in-app view shows their own flagged entries
+      // (see privacy.js filterForPersonalView), and export/share paths
+      // (pdfExport.applyRedactions) strip crisis-flagged entryRefs before
+      // anything leaves the app.
+      sections = generateWeeklyTemplate(contextData.analytics, nexusData, entriesData);
       // Attach mood chart data to the mood_trend section
       const moodSection = sections.find(s => s.id === 'mood_trend');
       if (moodSection) moodSection.chartData = { type: 'sparkline', data: moodTrend };
     } else {
-      sections = await generatePremiumNarrative(cadence, contextData, geminiApiKeyValue);
+      sections = await generatePremiumNarrative(cadence, contextData, geminiApiKeyValue, db);
     }
 
     // Attach chart data to first section if not already present
@@ -112,12 +126,24 @@ export async function generateReport(userId, cadence, periodStart, periodEnd, ge
     }
 
     // Build metadata
+    const sourceEntryIds = new Set(sections.flatMap(s => s.entryRefs || []));
     const metadata = {
       entryCount: entriesData.length,
       filteredEntryCount,
       moodAvg: analyticsData.moodAvg || null,
       topInsights: (nexusData.insights || []).slice(0, 5).map(i => i.id || ''),
       topEntities: (analyticsData.topEntities || []).slice(0, 5),
+      // Scheduled reports are always all-spaces (ratified product decision
+      // #3) — labeled explicitly so a future space-scoped report type can
+      // never be silently confused with this one.
+      scope: 'all_spaces',
+      model,
+      promptVersion: 1,
+      // Distinct entries actually traceable via this report's receipts
+      // (union of every section's entryRefs). Deliberately NOT the same as
+      // entryCount: premium cadences only cite a small excerpt sample per
+      // section, so this is usually smaller than entryCount/filteredEntryCount.
+      sourceEntryCount: sourceEntryIds.size,
     };
 
     // Update report to ready
@@ -216,18 +242,35 @@ async function readSignalData(db, userBase, periodStart, periodEnd) {
   }
 }
 
-async function readEntries(db, userBase, periodStart, periodEnd, cadence) {
+// Exported for direct unit testing of the source_exclusions filter and
+// entry shape; also used by generateReport above.
+export async function readEntries(db, userBase, periodStart, periodEnd, cadence) {
   try {
     const limit = cadence === 'annual' ? 500 : cadence === 'quarterly' ? 200 : 100;
-    const snap = await db.collection(`${userBase}/entries`)
-      .where('createdAt', '>=', periodStart)
-      .where('createdAt', '<=', periodEnd)
-      .orderBy('createdAt', 'asc')
-      .limit(limit)
-      .get();
+    // One extra collection read per report run for source_exclusions
+    // (Task 8/10 client concept, server-consumed here). Only
+    // appliesTo === 'all' exclusions drop an entry from reports entirely —
+    // pattern-scoped exclusions (a specific signal/pattern type) don't
+    // change what feeds a report, only what feeds pattern detection.
+    const [snap, exclusionsSnap] = await Promise.all([
+      db.collection(`${userBase}/entries`)
+        .where('createdAt', '>=', periodStart)
+        .where('createdAt', '<=', periodEnd)
+        .orderBy('createdAt', 'asc')
+        .limit(limit)
+        .get(),
+      db.collection(`${userBase}/source_exclusions`).get(),
+    ]);
+
+    const excludedIds = new Set();
+    exclusionsSnap.forEach(doc => {
+      const d = doc.data();
+      if (d.appliesTo === 'all' && d.entryId) excludedIds.add(d.entryId);
+    });
 
     const entries = [];
     snap.forEach(doc => {
+      if (excludedIds.has(doc.id)) return;
       const d = doc.data();
       entries.push({
         id: doc.id,

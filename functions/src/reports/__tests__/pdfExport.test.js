@@ -242,6 +242,46 @@ describe('pdfExport', () => {
       expect(mockRenderToBuffer).toHaveBeenCalledTimes(1);
     });
 
+    it('never hands a crisis-flagged entry id to the PDF renderer (non-vacuous: real, non-empty entryRefs)', async () => {
+      // Regression guard for the bug this task fixes: entryRefs used to be
+      // written as [] by every report-generation path, which made the
+      // crisis-strip logic below (applyRedactions, driven by
+      // report.sections[].entryRefs) unreachable in practice — there was
+      // never anything in entryRefs to strip. This test uses report fixture
+      // data with real, non-empty entryRefs (['e1','e2'] on 'summary', etc.,
+      // matching what generator.js/narrative.js now actually write) and
+      // inspects what's actually passed to the PDF renderer, not just
+      // whether rendering completed.
+      mockActiveSubscription();
+      mockGet.mockResolvedValueOnce({ exists: true, data: () => makeReport() });
+      mockGet.mockResolvedValueOnce({ exists: true, data: () => makePrivacy() });
+      // e2 (referenced by the 'summary' section) is crisis-flagged.
+      mockEntryLookups(4, new Set(['e2']));
+
+      const { handleExportRequest } = await import('../pdfExport.js');
+      await handleExportRequest({ reportId: VALID_REPORT_ID }, 'user1');
+
+      // buildPdfDocument() builds:
+      //   React.createElement(Document, null, CoverPage, SummaryPage, ...sectionElements)
+      // React.createElement never invokes component functions — it only
+      // creates descriptor objects — so we can inspect what was actually
+      // handed to each SectionPage element's props without needing to mock
+      // React itself or execute the component bodies.
+      expect(mockRenderToBuffer).toHaveBeenCalledTimes(1);
+      const pdfDocElement = mockRenderToBuffer.mock.calls[0][0];
+      const [, , ...sectionElements] = pdfDocElement.props.children;
+
+      const renderedSummary = sectionElements.find((el) => el.props.section.id === 'summary');
+      const renderedGoals = sectionElements.find((el) => el.props.section.id === 'goals');
+
+      // e2 was stripped from the section that referenced it...
+      expect(renderedSummary.props.section.entryRefs).not.toContain('e2');
+      // ...but a non-crisis ref on the SAME section survives the strip...
+      expect(renderedSummary.props.section.entryRefs).toContain('e1');
+      // ...and a different section's non-crisis ref is untouched.
+      expect(renderedGoals.props.section.entryRefs).toEqual(['e3']);
+    });
+
     it('URL expires after 24 hours', async () => {
       mockActiveSubscription();
       mockGet.mockResolvedValueOnce({ exists: true, data: () => makeReport() });

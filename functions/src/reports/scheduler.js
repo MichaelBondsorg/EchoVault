@@ -19,6 +19,15 @@ const BATCH_SIZE = 5;
 
 /**
  * Check if a user has sufficient data for report generation.
+ *
+ * Intentionally NOT filtered by source_exclusions (R2 Task 9): the entry
+ * count/day-spread here is a scheduling gate, not report content, so it
+ * stays scope-blind to exclusions the same way it's always been. This is
+ * simpler and conservative — a user near the threshold with excluded
+ * entries may get a report scheduled that then has fewer citable entries
+ * than this check implied, never the reverse (a report silently skipped
+ * because exclusions dropped it under threshold). readEntries() in
+ * generator.js is where exclusions actually apply, to report content.
  */
 export async function meetsDataThreshold(userId, cadence, periodStart, periodEnd) {
   const db = getFirestore();
