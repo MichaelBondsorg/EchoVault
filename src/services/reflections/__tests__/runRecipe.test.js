@@ -167,7 +167,59 @@ describe('runRecipe pipeline order', () => {
   });
 });
 
-describe('runRecipe adversarial: excluded/off-scope entries never in sources', () => {
+describe('runRecipe embedding-degradation warning', () => {
+  let warnSpy;
+
+  beforeEach(() => {
+    warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    warnSpy.mockRestore();
+  });
+
+  it('warns once per question missing an embedding, with the [runRecipe] tag and a truncated question', async () => {
+    const q1 = 'Question missing an embedding entirely, quite a long one indeed?';
+    const q2 = 'Second question also missing?';
+    await runRecipe(db, UID, recipe({ questions: [q1, q2] }), { entries: [], embeddings: {} });
+
+    expect(warnSpy).toHaveBeenCalledTimes(2);
+    expect(warnSpy.mock.calls[0][0]).toContain('[runRecipe]');
+    expect(warnSpy.mock.calls[0][0]).toContain('no embedding for question');
+    expect(warnSpy.mock.calls[0][1]).toBe(q1.slice(0, 40));
+    expect(warnSpy.mock.calls[1][1]).toBe(q2.slice(0, 40));
+  });
+
+  it('warns for a question whose embedding is explicitly null', async () => {
+    const q1 = 'Explicitly null embedding?';
+    await runRecipe(db, UID, recipe({ questions: [q1] }), { entries: [], embeddings: { [q1]: null } });
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not warn when every question has a real embedding', async () => {
+    const q1 = 'Question with an embedding?';
+    await runRecipe(db, UID, recipe({ questions: [q1] }), { entries: [], embeddings: { [q1]: [1, 0, 0] } });
+    expect(warnSpy).not.toHaveBeenCalled();
+  });
+
+  it('warns only for the embeddingless subset when mixed', async () => {
+    const q1 = 'Has embedding?';
+    const q2 = 'Missing embedding?';
+    await runRecipe(db, UID, recipe({ questions: [q1, q2] }), { entries: [], embeddings: { [q1]: [1, 0, 0] } });
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    expect(warnSpy.mock.calls[0][1]).toBe(q2.slice(0, 40));
+  });
+});
+
+describe('runRecipe input-pipeline invariant (mocked askJournalAI: describes ordering, not real retrieval)', () => {
+  // NOTE: askJournalAI is mocked in this file, so this test can only prove
+  // what runRecipe FEEDS INTO askJournalAI — it cannot catch a broken
+  // semantic/tag retrieval filter inside askJournalAI/getSmartChatContext
+  // itself (a stubbed askJournalAI returns whatever we tell it to,
+  // regardless of what real filtering would do). For a real end-to-end
+  // adversarial check — engineered high-similarity embeddings run through
+  // the REAL askJournalAI/getSmartChatContext, only the Firebase callable
+  // boundary mocked — see runRecipeAdversarialRetrieval.test.js.
   it('a block\'s sources can only ever contain ids askJournalAI actually returned for the filtered pool', async () => {
     const entries = [
       entry('in-scope', { spaceId: 'work', daysBack: 5 }),

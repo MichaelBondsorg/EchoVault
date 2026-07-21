@@ -60,7 +60,14 @@ function nowIso() {
 }
 
 function newBlockId() {
-  return crypto.randomUUID();
+  try {
+    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+      return crypto.randomUUID();
+    }
+  } catch {
+    /* fall through */
+  }
+  return `block_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
 }
 
 function toDate(value) {
@@ -160,6 +167,10 @@ export async function runRecipe(db, uid, recipe, { entries = [], embeddings = {}
   const blocks = [];
   for (const question of recipe.questions) {
     const qEmbedding = embeddings?.[question] ?? null;
+    if (qEmbedding == null) {
+      // eslint-disable-next-line no-console -- intentional degrade signal, see module doc.
+      console.warn('[runRecipe] no embedding for question — retrieval degrades to recency/tags:', question.slice(0, 40));
+    }
     // eslint-disable-next-line no-await-in-loop -- questions must run
     // sequentially against the same filtered pool; no shared mutable state
     // to race, but the Cloud Function calls are not parallelized here to
