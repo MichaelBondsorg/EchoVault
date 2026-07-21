@@ -14,6 +14,7 @@ import {
   closeLoop,
   dismissIntent,
 } from '../../../services/intents/intentClient';
+import { useFreshnessTick } from '../../../hooks/useFreshnessTick';
 
 const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
@@ -129,11 +130,12 @@ function resolveAnswerOutcome(savedResult) {
  * `openLoops`/`intentExtraction` flags are off, or when there are no due
  * loops. In-app only — no notification code here.
  *
- * The due subscription's `now` boundary is captured once at subscribe time
- * (see `subscribeDueOpenLoops`); `refreshNonce` re-keys that effect on
- * document visibility (foregrounding) and every 5 minutes while visible, so
- * a loop that becomes due while the app stays open in the background still
- * appears without needing a full remount.
+ * Both the due AND upcoming subscriptions' `now` boundary is captured once at
+ * subscribe time (see `subscribeDueOpenLoops`/`subscribeUpcomingOpenLoops`);
+ * the shared `refreshNonce` (from `useFreshnessTick`) re-keys BOTH effects on
+ * document visibility (foregrounding) and every 5 minutes while visible, so a
+ * loop that crosses its `targetAt` while the app stays open — migrating from
+ * upcoming to due — appears/moves without needing a full remount.
  */
 const OpenLoopsWidget = ({
   size = '2x1',
@@ -150,31 +152,17 @@ const OpenLoopsWidget = ({
   const [showUpcoming, setShowUpcoming] = useState(false);
   const [snoozeMenuId, setSnoozeMenuId] = useState(null);
 
-  // I2: subscribeDueOpenLoops bakes `now` into its Firestore query at
-  // subscribe time and never refreshes it — a loop that becomes due while
-  // this widget stays mounted (app left open/backgrounded across midnight,
-  // a snooze target passing, etc.) would never appear until something else
-  // forced a remount. refreshNonce re-keys the subscribe effect below (a
-  // fresh onSnapshot listener re-evaluates `now` at creation) whenever the
-  // tab/app comes back to the foreground, and every 5 minutes while it stays
-  // foregrounded, so due loops surface without needing a full remount.
-  const [refreshNonce, setRefreshNonce] = useState(0);
-
-  useEffect(() => {
-    if (!flagsOn) return undefined;
-    const bumpNonce = () => setRefreshNonce((n) => n + 1);
-    const onVisibilityChange = () => {
-      if (document.visibilityState === 'visible') bumpNonce();
-    };
-    document.addEventListener('visibilitychange', onVisibilityChange);
-    const intervalId = setInterval(() => {
-      if (document.visibilityState === 'visible') bumpNonce();
-    }, 5 * 60 * 1000);
-    return () => {
-      document.removeEventListener('visibilitychange', onVisibilityChange);
-      clearInterval(intervalId);
-    };
-  }, [flagsOn]);
+  // I2 (+ upcoming-list follow-up): subscribeDueOpenLoops/
+  // subscribeUpcomingOpenLoops each bake `now` into their Firestore query at
+  // subscribe time and never refresh it — a loop that becomes due (or
+  // crosses from upcoming into due) while this widget stays mounted (app
+  // left open/backgrounded across midnight, a snooze target passing, etc.)
+  // would never move until something else forced a remount. refreshNonce
+  // (from the shared `useFreshnessTick` hook) re-keys BOTH subscribe effects
+  // below (a fresh onSnapshot listener re-evaluates `now` at creation)
+  // whenever the tab/app comes back to the foreground, and every 5 minutes
+  // while it stays foregrounded.
+  const refreshNonce = useFreshnessTick();
 
   useEffect(() => {
     if (!flagsOn || !uid) return undefined;
@@ -186,7 +174,7 @@ const OpenLoopsWidget = ({
     if (!flagsOn || !uid) return undefined;
     const unsubscribe = subscribeUpcomingOpenLoops(db, uid, setUpcomingLoops, () => setUpcomingLoops([]));
     return unsubscribe;
-  }, [flagsOn, uid]);
+  }, [flagsOn, uid, refreshNonce]);
 
   const removeDueLocally = (id) => {
     setDueLoops((prev) => prev.filter((l) => l.id !== id));

@@ -421,4 +421,94 @@ describe('runIntentExtraction', () => {
       expect(result.extractedTasks).toEqual([{ text: 'Buy milk', completed: false, index: 0 }]);
     });
   });
+
+  describe('I3: targetAt canonicalization guard', () => {
+    const loopText = 'Ask me Friday how the dentist appointment went.';
+
+    function junkTargetAtOpenLoopCands() {
+      return async () => normalizeCandidates([
+        {
+          kind: 'open_loop',
+          text: 'Ask me Friday how the dentist appointment went',
+          attributes: attrs({ agency: true, unfinished: true, temporalFit: true }),
+          confidence: 0.9,
+          targetAt: 'Friday', // model-produced junk: not ISO, unparseable-by-contract
+          explicitCommand: true,
+        },
+      ], loopText);
+    }
+
+    it('forces an open_loop candidate with an unparseable targetAt to abstain (audit ON: visible as a stored abstain doc with targetAt nulled)', async () => {
+      const { db, store } = makeFakeDb({ intentAbstainAudit: true });
+      const entryRef = db.doc(`${USER_BASE}/entries/e1`);
+      const entry = { id: 'e1', text: loopText, entryInputVersion: 1 };
+
+      const result = await runIntentExtraction({ db, entryRef, entry, modelId: 'm', apiKey: 'k', extractCandidates: junkTargetAtOpenLoopCands() });
+
+      const stored = [...store.keys()].filter((p) => p.includes('/intents/')).map((p) => store.get(p));
+      expect(stored).toHaveLength(1);
+      expect(stored[0].kind).toBe('open_loop');
+      expect(stored[0].state).toBe('abstain'); // never active, despite explicit-command normally activating it
+      expect(stored[0].targetAt).toBeNull();
+      expect(result.extractedTasks).toEqual([]);
+    });
+
+    it('drops (never persists) an open_loop with junk targetAt when abstain audit is OFF — an unparseable due time never enters the due query', async () => {
+      const { db, store } = makeFakeDb(); // intentAbstainAudit off (default)
+      const entryRef = db.doc(`${USER_BASE}/entries/e1`);
+      const entry = { id: 'e1', text: loopText, entryInputVersion: 1 };
+
+      await runIntentExtraction({ db, entryRef, entry, modelId: 'm', apiKey: 'k', extractCandidates: junkTargetAtOpenLoopCands() });
+
+      const stored = [...store.keys()].filter((p) => p.includes('/intents/'));
+      expect(stored).toHaveLength(0);
+    });
+
+    it('accepts a valid ISO targetAt on an open_loop and keeps it, activating normally', async () => {
+      const { db, store } = makeFakeDb();
+      const entryRef = db.doc(`${USER_BASE}/entries/e1`);
+      const validCands = async () => normalizeCandidates([
+        {
+          kind: 'open_loop',
+          text: 'Ask me Friday how the dentist appointment went',
+          attributes: attrs({ agency: true, unfinished: true, temporalFit: true }),
+          confidence: 0.9,
+          targetAt: '2026-07-24T09:00:00.000Z',
+          explicitCommand: true,
+        },
+      ], loopText);
+      const entry = { id: 'e1', text: loopText, entryInputVersion: 1 };
+
+      await runIntentExtraction({ db, entryRef, entry, modelId: 'm', apiKey: 'k', extractCandidates: validCands });
+
+      const stored = [...store.keys()].filter((p) => p.includes('/intents/')).map((p) => store.get(p));
+      expect(stored).toHaveLength(1);
+      expect(stored[0].state).toBe('active');
+      expect(stored[0].targetAt).toBe('2026-07-24T09:00:00.000Z');
+    });
+
+    it('nulls out (rather than abstains) an invalid targetAt on a non-open_loop kind and proceeds with normal activation', async () => {
+      const { db, store } = makeFakeDb();
+      const entryRef = db.doc(`${USER_BASE}/entries/e1`);
+      const taskText = 'I need to call the dentist sometime soon.';
+      const cands = async () => normalizeCandidates([
+        {
+          kind: 'task',
+          text: 'call the dentist',
+          attributes: attrs({ agency: true, concrete: true, unfinished: true, temporalFit: true }),
+          confidence: 0.9,
+          targetAt: 'soon', // junk, but a task's activation isn't gated on targetAt
+        },
+      ], taskText);
+      const entry = { id: 'e1', text: taskText, entryInputVersion: 1 };
+
+      await runIntentExtraction({ db, entryRef, entry, modelId: 'm', apiKey: 'k', extractCandidates: cands });
+
+      const stored = [...store.keys()].filter((p) => p.includes('/intents/')).map((p) => store.get(p));
+      expect(stored).toHaveLength(1);
+      expect(stored[0].kind).toBe('task');
+      expect(stored[0].state).toBe('active'); // activation unaffected by a bad targetAt
+      expect(stored[0].targetAt).toBeNull(); // bad targetAt nulled, not thrown
+    });
+  });
 });

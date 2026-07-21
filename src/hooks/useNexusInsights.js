@@ -19,6 +19,7 @@ import {
   applyInsightBudget,
   recordShownInsights,
 } from '../services/insights/insightBudget';
+import { useFreshnessTick } from './useFreshnessTick';
 
 /**
  * Hook for accessing Nexus insights
@@ -259,14 +260,29 @@ export const useNexusInsights = (user, options = {}) => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeInsights, historyInsights, learningData]);
 
+  // Freshness tick (R2 Task 2): a day/week allowance derived from `shownLog`
+  // needs to re-evaluate at a day boundary even when nothing else causes a
+  // re-render — an app left open overnight would otherwise keep applying
+  // yesterday's dayCount/weekCount (computed against a `now` baked in at the
+  // last incidental render) until something unrelated happened to re-render
+  // it. `useFreshnessTick` bumps on visibility foregrounding and every 5
+  // minutes while visible; including it in `budgetedInsights`' memo deps
+  // forces a fresh `Date.now()` read on each such tick.
+  const nowTick = useFreshnessTick();
+
   // Insight Budget gate (Task 12). Order: feedback suppression (above,
   // insightLearning) -> 90-day near-dup vs shownLog -> day/week cap, all
   // inside applyInsightBudget. Flag off -> untouched, byte-identical
   // passthrough of allInsights (never reimplements or partially applies the
-  // gate when the flag is off).
-  const budgetedInsights = getFlag('insightBudget')
-    ? applyInsightBudget(allInsights, { mode: budgetMode, shownLog, now: Date.now() })
-    : allInsights;
+  // gate when the flag is off). Memoized so the flag-off branch stays a
+  // genuine reference-identical passthrough of `allInsights` (its own memo)
+  // across re-renders that don't touch any dep here, matching the
+  // reference-identity contract `allInsights` already provides.
+  const budgetedInsights = useMemo(() => {
+    if (!getFlag('insightBudget')) return allInsights;
+    return applyInsightBudget(allInsights, { mode: budgetMode, shownLog, now: Date.now() });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [allInsights, budgetMode, shownLog, nowTick]);
 
   // Record what's actually displayed. Guarded two ways: the ref dedupes
   // within this mount (budgetedInsights is a new array every render), and

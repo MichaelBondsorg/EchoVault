@@ -15,7 +15,7 @@
  * Never logs journal text — only ids, counts, and structured status.
  */
 import { createHash } from 'crypto';
-import { INTENT_KINDS, INTENT_ATTRIBUTE_KEYS, buildIntent } from './intentSchema.js';
+import { INTENT_KINDS, INTENT_ATTRIBUTE_KEYS, buildIntent, isValidIsoOrNull } from './intentSchema.js';
 import { decideActivation } from './activationPolicy.js';
 import { getServerFlag } from '../shared/flags.js';
 
@@ -330,14 +330,33 @@ export async function runIntentExtraction({ db, entryRef, entry, modelId, apiKey
   const evaluated = [];
   const needsDecisionCheck = new Set();
   for (const cand of candidates) {
-    const { state, reason } = decideActivation(cand);
+    let { state, reason } = decideActivation(cand);
+    let targetAt = cand.targetAt ?? null;
+
+    // I3 (targetAt canonicalization): a model-produced targetAt that isn't a
+    // real, parseable ISO-8601 instant (buildIntent's validateIsoOrNull) must
+    // never reach buildIntent as-is. An open_loop's entire due-surfacing
+    // mechanism (subscribeDueOpenLoops) is a `targetAt` range query, so an
+    // unparseable due time must NEVER activate — force it to abstain outright
+    // rather than let a broken/missing due date slip through as "active".
+    // Any other kind doesn't gate its surfacing on targetAt, so it simply
+    // loses the bad value and proceeds through the normal activation
+    // decision unaffected.
+    if (!isValidIsoOrNull(targetAt)) {
+      if (cand.kind === 'open_loop') {
+        state = 'abstain';
+        reason = 'invalid-targetAt';
+      }
+      targetAt = null;
+    }
+
     // Silent context (abstain) is only persisted under the audit flag.
     if (state === 'abstain' && !persistAbstain) continue;
     const id = deterministicIntentId(entryId, cand.sourceSpan.start, cand.kind);
     writtenIds.add(id);
     const existingDoc = existingById.get(id);
     if (existingDoc && !DISMISSAL_STATES.has(existingDoc.state)) needsDecisionCheck.add(id);
-    evaluated.push({ cand, state, reason, id, existingDoc });
+    evaluated.push({ cand, state, reason, id, existingDoc, targetAt });
   }
 
   // ONE shared decisions query (chunked at 30) covers every candidate in this
@@ -347,7 +366,7 @@ export async function runIntentExtraction({ db, entryRef, entry, modelId, apiKey
   // Pass 2: build the batch writes using the resolved preservation set.
   const batch = db.batch();
   const activeTaskIntents = [];
-  for (const { cand, state, reason, id, existingDoc } of evaluated) {
+  for (const { cand, state, reason, id, existingDoc, targetAt } of evaluated) {
     if (shouldPreserveDismissal(existingDoc, id, dismissedDecisionIds)) {
       // Dismissed/completed is user-terminal: never overwrite state or
       // user-set fields here — only bump the reap-relevant version marker so
@@ -366,7 +385,7 @@ export async function runIntentExtraction({ db, entryRef, entry, modelId, apiKey
       attributes: cand.attributes,
       confidence: cand.confidence,
       activationReason: reason,
-      targetAt: cand.targetAt ?? null,
+      targetAt,
       model: modelId,
       inputVersion,
     });

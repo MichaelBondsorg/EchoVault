@@ -9,6 +9,7 @@ import {
   isClientTransitionAllowed,
   validateUserIntentUpdate,
   buildUserDecision,
+  isValidIsoOrNull,
 } from '../intentSchema.js';
 
 function allAttrs(overrides = {}) {
@@ -56,6 +57,29 @@ describe('intent taxonomy constants', () => {
 
   it('DECISION_ACTIONS includes the new loop-closing actions', () => {
     expect(DECISION_ACTIONS).toEqual(['kept', 'dismissed', 'not_a_task', 'completed', 'snoozed', 'answered', 'closed']);
+  });
+});
+
+describe('isValidIsoOrNull', () => {
+  it('accepts null and a canonical ISO-8601 datetime string', () => {
+    expect(isValidIsoOrNull(null)).toBe(true);
+    expect(isValidIsoOrNull('2026-07-22T09:00:00.000Z')).toBe(true);
+    expect(isValidIsoOrNull('2026-07-22T09:00')).toBe(true); // prefix requires only HH:MM
+  });
+
+  it('rejects non-ISO/unparseable strings, a bare date, empty string, and non-strings', () => {
+    expect(isValidIsoOrNull('tomorrow')).toBe(false);
+    expect(isValidIsoOrNull('next Friday')).toBe(false);
+    expect(isValidIsoOrNull('2026-07-24')).toBe(false); // no HH:MM
+    expect(isValidIsoOrNull('')).toBe(false);
+    expect(isValidIsoOrNull('   ')).toBe(false);
+    expect(isValidIsoOrNull(123)).toBe(false);
+    expect(isValidIsoOrNull(undefined)).toBe(false);
+  });
+
+  it('never throws', () => {
+    expect(() => isValidIsoOrNull({})).not.toThrow();
+    expect(() => isValidIsoOrNull([])).not.toThrow();
   });
 });
 
@@ -115,6 +139,18 @@ describe('buildIntent', () => {
     expect(intent.targetAt).toBe('2026-07-24T00:00:00.000Z');
   });
 
+  it('rejects a non-ISO plain-language targetAt like "tomorrow" (I3: ISO-strict canonicalization)', () => {
+    expect(() => buildIntent(validArgs({ targetAt: 'tomorrow' }))).toThrow(/targetAt/);
+    expect(() => buildIntent(validArgs({ targetAt: 'next Friday' }))).toThrow(/targetAt/);
+    // A bare date with no time component fails the HH:MM prefix requirement.
+    expect(() => buildIntent(validArgs({ targetAt: '2026-07-24' }))).toThrow(/targetAt/);
+  });
+
+  it('accepts a canonical ISO-8601 targetAt with a time component', () => {
+    const intent = buildIntent(validArgs({ targetAt: '2026-07-22T09:00:00.000Z' }));
+    expect(intent.targetAt).toBe('2026-07-22T09:00:00.000Z');
+  });
+
   it('requires model provenance', () => {
     expect(() => buildIntent(validArgs({ model: '' }))).toThrow(/model/);
   });
@@ -136,6 +172,10 @@ describe('buildIntent', () => {
     expect(intent.snoozedUntil).toBe('2026-08-01T00:00:00.000Z');
     expect(() => buildIntent(validArgs({ snoozedUntil: 123 }))).toThrow(/snoozedUntil/);
     expect(() => buildIntent(validArgs({ snoozedUntil: '' }))).toThrow(/snoozedUntil/);
+  });
+
+  it('rejects a plain-language snoozedUntil too (I3: shared ISO-strict validator)', () => {
+    expect(() => buildIntent(validArgs({ snoozedUntil: 'tonight' }))).toThrow(/snoozedUntil/);
   });
 
   it('accepts a well-formed outcome and rejects malformed shapes', () => {

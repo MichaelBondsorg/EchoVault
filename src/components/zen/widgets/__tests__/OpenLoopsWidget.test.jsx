@@ -328,6 +328,47 @@ describe('OpenLoopsWidget - I2: due-loop foreground/visibility resubscribe', () 
   });
 });
 
+describe('OpenLoopsWidget - I2 follow-up: upcoming-list freshness (shares the due-list refreshNonce)', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('re-invokes subscribeUpcomingOpenLoops on visibilitychange when the tab becomes visible (a loop crossing targetAt migrates upcoming->due without remount)', () => {
+    dueWith([loop({ id: 'l1', sourceSpan: { text: 'call the dentist' } })]);
+    render(<OpenLoopsWidget />);
+    expect(subscribeUpcomingOpenLoops).toHaveBeenCalledTimes(1);
+
+    Object.defineProperty(document, 'visibilityState', { value: 'visible', configurable: true });
+    act(() => { document.dispatchEvent(new Event('visibilitychange')); });
+
+    expect(subscribeUpcomingOpenLoops).toHaveBeenCalledTimes(2);
+  });
+
+  it('re-invokes subscribeUpcomingOpenLoops every 5 minutes while visible (fake timers)', () => {
+    vi.useFakeTimers();
+    Object.defineProperty(document, 'visibilityState', { value: 'visible', configurable: true });
+    dueWith([loop({ id: 'l1', sourceSpan: { text: 'call the dentist' } })]);
+    render(<OpenLoopsWidget />);
+    expect(subscribeUpcomingOpenLoops).toHaveBeenCalledTimes(1);
+
+    act(() => { vi.advanceTimersByTime(5 * 60 * 1000); });
+    expect(subscribeUpcomingOpenLoops).toHaveBeenCalledTimes(2);
+  });
+
+  it('due and upcoming resubscribe together off the SAME nonce (one visibilitychange bumps both)', () => {
+    dueWith([loop({ id: 'l1', sourceSpan: { text: 'call the dentist' } })]);
+    render(<OpenLoopsWidget />);
+    expect(subscribeDueOpenLoops).toHaveBeenCalledTimes(1);
+    expect(subscribeUpcomingOpenLoops).toHaveBeenCalledTimes(1);
+
+    Object.defineProperty(document, 'visibilityState', { value: 'visible', configurable: true });
+    act(() => { document.dispatchEvent(new Event('visibilitychange')); });
+
+    expect(subscribeDueOpenLoops).toHaveBeenCalledTimes(2);
+    expect(subscribeUpcomingOpenLoops).toHaveBeenCalledTimes(2);
+  });
+});
+
 describe('OpenLoopsWidget - upcoming footer', () => {
   it('shows a "+N upcoming" footer that expands to a read-only list with dismiss', () => {
     dueWith([loop({ id: 'l1', sourceSpan: { text: 'call the dentist' } })]);

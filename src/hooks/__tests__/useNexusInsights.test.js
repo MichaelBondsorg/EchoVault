@@ -154,3 +154,46 @@ describe('useNexusInsights - Insight Budget wiring (flag on)', () => {
     expect(recordedArg.map((i) => i.id).sort()).toEqual(['i2', 'i3']);
   });
 });
+
+describe('useNexusInsights - Insight Budget freshness (day-boundary drift fix)', () => {
+  it('recomputes applyInsightBudget with a freshly-read `now` when the freshness tick fires (visibility bump) — nothing pins it to a stale closed-over timestamp', async () => {
+    flagValue = true;
+    budgetMocks.applyInsightBudget.mockImplementation((insights) => insights);
+
+    const beforeMidnight = new Date('2026-07-20T23:59:55.000Z').getTime();
+    const afterMidnight = new Date('2026-07-21T00:00:05.000Z').getTime();
+    const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(beforeMidnight);
+
+    const { result } = renderHook(() => useNexusInsights(USER, { autoRefresh: false }));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    await waitFor(() => expect(budgetMocks.applyInsightBudget).toHaveBeenCalled());
+
+    const firstNow = budgetMocks.applyInsightBudget.mock.calls.at(-1)[1].now;
+    expect(firstNow).toBe(beforeMidnight);
+    const callsBefore = budgetMocks.applyInsightBudget.mock.calls.length;
+
+    // Cross midnight with no unrelated state change — only the freshness
+    // tick (foregrounding) should force a re-evaluation with a fresh `now`.
+    nowSpy.mockReturnValue(afterMidnight);
+    Object.defineProperty(document, 'visibilityState', { value: 'visible', configurable: true });
+    act(() => { document.dispatchEvent(new Event('visibilitychange')); });
+
+    await waitFor(() => expect(budgetMocks.applyInsightBudget.mock.calls.length).toBeGreaterThan(callsBefore));
+    const lastNow = budgetMocks.applyInsightBudget.mock.calls.at(-1)[1].now;
+    expect(lastNow).toBe(afterMidnight);
+
+    nowSpy.mockRestore();
+  });
+
+  it('does not touch applyInsightBudget on a freshness tick when the flag is off', async () => {
+    flagValue = false;
+
+    const { result } = renderHook(() => useNexusInsights(USER, { autoRefresh: false }));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    Object.defineProperty(document, 'visibilityState', { value: 'visible', configurable: true });
+    act(() => { document.dispatchEvent(new Event('visibilitychange')); });
+
+    expect(budgetMocks.applyInsightBudget).not.toHaveBeenCalled();
+  });
+});

@@ -113,10 +113,32 @@ function validateSourceSpan(sourceSpan) {
   return { start, end, text };
 }
 
+// Requires at minimum the date + hour:minute portion of an ISO-8601
+// datetime (`YYYY-MM-DDTHH:MM`, optionally with seconds/ms/offset). A bare
+// date ("2026-07-24") or a plain-language phrase ("tomorrow", "next Friday")
+// fails this prefix check even where `Date.parse` might loosely accept it in
+// some engines — the extraction/build path (I3) must canonicalize to a real
+// instant, never a string that merely looks date-ish.
+const ISO_PREFIX_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/;
+
+/**
+ * Non-throwing check: is `value` either `null`, or a string matching the ISO
+ * date-time prefix shape AND parseable by `Date.parse` into a real instant?
+ * Shared by `targetAt` and `snoozedUntil` (via `validateIsoOrNull`) so the two
+ * fields can never drift on what counts as a valid due/snooze instant.
+ *
+ * @param {*} value
+ * @returns {boolean}
+ */
+export function isValidIsoOrNull(value) {
+  if (value === null) return true;
+  if (typeof value !== 'string' || !value.trim()) return false;
+  return ISO_PREFIX_RE.test(value) && !Number.isNaN(Date.parse(value));
+}
+
 function validateIsoOrNull(value, label) {
-  if (value === null) return null;
-  if (typeof value !== 'string' || !value.trim()) {
-    throw new Error(`intent: ${label} must be an ISO string or null`);
+  if (!isValidIsoOrNull(value)) {
+    throw new Error(`intent: ${label} must be an ISO-8601 string (YYYY-MM-DDTHH:MM...) or null`);
   }
   return value;
 }
@@ -195,9 +217,7 @@ export function buildIntent({
   if (!isFiniteNumber(confidence) || confidence < 0 || confidence > 1) {
     throw new Error('intent: confidence must be a number in [0,1]');
   }
-  if (targetAt !== null && (typeof targetAt !== 'string' || !targetAt.trim())) {
-    throw new Error('intent: targetAt must be an ISO string or null');
-  }
+  validateIsoOrNull(targetAt, 'targetAt');
   if (typeof model !== 'string' || !model.trim()) throw new Error('intent: model (provenance) is required');
 
   const span = validateSourceSpan(sourceSpan);
@@ -303,4 +323,5 @@ export default {
   isClientTransitionAllowed,
   validateUserIntentUpdate,
   buildUserDecision,
+  isValidIsoOrNull,
 };
