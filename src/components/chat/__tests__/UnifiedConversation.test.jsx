@@ -275,3 +275,119 @@ describe('UnifiedConversation — voice relay session-init threads the active sc
     );
   });
 });
+
+// Review fix (task 5): the voice-connect effect used to fire as soon as
+// `mode` became VOICE, regardless of whether the async spaces subscription
+// and default-scope load had resolved yet. An early voice entry could beat
+// both, connect unscoped, and — because the effect's deps didn't include
+// scope resolution — silently STAY unscoped for the rest of the session
+// even after the real default resolved. These tests hold both async
+// sources open past the point voice mode is entered, to prove the connect
+// call now waits (`scopeReady`) instead of racing.
+describe('UnifiedConversation — voice connect waits for scope resolution (no race)', () => {
+  const deferredSubscribeSpaces = () => {
+    let deliver;
+    subscribeSpaces.mockImplementation((_db, _uid, cb) => {
+      deliver = cb;
+      return () => {};
+    });
+    return { deliver: (list) => act(() => deliver(list)) };
+  };
+
+  const deferredGetLastCaptureSpaceId = () => {
+    let resolveFn;
+    let rejectFn;
+    getLastCaptureSpaceId.mockImplementation(
+      () => new Promise((resolve, reject) => { resolveFn = resolve; rejectFn = reject; })
+    );
+    return {
+      resolve: (v) => act(async () => { resolveFn(v); await Promise.resolve(); }),
+      reject: (e) => act(async () => { rejectFn(e); await Promise.resolve(); }),
+    };
+  };
+
+  it('holds the connect until a delayed non-empty spaces snapshot AND the default-scope load resolve, then connects with the resolved spaceId', async () => {
+    const spacesCtrl = deferredSubscribeSpaces();
+    const defaultScopeCtrl = deferredGetLastCaptureSpaceId();
+    render(<UnifiedConversation userId={USER_ID} onClose={vi.fn()} />);
+
+    // Enter Voice mode before either async scope source has resolved.
+    fireEvent.click(await screen.findByText('Voice Conversation'));
+    expect(mockVoiceConnect).not.toHaveBeenCalled();
+
+    // Spaces snapshot lands (non-empty) — still must wait on the default
+    // scope load before connecting.
+    spacesCtrl.deliver([{ id: 'space-1', name: 'Work' }]);
+    await Promise.resolve();
+    expect(mockVoiceConnect).not.toHaveBeenCalled();
+
+    // Default-scope load resolves — now it's safe to connect.
+    await defaultScopeCtrl.resolve('space-1');
+
+    await waitFor(() =>
+      expect(mockVoiceConnect).toHaveBeenCalledWith('free', 'realtime', 'space-1')
+    );
+    expect(mockVoiceConnect).toHaveBeenCalledTimes(1);
+  });
+
+  it('zero-space user: the first (empty) spaces snapshot alone unlocks connect with a null scope — no hang waiting on a default-scope load that will never run', async () => {
+    const spacesCtrl = deferredSubscribeSpaces();
+    render(<UnifiedConversation userId={USER_ID} onClose={vi.fn()} />);
+
+    fireEvent.click(await screen.findByText('Voice Conversation'));
+    expect(mockVoiceConnect).not.toHaveBeenCalled();
+
+    spacesCtrl.deliver([]);
+
+    await waitFor(() =>
+      expect(mockVoiceConnect).toHaveBeenCalledWith('free', 'realtime', null)
+    );
+    expect(getLastCaptureSpaceId).not.toHaveBeenCalled();
+  });
+
+  it('default-scope load failure: connect proceeds with a null scope instead of hanging forever', async () => {
+    const spacesCtrl = deferredSubscribeSpaces();
+    const defaultScopeCtrl = deferredGetLastCaptureSpaceId();
+    render(<UnifiedConversation userId={USER_ID} onClose={vi.fn()} />);
+
+    fireEvent.click(await screen.findByText('Voice Conversation'));
+    spacesCtrl.deliver([{ id: 'space-1', name: 'Work' }]);
+    await Promise.resolve();
+    expect(mockVoiceConnect).not.toHaveBeenCalled();
+
+    await defaultScopeCtrl.reject(new Error('boom'));
+
+    await waitFor(() =>
+      expect(mockVoiceConnect).toHaveBeenCalledWith('free', 'realtime', null)
+    );
+  });
+
+  it('does not reconnect (no second connect call) when the effective scope changes after the session has already connected', async () => {
+    let spacesCallback;
+    subscribeSpaces.mockImplementation((_db, _uid, cb) => {
+      spacesCallback = cb;
+      cb([{ id: 'space-1', name: 'Work' }, { id: 'space-2', name: 'Personal' }]);
+      return () => {};
+    });
+    getLastCaptureSpaceId.mockResolvedValue('space-1');
+
+    render(<UnifiedConversation userId={USER_ID} onClose={vi.fn()} />);
+    fireEvent.click(await screen.findByText('Voice Conversation'));
+
+    await waitFor(() =>
+      expect(mockVoiceConnect).toHaveBeenCalledWith('free', 'realtime', 'space-1')
+    );
+    expect(mockVoiceConnect).toHaveBeenCalledTimes(1);
+
+    // Scope changes AFTER connect (e.g. "Work" archived elsewhere while the
+    // voice session is live) — the already-started session must not pick
+    // up the new scope or reconnect.
+    act(() => {
+      spacesCallback([{ id: 'space-2', name: 'Personal' }]);
+    });
+    await act(async () => { await Promise.resolve(); });
+
+    expect(mockVoiceConnect).toHaveBeenCalledTimes(1);
+    expect(mockVoiceConnect).toHaveBeenCalledWith('free', 'realtime', 'space-1');
+  });
+});

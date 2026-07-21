@@ -57,6 +57,10 @@ describe('getCompanionContext — Tier 1 (memory graph) scope seam', () => {
     expect(getMemoryGraph).not.toHaveBeenCalled();
     expect(formatMemoryForContext).not.toHaveBeenCalled();
     expect(result.context.memory).toBe('(Long-term memory omitted: scoped conversation)');
+    // Review fix: `context.memory` is truthy here (it holds the omission
+    // note), but no actual memory was included — stats.hasMemory must
+    // report that honestly rather than deriving from `!!context.memory`.
+    expect(result.stats.hasMemory).toBe(false);
   });
 
   it('null scope: Tier 1 behaves like legacy — calls getMemoryGraph and uses formatMemoryForContext', async () => {
@@ -70,6 +74,7 @@ describe('getCompanionContext — Tier 1 (memory graph) scope seam', () => {
 
     expect(getMemoryGraph).toHaveBeenCalledWith('u1', { excludeArchived: true });
     expect(result.context.memory).toBe('YOUR MEMORY OF THIS USER content');
+    expect(result.stats.hasMemory).toBe(true);
   });
 
   it('omitting scope entirely (undefined) is identical to scope: null for Tier 1', async () => {

@@ -146,6 +146,16 @@ const UnifiedConversation = ({
   const [spaces, setSpaces] = useState([]);
   const [scope, setScope] = useState(null); // {spaceId} | null
   const scopeDefaultLoadedRef = useRef(false);
+  // Voice-connect race guard (review fix, task 5): the spaces subscription
+  // and the one-shot default-scope load are both async, so `effectiveScope`
+  // can still be null-by-default (not yet resolved) at the moment a user
+  // jumps straight into Voice mode. `spacesLoaded` flips true on the FIRST
+  // subscribeSpaces snapshot (empty counts — zero-space users must not
+  // wait further); `defaultScopeSettled` flips true once the default-scope
+  // load has settled, success OR failure — a failure must not hang voice
+  // forever, it just proceeds unscoped. See `scopeReady` below.
+  const [spacesLoaded, setSpacesLoaded] = useState(false);
+  const [defaultScopeSettled, setDefaultScopeSettled] = useState(false);
   const [scopePickerOpen, setScopePickerOpen] = useState(false);
   const scopePopoverRef = useDismissablePopover(scopePickerOpen, () => setScopePickerOpen(false));
 
@@ -179,9 +189,13 @@ const UnifiedConversation = ({
   useEffect(() => {
     if (!contextSpacesOn || !userId) {
       setSpaces([]);
+      setSpacesLoaded(true);
       return undefined;
     }
-    return subscribeSpaces(db, userId, setSpaces);
+    return subscribeSpaces(db, userId, (list) => {
+      setSpaces(list);
+      setSpacesLoaded(true);
+    });
   }, [contextSpacesOn, userId]);
 
   // Load the default scope ONCE per userId, after the first spaces
@@ -200,9 +214,22 @@ const UnifiedConversation = ({
       })
       .catch((e) => {
         console.warn('[Spaces] failed to load default Ask Journal scope:', e?.message);
+        // Explicit failure path: proceed unscoped rather than blocking voice
+        // (or anything else gated on scopeReady) forever.
+      })
+      .finally(() => {
+        if (!cancelled) setDefaultScopeSettled(true);
       });
     return () => { cancelled = true; };
   }, [contextSpacesOn, userId, spaces]);
+
+  // scopeReady: gates voice-connect (below) so an early voice entry can
+  // never start — and silently stay — unscoped while the default-scope
+  // load is still in flight. Zero-space users are never delayed past the
+  // first (empty) spaces snapshot; a non-empty snapshot additionally waits
+  // for the default-scope load to settle (applied or failed).
+  const scopeReady = !contextSpacesOn
+    || (spacesLoaded && (spaces.length === 0 || defaultScopeSettled));
 
   // Explicit scope selection (session-only — unlike EntryBar's capture
   // pill, Ask Journal's scope choice is not persisted as the "last capture
@@ -239,9 +266,16 @@ const UnifiedConversation = ({
     };
   }, []);
 
-  // Connect to voice relay when entering VOICE mode
+  // Connect to voice relay when entering VOICE mode. Gated on `scopeReady`
+  // (review fix, task 5) so we never connect on a not-yet-resolved default
+  // scope and silently stay unscoped for the rest of the session — see
+  // `scopeReady` above. `effectiveScope` is deliberately NOT in the deps:
+  // scope is captured once at session start by design, so a scope change
+  // after connect must never re-trigger this effect (the `voiceStatus`
+  // guard also prevents it — once connected, voiceStatus leaves
+  // 'disconnected' and stays there for the life of the session).
   useEffect(() => {
-    if (mode === MODES.VOICE && voiceStatus === 'disconnected') {
+    if (mode === MODES.VOICE && voiceStatus === 'disconnected' && scopeReady) {
       console.log('[Voice] Entering voice mode, connecting...');
       voiceClearError();
       voiceClearTranscript();
@@ -252,7 +286,7 @@ const UnifiedConversation = ({
       // call above.
       voiceConnect('free', 'realtime', effectiveScope?.spaceId ?? null);
     }
-  }, [mode, voiceStatus]);
+  }, [mode, voiceStatus, scopeReady]);
 
   // Cleanup voice relay when leaving VOICE mode or unmounting
   useEffect(() => {

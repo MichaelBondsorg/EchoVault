@@ -185,6 +185,13 @@ export const getCompanionContext = async ({
   // merged in), a scoped conversation omits Tier 1 entirely rather than
   // silently leaking cross-space-derived memory. `scope: null` (the legacy,
   // unscoped default) is untouched — same call, same output.
+  // `memoryIncluded` tracks whether ACTUAL memory content was included,
+  // distinct from `context.memory` being truthy: the scoped path sets
+  // context.memory to an explanatory omission note (truthy, non-empty)
+  // rather than real memory, so `stats.hasMemory` must not derive from
+  // `!!context.memory` alone or it misreports true for a scoped call that
+  // omitted memory entirely.
+  let memoryIncluded = false;
   if (scope != null) {
     context.memory = '(Long-term memory omitted: scoped conversation)';
     tokenBudget.used += estimateTokens(context.memory);
@@ -193,6 +200,7 @@ export const getCompanionContext = async ({
       const memory = await getMemoryGraph(userId, { excludeArchived: true });
       context.memory = formatMemoryForContext(memory, 500);
       tokenBudget.used += estimateTokens(context.memory);
+      memoryIncluded = !!context.memory;
     } catch (e) {
       console.warn('Failed to load memory graph:', e);
       context.memory = null;
@@ -346,7 +354,7 @@ export const getCompanionContext = async ({
       remaining: tokenBudget.max - tokenBudget.used
     },
     stats: {
-      hasMemory: !!context.memory,
+      hasMemory: memoryIncluded,
       hasSessionBuffer: !!context.sessionBuffer,
       recentCount: context.recent.length,
       similarCount: context.similar.length,
