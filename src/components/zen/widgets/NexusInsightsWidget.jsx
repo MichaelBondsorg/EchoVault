@@ -1,9 +1,11 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Sparkles, ChevronRight, Loader2, Brain, AlertCircle, TrendingUp, Target, Lightbulb } from 'lucide-react';
 import GlassCard from '../GlassCard';
 import { useNexusInsights } from '../../../hooks/useNexusInsights';
+import { getFlag } from '../../../config/flags';
+import ReceiptSheet from '../../insights/ReceiptSheet';
 
 // Type-specific styling for insight cards
 const INSIGHT_STYLES = {
@@ -74,7 +76,7 @@ const getInsightContent = (insight) => {
 /**
  * Mini insight card for the widget
  */
-const MiniInsightCard = ({ insight, index }) => {
+const MiniInsightCard = ({ insight, index, onWhyThis }) => {
   const type = insight.type || 'default';
   const style = INSIGHT_STYLES[type] || INSIGHT_STYLES.default;
   const Icon = style.icon;
@@ -110,6 +112,18 @@ const MiniInsightCard = ({ insight, index }) => {
           <p className="text-xs text-warm-500 line-clamp-2 mt-0.5">
             {content}
           </p>
+          {onWhyThis && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onWhyThis(insight);
+              }}
+              className="relative mt-1 inline-flex text-[11px] font-medium text-warm-600 underline decoration-warm-300 underline-offset-2 before:absolute before:-inset-2 before:content-['']"
+            >
+              Why am I seeing this?
+            </button>
+          )}
         </div>
       </div>
     </motion.div>
@@ -126,6 +140,7 @@ const NexusInsightsWidget = ({
   isEditing = false,
   onDelete,
   size = '2x1',
+  entries = [],
 }) => {
   const navigate = useNavigate();
 
@@ -140,6 +155,23 @@ const NexusInsightsWidget = ({
   // Take top 2 insights for the widget
   const displayInsights = (insights || []).slice(0, 2);
 
+  const receiptsOn = getFlag('insightReceipts');
+  const [receiptInsight, setReceiptInsight] = useState(null);
+
+  // Synchronous entryId -> entry lookup for ReceiptSheet's source rows
+  // (v1: never fetches a missing entry from Firestore — see ReceiptSheet's
+  // own doc comment). `entries` already flows to every widget via
+  // HomePage's `widgetProps` spread (BentoGrid), so no new data plumbing
+  // is needed here.
+  const entriesById = useMemo(() => {
+    const map = {};
+    for (const entry of entries || []) {
+      const id = entry?.id || entry?.entryId;
+      if (id) map[id] = entry;
+    }
+    return map;
+  }, [entries]);
+
   const handleClick = () => {
     if (!isEditing) {
       navigate('/insights');
@@ -147,13 +179,23 @@ const NexusInsightsWidget = ({
   };
 
   return (
-    <GlassCard
-      size={size}
-      isEditing={isEditing}
-      onDelete={onDelete}
-      interactive={!isEditing}
-      onClick={handleClick}
-    >
+    // ReceiptSheet is a *sibling* of GlassCard, not a child — GlassCard's
+    // onClick (navigate to /insights) is spread onto its root motion.div,
+    // and React bubbles synthetic events from a portal through the REACT
+    // tree, not the DOM tree. If ReceiptSheet's Drawer/Dialog (both
+    // portaled to document.body) were nested inside GlassCard's children,
+    // every click inside the open sheet (Not true, Wrong source, closing
+    // the confirm dialog, ...) would bubble up to GlassCard's onClick and
+    // fire an unwanted navigation. Keeping it outside GlassCard's React
+    // subtree avoids that entirely, no per-button stopPropagation needed.
+    <>
+      <GlassCard
+        size={size}
+        isEditing={isEditing}
+        onDelete={onDelete}
+        interactive={!isEditing}
+        onClick={handleClick}
+      >
       <div className="h-full flex flex-col">
         {/* Header */}
         <div className="flex items-center justify-between mb-3">
@@ -203,6 +245,7 @@ const NexusInsightsWidget = ({
                     key={insight.id || idx}
                     insight={insight}
                     index={idx}
+                    onWhyThis={receiptsOn ? setReceiptInsight : undefined}
                   />
                 ))}
               </AnimatePresence>
@@ -229,7 +272,18 @@ const NexusInsightsWidget = ({
           )}
         </div>
       </div>
-    </GlassCard>
+      </GlassCard>
+
+      {receiptsOn && (
+        <ReceiptSheet
+          insight={receiptInsight}
+          entriesById={entriesById}
+          uid={user?.uid}
+          open={Boolean(receiptInsight)}
+          onClose={() => setReceiptInsight(null)}
+        />
+      )}
+    </>
   );
 };
 

@@ -22,6 +22,48 @@ import {
 import { useFreshnessTick } from './useFreshnessTick';
 
 /**
+ * Derive a pattern-learning key from a Nexus insight's text (title/body/
+ * summary), for use as the lookup key into feedback-learning data
+ * (`insightLearning/{patternType}`) and, per R2 Task 11, as the default
+ * `appliesTo` value for a per-insight-family "Wrong source" exclusion
+ * (see `ReceiptSheet.jsx`). Pure, keyword-based, no hook state — safe to
+ * call outside a component/hook.
+ *
+ * @param {Object} insight
+ * @returns {string|null} a `pattern` key from the mapping below, or `null`
+ *   if no keyword matched (callers decide their own fallback).
+ */
+export const extractPatternTypeFromInsight = (insight) => {
+  const text = (insight.title || '') + ' ' + (insight.body || '') + ' ' + (insight.summary || '');
+  const textLower = text.toLowerCase();
+
+  // Map common patterns to learning keys
+  const patternMappings = [
+    { keywords: ['journal', 'writing', 'entry'], pattern: 'activity_journaling' },
+    { keywords: ['reading', 'book'], pattern: 'activity_reading' },
+    { keywords: ['exercise', 'workout', 'gym'], pattern: 'activity_exercise' },
+    { keywords: ['yoga', 'stretch'], pattern: 'activity_yoga' },
+    { keywords: ['meditation', 'mindful'], pattern: 'activity_meditation' },
+    { keywords: ['family', 'mom', 'dad', 'parent'], pattern: 'people_family' },
+    { keywords: ['friend'], pattern: 'people_friends' },
+    { keywords: ['partner', 'spouse', 'boyfriend', 'girlfriend'], pattern: 'people_partner' },
+    { keywords: ['gratitude', 'grateful', 'thankful'], pattern: 'theme_gratitude' },
+    { keywords: ['anxiety', 'anxious', 'stress'], pattern: 'theme_anxiety' },
+    { keywords: ['sleep', 'rest'], pattern: 'health_sleep' },
+    { keywords: ['weekend'], pattern: 'time_weekend' },
+    { keywords: ['morning'], pattern: 'time_morning' }
+  ];
+
+  for (const mapping of patternMappings) {
+    if (mapping.keywords.some(kw => textLower.includes(kw))) {
+      return mapping.pattern;
+    }
+  }
+
+  return null;
+};
+
+/**
  * Hook for accessing Nexus insights
  * @param {Object} user - Firebase user object
  * @param {Object} options - Configuration options
@@ -164,37 +206,6 @@ export const useNexusInsights = (user, options = {}) => {
       setRefreshing(false);
     }
   }, [user?.uid, refreshing]);
-
-  // Helper to extract pattern type from Nexus insight for learning lookup
-  const extractPatternTypeFromInsight = (insight) => {
-    const text = (insight.title || '') + ' ' + (insight.body || '') + ' ' + (insight.summary || '');
-    const textLower = text.toLowerCase();
-
-    // Map common patterns to learning keys
-    const patternMappings = [
-      { keywords: ['journal', 'writing', 'entry'], pattern: 'activity_journaling' },
-      { keywords: ['reading', 'book'], pattern: 'activity_reading' },
-      { keywords: ['exercise', 'workout', 'gym'], pattern: 'activity_exercise' },
-      { keywords: ['yoga', 'stretch'], pattern: 'activity_yoga' },
-      { keywords: ['meditation', 'mindful'], pattern: 'activity_meditation' },
-      { keywords: ['family', 'mom', 'dad', 'parent'], pattern: 'people_family' },
-      { keywords: ['friend'], pattern: 'people_friends' },
-      { keywords: ['partner', 'spouse', 'boyfriend', 'girlfriend'], pattern: 'people_partner' },
-      { keywords: ['gratitude', 'grateful', 'thankful'], pattern: 'theme_gratitude' },
-      { keywords: ['anxiety', 'anxious', 'stress'], pattern: 'theme_anxiety' },
-      { keywords: ['sleep', 'rest'], pattern: 'health_sleep' },
-      { keywords: ['weekend'], pattern: 'time_weekend' },
-      { keywords: ['morning'], pattern: 'time_morning' }
-    ];
-
-    for (const mapping of patternMappings) {
-      if (mapping.keywords.some(kw => textLower.includes(kw))) {
-        return mapping.pattern;
-      }
-    }
-
-    return null;
-  };
 
   // Combine active + history, dedupe, filter by confidence and learning.
   // Memoized (Task 12 follow-up) so the array reference is stable across

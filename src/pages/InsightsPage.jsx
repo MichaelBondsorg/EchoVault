@@ -3,7 +3,7 @@ import {
   Brain, Sparkles, TrendingUp, AlertTriangle, Lightbulb, X,
   ChevronDown, ChevronUp, RefreshCw, Loader2, CheckCircle2,
   Activity, FileText, Target, Sun, Moon, Heart, Thermometer,
-  CloudRain, Footprints, Zap, Download, ThumbsUp, ThumbsDown, Flag
+  CloudRain, Footprints, Zap, Download, ThumbsUp, ThumbsDown, Flag, Info
 } from 'lucide-react';
 import { reportInsight } from '../services/moderation/reportInsight';
 import { recordInsightEngagement } from '../services/analytics/insightEngagement';
@@ -11,6 +11,8 @@ import { useNexusInsights } from '../hooks/useNexusInsights';
 import { useBasicInsights } from '../hooks/useBasicInsights';
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { recordFeedbackAndLearn } from '../services/basicInsights/feedbackLearning';
+import { getFlag } from '../config/flags';
+import ReceiptSheet from '../components/insights/ReceiptSheet';
 import {
   computeHealthMoodCorrelations,
   getTopHealthInsights,
@@ -49,6 +51,22 @@ const InsightsPage = ({
   const [showCorrelations, setShowCorrelations] = useState(true);
   const [recommendations, setRecommendations] = useState(null);
   const [loadingRecommendations, setLoadingRecommendations] = useState(false);
+  // R2 Task 11: "Why am I seeing this?" — one ReceiptSheet instance for the
+  // whole page, mounted at the top level (not nested inside a card's
+  // clickable area — see the mount site below for why).
+  const [receiptInsight, setReceiptInsight] = useState(null);
+
+  // Synchronous entryId -> entry lookup for ReceiptSheet's source rows (v1:
+  // never fetches a missing entry from Firestore — see ReceiptSheet's own
+  // doc comment).
+  const entriesById = useMemo(() => {
+    const map = {};
+    for (const entry of entries || []) {
+      const id = entry?.id || entry?.entryId;
+      if (id) map[id] = entry;
+    }
+    return map;
+  }, [entries]);
 
   // Load recommendations when health/environment data is available
   useEffect(() => {
@@ -191,6 +209,11 @@ const InsightsPage = ({
     setExpandedInsight(expandedInsight === insightId ? null : insightId);
   };
 
+  const handleShowReceipt = (insight, e) => {
+    e?.stopPropagation?.();
+    setReceiptInsight(insight);
+  };
+
   return (
     <motion.div
       className="px-4 pb-8 space-y-4"
@@ -302,6 +325,7 @@ const InsightsPage = ({
                 }}
                 onDismiss={(e) => handleDismissInsight(insight, e)}
                 onReport={(e) => handleReportInsight(insight, e)}
+                onWhyThis={(e) => handleShowReceipt(insight, e)}
               />
             ))}
           </AnimatePresence>
@@ -331,6 +355,16 @@ const InsightsPage = ({
             }
           </p>
         </motion.div>
+      )}
+
+      {getFlag('insightReceipts') && (
+        <ReceiptSheet
+          insight={receiptInsight}
+          entriesById={entriesById}
+          uid={userId}
+          open={Boolean(receiptInsight)}
+          onClose={() => setReceiptInsight(null)}
+        />
       )}
     </motion.div>
   );
@@ -1739,7 +1773,7 @@ const getStringContent = (...fields) => {
 /**
  * NexusInsightCard - Expandable insight display
  */
-const NexusInsightCard = ({ insight, isExpanded, onToggleExpand, onDismiss, onReport }) => {
+const NexusInsightCard = ({ insight, isExpanded, onToggleExpand, onDismiss, onReport, onWhyThis }) => {
   // Determine insight type styling
   const getInsightStyle = () => {
     const type = insight.type || insight.source || 'pattern';
@@ -1852,6 +1886,17 @@ const NexusInsightCard = ({ insight, isExpanded, onToggleExpand, onDismiss, onRe
                       <ChevronDown size={14} className="text-muted-foreground" />
                     )}
                   </div>
+                )}
+                {/* R2 Task 11: "Why am I seeing this?" — flag-gated provenance trigger */}
+                {onWhyThis && getFlag('insightReceipts') && (
+                  <button
+                    onClick={(e) => onWhyThis(e)}
+                    className="p-2 hover:bg-divider rounded-full transition-colors min-w-[44px] min-h-[44px] flex items-center justify-center"
+                    aria-label="Why am I seeing this?"
+                    title="Why am I seeing this?"
+                  >
+                    <Info size={16} className="text-muted-foreground" />
+                  </button>
                 )}
                 {/* Report AI-generated content (Play AI-content policy) */}
                 {onReport && (
