@@ -1687,18 +1687,9 @@ export default function App() {
         };
       }
 
-      // Store future mentions for follow-up prompts
-      if (temporalContext?.futureMentions?.length > 0) {
-        entryData.futureMentions = temporalContext.futureMentions.map(mention => ({
-          targetDate: Timestamp.fromDate(mention.targetDate),
-          event: mention.event,
-          sentiment: mention.sentiment,
-          phrase: mention.phrase,
-          confidence: mention.confidence,
-          isRecurring: mention.isRecurring || false,
-          recurringPattern: mention.recurringPattern || null
-        }));
-      }
+      // futureMentions is intentionally no longer persisted (retired —
+      // Open Loops replaced it in R1). temporalContext above still
+      // captures the past-reference detection.
 
       if (safetyFlagged) {
         entryData.safety_flagged = true;

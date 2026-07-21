@@ -39,7 +39,9 @@ export const sanitizeEntry = (id, data) => {
     // Phase 2: Temporal context fields
     effectiveDate: data.effectiveDate ? safeDate(data.effectiveDate) : null,
     temporalContext: data.temporalContext || null,
-    futureMentions: Array.isArray(data.futureMentions) ? data.futureMentions : [],
+    // futureMentions is intentionally no longer surfaced here (retired —
+    // Open Loops replaced it in R1). Legacy docs may still carry the raw
+    // field in Firestore; it's just not normalized/read through anymore.
     // Enhanced context fields
     continues_situation: data.continues_situation || null,
     goal_update: data.goal_update || null,

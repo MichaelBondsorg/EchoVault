@@ -91,7 +91,7 @@ describe('runPostSaveEnrichment', () => {
     expect(written.environmentContext.weather).toBe('clear'); // sibling group survives
   });
 
-  it('writes temporal + future-mention fields with the legacy shape (Timestamp on future dates)', async () => {
+  it('writes temporal fields with the legacy shape but no longer persists futureMentions (retired — Open Loops replaced it in R1)', async () => {
     const target = new Date('2026-08-01T00:00:00.000Z');
     const deps = makeDeps({
       detectTemporalContext: vi.fn().mockResolvedValue({
@@ -113,12 +113,9 @@ describe('runPostSaveEnrichment', () => {
       confidence: 0.9,
       backdated: false,
     });
-    expect(written.futureMentions).toHaveLength(1);
-    // targetDate mapped through Timestamp.fromDate — a Firestore Timestamp.
-    expect(typeof written.futureMentions[0].targetDate.toDate).toBe('function');
-    expect(written.futureMentions[0].targetDate.toDate().toISOString()).toBe(target.toISOString());
-    expect(written.futureMentions[0].isRecurring).toBe(false);
-    expect(written.futureMentions[0].recurringPattern).toBe(null);
+    // futureMentions is no longer persisted, even though the temporal
+    // service still produces it in memory (producer stays; write stops).
+    expect(written).not.toHaveProperty('futureMentions');
   });
 
   it('persists native local analysis but not on web', async () => {

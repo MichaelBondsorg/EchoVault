@@ -4,8 +4,8 @@
  * Part of the "core-first save" redesign (flag: coreFirstSave). The core
  * journal entry is persisted FIRST (see buildCoreEntry). This runner then
  * derives every OPTIONAL context — health, environment (weather/sun), temporal
- * / future-mentions, and native local-analysis — against the moment of capture
- * and writes it back with a single updateDoc. It is invoked AFTER addDoc
+ * context, and native local-analysis — against the moment of capture and
+ * writes it back with a single updateDoc. It is invoked AFTER addDoc
  * resolves and AFTER the UI reset/dismiss, so no user-visible latency depends
  * on it.
  *
@@ -22,7 +22,7 @@
  * lazy-loaded (dynamic import) only when a dep is not supplied, so unit tests
  * that inject every dep never pull the heavy AI/native modules.
  */
-import { Timestamp, updateDoc as fsUpdateDoc } from 'firebase/firestore';
+import { updateDoc as fsUpdateDoc } from 'firebase/firestore';
 import { recordStage as realRecordStage, STAGES } from '../telemetry/captureTelemetry';
 import { removeUndefined } from '../../utils/string';
 
@@ -132,17 +132,9 @@ async function temporalGroup({ detectTemporalContext, text }) {
         backdated: false,
       };
     }
-    if (temporal?.futureMentions?.length > 0) {
-      fields.futureMentions = temporal.futureMentions.map((mention) => ({
-        targetDate: Timestamp.fromDate(mention.targetDate),
-        event: mention.event,
-        sentiment: mention.sentiment,
-        phrase: mention.phrase,
-        confidence: mention.confidence,
-        isRecurring: mention.isRecurring || false,
-        recurringPattern: mention.recurringPattern || null,
-      }));
-    }
+    // futureMentions is intentionally no longer persisted (retired — Open
+    // Loops replaced it in R1). The temporal service still produces the
+    // data in memory above; we just stop writing it to Firestore.
     return { fields, reasons: {} };
   } catch (e) {
     return { fields: {}, reasons: { temporal: e?.code || 'temporal_error' } };
