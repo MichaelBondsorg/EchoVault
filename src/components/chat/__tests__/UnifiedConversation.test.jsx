@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import UnifiedConversation from '../UnifiedConversation';
 import { getFlag } from '../../../config/flags';
 import { subscribeSpaces, getLastCaptureSpaceId } from '../../../services/spaces/spacesService';
@@ -188,6 +188,41 @@ describe('UnifiedConversation — selected scope reaches the context call', () =
 
     await sendMessage('How am I doing overall?');
 
+    await waitFor(() =>
+      expect(getCompanionContext).toHaveBeenCalledWith(
+        expect.objectContaining({ scope: null })
+      )
+    );
+  });
+
+  it('falls back to a null scope in the context call when the selected space is later removed from the live subscription (e.g. archived elsewhere while Companion stays open)', async () => {
+    let spacesCallback;
+    subscribeSpaces.mockImplementation((_db, _uid, cb) => {
+      spacesCallback = cb;
+      cb([{ id: 'space-1', name: 'Work' }, { id: 'space-2', name: 'Personal' }]);
+      return () => {};
+    });
+    getLastCaptureSpaceId.mockResolvedValue(null);
+    render(<UnifiedConversation userId={USER_ID} onClose={vi.fn()} initialMode="chat" />);
+
+    fireEvent.click(await screen.findByLabelText('Ask Journal scope: All spaces'));
+    fireEvent.click(screen.getByRole('option', { name: 'Work' }));
+    expect(await screen.findByLabelText('Ask Journal scope: Work')).toBeTruthy();
+
+    // Simulate "Work" being archived (e.g. via Settings -> SpaceManager)
+    // while this conversation stays open: subscribeSpaces' next live
+    // snapshot no longer includes it, but at least one other space
+    // ("Personal") remains so the chip itself is still shown.
+    act(() => {
+      spacesCallback([{ id: 'space-2', name: 'Personal' }]);
+    });
+
+    // Label falls back to "All spaces"...
+    expect(await screen.findByLabelText('Ask Journal scope: All spaces')).toBeTruthy();
+
+    // ...and retrieval must follow the same fallback, never the stale,
+    // now-unresolvable spaceId.
+    await sendMessage('Anything new?');
     await waitFor(() =>
       expect(getCompanionContext).toHaveBeenCalledWith(
         expect.objectContaining({ scope: null })

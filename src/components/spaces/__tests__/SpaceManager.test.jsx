@@ -23,6 +23,20 @@ vi.mock('../../../services/spaces/spacesService', () => ({
 
 const UID = 'user-a';
 
+// A manually-controlled promise so a test can assert on behavior WHILE an
+// async call is still pending, not just on final call order.
+// `invocationCallOrder` only proves the two mocks were invoked in a given
+// order — it can't catch a future regression that fires them concurrently
+// (e.g. via Promise.all) instead of sequentially awaiting the first before
+// starting the second. Resolving order is what actually matters here:
+// archiveSpace must never fire before reassignEntriesSpace's promise has
+// resolved.
+const createDeferred = () => {
+  let resolve;
+  const promise = new Promise((res) => { resolve = res; });
+  return { promise, resolve };
+};
+
 const withSpaces = (spaces) => {
   subscribeSpaces.mockImplementation((_db, _uid, cb) => {
     cb(spaces);
@@ -93,11 +107,13 @@ describe('SpaceManager — create + rename', () => {
 });
 
 describe('SpaceManager — archive flow (3-option sheet)', () => {
-  it('Move entries: reassigns to the chosen space THEN archives, in that order', async () => {
+  it('Move entries: does not archive until the reassignment resolves, then archives the right space', async () => {
     withSpaces([
       { id: 'space-1', name: 'Work', state: 'active' },
       { id: 'space-2', name: 'Personal', state: 'active' },
     ]);
+    const deferred = createDeferred();
+    reassignEntriesSpace.mockReturnValue(deferred.promise);
     render(<SpaceManager uid={UID} onClose={vi.fn()} />);
 
     fireEvent.click(await screen.findByLabelText('Archive Work'));
@@ -109,29 +125,40 @@ describe('SpaceManager — archive flow (3-option sheet)', () => {
     expect(within(archiveSheet).queryByRole('button', { name: 'Work' })).toBeNull();
     fireEvent.click(within(archiveSheet).getByText('Personal'));
 
-    await waitFor(() => expect(archiveSpace).toHaveBeenCalled());
-
     expect(reassignEntriesSpace).toHaveBeenCalledWith({ __db: true }, UID, 'space-1', 'space-2');
-    expect(archiveSpace).toHaveBeenCalledWith({ __db: true }, UID, 'space-1');
-    expect(reassignEntriesSpace.mock.invocationCallOrder[0]).toBeLessThan(
-      archiveSpace.mock.invocationCallOrder[0]
-    );
+
+    // Reassignment is still pending — archiveSpace must NOT have fired yet,
+    // no matter how many microtask ticks pass while we wait.
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(archiveSpace).not.toHaveBeenCalled();
+
+    // Now let the reassignment resolve — only then should archiveSpace fire.
+    deferred.resolve(2);
+    await waitFor(() => expect(archiveSpace).toHaveBeenCalledWith({ __db: true }, UID, 'space-1'));
   });
 
-  it('Keep unscoped: reassigns to null THEN archives', async () => {
+  it('Keep unscoped: does not archive until the reassignment (to null) resolves', async () => {
     withSpaces([{ id: 'space-1', name: 'Work', state: 'active' }]);
+    const deferred = createDeferred();
+    reassignEntriesSpace.mockReturnValue(deferred.promise);
     render(<SpaceManager uid={UID} onClose={vi.fn()} />);
 
     fireEvent.click(await screen.findByLabelText('Archive Work'));
     fireEvent.click(screen.getByText('Keep entries unscoped'));
 
-    await waitFor(() => expect(archiveSpace).toHaveBeenCalled());
-
     expect(reassignEntriesSpace).toHaveBeenCalledWith({ __db: true }, UID, 'space-1', null);
-    expect(archiveSpace).toHaveBeenCalledWith({ __db: true }, UID, 'space-1');
-    expect(reassignEntriesSpace.mock.invocationCallOrder[0]).toBeLessThan(
-      archiveSpace.mock.invocationCallOrder[0]
-    );
+
+    // Reassignment is still pending — archiveSpace must NOT have fired yet.
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(archiveSpace).not.toHaveBeenCalled();
+
+    // Now let it resolve — only then should archiveSpace fire.
+    deferred.resolve(0);
+    await waitFor(() => expect(archiveSpace).toHaveBeenCalledWith({ __db: true }, UID, 'space-1'));
   });
 
   it('Cancel is a pure no-op: closes the sheet and calls neither reassignEntriesSpace nor archiveSpace', async () => {

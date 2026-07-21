@@ -213,6 +213,16 @@ const UnifiedConversation = ({
 
   const selectedScopeSpace = spaces.find((s) => s.id === scope?.spaceId) || null;
 
+  // Effective scope actually passed into getCompanionContext. Derived from
+  // `selectedScopeSpace` (the live spaces list), NOT the raw `scope` state
+  // directly: if the selected space is archived while this conversation is
+  // open, `subscribeSpaces` drops it from `spaces` on its next snapshot,
+  // `selectedScopeSpace` resolves to null, and the chip label falls back to
+  // "All spaces" — this derivation makes retrieval follow that same fallback
+  // instead of silently continuing to scope-to-nothing on a spaceId that no
+  // longer resolves to any space. Label and retrieval can never diverge.
+  const effectiveScope = selectedScopeSpace ? { spaceId: selectedScopeSpace.id } : null;
+
   // Auto-scroll messages
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -335,7 +345,7 @@ const UnifiedConversation = ({
         queryEmbedding,
         entries,
         category,
-        scope,
+        scope: effectiveScope,
         sessionBuffer
       });
 
