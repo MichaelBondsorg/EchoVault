@@ -304,20 +304,30 @@ describe('ReceiptSheet — distinct repair actions call the exact service with e
     fireEvent.click(rows[0]);
 
     await vi.waitFor(() => expect(excludeSource).toHaveBeenCalledTimes(1));
-    // "Evening walks lift your mood" matches no keyword in the pattern map
-    // -> falls back to insight.type ('pattern').
+    // Task-11 re-review: patternTypeOf now mirrors recordFeedbackAndLearn's
+    // own chain FIRST. baseInsight has no activityKey/themeKey/peopleKey/
+    // category, but does carry `id: 'insight-1'` — the chain's
+    // `insightId || category` tail resolves to that id (never reaching
+    // insight.type/'pattern'), matching what "Not true" actually records
+    // for this exact fixture (see ReceiptSheet.realFeedback.test.jsx).
     expect(excludeSource).toHaveBeenCalledWith(
       { __db: true },
       UID,
-      { entryId: 'e1', appliesTo: 'pattern', reason: 'wrong_source' }
+      { entryId: 'e1', appliesTo: 'insight-1', reason: 'wrong_source' }
     );
-    expect(onExcludeSource).toHaveBeenCalledWith({ entryId: 'e1', appliesTo: 'pattern', reason: 'wrong_source' });
+    expect(onExcludeSource).toHaveBeenCalledWith({ entryId: 'e1', appliesTo: 'insight-1', reason: 'wrong_source' });
   });
 
-  it('derives appliesTo from a matched keyword pattern when the insight text matches one', async () => {
+  it('derives appliesTo from a matched keyword pattern when the insight has no id/category/keys but its text matches one', async () => {
+    // The activityKey/themeKey/peopleKey/id/category chain takes priority
+    // over keyword text matching (see patternTypeOf's doc comment), so an
+    // id-bearing insight never reaches this branch — only an insight with
+    // none of those fields (and no keys) falls through to
+    // extractPatternTypeFromInsight.
+    const { id, ...withoutId } = baseInsight;
     renderSheet({
       insight: {
-        ...baseInsight,
+        ...withoutId,
         title: 'Exercise boosts your mood',
         summary: 'Days with exercise tend to run higher on mood.',
       },
@@ -332,14 +342,15 @@ describe('ReceiptSheet — distinct repair actions call the exact service with e
     );
   });
 
-  it('falls back to \'unspecified\' when no keyword matches and the insight has no type', async () => {
+  it('falls back to \'unspecified\' when nothing in the chain resolves: no id/category/keys, no keyword match, no type', async () => {
     // patternTypeOf's last-resort floor (ReceiptSheet.jsx) — `'unspecified'`
-    // only shows up when extractPatternTypeFromInsight finds no keyword
-    // AND insight.type is also absent. Base insight's text already matches
-    // no keyword (proven by the fallback-to-type test above); dropping
-    // `type` too exercises the final branch.
-    const { type, ...insightWithoutType } = baseInsight;
-    renderSheet({ insight: insightWithoutType });
+    // only shows up when the activityKey/themeKey/peopleKey/id/category
+    // chain, extractPatternTypeFromInsight, AND insight.type all come up
+    // empty. Base insight's text already matches no keyword (proven by the
+    // fallback-to-keyword test above); dropping `id` and `type` too
+    // exercises the final branch.
+    const { id, type, ...insightWithoutIdOrType } = baseInsight;
+    renderSheet({ insight: insightWithoutIdOrType });
     fireEvent.click(screen.getAllByText('Wrong source')[0]);
 
     await vi.waitFor(() => expect(excludeSource).toHaveBeenCalledTimes(1));
@@ -403,6 +414,80 @@ describe('ReceiptSheet — copy constraints', () => {
     expect(screen.getByText('Not useful')).toBeTruthy();
     expect(screen.queryByText(/you were wrong/i)).toBeNull();
     expect(screen.queryByText(/you shouldn't/i)).toBeNull();
+  });
+});
+
+describe('ReceiptSheet — basic-insight-shaped fixture (Task 11 re-review)', () => {
+  // Basic insights (QuickInsightsSection, wired to the receipt trigger in
+  // the original Task 11 addendum) carry `{category, insight, activityKey?,
+  // themeKey?, peopleKey?}` — no title/body/summary/type. Before this fix,
+  // `patternTypeOf` only ever read title/body/summary (via
+  // `extractPatternTypeFromInsight`) or `insight.type`, so every basic-card
+  // "Wrong source" fell through to `'unspecified'` regardless of the
+  // activityKey/themeKey/peopleKey the card actually carries — while "Not
+  // true" (via `recordFeedbackAndLearn`'s own chain) correctly scoped to
+  // `activity_yoga` etc. These tests pin the fix: same shape, same
+  // `appliesTo` on both actions.
+  const basicReceipt = {
+    sources: [
+      { entryId: 'b1', date: '2026-07-10T09:00:00.000Z', excerpt: 'Yoga this morning, felt centered.' },
+    ],
+    scope: null,
+    timeWindow: { start: '2026-06-21T00:00:00.000Z', end: '2026-07-21T00:00:00.000Z' },
+    sampleSize: 6,
+    missingness: null,
+    versions: {},
+  };
+
+  const basicInsight = {
+    id: 'basic-1',
+    category: 'activity',
+    insight: 'Yoga days average +12',
+    moodDelta: 12,
+    sampleSize: 6,
+    activityKey: 'yoga',
+    receipt: basicReceipt,
+  };
+
+  it('renders without crashing: claim falls back to category, summary shows the .insight text', () => {
+    renderSheet({ insight: basicInsight });
+    expect(screen.getByText('activity')).toBeTruthy();
+    expect(screen.getByText('Yoga days average +12')).toBeTruthy();
+  });
+
+  it('"Wrong source" scopes to the SAME patternType recordFeedbackAndLearn would derive (activityKey -> activity_yoga)', async () => {
+    const onExcludeSource = vi.fn();
+    renderSheet({ insight: basicInsight, onExcludeSource });
+    fireEvent.click(screen.getByText('Wrong source'));
+
+    await vi.waitFor(() => expect(excludeSource).toHaveBeenCalledTimes(1));
+    // recordFeedbackAndLearn (feedbackLearning.js:129-132) derives
+    // `patternType` as `activityKey ? \`activity_${activityKey}\` : ...` —
+    // with activityKey: 'yoga' present, that's 'activity_yoga' regardless
+    // of any title/type text. Wrong-source must land the same value.
+    expect(excludeSource).toHaveBeenCalledWith(
+      { __db: true },
+      UID,
+      { entryId: 'b1', appliesTo: 'activity_yoga', reason: 'wrong_source' }
+    );
+    expect(onExcludeSource).toHaveBeenCalledWith({ entryId: 'b1', appliesTo: 'activity_yoga', reason: 'wrong_source' });
+  });
+
+  it('keeps a Nexus-shaped fixture working through the same path (no regression): id-bearing insight scopes to its own id', async () => {
+    // baseInsight has no activityKey/themeKey/peopleKey/category, but does
+    // carry an id — recordFeedbackAndLearn's tail (`insightId || category`)
+    // resolves to that id, and ReceiptSheet.realFeedback.test.jsx already
+    // proves this is exactly what the real "Not true" write records
+    // (`writtenDoc.patternType === 'insight-1'`) for this exact fixture.
+    renderSheet();
+    fireEvent.click(screen.getAllByText('Wrong source')[0]);
+
+    await vi.waitFor(() => expect(excludeSource).toHaveBeenCalledTimes(1));
+    expect(excludeSource).toHaveBeenCalledWith(
+      { __db: true },
+      UID,
+      { entryId: 'e1', appliesTo: 'insight-1', reason: 'wrong_source' }
+    );
   });
 });
 

@@ -34,7 +34,11 @@ import { useFreshnessTick } from './useFreshnessTick';
  *   if no keyword matched (callers decide their own fallback).
  */
 export const extractPatternTypeFromInsight = (insight) => {
-  const text = (insight.title || '') + ' ' + (insight.body || '') + ' ' + (insight.summary || '');
+  // `insight.insight` (Task 11 re-review): basic insights
+  // (`src/services/basicInsights/...`) carry their prose in an `insight`
+  // field, not title/body/summary — omitting it here was why a
+  // keyword-bearing basic insight's text never matched anything.
+  const text = (insight.title || '') + ' ' + (insight.body || '') + ' ' + (insight.summary || '') + ' ' + (insight.insight || '');
   const textLower = text.toLowerCase();
 
   // Map common patterns to learning keys

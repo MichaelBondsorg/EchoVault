@@ -84,20 +84,65 @@ const CONFIDENCE_COPY = {
 
 /**
  * The pattern-family key a per-insight "Wrong source" exclusion is scoped
- * to. Reuses `extractPatternTypeFromInsight` (the same keyword→pattern map
- * that already gates feedback-learning suppression in useNexusInsights) so
- * a Wrong-source exclusion targets the same family the learning system
- * already tracks. When no keyword matches (common for insight types that
- * don't read as prose, e.g. calibration, or basic-insight fixtures whose
- * text doesn't hit the keyword list), falls back to the insight's own
- * `type` string rather than the generic `'all'` — `'all'` is reserved for
- * the *other* action ("Exclude source"), and collapsing the two onto the
- * same value would erase the PRD's distinction between them. `'unspecified'`
- * is a last-resort floor so `appliesTo` is never `undefined` (which
- * `excludeSource` would silently default to `'all'`, the same collapse).
+ * to.
+ *
+ * Task-11 re-review fix: the SOURCE OF TRUTH for what "the same pattern
+ * family" means is `recordFeedbackAndLearn`'s own derivation
+ * (`src/services/basicInsights/feedbackLearning.js:129-132`, the "Not
+ * true" path):
+ *   activityKey ? `activity_${activityKey}`
+ *   : themeKey  ? `theme_${themeKey}`
+ *   : peopleKey ? `people_${peopleKey}`
+ *   : insightId || category
+ * Before this fix, "Wrong source" never read activityKey/themeKey/
+ * peopleKey/id/category at all — it only tried `extractPatternTypeFromInsight`
+ * (a title/body/summary keyword map) and `insight.type`. Basic insights
+ * (`{category, insight, activityKey?, themeKey?, peopleKey?}` — no title/
+ * body/summary/type) hit neither, so every basic-card "Wrong source"
+ * landed `'unspecified'` while "Not true" correctly scoped per-family.
+ * This replicates that exact chain FIRST (reading the same fields
+ * `feedbackDataFor` above reads to build `recordFeedbackAndLearn`'s
+ * argument: activityKey/themeKey/peopleKey, `insight.id` as its
+ * `insightId`, and `category`), so both actions scope any given insight
+ * identically. `ReceiptSheet.realFeedback.test.jsx` pins the two
+ * derivations equal (via the real `recordFeedbackAndLearn` Firestore
+ * write) across a shared fixture set, so they can't silently drift apart.
+ *
+ * Deliberately replicated rather than imported as a shared helper:
+ * several test files that render this component fully `vi.mock()` the
+ * `feedbackLearning` module down to just `{ recordFeedbackAndLearn }`
+ * (`ReceiptSheet.test.jsx`, `NexusInsightsWidget.portalBubbling.test.jsx`)
+ * — a second named export imported from that module here would resolve to
+ * `undefined` under those mocks and crash "Wrong source" in all of them.
+ *
+ * Only when the chain above resolves to nothing (no keys, no id, no
+ * category — essentially never for a real insight) does this fall back to
+ * `extractPatternTypeFromInsight` (the same title/body/summary/insight
+ * keyword→pattern map that already gates feedback-learning suppression in
+ * `useNexusInsights`), then the insight's own `type` string, then
+ * `category` again (a harmless, likely-unreachable extra floor), then
+ * `'unspecified'` as the final floor — never `undefined`, which
+ * `excludeSource` would silently default to `'all'`, collapsing this
+ * action into "Exclude source"'s scope.
  */
 export function patternTypeOf(insight) {
-  return extractPatternTypeFromInsight(insight) || insight?.type || 'unspecified';
+  const { activityKey, themeKey, peopleKey, id: insightId, category } = insight || {};
+
+  const learningPatternType = activityKey
+    ? `activity_${activityKey}`
+    : themeKey
+    ? `theme_${themeKey}`
+    : peopleKey
+    ? `people_${peopleKey}`
+    : insightId || category;
+
+  return (
+    learningPatternType ||
+    extractPatternTypeFromInsight(insight) ||
+    insight?.type ||
+    insight?.category ||
+    'unspecified'
+  );
 }
 
 function claimTitle(insight) {
