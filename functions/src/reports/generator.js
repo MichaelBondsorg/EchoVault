@@ -59,17 +59,19 @@ export async function generateReport(userId, cadence, periodStart, periodEnd, ge
 
   try {
     // Read all data in parallel. `model` is resolved once per report run
-    // (registry, workload 'insight') regardless of cadence — weekly's
-    // template path doesn't call an LLM, but the metadata schema stays
-    // consistent across all cadences (mirrors the analysis orchestrator's
-    // "resolve once, stamp regardless of which branch used it" convention).
+    // (registry, workload 'insight') for cadences that actually invoke the
+    // narrative LLM. Weekly is template-only (zero LLM calls) — skip the
+    // registry read entirely rather than resolving a model id that's never
+    // invoked and would otherwise get stamped into metadata.model,
+    // overstating what generated the report.
+    const isWeekly = cadence === 'weekly';
     const [analyticsData, nexusData, signalData, entriesData, healthData, model] = await Promise.all([
       readAnalytics(db, userBase),
       readNexusData(db, userBase, periodStart, periodEnd),
       readSignalData(db, userBase, periodStart, periodEnd),
       readEntries(db, userBase, periodStart, periodEnd, cadence),
       readHealthData(db, userBase),
-      getModel(db, 'insight'),
+      isWeekly ? Promise.resolve(null) : getModel(db, 'insight'),
     ]);
 
     // Prepare chart data
@@ -137,8 +139,11 @@ export async function generateReport(userId, cadence, periodStart, periodEnd, ge
       // #3) — labeled explicitly so a future space-scoped report type can
       // never be silently confused with this one.
       scope: 'all_spaces',
+      // Only cadences that actually invoke the narrative LLM stamp a model
+      // id / prompt version — weekly's narrative has no prompt (template
+      // output), so both are null rather than overstating provenance.
       model,
-      promptVersion: 1,
+      promptVersion: isWeekly ? null : 1,
       // Distinct entries actually traceable via this report's receipts
       // (union of every section's entryRefs). Deliberately NOT the same as
       // entryCount: premium cadences only cite a small excerpt sample per
@@ -242,51 +247,91 @@ async function readSignalData(db, userBase, periodStart, periodEnd) {
   }
 }
 
+/**
+ * Thrown when the source_exclusions read fails inside readEntries(). Kept
+ * distinct from a plain Error so it can be identified by name — see the
+ * fail-closed handling below.
+ */
+export class ExclusionsReadError extends Error {
+  constructor(cause) {
+    super(`source_exclusions read failed: ${cause?.message || cause}`);
+    this.name = 'ExclusionsReadError';
+    this.cause = cause;
+  }
+}
+
 // Exported for direct unit testing of the source_exclusions filter and
 // entry shape; also used by generateReport above.
 export async function readEntries(db, userBase, periodStart, periodEnd, cadence) {
-  try {
-    const limit = cadence === 'annual' ? 500 : cadence === 'quarterly' ? 200 : 100;
-    // One extra collection read per report run for source_exclusions
-    // (Task 8/10 client concept, server-consumed here). Only
-    // appliesTo === 'all' exclusions drop an entry from reports entirely —
-    // pattern-scoped exclusions (a specific signal/pattern type) don't
-    // change what feeds a report, only what feeds pattern detection.
-    const [snap, exclusionsSnap] = await Promise.all([
-      db.collection(`${userBase}/entries`)
-        .where('createdAt', '>=', periodStart)
-        .where('createdAt', '<=', periodEnd)
-        .orderBy('createdAt', 'asc')
-        .limit(limit)
-        .get(),
-      db.collection(`${userBase}/source_exclusions`).get(),
-    ]);
+  const limit = cadence === 'annual' ? 500 : cadence === 'quarterly' ? 200 : 100;
 
-    const excludedIds = new Set();
-    exclusionsSnap.forEach(doc => {
-      const d = doc.data();
-      if (d.appliesTo === 'all' && d.entryId) excludedIds.add(d.entryId);
-    });
+  // The entries read and the source_exclusions read (Task 8/10 client
+  // concept, server-consumed here) are run in parallel but handled with
+  // INDEPENDENT failure semantics:
+  //   - an entries-read failure degrades to an empty period (unchanged
+  //     behavior — a report with no entries is honest and harmless).
+  //   - an exclusions-read failure must NOT silently produce a report as if
+  //     no exclusions existed — that would leak entries the user asked to
+  //     exclude, violating the "exclusions honored on regeneration" PRD
+  //     acceptance criterion. So it's re-thrown as a distinct error
+  //     (ExclusionsReadError) that propagates out of this function, through
+  //     generateReport's `Promise.all(...)`, into its existing try/catch
+  //     (below), which marks the report doc `status: 'failed'`. That doc is
+  //     then picked up by the existing retryCount machinery: the
+  //     top-of-function dedup transaction only skips docs whose status is
+  //     'ready' or 'generating', so a 'failed' doc is retried on the next
+  //     matching scheduler invocation; reportCleanup.js's
+  //     cleanupStuckReports() separately escalates via retryCount if a
+  //     report gets stuck. (If both reads fail, the exclusions failure
+  //     takes precedence and throws — fail-closed wins over degrade-open.)
+  //
+  // Only appliesTo === 'all' exclusions drop an entry from reports
+  // entirely — pattern-scoped exclusions (a specific signal/pattern type)
+  // don't change what feeds a report, only what feeds pattern detection.
+  const [entriesResult, exclusionsResult] = await Promise.allSettled([
+    db.collection(`${userBase}/entries`)
+      .where('createdAt', '>=', periodStart)
+      .where('createdAt', '<=', periodEnd)
+      .orderBy('createdAt', 'asc')
+      .limit(limit)
+      .get(),
+    db.collection(`${userBase}/source_exclusions`).get(),
+  ]);
 
-    const entries = [];
-    snap.forEach(doc => {
-      if (excludedIds.has(doc.id)) return;
-      const d = doc.data();
-      entries.push({
-        id: doc.id,
-        date: d.createdAt?.toDate?.()?.toISOString?.()?.slice(0, 10) || '',
-        text: d.text || d.rawText || '',
-        moodScore: d.analysis?.moodScore ?? d.moodScore ?? null,
-        category: d.classification?.category || d.category || 'uncategorized',
-        safety_flagged: d.safety_flagged || false,
-        has_warning_indicators: d.has_warning_indicators || false,
-      });
-    });
-    return entries;
-  } catch (e) {
-    console.warn('[report] Failed to read entries:', e.message);
+  if (exclusionsResult.status === 'rejected') {
+    console.error('[report] Failed to read source_exclusions — failing closed:', exclusionsResult.reason?.message);
+    throw new ExclusionsReadError(exclusionsResult.reason);
+  }
+
+  if (entriesResult.status === 'rejected') {
+    console.warn('[report] Failed to read entries:', entriesResult.reason?.message);
     return [];
   }
+
+  const snap = entriesResult.value;
+  const exclusionsSnap = exclusionsResult.value;
+
+  const excludedIds = new Set();
+  exclusionsSnap.forEach(doc => {
+    const d = doc.data();
+    if (d.appliesTo === 'all' && d.entryId) excludedIds.add(d.entryId);
+  });
+
+  const entries = [];
+  snap.forEach(doc => {
+    if (excludedIds.has(doc.id)) return;
+    const d = doc.data();
+    entries.push({
+      id: doc.id,
+      date: d.createdAt?.toDate?.()?.toISOString?.()?.slice(0, 10) || '',
+      text: d.text || d.rawText || '',
+      moodScore: d.analysis?.moodScore ?? d.moodScore ?? null,
+      category: d.classification?.category || d.category || 'uncategorized',
+      safety_flagged: d.safety_flagged || false,
+      has_warning_indicators: d.has_warning_indicators || false,
+    });
+  });
+  return entries;
 }
 
 async function readHealthData(db, userBase) {

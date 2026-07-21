@@ -184,6 +184,60 @@ describe('generatePremiumNarrative', () => {
     }
   });
 
+  describe('entryRefs — quarterly/annual union with month-sampled ids (finding 1)', () => {
+    beforeEach(() => {
+      vi.clearAllMocks();
+      getModel.mockResolvedValue('registry-insight-model-x');
+      callGemini.mockResolvedValue('Generated narrative text.');
+    });
+
+    // 5 entries in January (all sampled by preSummarizeByMonth's per-month
+    // cap of 10), 12 entries in February (only the first 10 are sampled —
+    // over the cap). slice(0,8) (array order, not date order) covers only
+    // id1..id8 (5 Jan + first 3 Feb) — id9..id15 can ONLY be attributed via
+    // the month-sample ids, and id16/id17 are never sampled by either
+    // mechanism so they must be absent from entryRefs entirely.
+    function buildEntries() {
+      const jan = Array.from({ length: 5 }, (_, i) => ({ id: `id${i + 1}`, date: '2026-01-10', text: 'jan' }));
+      const feb = Array.from({ length: 12 }, (_, i) => ({ id: `id${i + 6}`, date: '2026-02-10', text: 'feb' }));
+      return [...jan, ...feb];
+    }
+
+    it.each(['quarterly', 'annual'])('%s entryRefs = union(slice(0,8), all month-sampled ids)', async (cadence) => {
+      const entries = buildEntries();
+      const contextData = {
+        entries, analytics: {}, signals: { activeGoals: [], achievedGoals: [] },
+        nexus: { patterns: [] }, health: {},
+      };
+
+      const sections = await generatePremiumNarrative(cadence, contextData, 'test-key', fakeDb);
+      expect(sections.length).toBeGreaterThan(0);
+
+      const expectedIds = Array.from({ length: 15 }, (_, i) => `id${i + 1}`); // id1..id15
+      for (const section of sections) {
+        expect(new Set(section.entryRefs)).toEqual(new Set(expectedIds));
+        expect(section.entryRefs).not.toContain('id16');
+        expect(section.entryRefs).not.toContain('id17');
+        // Proves this isn't just slice(0,8): more than 8 ids cited.
+        expect(section.entryRefs.length).toBeGreaterThan(8);
+      }
+    });
+
+    it('monthly does NOT pre-summarize by month, so entryRefs stays plain slice(0,8) (no month-sample union)', async () => {
+      const entries = buildEntries();
+      const contextData = {
+        entries, analytics: {}, signals: { activeGoals: [], achievedGoals: [] },
+        nexus: { patterns: [] }, health: {},
+      };
+
+      const sections = await generatePremiumNarrative('monthly', contextData, 'test-key', fakeDb);
+      const expectedIds = entries.slice(0, 8).map(e => e.id);
+      for (const section of sections) {
+        expect(section.entryRefs).toEqual(expectedIds);
+      }
+    });
+  });
+
   it('entryRefs is still populated on the fallback ("could not be generated") path', async () => {
     // Only the first section exhausts its retries (3 nulls); the rest
     // succeed — mirrors 'returns partial sections on Gemini failure' above,

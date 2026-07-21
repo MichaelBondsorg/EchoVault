@@ -128,7 +128,10 @@ export async function generatePremiumNarrative(cadence, contextData, apiKey, db)
   // makes (section narratives + month pre-summarization).
   const model = await getModel(db, 'insight');
 
-  // For quarterly/annual, pre-summarize by month first
+  // For quarterly/annual, pre-summarize by month first. Only these two
+  // cadences ever get `monthSummaries` injected into buildSectionPrompt()
+  // (see the `contextData.monthSummaries` check there) — monthly never
+  // pre-summarizes, so its entryRefs below stay the plain slice(0,8).
   let synthesisContext = contextData;
   if (cadence === 'quarterly' || cadence === 'annual') {
     synthesisContext = await preSummarizeByMonth(contextData, apiKey, model);
@@ -140,10 +143,22 @@ export async function generatePremiumNarrative(cadence, contextData, apiKey, db)
   // list for every section, whether generation succeeded or fell back to
   // the "could not be generated" placeholder (the prompt was still built
   // and sent with these entries either way).
-  const sourceEntryIds = (synthesisContext.entries || [])
+  //
+  // For quarterly/annual, buildSectionPrompt ALSO injects `monthSummaries`
+  // into every section's prompt — built by preSummarizeByMonth from up to
+  // 10 excerpts PER MONTH, sampled from ALL of contextData.entries, not
+  // just the first 8. Citing only the slice(0,8) ids would under-claim what
+  // actually fed the narrative (provenance dishonesty), so for these two
+  // cadences entryRefs is the deduped union of the slice(0,8) ids and every
+  // month-sampled entry id. Monthly never gets monthSummaries, so its
+  // synthesisContext.monthSampleEntryIds is undefined and this union
+  // degrades to the plain slice(0,8), unchanged from before.
+  const sliceIds = (synthesisContext.entries || [])
     .slice(0, 8)
     .map(e => e.id)
     .filter(Boolean);
+  const monthSampleIds = synthesisContext.monthSampleEntryIds || [];
+  const sourceEntryIds = Array.from(new Set([...sliceIds, ...monthSampleIds]));
 
   const sections = [];
   for (const config of sectionConfigs) {
@@ -226,6 +241,12 @@ function buildSectionPrompt(config, cadence, contextData) {
   return prompt;
 }
 
+/**
+ * @returns {Promise<object>} contextData plus `monthSummaries` (joined text)
+ *   and `monthSampleEntryIds` — the ids of every entry whose excerpt was
+ *   actually sampled into a month summary (up to 10 per month), so callers
+ *   can attribute monthSummaries content in entryRefs receipts.
+ */
 async function preSummarizeByMonth(contextData, apiKey, model) {
   const { entries = [] } = contextData;
 
@@ -238,10 +259,15 @@ async function preSummarizeByMonth(contextData, apiKey, model) {
   }
 
   const summaries = [];
+  const monthSampleEntryIds = [];
   for (const [month, monthEntries] of Object.entries(byMonth).sort()) {
-    const excerpts = monthEntries.slice(0, 10).map(e =>
+    const sampled = monthEntries.slice(0, 10);
+    const excerpts = sampled.map(e =>
       `[${e.date}] ${(e.text || '').slice(0, 150)}`
     ).join('\n');
+    for (const e of sampled) {
+      if (e.id) monthSampleEntryIds.push(e.id);
+    }
 
     const summary = await callGeminiWithRetry(
       apiKey,
@@ -255,6 +281,7 @@ async function preSummarizeByMonth(contextData, apiKey, model) {
   return {
     ...contextData,
     monthSummaries: summaries.join('\n'),
+    monthSampleEntryIds,
   };
 }
 
