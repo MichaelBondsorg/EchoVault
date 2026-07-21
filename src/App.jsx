@@ -458,9 +458,19 @@ export default function App() {
         handleAudioRetry: async (recordingId, opId) => {
           const rec = await audioVault.getRecording(user.uid, recordingId);
           if (!rec) return;
+          // Voice Chapters (flag: voiceChapters): mirror PendingAudioBanner's
+          // retryAll (src/components/shared/PendingAudioBanner.jsx) — forward
+          // markers/durationMs from the vault entry so a launch-time crash
+          // resume doesn't drop chapters the user already tapped. Omitted
+          // (not stuffed as empty) when the entry has none.
+          const chapterExtras = {
+            ...(rec.markers && rec.markers.length ? { markers: rec.markers } : {}),
+            ...(rec.durationMs != null ? { durationMs: rec.durationMs } : {}),
+          };
           await handleAudioWrapper(rec.base64, rec.mime, {
             existingRecordingId: recordingId,
             operationId: opId,
+            ...chapterExtras,
           });
         },
       }).then((s) => s && (s.resumed || s.completed || s.needsAttention)
