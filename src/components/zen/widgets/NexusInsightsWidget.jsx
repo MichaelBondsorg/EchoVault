@@ -119,7 +119,7 @@ const MiniInsightCard = ({ insight, index, onWhyThis }) => {
                 e.stopPropagation();
                 onWhyThis(insight);
               }}
-              className="relative mt-1 inline-flex text-[11px] font-medium text-warm-600 underline decoration-warm-300 underline-offset-2 before:absolute before:-inset-2 before:content-['']"
+              className="relative mt-1 inline-flex min-h-[28px] items-center text-[11px] font-medium text-warm-600 underline decoration-warm-300 underline-offset-2 before:absolute before:-inset-2 before:content-['']"
             >
               Why am I seeing this?
             </button>

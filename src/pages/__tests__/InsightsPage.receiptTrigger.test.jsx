@@ -116,6 +116,29 @@ function baseBasicReturn(overrides = {}) {
   };
 }
 
+// Basic insights always carry a `.receipt` (verified in
+// basicInsightsOrchestrator.receipts.test.js) but never a `.title` field —
+// QuickInsightsSection renders `insight.insight` as the card text, unlike
+// NexusInsightCard which reads `.title`/`.summary`.
+const BASIC_INSIGHT = {
+  id: 'basic-1',
+  category: 'activity',
+  insight: 'You journal more on days you exercise.',
+  direction: 'positive',
+  strength: 'strong',
+  moodDelta: 8,
+  sampleSize: 12,
+  entryIds: ['e1'],
+  receipt: {
+    sources: [{ entryId: 'e1', date: '2026-07-18T10:00:00.000Z', excerpt: 'Exercised today.' }],
+    scope: null,
+    timeWindow: { start: '2026-06-21T00:00:00.000Z', end: '2026-07-21T00:00:00.000Z' },
+    sampleSize: 12,
+    missingness: null,
+    versions: {},
+  },
+};
+
 const ENTRIES = [
   { id: 'e1', content: 'Went for a walk, felt calmer.', createdAt: '2026-07-18T10:00:00.000Z' },
   { id: 'e2', content: 'Normal day.', createdAt: '2026-07-17T10:00:00.000Z' },
@@ -141,6 +164,14 @@ describe('InsightsPage — insightReceipts flag OFF', () => {
   it('never mounts the ReceiptSheet', () => {
     render(<InsightsPage entries={ENTRIES} userId="user-1" user={{ uid: 'user-1' }} />);
     expect(screen.queryByTestId('receipt-sheet-stub')).toBeNull();
+  });
+
+  it('renders no "Why am I seeing this?" trigger on basic-insight cards (QuickInsightsSection) either', () => {
+    useNexusInsights.mockReturnValue(baseNexusReturn({ insights: [] }));
+    useBasicInsights.mockReturnValue(baseBasicReturn({ insights: [BASIC_INSIGHT], hasEnoughData: true }));
+    render(<InsightsPage entries={ENTRIES} userId="user-1" user={{ uid: 'user-1' }} />);
+    expect(screen.getByText('You journal more on days you exercise.')).toBeTruthy();
+    expect(screen.queryByLabelText('Why am I seeing this?')).toBeNull();
   });
 });
 
@@ -172,6 +203,33 @@ describe('InsightsPage — insightReceipts flag ON', () => {
     // open with body content — this insight has no `body`, so the safest
     // signal is that no crash occurred and the sheet, not an expanded
     // card, is what appeared.
+    expect(screen.getByTestId('receipt-sheet-stub')).toBeTruthy();
+  });
+
+  it('renders the "Why am I seeing this?" trigger on a basic-insight card (QuickInsightsSection) and opens the shared sheet', () => {
+    // Nexus insights emptied so the only trigger in the tree belongs to
+    // the basic-insight card — keeps this test unambiguous about which
+    // surface it's exercising.
+    useNexusInsights.mockReturnValue(baseNexusReturn({ insights: [] }));
+    useBasicInsights.mockReturnValue(baseBasicReturn({ insights: [BASIC_INSIGHT], hasEnoughData: true }));
+    render(<InsightsPage entries={ENTRIES} userId="user-1" user={{ uid: 'user-1' }} />);
+
+    const trigger = screen.getByLabelText('Why am I seeing this?');
+    fireEvent.click(trigger);
+
+    const sheet = screen.getByTestId('receipt-sheet-stub');
+    expect(within(sheet).getByText('uid:user-1')).toBeTruthy();
+  });
+
+  it('the basic-card trigger does not also toggle the card open (stopPropagation)', () => {
+    useNexusInsights.mockReturnValue(baseNexusReturn({ insights: [] }));
+    useBasicInsights.mockReturnValue(baseBasicReturn({ insights: [BASIC_INSIGHT], hasEnoughData: true }));
+    render(<InsightsPage entries={ENTRIES} userId="user-1" user={{ uid: 'user-1' }} />);
+
+    fireEvent.click(screen.getByLabelText('Why am I seeing this?'));
+    // No "N entries" expand toggle exists for this fixture (no entryIds
+    // affordance rendered beyond the trigger) — the safest signal is that
+    // the sheet, not an expanded card, is what appeared, and nothing crashed.
     expect(screen.getByTestId('receipt-sheet-stub')).toBeTruthy();
   });
 });

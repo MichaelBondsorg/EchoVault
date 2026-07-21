@@ -287,6 +287,7 @@ const InsightsPage = ({
         lastGenerated={basicLastGenerated}
         onRefresh={regenerateBasic}
         userId={userId}
+        onWhyThis={handleShowReceipt}
       />
 
       {/* Today's Recommendations */}
@@ -1179,7 +1180,8 @@ const QuickInsightsSection = ({
   entriesNeeded,
   lastGenerated,
   onRefresh,
-  userId
+  userId,
+  onWhyThis
 }) => {
   const [expandedInsight, setExpandedInsight] = useState(null);
   const [showAllEntries, setShowAllEntries] = useState(new Set());
@@ -1494,8 +1496,29 @@ const QuickInsightsSection = ({
               transition={{ delay: index * 0.05 }}
             >
               <div className="p-3 flex items-start gap-3">
-                <div className={`p-1.5 rounded-lg ${style.bg}`}>
-                  <Icon size={14} className={style.color} />
+                <div className="flex flex-col items-center gap-1">
+                  <div className={`p-1.5 rounded-lg ${style.bg}`}>
+                    <Icon size={14} className={style.color} />
+                  </div>
+                  {/* R2 Task 11: "Why am I seeing this?" — every basic
+                      insight carries a `.receipt` (verified in
+                      basicInsightsOrchestrator.receipts.test.js), so the
+                      trigger lives in the card header/icon region here
+                      rather than the hand-tuned feedback/export row below
+                      (its geometry is load-bearing and stays untouched).
+                      20px visual box + before:-inset-3 (12px/side) = 44px,
+                      same painted+inset formula as Chip.jsx. */}
+                  {onWhyThis && getFlag('insightReceipts') && (
+                    <button
+                      type="button"
+                      onClick={(e) => { e.stopPropagation(); onWhyThis(insight, e); }}
+                      aria-label="Why am I seeing this?"
+                      title="Why am I seeing this?"
+                      className="relative flex min-h-[20px] min-w-[20px] items-center justify-center rounded-full text-muted-foreground hover:text-secondary-foreground transition-colors before:absolute before:-inset-3 before:content-['']"
+                    >
+                      <Info size={12} aria-hidden="true" />
+                    </button>
+                  )}
                 </div>
                 <div className="flex-1 min-w-0">
                   <p className="text-sm text-secondary-foreground leading-relaxed">

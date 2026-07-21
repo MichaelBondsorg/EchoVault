@@ -210,17 +210,81 @@ describe('ReceiptSheet — tap a source row to expand full entry text', () => {
 });
 
 describe('ReceiptSheet — distinct repair actions call the exact service with exact payloads', () => {
-  it('"Not true" calls recordFeedbackAndLearn(uid, \'inaccurate\', citedEntries)', async () => {
+  // recordFeedbackAndLearn (src/services/basicInsights/feedbackLearning.js)
+  // destructures its SECOND argument as an object — `{ insightId, category,
+  // moodDelta, activityKey, themeKey, peopleKey, entryIds }` — and derives
+  // `patternType` from those fields. A bare string there (the previous
+  // implementation) yields `patternType === undefined`, which throws
+  // inside Firestore's `doc()` and is silently swallowed, so nothing is
+  // ever recorded even though the caller believes it succeeded. These
+  // tests assert the real, working contract.
+  it('"Not true" calls recordFeedbackAndLearn(uid, feedbackObject, citedEntries) with insightId/feedback/entryIds', async () => {
     const onFeedback = vi.fn();
     renderSheet({ onFeedback });
     fireEvent.click(screen.getByText('Not true'));
 
     await vi.waitFor(() => expect(recordFeedbackAndLearn).toHaveBeenCalledTimes(1));
-    expect(recordFeedbackAndLearn).toHaveBeenCalledWith(UID, 'inaccurate', [
-      entriesById.e1,
-      { id: 'e2', entryId: 'e2', date: baseReceipt.sources[1].date, excerpt: baseReceipt.sources[1].excerpt },
-    ]);
+    expect(recordFeedbackAndLearn).toHaveBeenCalledWith(
+      UID,
+      {
+        insightId: 'insight-1',
+        feedback: 'inaccurate',
+        entryIds: ['e1', 'e2'],
+      },
+      [
+        entriesById.e1,
+        { id: 'e2', entryId: 'e2', date: baseReceipt.sources[1].date, excerpt: baseReceipt.sources[1].excerpt },
+      ]
+    );
     await vi.waitFor(() => expect(onFeedback).toHaveBeenCalledWith('not_true'));
+  });
+
+  it('"Not true" includes activityKey/themeKey/peopleKey/category/moodDelta/sampleSize when the insight carries them', async () => {
+    renderSheet({
+      insight: {
+        ...baseInsight,
+        activityKey: 'yoga',
+        themeKey: 'gratitude',
+        peopleKey: 'partner',
+        category: 'activity',
+        moodDelta: 12,
+        sampleSize: 9,
+      },
+    });
+    fireEvent.click(screen.getByText('Not true'));
+
+    await vi.waitFor(() => expect(recordFeedbackAndLearn).toHaveBeenCalledTimes(1));
+    expect(recordFeedbackAndLearn).toHaveBeenCalledWith(
+      UID,
+      expect.objectContaining({
+        insightId: 'insight-1',
+        feedback: 'inaccurate',
+        entryIds: ['e1', 'e2'],
+        activityKey: 'yoga',
+        themeKey: 'gratitude',
+        peopleKey: 'partner',
+        category: 'activity',
+        moodDelta: 12,
+        sampleSize: 9,
+      }),
+      expect.any(Array)
+    );
+  });
+
+  it('"Not true" only reports success (onFeedback) when recordFeedbackAndLearn actually recorded something', async () => {
+    // recordFeedbackAndLearn returns null on any internal failure (bad
+    // patternType, Firestore error, ...) — silently claiming success on a
+    // null result is exactly the bug this guard closes.
+    recordFeedbackAndLearn.mockResolvedValueOnce(null);
+    const onFeedback = vi.fn();
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    renderSheet({ onFeedback });
+    fireEvent.click(screen.getByText('Not true'));
+
+    await vi.waitFor(() => expect(recordFeedbackAndLearn).toHaveBeenCalledTimes(1));
+    expect(onFeedback).not.toHaveBeenCalledWith('not_true');
+    expect(errorSpy).toHaveBeenCalled();
+    errorSpy.mockRestore();
   });
 
   it('"Not useful" calls recordInsightEngagement(uid, insight, \'dismissed\')', async () => {
@@ -265,6 +329,24 @@ describe('ReceiptSheet — distinct repair actions call the exact service with e
       { __db: true },
       UID,
       { entryId: 'e1', appliesTo: 'activity_exercise', reason: 'wrong_source' }
+    );
+  });
+
+  it('falls back to \'unspecified\' when no keyword matches and the insight has no type', async () => {
+    // patternTypeOf's last-resort floor (ReceiptSheet.jsx) — `'unspecified'`
+    // only shows up when extractPatternTypeFromInsight finds no keyword
+    // AND insight.type is also absent. Base insight's text already matches
+    // no keyword (proven by the fallback-to-type test above); dropping
+    // `type` too exercises the final branch.
+    const { type, ...insightWithoutType } = baseInsight;
+    renderSheet({ insight: insightWithoutType });
+    fireEvent.click(screen.getAllByText('Wrong source')[0]);
+
+    await vi.waitFor(() => expect(excludeSource).toHaveBeenCalledTimes(1));
+    expect(excludeSource).toHaveBeenCalledWith(
+      { __db: true },
+      UID,
+      { entryId: 'e1', appliesTo: 'unspecified', reason: 'wrong_source' }
     );
   });
 
@@ -333,5 +415,24 @@ describe('ReceiptSheet — closed / missing-receipt states', () => {
   it('does not crash when insight has no receipt yet', () => {
     renderSheet({ insight: { ...baseInsight, receipt: null }, open: true });
     expect(screen.queryByText('Why am I seeing this?')).toBeNull();
+  });
+});
+
+describe('ReceiptSheet — 44px tap targets (Chip.jsx pattern: min-height + before:-inset)', () => {
+  // jsdom can't measure layout, so this asserts class presence — the same
+  // painted+inset formula documented on Chip.jsx (min-h-[28px] + inset-2
+  // 8px/side = 44px) must be present on both per-source repair actions.
+  it('"Wrong source" carries min-h-[28px] and before:-inset-2', () => {
+    renderSheet();
+    const button = screen.getAllByText('Wrong source')[0];
+    expect(button.className).toContain('min-h-[28px]');
+    expect(button.className).toContain('before:-inset-2');
+  });
+
+  it('"Exclude source" carries min-h-[28px] and before:-inset-2', () => {
+    renderSheet();
+    const button = screen.getAllByText('Exclude source')[0];
+    expect(button.className).toContain('min-h-[28px]');
+    expect(button.className).toContain('before:-inset-2');
   });
 });

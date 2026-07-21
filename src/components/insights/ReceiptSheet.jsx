@@ -169,6 +169,42 @@ function citedEntriesFromReceipt(receipt, entriesById) {
 
 const RECOMPUTE_COPY = 'This will recompute affected insights.';
 
+/**
+ * Builds the `feedback` object `recordFeedbackAndLearn` actually expects
+ * (`src/services/basicInsights/feedbackLearning.js`, which destructures its
+ * SECOND argument as `{ insightId, category, moodDelta, activityKey,
+ * themeKey, peopleKey, entryIds }` and derives `patternType` from those
+ * fields — a bare string there yields `patternType === undefined`, which
+ * throws inside Firestore's `doc()` and gets silently swallowed, so nothing
+ * is ever recorded). Mirrors the construction already proven correct at
+ * `InsightsPage.jsx`'s `handleFeedback` (`feedbackData`), adapted to what
+ * a receipt has on hand: `entryIds` comes from the cited entries actually
+ * shown in this sheet (the receipt's sources), not `insight.entryIds`,
+ * since Nexus insights don't carry that field. Optional keys are omitted
+ * entirely rather than sent as `undefined` when the insight doesn't carry
+ * them, so `patternType`'s own fallback chain in `recordFeedbackAndLearn`
+ * (activityKey -> themeKey -> peopleKey -> insightId -> category) behaves
+ * exactly as it does for InsightsPage's own basic-insight feedback.
+ */
+function feedbackDataFor(insight, citedEntries) {
+  const entryIds = citedEntries
+    .map((entry) => entry?.id || entry?.entryId)
+    .filter(Boolean);
+
+  const data = {
+    insightId: insight?.id,
+    feedback: 'inaccurate',
+    entryIds,
+  };
+  if (insight?.activityKey) data.activityKey = insight.activityKey;
+  if (insight?.themeKey) data.themeKey = insight.themeKey;
+  if (insight?.peopleKey) data.peopleKey = insight.peopleKey;
+  if (insight?.category) data.category = insight.category;
+  if (typeof insight?.moodDelta === 'number') data.moodDelta = insight.moodDelta;
+  if (typeof insight?.sampleSize === 'number') data.sampleSize = insight.sampleSize;
+  return data;
+}
+
 const ReceiptSheet = ({
   insight,
   entriesById = {},
@@ -196,8 +232,17 @@ const ReceiptSheet = ({
     setBusy(true);
     try {
       const citedEntries = citedEntriesFromReceipt(receipt, entriesById);
-      await recordFeedbackAndLearn(uid, 'inaccurate', citedEntries);
-      onFeedback?.('not_true');
+      const feedbackData = feedbackDataFor(insight, citedEntries);
+      const result = await recordFeedbackAndLearn(uid, feedbackData, citedEntries);
+      // recordFeedbackAndLearn returns null on any failure (bad patternType,
+      // Firestore error, ...) — only report success to the caller when the
+      // write actually happened. Reporting success on a silent no-op is
+      // exactly the bug this fix closes.
+      if (result != null) {
+        onFeedback?.('not_true');
+      } else {
+        console.error('[ReceiptSheet] "Not true" feedback was not recorded (recordFeedbackAndLearn returned null)');
+      }
     } finally {
       setBusy(false);
     }
@@ -358,7 +403,7 @@ const ReceiptSheet = ({
                                 type="button"
                                 onClick={() => handleWrongSource(source.entryId)}
                                 disabled={busy}
-                                className="relative text-xs font-medium text-accent-deep before:absolute before:-inset-2 before:content-[''] disabled:opacity-50"
+                                className="relative inline-flex min-h-[28px] items-center text-xs font-medium text-accent-deep before:absolute before:-inset-2 before:content-[''] disabled:opacity-50"
                               >
                                 Wrong source
                               </button>
@@ -366,7 +411,7 @@ const ReceiptSheet = ({
                                 type="button"
                                 onClick={() => setConfirmEntryId(source.entryId)}
                                 disabled={busy}
-                                className="relative text-xs font-medium text-muted-foreground before:absolute before:-inset-2 before:content-[''] disabled:opacity-50"
+                                className="relative inline-flex min-h-[28px] items-center text-xs font-medium text-muted-foreground before:absolute before:-inset-2 before:content-[''] disabled:opacity-50"
                               >
                                 Exclude source
                               </button>

@@ -125,4 +125,13 @@ describe('NexusInsightsWidget — insightReceipts flag ON', () => {
     fireEvent.click(screen.getByText('AI Insights'));
     expect(navigate).toHaveBeenCalledWith('/insights');
   });
+
+  it('the trigger carries min-h-[28px] and before:-inset-2 (Chip.jsx 44px painted+inset pattern)', () => {
+    // Text-[11px] + before:-inset-2 alone paints well under 44px; the
+    // review found this half of the Chip pattern dropped here.
+    render(<NexusInsightsWidget user={USER} entries={ENTRIES} />);
+    const trigger = screen.getByText('Why am I seeing this?');
+    expect(trigger.className).toContain('min-h-[28px]');
+    expect(trigger.className).toContain('before:-inset-2');
+  });
 });
