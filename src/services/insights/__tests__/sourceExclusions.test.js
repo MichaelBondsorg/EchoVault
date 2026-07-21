@@ -14,6 +14,9 @@ const mocks = {
   addDoc: vi.fn(async () => ({ id: 'excl-1' })),
   deleteDoc: vi.fn(async () => {}),
   getDocs: vi.fn(async () => ({ docs: [], forEach: () => {} })),
+  query: vi.fn((col, ...clauses) => ({ __col: col, __clauses: clauses })),
+  where: vi.fn((field, op, value) => ({ __where: [field, op, value] })),
+  limit: vi.fn((n) => ({ __limit: n })),
 };
 
 vi.mock('../../../config/firebase', () => mocks);
@@ -88,6 +91,23 @@ describe('excludeSource', () => {
     await excludeSource(db, UID, { entryId: 'entry-1', reason: 'wrong_source' });
     expect(resolved).toBe(true);
   });
+
+  it('is idempotent per (entryId, appliesTo): excluding the same entry twice creates exactly one doc and returns the existing id on the second call', async () => {
+    // First call: no existing exclusion -> addDoc creates 'excl-1'.
+    mocks.getDocs.mockResolvedValueOnce(docsSnapshot([]));
+    const first = await excludeSource(db, UID, { entryId: 'entry-1', reason: 'wrong_source' });
+    expect(first.id).toBe('excl-1');
+
+    // Second call: the duplicate-check query now finds the doc created above.
+    mocks.getDocs.mockResolvedValueOnce(docsSnapshot([
+      { id: 'excl-1', entryId: 'entry-1', appliesTo: 'all', reason: 'wrong_source', permanent: true, createdAt: '2026-07-20T00:00:00.000Z' },
+    ]));
+    const second = await excludeSource(db, UID, { entryId: 'entry-1', reason: 'wrong_source' });
+
+    expect(second.id).toBe('excl-1');
+    expect(mocks.addDoc).toHaveBeenCalledTimes(1); // NOT called again on the second, duplicate call
+    expect(onSourcesChanged).toHaveBeenCalledTimes(1); // nothing changed on the second call, so no fan-out
+  });
 });
 
 describe('restoreSource', () => {
@@ -96,6 +116,19 @@ describe('restoreSource', () => {
     expect(mocks.doc).toHaveBeenCalledWith(db, EXCLUSIONS_PATH, 'excl-1');
     expect(mocks.deleteDoc).toHaveBeenCalledTimes(1);
     expect(onSourcesChanged).toHaveBeenCalledWith(db, UID);
+  });
+
+  it('resolves without throwing for a nonexistent exclusionId (deleteDoc is a Firestore no-op) and still fans out staleness', async () => {
+    // Firestore's deleteDoc resolves successfully even when the target doc
+    // does not exist (or was already deleted) — it does not reject/throw.
+    mocks.deleteDoc.mockResolvedValueOnce(undefined);
+    await expect(restoreSource(db, UID, 'does-not-exist')).resolves.toBeUndefined();
+    expect(mocks.doc).toHaveBeenCalledWith(db, EXCLUSIONS_PATH, 'does-not-exist');
+    // Current behavior: restoreSource always fans out staleness after the
+    // delete call, regardless of whether a doc actually existed — a no-op
+    // delete still triggers a harmless recompute/invalidation.
+    expect(onSourcesChanged).toHaveBeenCalledWith(db, UID);
+    expect(onSourcesChanged).toHaveBeenCalledTimes(1);
   });
 });
 

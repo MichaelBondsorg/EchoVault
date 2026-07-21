@@ -81,6 +81,14 @@
         { "fieldPath": "spaceId", "order": "ASCENDING" },
         { "fieldPath": "createdAt", "order": "DESCENDING" }
       ]
+    },
+    {
+      "collectionGroup": "source_exclusions",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "entryId", "order": "ASCENDING" },
+        { "fieldPath": "appliesTo", "order": "ASCENDING" }
+      ]
     }
   ],
   "fieldOverrides": []

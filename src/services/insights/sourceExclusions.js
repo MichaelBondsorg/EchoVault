@@ -11,6 +11,12 @@
  * Storage: artifacts/{APP}/users/{uid}/source_exclusions/{id}
  *   {entryId, appliesTo, reason, permanent:true, createdAt}
  *
+ * `excludeSource` is idempotent per (entryId, appliesTo) — see its own
+ * doc comment. The duplicate-check query (entryId==, appliesTo==, limit 1)
+ * has an explicit composite index in firestore.indexes.json, matching the
+ * codebase's precedent for `intentClient.js#subscribeSuggestedIntentsForEntry`
+ * (entryId==, state==, no orderBy) which ships the same way.
+ *
  * firestore.rules: owner create/read/delete, NO update — deleting the doc
  * IS the "restore" action (a client can never edit an exclusion in place).
  * `reason` must be 'wrong_source' | 'excluded_by_user'; `permanent` must be
@@ -22,7 +28,7 @@
  * AWAIT it before resolving, per the PRD's "stale within 10 seconds"
  * acceptance criterion.
  */
-import { collection, doc, addDoc, deleteDoc, getDocs } from '../../config/firebase';
+import { collection, doc, addDoc, deleteDoc, getDocs, query, where, limit } from '../../config/firebase';
 import { APP_COLLECTION_ID } from '../../config/constants';
 import { onSourcesChanged } from './recompute';
 
@@ -35,6 +41,14 @@ function exclusionsPath(uid) {
 /**
  * Exclude an entry from future insight/report generation.
  *
+ * Idempotent per (entryId, appliesTo): if an exclusion already exists for
+ * this exact pair, the existing doc's id is returned as-is — no duplicate
+ * doc is created and no staleness fan-out fires (nothing actually changed).
+ * This matters because `restoreSource` deletes by exclusionId; without this
+ * guard, excluding the same entry twice would create two docs, and deleting
+ * only one of them (the id the caller happens to hold) would leave the
+ * entry silently still excluded.
+ *
  * @param {object} db
  * @param {string} uid
  * @param {{entryId: string, appliesTo?: string, reason: 'wrong_source'|'excluded_by_user'}} params
@@ -46,6 +60,18 @@ export async function excludeSource(db, uid, { entryId, appliesTo = 'all', reaso
   }
   if (!VALID_REASONS.includes(reason)) {
     throw new Error(`excludeSource: reason must be one of ${VALID_REASONS.join(', ')}`);
+  }
+
+  const existingQuery = query(
+    collection(db, exclusionsPath(uid)),
+    where('entryId', '==', entryId),
+    where('appliesTo', '==', appliesTo),
+    limit(1),
+  );
+  const existingSnap = await getDocs(existingQuery);
+  if (existingSnap.docs.length > 0) {
+    const existingDoc = existingSnap.docs[0];
+    return { id: existingDoc.id, ...existingDoc.data() };
   }
 
   const payload = {
