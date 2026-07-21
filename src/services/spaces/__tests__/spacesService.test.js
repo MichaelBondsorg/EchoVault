@@ -265,6 +265,24 @@ describe('reassignEntriesSpace', () => {
     expect(mocks.writeBatch).not.toHaveBeenCalled();
     expect(total).toBe(0);
   });
+
+  it('short-circuits with zero queries/writes when fromSpaceId === toSpaceIdOrNull (self-reassign no-op guard)', async () => {
+    const total = await reassignEntriesSpace(db, UID, 'space-1', 'space-1', { batchSize: 5 });
+    expect(total).toBe(0);
+    expect(mocks.getDocs).not.toHaveBeenCalled();
+    expect(mocks.collection).not.toHaveBeenCalled();
+    expect(mocks.query).not.toHaveBeenCalled();
+    expect(mocks.where).not.toHaveBeenCalled();
+    expect(mocks.limit).not.toHaveBeenCalled();
+    expect(mocks.writeBatch).not.toHaveBeenCalled();
+  });
+
+  it('short-circuits when both fromSpaceId and toSpaceIdOrNull are null (null-safe strict equality)', async () => {
+    const total = await reassignEntriesSpace(db, UID, null, null, { batchSize: 5 });
+    expect(total).toBe(0);
+    expect(mocks.getDocs).not.toHaveBeenCalled();
+    expect(mocks.writeBatch).not.toHaveBeenCalled();
+  });
 });
 
 describe('getLastCaptureSpaceId', () => {

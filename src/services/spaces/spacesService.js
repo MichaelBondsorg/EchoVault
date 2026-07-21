@@ -143,6 +143,18 @@ export async function archiveSpace(db, uid, id) {
  * state (active or archived). Never fires automatically — callers must only
  * invoke this from that explicit entry point.
  *
+ * NOT wrapped in `runTransaction`: the modular Firestore Web SDK's
+ * `Transaction.get()` only accepts a `DocumentReference` (see
+ * `@firebase/firestore/dist/index.d.ts`), not a `Query`/`CollectionReference`
+ * — so the "is this collection empty" check this function needs cannot run
+ * inside a transaction at all. The check-then-write here is therefore
+ * inherently racy across concurrent calls (two simultaneous "open Space
+ * management for the first time" calls could both see zero docs and both
+ * seed), same as `firestore.rules` can enforce structurally (docs
+ * hasOnly(...)) but not exclusively. Acceptable: this only runs from a
+ * single explicit, rare, user-initiated entry point, and duplicate starter
+ * spaces are a minor annoyance (renameable/archivable), not data loss.
+ *
  * @param {object} db
  * @param {string} uid
  * @returns {Promise<number>} count of spaces created (0 or 4)
@@ -179,6 +191,16 @@ export async function seedStarterSpaces(db, uid) {
  * @returns {Promise<number>} total entries updated
  */
 export async function reassignEntriesSpace(db, uid, fromSpaceId, toSpaceIdOrNull, { batchSize = 200 } = {}) {
+  // Guard: a self-reassign (from === to, null-safe via strict equality) would
+  // write {spaceId: fromSpaceId, ...} onto docs that already match
+  // where('spaceId','==',fromSpaceId) — a no-op update that never removes
+  // them from the next page's filter, so the loop below would run forever
+  // (and re-write the same docs) once matches >= batchSize. Short-circuit
+  // before any query/write.
+  if (fromSpaceId === toSpaceIdOrNull) {
+    return 0;
+  }
+
   let total = 0;
 
   // eslint-disable-next-line no-constant-condition
