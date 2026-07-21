@@ -301,8 +301,16 @@ export const findEntriesByTag = (entries, tagPrefix) => {
  *   FIRST, before any semantic/tag/recent candidate selection, so a
  *   Work-scoped call can never surface a Personal-space or unscoped entry.
  *   null (default) is identity — legacy, unscoped behavior.
+ * @param {{returnIds?: boolean}} [options] - R2 Task 16 addition. Default
+ *   `returnIds: false` preserves the original return shape (the relevant
+ *   entries array itself) byte-for-byte, so every existing caller (today:
+ *   only `askJournalAI` below) is unaffected. Pass `{returnIds: true}` to
+ *   additionally get the entry ids back without re-deriving them —
+ *   `runRecipe.js` needs real source ids for its receipt-carrying blocks
+ *   and this avoids a second pass over the result.
+ * @returns {Promise<Array|{context: Array, entryIds: string[]}>}
  */
-export const getSmartChatContext = async (entries, question, questionEmbedding, scope = null) => {
+export const getSmartChatContext = async (entries, question, questionEmbedding, scope = null, { returnIds = false } = {}) => {
   const scopedEntries = filterEntriesByScope(entries, scope);
 
   let semanticMatches = [];
@@ -347,7 +355,11 @@ export const getSmartChatContext = async (entries, question, questionEmbedding, 
     }
   });
 
-  return Array.from(allMatches.values()).slice(0, 20);
+  const relevantEntries = Array.from(allMatches.values()).slice(0, 20);
+  if (returnIds) {
+    return { context: relevantEntries, entryIds: relevantEntries.map((e) => e.id) };
+  }
+  return relevantEntries;
 };
 
 /**
@@ -450,9 +462,23 @@ ${entriesContext}`,
  * @param {{spaceId: string}|null} [scope] - Context Space scope, threaded
  *   through to getSmartChatContext, which applies it FIRST (before
  *   semantic/tag/recent candidate selection). null (default) is identity.
+ * @param {{returnSources?: boolean}} [options] - R2 Task 16 addition.
+ *   Default `returnSources: false` preserves the original return shape (a
+ *   plain string response, or `null` on failure) byte-for-byte. Pass
+ *   `{returnSources: true}` to additionally get back the source entry ids
+ *   `getSmartChatContext` actually used — `runRecipe.js` needs both the
+ *   answer text AND its receipts per question. This is deliberately a
+ *   passthrough on `askJournalAI` itself (not a second, separate call into
+ *   `getSmartChatContext` from the caller) so `runRecipe` doesn't
+ *   re-implement the context-formatting / callable-invocation / error
+ *   handling that already lives here — see task-16-report.md "seam choice".
  */
-export const askJournalAI = async (entries, question, questionEmbedding = null, scope = null) => {
-  const relevantEntries = await getSmartChatContext(entries, question, questionEmbedding, scope);
+export const askJournalAI = async (entries, question, questionEmbedding = null, scope = null, { returnSources = false } = {}) => {
+  const contextResult = returnSources
+    ? await getSmartChatContext(entries, question, questionEmbedding, scope, { returnIds: true })
+    : await getSmartChatContext(entries, question, questionEmbedding, scope);
+  const relevantEntries = returnSources ? contextResult.context : contextResult;
+  const entryIds = returnSources ? contextResult.entryIds : undefined;
 
   const context = relevantEntries.map(e => {
     const date = e.createdAt instanceof Date ? e.createdAt : e.createdAt?.toDate?.() || new Date();
@@ -469,9 +495,10 @@ export const askJournalAI = async (entries, question, questionEmbedding = null, 
       question,
       entriesContext: context
     });
-    return result.data.response;
+    const text = result.data.response;
+    return returnSources ? { text, entryIds } : text;
   } catch (e) {
     console.error('askJournalAI error:', e);
-    return null;
+    return returnSources ? { text: null, entryIds } : null;
   }
 };
