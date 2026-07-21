@@ -23,6 +23,7 @@ import EntryComposer from '../capture/EntryComposer';
 import CaptureReliabilityCenter from '../capture/CaptureReliabilityCenter';
 import CapturedToast from '../capture/CapturedToast';
 import PrivacyCenter from '../privacy/PrivacyCenter';
+import SpaceManager from '../spaces/SpaceManager';
 
 /**
  * AppLayout - Main application shell with Zen & Bento navigation
@@ -98,6 +99,7 @@ const AppLayout = ({
   const [showEntryModal, setShowEntryModal] = useState(false);
   const [showReliabilityCenter, setShowReliabilityCenter] = useState(false);
   const [showPrivacyCenter, setShowPrivacyCenter] = useState(false);
+  const [showSpaceManager, setShowSpaceManager] = useState(false);
   const [entryMode, setEntryMode] = useState('text'); // 'voice' or 'text'
   const [isFreshEntry, setIsFreshEntry] = useState(true); // true = FAB entry, false = responding to prompt
   const [currentPrompt, setCurrentPrompt] = useState(null); // Track prompt being answered for auto-dismiss
@@ -426,6 +428,7 @@ const AppLayout = ({
                 onOpenReports={onShowReports}
                 onOpenReliability={() => setShowReliabilityCenter(true)}
                 onOpenPrivacy={() => setShowPrivacyCenter(true)}
+                onOpenSpaces={() => setShowSpaceManager(true)}
                 onOpenSafetyPlan={onShowSafetyPlan}
                 onOpenExport={onShowExport}
                 onRequestNotifications={onRequestNotifications}
@@ -537,6 +540,13 @@ const AppLayout = ({
             if (aiProcessingEnabled) await onRevokeAiConsent?.();
             else onRequestAiConsent?.();
           }}
+        />
+      )}
+
+      {showSpaceManager && (
+        <SpaceManager
+          uid={user?.uid}
+          onClose={() => setShowSpaceManager(false)}
         />
       )}
 

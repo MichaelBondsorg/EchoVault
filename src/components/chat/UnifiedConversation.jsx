@@ -31,11 +31,13 @@ import {
   Heart,
   Brain,
   Loader2,
-  Phone
+  Phone,
+  Tag
 } from 'lucide-react';
 
 // Hooks
 import { useVoiceRelay } from '../../hooks/useVoiceRelay';
+import { useDismissablePopover } from '../../hooks/useDismissablePopover';
 
 // Services
 import { callOpenAI, generateEmbedding, transcribeAudio } from '../../services/ai';
@@ -46,6 +48,9 @@ import {
 } from '../../services/rag/companionContext';
 import { getMemoryGraph } from '../../services/memory';
 import { getSessionBuffer, setSessionBuffer } from '../../services/memory/sessionBuffer';
+import { getFlag } from '../../config/flags';
+import { db } from '../../config/firebase';
+import { subscribeSpaces, getLastCaptureSpaceId } from '../../services/spaces/spacesService';
 import {
   GUIDED_SESSIONS,
   getRecommendedSessions,
@@ -62,7 +67,7 @@ import {
 import MarkdownLite from '../ui/MarkdownLite';
 import VoiceRecorder from '../input/VoiceRecorder';
 import BreathingExercise from '../shelter/BreathingExercise';
-import { SectionLabel, Button } from '../cloud';
+import { SectionLabel, Button, Chip } from '../cloud';
 
 // Audio synthesis
 import { synthesizeSpeech } from '../../utils/audio';
@@ -129,6 +134,20 @@ const UnifiedConversation = ({
   // Mindfulness state
   const [selectedExercise, setSelectedExercise] = useState(null);
 
+  // Ask Journal scope (PRD R1 Context Spaces, plan task 11): scopes which
+  // entries getCompanionContext draws from. `null` means "All spaces"
+  // (identity — unscoped, legacy behavior). Michael's decision: no spaces ->
+  // default stays All and the chip is hidden entirely (zero UI change for
+  // users who haven't adopted spaces); has spaces -> default to the last
+  // capture Space, loaded once via getLastCaptureSpaceId. "All spaces" is
+  // always an explicit row in the selector regardless of the default.
+  const contextSpacesOn = getFlag('contextSpaces');
+  const [spaces, setSpaces] = useState([]);
+  const [scope, setScope] = useState(null); // {spaceId} | null
+  const scopeDefaultLoadedRef = useRef(false);
+  const [scopePickerOpen, setScopePickerOpen] = useState(false);
+  const scopePopoverRef = useDismissablePopover(scopePickerOpen, () => setScopePickerOpen(false));
+
   // Refs
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
@@ -153,6 +172,46 @@ const UnifiedConversation = ({
 
     loadMemory();
   }, [userId]);
+
+  // Context Space scope (flag: contextSpaces): subscribe to the owner's
+  // active spaces so the header chip/selector can list them.
+  useEffect(() => {
+    if (!contextSpacesOn || !userId) {
+      setSpaces([]);
+      return undefined;
+    }
+    return subscribeSpaces(db, userId, setSpaces);
+  }, [contextSpacesOn, userId]);
+
+  // Load the default scope ONCE per userId, after the first spaces
+  // subscription callback resolves: no spaces -> stays null/All (chip stays
+  // hidden regardless, see the render below); has spaces -> the last
+  // capture Space (falls back to All if nothing has ever been captured
+  // into a space).
+  useEffect(() => {
+    if (!contextSpacesOn || !userId || scopeDefaultLoadedRef.current) return;
+    if (spaces.length === 0) return;
+    let cancelled = false;
+    scopeDefaultLoadedRef.current = true;
+    getLastCaptureSpaceId(db, userId)
+      .then((lastId) => {
+        if (!cancelled) setScope(lastId ? { spaceId: lastId } : null);
+      })
+      .catch((e) => {
+        console.warn('[Spaces] failed to load default Ask Journal scope:', e?.message);
+      });
+    return () => { cancelled = true; };
+  }, [contextSpacesOn, userId, spaces]);
+
+  // Explicit scope selection (session-only — unlike EntryBar's capture
+  // pill, Ask Journal's scope choice is not persisted as the "last capture
+  // space"; it only affects this conversation's context retrieval).
+  const handleSelectScope = (spaceId) => {
+    setScope(spaceId ? { spaceId } : null);
+    setScopePickerOpen(false);
+  };
+
+  const selectedScopeSpace = spaces.find((s) => s.id === scope?.spaceId) || null;
 
   // Auto-scroll messages
   useEffect(() => {
@@ -276,6 +335,7 @@ const UnifiedConversation = ({
         queryEmbedding,
         entries,
         category,
+        scope,
         sessionBuffer
       });
 
@@ -1024,6 +1084,55 @@ const UnifiedConversation = ({
             )}
             {memoryLoading && (
               <p className="text-[11px] text-faint">Loading memories...</p>
+            )}
+            {/* Ask Journal scope chip (flag: contextSpaces) — hidden
+                entirely when the user has no spaces (Michael's decision:
+                zero UI change for non-adopters). "All spaces" is always an
+                explicit row so the answer's scope stays visibly stated. */}
+            {contextSpacesOn && mode === MODES.CHAT && spaces.length > 0 && (
+              <div className="relative mt-1 inline-block" ref={scopePopoverRef}>
+                <Chip
+                  as="button"
+                  type="button"
+                  onClick={() => setScopePickerOpen((open) => !open)}
+                  aria-haspopup="listbox"
+                  aria-expanded={scopePickerOpen}
+                  aria-label={selectedScopeSpace ? `Ask Journal scope: ${selectedScopeSpace.name}` : 'Ask Journal scope: All spaces'}
+                  className="text-[10px]"
+                >
+                  <Tag size={10} aria-hidden="true" />
+                  <span>{selectedScopeSpace ? selectedScopeSpace.name : 'All spaces'}</span>
+                </Chip>
+                {scopePickerOpen && (
+                  <div
+                    role="listbox"
+                    aria-label="Choose Ask Journal scope"
+                    className="absolute left-0 z-40 mt-1 min-w-[140px] rounded-xl border border-border bg-card p-1 shadow-soft-lg"
+                  >
+                    <button
+                      type="button"
+                      role="option"
+                      aria-selected={scope == null}
+                      onClick={() => handleSelectScope(null)}
+                      className={`block w-full rounded-lg px-2 py-1.5 text-left text-xs ${scope == null ? 'bg-accent-wash text-accent-deep' : 'text-secondary-foreground hover:bg-divider'}`}
+                    >
+                      All spaces
+                    </button>
+                    {spaces.map((space) => (
+                      <button
+                        key={space.id}
+                        type="button"
+                        role="option"
+                        aria-selected={scope?.spaceId === space.id}
+                        onClick={() => handleSelectScope(space.id)}
+                        className={`block w-full rounded-lg px-2 py-1.5 text-left text-xs ${scope?.spaceId === space.id ? 'bg-accent-wash text-accent-deep' : 'text-secondary-foreground hover:bg-divider'}`}
+                      >
+                        {space.name}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
             )}
           </div>
         </div>

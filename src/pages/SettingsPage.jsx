@@ -6,6 +6,7 @@ import {
 import BackfillPanel from '../components/settings/BackfillPanel';
 import { exportDiagnosticJSON, migrateEntriesForHealthEnrichment } from '../utils/diagnosticExport';
 import { db, deleteAccountFn } from '../config/firebase';
+import { getFlag } from '../config/flags';
 import { Card, CardRow, Chip, SectionLabel, Switch, Button } from '../components/cloud';
 import { initAccent, setAccent } from '../utils/accent';
 import { initDarkMode, cleanupDarkMode, toggleDarkMode } from '../utils/darkMode';
@@ -59,6 +60,7 @@ const SettingsPage = ({
   onOpenReports,
   onOpenReliability,
   onOpenPrivacy,
+  onOpenSpaces,
   onRequestNotifications,
   onLogout,
   notificationPermission,
@@ -234,6 +236,16 @@ const SettingsPage = ({
     onClick: notificationPermission !== 'granted' ? onRequestNotifications : null,
     badge: notificationPermission !== 'granted' ? 'Off' : null,
   };
+
+  // Context Spaces (flag: contextSpaces) — organize entries into spaces
+  // (Personal/Work/...) and scope Ask Journal to one. Flag-gated: this row
+  // (and the App-group Card it lives in) is filtered out entirely when off.
+  const contextSpacesItem = {
+    label: 'Context Spaces',
+    description: 'Organize entries into spaces and scope Ask Journal',
+    onClick: onOpenSpaces,
+  };
+  const appNavRows = [getFlag('contextSpaces') && contextSpacesItem, notificationsItem].filter(Boolean);
 
   // Shared row renderer for the simple label/description/chevron nav items
   // across HEALTH & DATA, AI & PRIVACY, and the APP section's Notifications
@@ -493,7 +505,7 @@ const SettingsPage = ({
               onCheckedChange={setBackgroundMotion}
             />
           </CardRow>
-          {renderNavRow(notificationsItem, true)}
+          {appNavRows.map((item, i) => renderNavRow(item, i === appNavRows.length - 1))}
         </Card>
       </div>
 
