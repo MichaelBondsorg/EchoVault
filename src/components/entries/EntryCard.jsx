@@ -10,6 +10,7 @@ import { safeString, formatMentions } from '../../utils/string';
 import { formatDateForInput, getTodayForInput, parseDateInput, getDateString } from '../../utils/date';
 import { accentForMood } from '../../utils/moodTrend';
 import ProvenanceDisclosure from '../ui/ProvenanceDisclosure';
+import IntentSuggestionTray from './IntentSuggestionTray';
 
 // Entity tag emoji lookup (hoisted for performance - used in tag rendering)
 const ENTITY_EMOJIS = {
@@ -776,6 +777,9 @@ const EntryCard = ({ entry, onDelete, onUpdate }) => {
           </div>
         </div>
       )}
+
+      <IntentSuggestionTray entryId={entry.id} />
+
       <ProvenanceDisclosure entry={entry} />
     </motion.div>
   );
