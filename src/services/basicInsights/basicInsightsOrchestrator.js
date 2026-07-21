@@ -35,6 +35,11 @@ import { THRESHOLDS, CATEGORIES } from './utils/thresholds';
 // Feedback learning
 import { filterInsightsByLearning } from './feedbackLearning';
 
+// Insight Receipts (R2 Task 8) — single seam: correlation modules already
+// produce `entryIds`; we wrap them into the shared receipt shape here
+// rather than touching each correlations/*.js file.
+import { buildReceipt, applyReceiptDefaults, sourceFromEntry, computeTimeWindow } from '../insights/receipts';
+
 /**
  * Get Firestore document reference for basic insights
  * @param {string} userId - User ID
@@ -42,6 +47,57 @@ import { filterInsightsByLearning } from './feedbackLearning';
  */
 const getInsightsRef = (userId) => {
   return doc(db, 'artifacts', APP_COLLECTION_ID, 'users', userId, 'basicInsights', 'current');
+};
+
+/**
+ * Attach a receipt to a single basic insight (R2 Task 8).
+ *
+ * Correlation insights (activity/people/time/category/themes/extended
+ * health) already carry `entryIds` — the exact entries their correlation
+ * was computed over — so those get a precise receipt. The pre-existing
+ * health/environment insights (from `healthCorrelations`/
+ * `environmentCorrelations`) don't expose entry ids, so they (and any
+ * insight whose `entryIds` end up empty after lookup) fall back to a
+ * window-level receipt over the full `entries` set, via the same
+ * `applyReceiptDefaults` Nexus uses — keeping the two insight surfaces'
+ * receipt semantics identical.
+ *
+ * Basic insights are all-spaces today (no Context Space wiring here yet),
+ * so `scope` is always null.
+ *
+ * @param {Object} insight
+ * @param {Map<string, Object>} entriesById
+ * @param {{start: string, end: string}} timeWindow
+ * @param {Array} allEntries - full entries set, for the fallback path
+ */
+const attachBasicInsightReceipt = (insight, entriesById, timeWindow, allEntries) => {
+  const generator = `basic_${insight.category || insight.source || 'unknown'}`;
+
+  if (insight.entryIds && insight.entryIds.length > 0) {
+    const sources = insight.entryIds
+      .map((id) => entriesById.get(id))
+      .filter(Boolean)
+      .map(sourceFromEntry)
+      .filter(Boolean);
+
+    return {
+      ...insight,
+      receipt: buildReceipt({
+        sources,
+        scope: null,
+        timeWindow,
+        sampleSize: insight.sampleSize ?? insight.entryIds.length,
+        generator
+      })
+    };
+  }
+
+  return applyReceiptDefaults(insight, {
+    windowEntries: allEntries,
+    scope: null,
+    timeWindow,
+    generator
+  });
 };
 
 /**
@@ -146,9 +202,21 @@ export const generateBasicInsights = async (userId, entries) => {
 
     console.log('[BasicInsights] Total raw insights:', allInsights.length);
 
+    // 8.5. Attach receipts (R2 Task 8). Correlation insights already carry
+    // `entryIds` (the exact entries their correlation was computed over) —
+    // wrap those into a real receipt; anything without entryIds (e.g. the
+    // pre-existing health/environment insights) falls back to a
+    // window-level receipt over the full `entries` set passed in. Single
+    // seam: no correlations/*.js file needs to change.
+    const basicInsightsTimeWindow = computeTimeWindow(30);
+    const entriesById = new Map(entries.map((e) => [e.id || e.entryId, e]));
+    const allInsightsWithReceipts = allInsights.map((insight) =>
+      attachBasicInsightReceipt(insight, entriesById, basicInsightsTimeWindow, entries)
+    );
+
     // 9. Apply feedback learning filter
     // This adjusts confidence and suppresses insights with poor accuracy
-    const insightsWithLearning = await filterInsightsByLearning(userId, allInsights, entries.length);
+    const insightsWithLearning = await filterInsightsByLearning(userId, allInsightsWithReceipts, entries.length);
 
     // Separate shown vs suppressed insights
     const shownInsights = insightsWithLearning.filter(i => i._showDecision?.show !== false);

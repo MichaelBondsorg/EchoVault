@@ -35,6 +35,9 @@ import { detectGaps } from './gapDetector';
 // Health data
 import { getWhoopSummary, getWhoopHistory, isWhoopLinked } from '../health/whoop';
 
+// Insight Receipts (R2 Task 8)
+import { buildReceipt, applyReceiptDefaults, sourceFromEntry, computeTimeWindow } from '../insights/receipts';
+
 // ============================================================
 // PATTERN DISPLAY HELPERS
 // ============================================================
@@ -328,6 +331,13 @@ export const generateInsights = async (userId, options = {}) => {
   const insights = [];
   const errors = [];
 
+  // Receipts (R2 Task 8): `scope` is threaded through to `fetchRecentEntries`
+  // and stamped onto every receipt built below. No current caller passes
+  // `options.scope` yet (Nexus stays all-spaces until a future task wires
+  // Context Spaces into Nexus itself) — this just makes that seam ready.
+  const scope = options.scope || null;
+  const timeWindow = computeTimeWindow(30);
+
   try {
     // ========== GATHER DATA ==========
 
@@ -350,7 +360,7 @@ export const generateInsights = async (userId, options = {}) => {
       beliefs,
       settings
     ] = await Promise.all([
-      fetchRecentEntries(userId, 30),
+      fetchRecentEntries(userId, 30, scope),
       getActiveThreads(userId),
       getBaselines(userId),
       whoopConnected ? getWhoopSummary().catch(() => null) : Promise.resolve(null),
@@ -603,6 +613,11 @@ export const generateInsights = async (userId, options = {}) => {
         .filter(p => p.mood.mean !== null && p.occurrences >= 3)
         .sort((a, b) => Math.abs(b.mood.mean - 0.5) - Math.abs(a.mood.mean - 0.5));
 
+      // entryId -> full entry lookup, used below to turn the exact entries a
+      // pattern/entity generator computed over into receipt sources (with
+      // date + excerpt), without re-fetching anything.
+      const entriesById = new Map(entries.map(e => [e.id, e]));
+
       // Add up to 2 simple pattern insights
       let patternCount = 0;
       for (const pattern of sortedPatterns) {
@@ -610,6 +625,17 @@ export const generateInsights = async (userId, options = {}) => {
 
         const patternInfo = getPatternDisplayInfo(pattern.patternId, pattern.mood.mean);
         if (patternInfo.hasContent) {
+          // Receipts (R2 Task 8): the exact entries this pattern was
+          // detected over live in `patterns.rawPatterns` (per-entry pattern
+          // hits from Layer 1, pre-aggregation) — filter to this pattern's
+          // id to get its real source set instead of falling back to the
+          // window-level receipt.
+          const matchingRaw = (patterns.rawPatterns || [])
+            .filter(rp => rp.patternId === pattern.patternId);
+          const patternSources = matchingRaw
+            .map(rp => sourceFromEntry(entriesById.get(rp.entryId) || { id: rp.entryId, date: rp.entryDate }))
+            .filter(Boolean);
+
           insights.push({
             id: `pattern_${pattern.patternId}`,
             type: 'pattern_correlation',
@@ -623,6 +649,13 @@ export const generateInsights = async (userId, options = {}) => {
                 averageMood: Math.round(pattern.mood.mean * 100)
               }
             },
+            receipt: buildReceipt({
+              sources: patternSources,
+              scope,
+              timeWindow,
+              sampleSize: pattern.occurrences,
+              generator: 'pattern_correlation'
+            }),
             priority: 3  // Lower priority than deep insights but always show some
           });
           patternCount++;
@@ -663,6 +696,13 @@ export const generateInsights = async (userId, options = {}) => {
                 moodDelta: correlation.moodDelta
               }
             },
+            receipt: buildReceipt({
+              sources: (correlation.matchingEntries || []).map(sourceFromEntry).filter(Boolean),
+              scope,
+              timeWindow,
+              sampleSize: correlation.mentionCount,
+              generator: 'entity_correlation'
+            }),
             priority: 3
           });
           entityCount++;
@@ -675,15 +715,26 @@ export const generateInsights = async (userId, options = {}) => {
     // Sort by priority
     insights.sort((a, b) => a.priority - b.priority);
 
+    // Receipts (R2 Task 8): pattern_correlation/entity_correlation insights
+    // above already attached a precise receipt over their real source set.
+    // Everything else (Layer 3 synthesis/meta/belief, Layer 4
+    // intervention/counterfactual, calibration) falls back here to a
+    // window-level receipt over the full 30-day `entries` window. This is
+    // the final pass that guarantees the PRD's 100%-receipts invariant:
+    // every insight that reaches `active` has a truthy `.receipt`.
+    const insightsWithReceipts = insights.map(insight =>
+      applyReceiptDefaults(insight, { windowEntries: entries, scope, timeWindow })
+    );
+
     // Save insights to Firestore
-    await saveInsights(userId, insights);
+    await saveInsights(userId, insightsWithReceipts);
 
     const duration = Date.now() - startTime;
-    console.log(`[Orchestrator] Generated ${insights.length} insights in ${duration}ms`);
+    console.log(`[Orchestrator] Generated ${insightsWithReceipts.length} insights in ${duration}ms`);
 
     return {
       success: true,
-      insights,
+      insights: insightsWithReceipts,
       gaps: gapResults,
       dataStatus,
       generatedAt: new Date().toISOString(),
@@ -836,13 +887,25 @@ const computeEntityMoodCorrelations = (entries) => {
             entityName,
             entityType: type,
             moods: [],
-            mentionCount: 0
+            mentionCount: 0,
+            // Receipts (R2 Task 8): the exact entries this entity was
+            // matched in, deduped per entry (an entry can match the same
+            // entity via more than one pattern source without being cited
+            // twice).
+            matchingEntries: [],
+            matchedEntryIds: new Set()
           });
         }
 
         const stats = entityStats.get(key);
         stats.moods.push(mood);
         stats.mentionCount++;
+
+        const entryRefId = entry.id || entry.entryId;
+        if (entryRefId && !stats.matchedEntryIds.has(entryRefId)) {
+          stats.matchedEntryIds.add(entryRefId);
+          stats.matchingEntries.push(entry);
+        }
       }
     }
   }
@@ -863,7 +926,8 @@ const computeEntityMoodCorrelations = (entries) => {
       mentionCount: stats.mentionCount,
       averageMood,
       baselineMood,
-      moodDelta
+      moodDelta,
+      matchingEntries: stats.matchingEntries
     });
   }
 
