@@ -327,5 +327,51 @@ describe('SettingsPage - Insight Budget Mode Selector', () => {
       expect(screen.getByText('Balanced')).toBeTruthy();
       expect(screen.getByText('Exploratory')).toBeTruthy();
     });
+
+    it('blocks mode changes while budget-mode is loading', async () => {
+      flagsModule.getFlag = vi.fn((flag) => flag === 'insightBudget' ? true : false);
+
+      // Create a deferred promise so we can keep budgetModeLoading=true
+      // while testing interaction attempts
+      let resolveLoadPromise;
+      const loadPromise = new Promise((resolve) => {
+        resolveLoadPromise = resolve;
+      });
+      insightBudgetService.readBudgetMode.mockReturnValueOnce(loadPromise);
+      insightBudgetService.setBudgetMode.mockResolvedValue();
+
+      render(<SettingsPage {...defaultProps} />);
+
+      // Row renders (will have disabled chips while promise pending)
+      expect(screen.getByText('Insight frequency')).toBeTruthy();
+
+      // While loading is in flight (promise unresolved), try to click a chip
+      const quietChip = screen.getByText('Quiet');
+      fireEvent.click(quietChip);
+
+      // setBudgetMode should NOT have been called (disabled prop prevents it)
+      expect(insightBudgetService.setBudgetMode).not.toHaveBeenCalled();
+
+      // Now resolve the loading promise
+      resolveLoadPromise('balanced');
+
+      // Wait for component to process the resolved value
+      await waitFor(() => {
+        const balancedChip = screen.getByText('Balanced');
+        // See comment in "highlights the current mode chip" test about className coupling.
+        expect(balancedChip.className).toContain('bg-accent-deep');
+      });
+
+      // Now clicking should work (no longer disabled)
+      fireEvent.click(quietChip);
+
+      await waitFor(() => {
+        expect(insightBudgetService.setBudgetMode).toHaveBeenCalledWith(
+          expect.any(Object),
+          'test-uid',
+          'quiet'
+        );
+      });
+    });
   });
 });
