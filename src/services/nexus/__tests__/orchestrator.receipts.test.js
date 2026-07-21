@@ -112,6 +112,15 @@ vi.mock('../layer4/recommendationEngine', () => ({
   ])),
 }));
 
+// Source Exclusions (R2 Task 10): generateInsights now reads exclusions
+// once at the top of its pipeline. Mocked here (empty Set = no exclusions)
+// so these Task 8 receipts tests stay focused on receipts, unaffected by
+// Task 10's wiring. Exclusion-honoring behavior itself is covered in
+// orchestrator.exclusions.test.js.
+vi.mock('../../insights/sourceExclusions', () => ({
+  getExcludedEntryIds: vi.fn(async () => new Set()),
+}));
+
 const { getDocs, setDoc } = await import('firebase/firestore');
 const { generateInsights } = await import('../orchestrator');
 

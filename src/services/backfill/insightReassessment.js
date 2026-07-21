@@ -32,6 +32,7 @@ import { detectPatternsInPeriod } from '../nexus/layer1/patternDetector';
 import { analyzeHealthMoodCorrelations } from '../health/healthMoodCorrelation';
 import { getWhoopHistory, isWhoopLinked } from '../health/whoop';
 import { generateInsights } from '../nexus/orchestrator';
+import { getExcludedEntryIds } from '../insights/sourceExclusions';
 
 export const REASSESSMENT_STEPS = {
   BASELINES: 'baselines',
@@ -70,8 +71,17 @@ export const triggerInsightReassessment = async (onProgress, signal) => {
   console.log('[InsightReassessment] Starting reassessment pipeline...');
 
   try {
+    // Source Exclusions (R2 Task 10): read once and thread through, same
+    // pattern as orchestrator.js's generateInsights. Deliberately NOT
+    // degraded to an empty Set on failure — fail-closed, matching the
+    // server-side reports consumer's `ExclusionsReadError` precedent — a
+    // failed read must not silently resurface an excluded entry. A failure
+    // here propagates to the outer catch below, which re-throws (unchanged
+    // existing behavior for this pipeline).
+    const excludedIds = await getExcludedEntryIds(db, user.uid);
+
     // Fetch all recent entries (now enriched with health/env data)
-    const entries = await fetchRecentEntries(user.uid, 90);
+    const entries = await fetchRecentEntries(user.uid, 90, excludedIds);
     console.log(`[InsightReassessment] Loaded ${entries.length} entries`);
 
     // Check Whoop connectivity and fetch history
@@ -395,9 +405,16 @@ const calculateThreadBiometrics = (entries) => {
 };
 
 /**
- * Fetch recent entries
+ * Fetch recent entries.
+ *
+ * @param {string} userId
+ * @param {number} [days]
+ * @param {Set<string>|null} [excludedIds] - Source exclusions (R2 Task 10),
+ *   applied after the Firestore fetch (this function has no scope filter of
+ *   its own, unlike orchestrator.js's `fetchRecentEntries`). Callers read
+ *   exclusions ONCE via `getExcludedEntryIds` and pass the Set here.
  */
-const fetchRecentEntries = async (userId, days = 30) => {
+export const fetchRecentEntries = async (userId, days = 30, excludedIds = null) => {
   const entriesRef = collection(
     db, 'artifacts', APP_COLLECTION_ID, 'users', userId, 'entries'
   );
@@ -409,7 +426,9 @@ const fetchRecentEntries = async (userId, days = 30) => {
   );
 
   const snapshot = await getDocs(q);
-  return snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+  const entries = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+  if (!excludedIds || excludedIds.size === 0) return entries;
+  return entries.filter((e) => !excludedIds.has(e.id));
 };
 
 /**

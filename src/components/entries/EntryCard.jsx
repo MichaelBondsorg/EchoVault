@@ -13,6 +13,7 @@ import { getFlag } from '../../config/flags';
 import { db } from '../../config/firebase';
 import { useUser } from '../../stores';
 import { subscribeSpaces } from '../../services/spaces/spacesService';
+import { onSourcesChanged } from '../../services/insights/recompute';
 import { useDismissablePopover } from '../../hooks/useDismissablePopover';
 import { Chip } from '../cloud';
 import SpacePicker from '../spaces/SpacePicker';
@@ -216,8 +217,20 @@ const EntryCard = ({ entry, onDelete, onUpdate }) => {
   // Re-scope this entry to a different Space (or clear it). ONLY spaceId +
   // updatedAt are ever written — createdAt/effectiveDate/transcription/
   // provenance are never touched by a Space change.
+  //
+  // A space move changes what scoped artifacts (Nexus insights, dashboard
+  // summaries, weekly digests) should contain, so it also fans out
+  // staleness (R2 Task 10) — same as excluding/restoring a source. Fired
+  // without blocking the UI (not awaited); errors are swallowed since a
+  // failed staleness fan-out shouldn't surface as a failed re-scope (the
+  // re-scope itself, via onUpdate, already went through).
   const handleSpaceSelect = (spaceId) => {
     onUpdate(entry.id, { spaceId, updatedAt: new Date().toISOString() });
+    if (uid) {
+      onSourcesChanged(db, uid).catch((e) => {
+        console.warn('[EntryCard] onSourcesChanged failed after space re-scope:', e);
+      });
+    }
     setSpacePickerOpen(false);
   };
 

@@ -11,6 +11,11 @@ vi.mock('../../../services/spaces/spacesService', () => ({
   subscribeSpaces: (...a) => subscribeSpaces(...a),
 }));
 
+const onSourcesChanged = vi.fn(async () => {});
+vi.mock('../../../services/insights/recompute', () => ({
+  onSourcesChanged: (...a) => onSourcesChanged(...a),
+}));
+
 // IntentSuggestionTray is rendered by EntryCard — stub its service so the
 // real module (which imports config/firebase) is never loaded.
 vi.mock('../../../services/intents/intentClient', () => ({
@@ -99,6 +104,18 @@ describe('EntryCard — Space chip display + re-scoping', () => {
     expect(payload.spaceId).toBe('space-1');
     expect(typeof payload.updatedAt).toBe('string');
     expect(Object.keys(payload).sort()).toEqual(['spaceId', 'updatedAt']);
+  });
+
+  it('selecting a space also fans out staleness via onSourcesChanged(db, uid) (R2 Task 10)', () => {
+    subscribeSpaces.mockImplementation((_db, _uid, cb) => {
+      cb([{ id: 'space-1', name: 'Work' }]);
+      return () => {};
+    });
+    render(<EntryCard entry={baseEntry()} onDelete={vi.fn()} onUpdate={vi.fn()} />);
+    fireEvent.click(screen.getByLabelText('Assign a space'));
+    fireEvent.click(screen.getByText('Work'));
+
+    expect(onSourcesChanged).toHaveBeenCalledWith({ __db: true }, 'user-1');
   });
 
   it('selecting "No space" clears spaceId to null via the same exact payload shape', () => {

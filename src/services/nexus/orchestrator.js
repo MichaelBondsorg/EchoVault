@@ -38,6 +38,12 @@ import { getWhoopSummary, getWhoopHistory, isWhoopLinked } from '../health/whoop
 // Insight Receipts (R2 Task 8)
 import { buildReceipt, applyReceiptDefaults, sourceFromEntry, computeTimeWindow } from '../insights/receipts';
 
+// Source Exclusions (R2 Task 10)
+import { getExcludedEntryIds } from '../insights/sourceExclusions';
+
+// Staleness (extracted, R2 Task 10 — see staleness.js for why)
+import { markInsightsStale } from './staleness';
+
 // ============================================================
 // PATTERN DISPLAY HELPERS
 // ============================================================
@@ -267,8 +273,15 @@ const needsRegeneration = (cached) => {
  *   AFTER the Firestore fetch. null (default) is identity — Nexus stays
  *   all-spaces in R1 (every current caller passes null/omits scope); this
  *   param exists so R2 can wire a scoped Nexus without another seam change.
+ * @param {Set<string>|null} [excludedIds] - Source exclusions (R2 Task 10),
+ *   applied AFTER the scope filter. Entries whose id is in this set are
+ *   dropped entirely — every downstream generator in `generateInsights`
+ *   reads from this same filtered array, so an excluded entry never feeds
+ *   patterns, correlations, synthesis, or receipts. Callers read exclusions
+ *   ONCE (via `getExcludedEntryIds`) and pass the resulting Set here rather
+ *   than this function re-reading them itself.
  */
-export const fetchRecentEntries = async (userId, days = 30, scope = null) => {
+export const fetchRecentEntries = async (userId, days = 30, scope = null, excludedIds = null) => {
   try {
     const entriesRef = collection(
       db, 'artifacts', APP_COLLECTION_ID, 'users', userId, 'entries'
@@ -282,7 +295,9 @@ export const fetchRecentEntries = async (userId, days = 30, scope = null) => {
 
     const snapshot = await getDocs(q);
     const entries = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-    return filterEntriesByScope(entries, scope);
+    const scoped = filterEntriesByScope(entries, scope);
+    if (!excludedIds || excludedIds.size === 0) return scoped;
+    return scoped.filter((e) => !excludedIds.has(e.id));
   } catch (error) {
     console.error('[Orchestrator] Failed to fetch entries:', error);
     return [];
@@ -339,6 +354,21 @@ export const generateInsights = async (userId, options = {}) => {
   const timeWindow = computeTimeWindow(30);
 
   try {
+    // Source Exclusions (R2 Task 10): read ONCE here and thread the
+    // resulting Set into `fetchRecentEntries` below — every generator in
+    // this function reads from that same filtered `entries` array, so a
+    // single read is sufficient (no per-generator re-read).
+    //
+    // Deliberately NOT wrapped in a try/catch that degrades to an empty
+    // Set: this mirrors the fail-closed precedent set for the server-side
+    // reports consumer (`functions/src/reports/generator.js`'s
+    // `ExclusionsReadError`) — a failed exclusions read must never
+    // silently produce insights as if no exclusions existed, since that
+    // could resurface an entry the user explicitly excluded. A failure
+    // here propagates to the outer try/catch below and generation reports
+    // `success: false` rather than risking a leak.
+    const excludedIds = await getExcludedEntryIds(db, userId);
+
     // ========== GATHER DATA ==========
 
     // Check Whoop connectivity
@@ -360,7 +390,7 @@ export const generateInsights = async (userId, options = {}) => {
       beliefs,
       settings
     ] = await Promise.all([
-      fetchRecentEntries(userId, 30, scope),
+      fetchRecentEntries(userId, 30, scope, excludedIds),
       getActiveThreads(userId),
       getBaselines(userId),
       whoopConnected ? getWhoopSummary().catch(() => null) : Promise.resolve(null),
@@ -1007,17 +1037,6 @@ const saveInsights = async (userId, insights) => {
     generatedAt: Timestamp.now(),
     expiresAt: Timestamp.fromMillis(Date.now() + 24 * 60 * 60 * 1000), // 24h
     stale: false
-  }, { merge: true });
-};
-
-const markInsightsStale = async (userId) => {
-  const insightRef = doc(
-    db, 'artifacts', APP_COLLECTION_ID, 'users', userId, 'nexus', 'insights'
-  );
-
-  await setDoc(insightRef, {
-    stale: true,
-    staleAt: Timestamp.now()
   }, { merge: true });
 };
 
