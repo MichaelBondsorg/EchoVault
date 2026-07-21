@@ -1,10 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Mic, Square, X, Loader2, Tag } from 'lucide-react';
+import { Mic, Square, X, Loader2, Tag, Bookmark } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
 import { CaptureService } from '../../services/capture/captureService';
 import { nativeCaptureAdapter } from '../../services/capture/nativeCaptureAdapter';
-import { appendChunk, deleteDraft, recoverWebDrafts } from '../../services/capture/webChunkStore';
+import { appendChunk, appendMarker, deleteDraft, recoverWebDrafts } from '../../services/capture/webChunkStore';
 import { restoreDraft, writeDraft, clearDraft } from '../../services/capture/draftAutosave';
 import { audioVault } from '../../services/audio/audioVault';
 import { getFlag } from '../../config/flags';
@@ -86,6 +86,8 @@ const EntryBar = ({
   const [spaces, setSpaces] = useState([]);
   const [spacePickerOpen, setSpacePickerOpen] = useState(false);
   const contextSpacesOn = getFlag('contextSpaces');
+  const voiceChaptersOn = getFlag('voiceChapters');
+  const [markerCount, setMarkerCount] = useState(0);
   const timerRef = useRef(null);
   const textInputRef = useRef(null);
   const shouldAutoStartVoice = useRef(false);
@@ -93,6 +95,16 @@ const EntryBar = ({
   const webChunkDraftIdRef = useRef(null);
   const webChunkSeqRef = useRef(0);
   const draftRestoredRef = useRef(false);
+  // Voice Chapters (flag: voiceChapters). recordingStartedAtRef is the clock
+  // markers are timed against — Date.now() at the moment recording actually
+  // started, deliberately separate from the 1s recordingSeconds UI counter
+  // (too coarse for a tap-accurate chapter timestamp). markersRef is the
+  // primary source for the stop() payload (kept in memory so a durable-write
+  // failure never loses a marker the user already saw counted); the IDB
+  // write in handleMarkChapter is the durability-at-tap layer for surviving
+  // a tab kill, not the payload's source of truth.
+  const recordingStartedAtRef = useRef(null);
+  const markersRef = useRef([]);
 
   // Use refs to always have the latest callbacks
   // This prevents stale closure issues during long recordings
@@ -239,6 +251,9 @@ const EntryBar = ({
       setRecording(true);
       setMode('recording');
       setRecordingSeconds(0);
+      recordingStartedAtRef.current = Date.now();
+      markersRef.current = [];
+      setMarkerCount(0);
       timerRef.current = setInterval(() => setRecordingSeconds((seconds) => seconds + 1), 1000);
       return;
     }
@@ -345,6 +360,20 @@ const EntryBar = ({
           // Use ref to get the latest callback, avoiding stale closure
           console.log('[Recording] Sending to transcription...');
           const persistedDraftId = webChunkDraftIdRef.current;
+          // Voice Chapters: markersRef is the source of truth for the stop()
+          // payload (durable-at-tap IDB writes are best-effort on top of
+          // this, not a prerequisite for it — see handleMarkChapter). Only
+          // threaded through when the flag is on and omitted entirely
+          // (no empty-array/0 stuffing) when there's nothing to report, so a
+          // flag-off or chapter-free recording's options are unchanged.
+          const chapterExtras = voiceChaptersOn
+            ? {
+                ...(markersRef.current.length ? { markers: [...markersRef.current] } : {}),
+                ...(recordingStartedAtRef.current != null
+                  ? { durationMs: Date.now() - recordingStartedAtRef.current }
+                  : {}),
+              }
+            : {};
           if (persistedDraftId) {
             // Assembled from the fast in-memory path above (unchanged); the
             // chunk draft is only a fallback for a crash before this point.
@@ -354,7 +383,7 @@ const EntryBar = ({
             // next launch's recovery pass can retry.
             let handedOff = false;
             try {
-              const result = await onVoiceSaveRef.current(base64, mime);
+              const result = await onVoiceSaveRef.current(base64, mime, chapterExtras);
               handedOff = result !== false;
             } catch (err) {
               console.warn('[Recording] onVoiceSave failed, keeping chunk draft:', err?.message);
@@ -365,7 +394,7 @@ const EntryBar = ({
             }
             webChunkDraftIdRef.current = null;
           } else {
-            onVoiceSaveRef.current(base64, mime);
+            onVoiceSaveRef.current(base64, mime, chapterExtras);
           }
           setMode('idle');
         };
@@ -384,10 +413,38 @@ const EntryBar = ({
       setRecording(true);
       setMode('recording');
       setRecordingSeconds(0);
+      recordingStartedAtRef.current = Date.now();
+      markersRef.current = [];
+      setMarkerCount(0);
       timerRef.current = setInterval(() => setRecordingSeconds(s => s + 1), 1000);
     } catch (e) {
       console.error('[Recording] Setup error:', e);
       alert("Microphone access denied or error occurred: " + e.message);
+    }
+  };
+
+  // Voice Chapters (flag: voiceChapters). Invariant: marking a chapter must
+  // NEVER interrupt or block the audio path — the tap is recorded
+  // synchronously into markersRef/markerCount (the badge + stop() payload
+  // source of truth), then the durable write (IDB for web, native sidecar
+  // for native) fires WITHOUT being awaited here; a rejection is logged and
+  // otherwise ignored (the in-memory marker already covers the stop()
+  // payload; durability-at-tap is best-effort on top of that).
+  const handleMarkChapter = () => {
+    if (mode !== 'recording') return;
+    const startedAt = recordingStartedAtRef.current ?? Date.now();
+    const tMs = Date.now() - startedAt;
+    markersRef.current = [...markersRef.current, tMs];
+    setMarkerCount(markersRef.current.length);
+
+    if (mediaRecorder?.native) {
+      nativeCaptureRef.current?.markChapter().catch((err) => {
+        console.warn('[Recording] native markChapter failed:', err?.message);
+      });
+    } else if (webChunkDraftIdRef.current) {
+      appendMarker(ownerUid, webChunkDraftIdRef.current, tMs).catch((err) => {
+        console.warn('[Recording] marker persistence failed:', err?.message);
+      });
     }
   };
 
@@ -402,7 +459,17 @@ const EntryBar = ({
         alert('The recording is safe on this device but needs review before processing.');
         return;
       }
-      await onVoiceSaveRef.current(stored.base64, stored.mime, { nativeDraftId: stored.draftId });
+      // Voice Chapters: markers/durationMs come from the native sidecar
+      // (stored.markers/stored.durationMs, the durable ground truth) — only
+      // threaded through when the flag is on, so a flag-off recording's
+      // options are byte-for-byte what they were before this feature.
+      const chapterExtras = voiceChaptersOn
+        ? {
+            ...(stored.markers && stored.markers.length ? { markers: stored.markers } : {}),
+            ...(stored.durationMs != null ? { durationMs: stored.durationMs } : {}),
+          }
+        : {};
+      await onVoiceSaveRef.current(stored.base64, stored.mime, { nativeDraftId: stored.draftId, ...chapterExtras });
       setMode('idle');
       return;
     }
@@ -570,6 +637,19 @@ const EntryBar = ({
               {promptContext && (
                 <div className="mb-3 px-3 py-2 bg-accent-wash rounded-xl text-xs text-accent-deep text-center">
                   <span className="font-semibold">Responding to:</span> "{promptContext}"
+                </div>
+              )}
+              {/* Chapter pill (flag: voiceChapters) — durable-at-tap chapter
+                  marker, never pauses or blocks the recording. */}
+              {voiceChaptersOn && (
+                <div className="mb-3 flex justify-center">
+                  <Chip as="button" type="button" onClick={handleMarkChapter} aria-label="Mark chapter">
+                    <Bookmark size={12} aria-hidden="true" />
+                    <span>Chapter</span>
+                    {markerCount > 0 && (
+                      <span className="text-accent-deep">Ch {markerCount}</span>
+                    )}
+                  </Chip>
                 </div>
               )}
               <div className="flex items-center justify-center gap-6">

@@ -94,6 +94,37 @@ describe('prepareDurableRecording', () => {
     expect(deleteNativeDraft).not.toHaveBeenCalled();
   });
 
+  it('passes markers/durationMs through to audioVault.saveRecording when provided (Voice Chapters)', async () => {
+    const audioVault = makeVault({ id: 'rec_5_abcdef' });
+
+    const out = await prepareDurableRecording({
+      ownerUid: OWNER,
+      base64: 'QUJD',
+      mimeType: 'audio/webm',
+      markers: [1200, 3400],
+      durationMs: 5000,
+      audioVault,
+    });
+
+    expect(out).toEqual({ ok: true, recordingId: 'rec_5_abcdef' });
+    expect(audioVault.saveRecording).toHaveBeenCalledWith(
+      OWNER, 'QUJD', 'audio/webm', { markers: [1200, 3400], durationMs: 5000 }
+    );
+  });
+
+  it('omits markers/durationMs from the saveRecording call when not provided (no behavior change)', async () => {
+    const audioVault = makeVault({ id: 'rec_6_abcdef' });
+
+    await prepareDurableRecording({
+      ownerUid: OWNER,
+      base64: 'QUJD',
+      mimeType: 'audio/webm',
+      audioVault,
+    });
+
+    expect(audioVault.saveRecording).toHaveBeenCalledWith(OWNER, 'QUJD', 'audio/webm', {});
+  });
+
   it('native draft deletion failure does not fail the durable commit', async () => {
     const audioVault = makeVault({ id: 'rec_4_abcdef' });
     const deleteNativeDraft = vi.fn().mockRejectedValue(new Error('draft gone'));

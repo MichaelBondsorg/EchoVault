@@ -12,6 +12,7 @@ type NativeCapturePlugin = {
   updateDraftStatus(
     options: { ownerUid: string; draftId: string; status: string }
   ): Promise<{ draftId: string; status: string }>;
+  markChapter(options: { ownerUid: string; draftId: string }): Promise<{ tMs: number }>;
 };
 
 // A draft still in 'recording' status means the app died mid-recording (no
@@ -115,5 +116,12 @@ export const nativeCaptureAdapter: CaptureAdapter = {
     const result = await NativeCapture.stop({ ownerUid, draftId });
     lastRecordingStartedAt = null;
     return result;
+  },
+
+  // Voice Chapters (flag: voiceChapters). The coordinator derives tMs from
+  // `recorder.currentTime` (audio clock, not JS Date.now()) and writes it to
+  // the sidecar before returning — see CaptureCoordinator.markChapter.
+  async markChapter(ownerUid, draftId) {
+    return NativeCapture.markChapter({ ownerUid, draftId });
   },
 };

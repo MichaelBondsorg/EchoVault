@@ -81,6 +81,27 @@ describe('audioVault — web backend on IndexedDB', () => {
     expect(localStorage.getItem(`engram:v2:owner:user-a:audio%2Fblob%2F${result.id}`)).toBe('QUJD');
   });
 
+  it('persists markers/durationMs onto the index entry when passed, and returns them from getRecording', async () => {
+    const { id } = await audioVault.saveRecording(OWNER, 'QUJD', 'audio/mp4', {
+      markers: [{ tMs: 1200 }, { tMs: 3400 }],
+      durationMs: 5000,
+    });
+    const rec = await audioVault.getRecording(OWNER, id);
+    expect(rec.markers).toEqual([{ tMs: 1200 }, { tMs: 3400 }]);
+    expect(rec.durationMs).toBe(5000);
+  });
+
+  it('omits markers/durationMs from the index entry and getRecording when not passed (no empty-array stuffing)', async () => {
+    const { id } = await audioVault.saveRecording(OWNER, 'QUJD', 'audio/mp4');
+    const rec = await audioVault.getRecording(OWNER, id);
+    expect(rec).not.toHaveProperty('markers');
+    expect(rec).not.toHaveProperty('durationMs');
+
+    const index = JSON.parse(localStorage.getItem(OWNER_INDEX_KEY));
+    expect(index[id]).not.toHaveProperty('markers');
+    expect(index[id]).not.toHaveProperty('durationMs');
+  });
+
   it('never exposes one owner recording to another owner (IndexedDB path)', async () => {
     const { id } = await audioVault.saveRecording(OWNER, 'QUJD', 'audio/webm');
     expect(await audioVault.getRecording(OTHER_OWNER, id)).toBeNull();

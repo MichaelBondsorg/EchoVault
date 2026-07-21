@@ -42,7 +42,16 @@ const PendingAudioBanner = ({ ownerUid, onRetry }) => {
         // Linking on success (and leaving unlinked on failure) is the
         // pipeline's responsibility now — we just drive the retry and
         // re-read vault state afterward.
-        await onRetry(rec.base64, rec.mime, id);
+        // Voice Chapters (flag: voiceChapters): markers/durationMs were
+        // persisted onto this vault entry at the ORIGINAL save attempt
+        // (prepareDurableRecording) — re-read them here so a retry after a
+        // simulated app kill doesn't lose the chapters the user already
+        // tapped. Omitted (not stuffed as empty) when the entry has none.
+        const chapterExtras = {
+          ...(rec.markers && rec.markers.length ? { markers: rec.markers } : {}),
+          ...(rec.durationMs != null ? { durationMs: rec.durationMs } : {}),
+        };
+        await onRetry(rec.base64, rec.mime, id, chapterExtras);
       }
     }
     setOrphans(await audioVault.listOrphans(ownerUid));

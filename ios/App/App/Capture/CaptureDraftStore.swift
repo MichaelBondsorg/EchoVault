@@ -79,6 +79,21 @@ final class CaptureDraftStore {
         try data.write(to: url, options: .atomic)
     }
 
+    /// Append a chapter-mark marker to an existing draft's sidecar JSON,
+    /// keyed by an already-computed owner hash — mirrors updateStatus above
+    /// exactly (read, mutate one field, atomic rewrite), so a chapter tap is
+    /// durable on disk before the caller (CaptureCoordinator.markChapter)
+    /// returns, the same way a status transition is.
+    func addMarker(id: String, ownerHash: String, tMs: Int) throws {
+        let draftId = try validatedDraftId(id)
+        let url = try directory(forHash: ownerHash).appendingPathComponent("\(draftId).json")
+        var draft = try decoder.decode(CaptureDraft.self, from: Data(contentsOf: url))
+        guard draft.ownerHash == ownerHash else { throw CaptureError.ownerMismatch }
+        draft.markers = (draft.markers ?? []) + [Marker(tMs: tMs)]
+        let data = try encoder.encode(draft)
+        try data.write(to: url, options: .atomic)
+    }
+
     func delete(ownerUid: String, draftId: String) throws {
         let id = try validatedDraftId(draftId)
         let directory = try directory(for: ownerUid)

@@ -1,13 +1,14 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, cleanup } from '@testing-library/react';
 import EntryBar from '../EntryBar';
-import { appendChunk, deleteDraft, recoverWebDrafts } from '../../../services/capture/webChunkStore';
+import { appendChunk, appendMarker, deleteDraft, recoverWebDrafts } from '../../../services/capture/webChunkStore';
 import { audioVault } from '../../../services/audio/audioVault';
 import { getFlag } from '../../../config/flags';
 import { subscribeSpaces, setLastCaptureSpaceId } from '../../../services/spaces/spacesService';
 
 vi.mock('../../../services/capture/webChunkStore', () => ({
   appendChunk: vi.fn().mockResolvedValue(true),
+  appendMarker: vi.fn().mockResolvedValue(1),
   deleteDraft: vi.fn().mockResolvedValue(true),
   recoverWebDrafts: vi.fn().mockResolvedValue(0),
 }));
@@ -74,6 +75,7 @@ beforeEach(() => {
   };
   getFlag.mockReturnValue(true);
   appendChunk.mockClear().mockResolvedValue(true);
+  appendMarker.mockClear().mockResolvedValue(1);
   deleteDraft.mockClear().mockResolvedValue(true);
   recoverWebDrafts.mockClear().mockResolvedValue(0);
   audioVault.saveRecording.mockReset();
@@ -229,6 +231,107 @@ describe('EntryBar — typed-draft autosave', () => {
     );
     const textarea = await screen.findByPlaceholderText("What's on your mind?");
     expect(textarea.value).toBe('');
+  });
+});
+
+describe('EntryBar — Voice Chapters (flag: voiceChapters)', () => {
+  it('shows a "Mark chapter" pill during recording when the flag is on', async () => {
+    render(<EntryBar ownerUid={OWNER} onVoiceSave={vi.fn().mockResolvedValue(true)} onTextSave={vi.fn()} />);
+    await startFakeRecording();
+    expect(screen.getByLabelText('Mark chapter')).toBeTruthy();
+  });
+
+  it('renders no pill (and marking is inert) when the flag is off', async () => {
+    getFlag.mockImplementation((flag) => flag !== 'voiceChapters');
+    const onVoiceSave = vi.fn().mockResolvedValue(true);
+    render(<EntryBar ownerUid={OWNER} onVoiceSave={onVoiceSave} onTextSave={vi.fn()} />);
+    const recorder = await startFakeRecording();
+    expect(screen.queryByLabelText('Mark chapter')).toBeNull();
+
+    recorder.ondataavailable({ data: new Blob(['chunk-0-'.repeat(20)]) });
+    fireEvent.click(screen.getByLabelText('Stop recording'));
+    await waitFor(() => expect(onVoiceSave).toHaveBeenCalled());
+    const [, , options] = onVoiceSave.mock.calls[0];
+    expect(options).not.toHaveProperty('markers');
+    expect(options).not.toHaveProperty('durationMs');
+    expect(appendMarker).not.toHaveBeenCalled();
+  });
+
+  it('tapping the pill writes a durable marker (appendMarker) and increments a "Ch N" count badge', async () => {
+    render(<EntryBar ownerUid={OWNER} onVoiceSave={vi.fn().mockResolvedValue(true)} onTextSave={vi.fn()} />);
+    await startFakeRecording();
+
+    fireEvent.click(screen.getByLabelText('Mark chapter'));
+    await waitFor(() => expect(appendMarker).toHaveBeenCalledWith(OWNER, expect.any(String), expect.any(Number)));
+    expect(screen.getByText(/Ch 1/)).toBeTruthy();
+
+    fireEvent.click(screen.getByLabelText('Mark chapter'));
+    await waitFor(() => expect(appendMarker).toHaveBeenCalledTimes(2));
+    expect(screen.getByText(/Ch 2/)).toBeTruthy();
+    // seq-ordered, monotonically increasing tMs
+    const [t1] = appendMarker.mock.calls[0].slice(2);
+    const [t2] = appendMarker.mock.calls[1].slice(2);
+    expect(t2).toBeGreaterThanOrEqual(t1);
+  });
+
+  it('a marker-persistence failure never interrupts recording — it is kept in-memory as the stop() fallback', async () => {
+    appendMarker.mockRejectedValueOnce(new Error('idb down'));
+    render(<EntryBar ownerUid={OWNER} onVoiceSave={vi.fn().mockResolvedValue(true)} onTextSave={vi.fn()} />);
+    await startFakeRecording();
+
+    fireEvent.click(screen.getByLabelText('Mark chapter'));
+    await waitFor(() => expect(appendMarker).toHaveBeenCalled());
+
+    // Badge still incremented and recording still in progress — the IDB
+    // rejection was swallowed, not surfaced as a recording failure.
+    expect(screen.getByText(/Ch 1/)).toBeTruthy();
+    expect(screen.getByLabelText('Stop recording')).toBeTruthy();
+  });
+
+  it('stop() passes markers + durationMs to onVoiceSave when chapters were tapped', async () => {
+    const onVoiceSave = vi.fn().mockResolvedValue(true);
+    render(<EntryBar ownerUid={OWNER} onVoiceSave={onVoiceSave} onTextSave={vi.fn()} />);
+    const recorder = await startFakeRecording();
+    fireEvent.click(screen.getByLabelText('Mark chapter'));
+    await waitFor(() => expect(appendMarker).toHaveBeenCalled());
+
+    recorder.ondataavailable({ data: new Blob(['chunk-0-'.repeat(20)]) });
+    fireEvent.click(screen.getByLabelText('Stop recording'));
+    await waitFor(() => expect(onVoiceSave).toHaveBeenCalled());
+
+    const [, , options] = onVoiceSave.mock.calls[0];
+    expect(options.markers).toEqual([expect.any(Number)]);
+    expect(typeof options.durationMs).toBe('number');
+  });
+
+  it('omits markers/durationMs from onVoiceSave when no chapters were tapped (no empty-array stuffing)', async () => {
+    const onVoiceSave = vi.fn().mockResolvedValue(true);
+    render(<EntryBar ownerUid={OWNER} onVoiceSave={onVoiceSave} onTextSave={vi.fn()} />);
+    const recorder = await startFakeRecording();
+
+    recorder.ondataavailable({ data: new Blob(['chunk-0-'.repeat(20)]) });
+    fireEvent.click(screen.getByLabelText('Stop recording'));
+    await waitFor(() => expect(onVoiceSave).toHaveBeenCalled());
+
+    const [, , options] = onVoiceSave.mock.calls[0];
+    expect(options?.markers).toBeUndefined();
+  });
+
+  it('does not write a marker to IDB when webChunkPersistence is off (no draft id) — flag on, ref-only fallback', async () => {
+    getFlag.mockImplementation((flag) => flag !== 'webChunkPersistence');
+    const onVoiceSave = vi.fn().mockResolvedValue(true);
+    render(<EntryBar ownerUid={OWNER} onVoiceSave={onVoiceSave} onTextSave={vi.fn()} />);
+    const recorder = await startFakeRecording();
+
+    fireEvent.click(screen.getByLabelText('Mark chapter'));
+    expect(screen.getByText(/Ch 1/)).toBeTruthy();
+    expect(appendMarker).not.toHaveBeenCalled();
+
+    recorder.ondataavailable({ data: new Blob(['chunk-0-'.repeat(20)]) });
+    fireEvent.click(screen.getByLabelText('Stop recording'));
+    await waitFor(() => expect(onVoiceSave).toHaveBeenCalled());
+    const [, , options] = onVoiceSave.mock.calls[0];
+    expect(options.markers).toEqual([expect.any(Number)]);
   });
 });
 

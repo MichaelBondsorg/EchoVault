@@ -104,9 +104,16 @@ export const audioVault = {
    * than silently proceed with no durable local copy. `error: 'quota'` means a
    * capacity limit was hit (oversized web blob / index write rejected);
    * `error: 'io'` means the underlying storage write failed.
+   *
+   * `extra.markers`/`extra.durationMs` (Voice Chapters, flag: voiceChapters)
+   * are optional and stored on the index entry verbatim when present — never
+   * stuffed in as an empty array/0 when absent, so a recording without
+   * chapters produces an index entry identical to one saved before this
+   * feature existed.
    */
-  async saveRecording(ownerUid, base64, mime) {
+  async saveRecording(ownerUid, base64, mime, extra = {}) {
     const owner = requireOwner(ownerUid);
+    const { markers, durationMs } = extra || {};
     const id = `rec_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
     try {
       if (isNative()) {
@@ -125,7 +132,15 @@ export const audioVault = {
       }
 
       const index = readIndex(owner);
-      index[id] = { ownerUid: owner, createdAt: Date.now(), mime, entryId: null, size: base64.length };
+      index[id] = {
+        ownerUid: owner,
+        createdAt: Date.now(),
+        mime,
+        entryId: null,
+        size: base64.length,
+        ...(markers && markers.length ? { markers } : {}),
+        ...(durationMs != null ? { durationMs } : {}),
+      };
       if (!writeIndex(owner, index)) {
         if (isNative()) {
           await Filesystem.deleteFile({ path: filePath(owner, id), directory: Directory.Data }).catch(() => {});
@@ -162,7 +177,15 @@ export const audioVault = {
           base64 = await idbGetBlob(owner, id);
         }
       }
-      return base64 ? { base64, mime: meta.mime, createdAt: meta.createdAt, entryId: meta.entryId } : null;
+      if (!base64) return null;
+      return {
+        base64,
+        mime: meta.mime,
+        createdAt: meta.createdAt,
+        entryId: meta.entryId,
+        ...(meta.markers && meta.markers.length ? { markers: meta.markers } : {}),
+        ...(meta.durationMs != null ? { durationMs: meta.durationMs } : {}),
+      };
     } catch { return null; }
   },
 

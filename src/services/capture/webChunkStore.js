@@ -44,6 +44,39 @@ export const appendChunk = async (ownerUid, draftId, seq, blob, mimeType) => {
   return true;
 };
 
+/**
+ * Voice Chapters (flag: voiceChapters) — record a chapter-mark timestamp
+ * durably AT TAP TIME, into the same `meta` record chunk persistence already
+ * maintains. This must survive a tab kill immediately after the tap, so the
+ * write happens synchronously with the call (no batching/debounce) — callers
+ * are expected to fire this without awaiting on the audio-capture path
+ * (fire-and-forget with the marker also kept in an in-memory ref as a
+ * fallback for the eventual stop() payload; see EntryBar).
+ *
+ * A no-op (returns null) when IndexedDB is unavailable or draftId is falsy
+ * (e.g. webChunkPersistence is off, so no chunk draft was ever started) —
+ * callers must tolerate that, same as appendChunk.
+ */
+export const appendMarker = async (ownerUid, draftId, tMs) => {
+  if (!hasIndexedDb()) return null;
+  const owner = parseOwnerUid(ownerUid);
+  if (!draftId) return null;
+  const stores = await withStores(['meta'], 'readwrite');
+  if (!stores) return null;
+
+  const existingMeta = await reqP(stores.meta.get([owner, draftId]));
+  const markers = [...(existingMeta?.markers || []), tMs];
+  await reqP(stores.meta.put({
+    ownerUid: owner,
+    draftId,
+    mimeType: existingMeta?.mimeType,
+    startedAt: existingMeta?.startedAt ?? Date.now(),
+    lastSeq: existingMeta?.lastSeq,
+    markers,
+  }));
+  return markers.length;
+};
+
 export const listDrafts = async (ownerUid) => {
   if (!hasIndexedDb()) return null;
   const owner = parseOwnerUid(ownerUid);
@@ -64,6 +97,10 @@ export const listDrafts = async (ownerUid) => {
       mimeType: meta.mimeType,
       startedAt: meta.startedAt,
       chunkCount: chunks.length,
+      // Voice Chapters: only present when at least one marker was tapped —
+      // no empty-array stuffing so a recovery pass for an unmarked draft
+      // looks exactly like it did before this feature.
+      ...(meta.markers && meta.markers.length ? { markers: meta.markers } : {}),
     });
   }
   return drafts;
@@ -114,7 +151,7 @@ export const recoverWebDrafts = async (ownerUid, adopt) => {
     if (!blob) continue;
     const base64 = await blobToBase64(blob).catch(() => '');
     if (!base64) continue;
-    const adoptedId = await adopt(base64, draft.mimeType);
+    const adoptedId = await adopt(base64, draft.mimeType, draft.markers);
     if (adoptedId) {
       await deleteDraft(ownerUid, draft.draftId);
       recovered += 1;

@@ -50,12 +50,40 @@ describe('PendingAudioBanner', () => {
     await screen.findByText(/1 unsaved recording/);
     fireEvent.click(screen.getByText('Retry now'));
 
-    await waitFor(() => expect(onRetry).toHaveBeenCalledWith('QUJD', 'audio/webm', 'rec_1'));
+    await waitFor(() => expect(onRetry).toHaveBeenCalledWith('QUJD', 'audio/webm', 'rec_1', {}));
     // The banner itself must never call linkEntry — that's the pipeline's job.
     expect(audioVault.linkEntry).not.toHaveBeenCalled();
     // Still shown, because listOrphans (re-fetched post-retry) still
     // reports the recording as unlinked.
     await waitFor(() => expect(screen.getByText(/1 unsaved recording/)).toBeTruthy());
+  });
+
+  it('retry forwards markers/durationMs read from the vault entry when present (Voice Chapters)', async () => {
+    audioVault.getRecording.mockResolvedValue({
+      base64: 'QUJD', mime: 'audio/webm', markers: [1200, 3400], durationMs: 5000,
+    });
+    const onRetry = vi.fn().mockResolvedValue(true);
+    render(<PendingAudioBanner ownerUid={OWNER} onRetry={onRetry} />);
+
+    await screen.findByText(/1 unsaved recording/);
+    fireEvent.click(screen.getByText('Retry now'));
+
+    await waitFor(() => expect(onRetry).toHaveBeenCalledWith(
+      'QUJD', 'audio/webm', 'rec_1', { markers: [1200, 3400], durationMs: 5000 }
+    ));
+  });
+
+  it('retry omits markers/durationMs when the vault entry has none (no empty-array stuffing)', async () => {
+    audioVault.getRecording.mockResolvedValue({ base64: 'QUJD', mime: 'audio/webm' });
+    const onRetry = vi.fn().mockResolvedValue(true);
+    render(<PendingAudioBanner ownerUid={OWNER} onRetry={onRetry} />);
+
+    await screen.findByText(/1 unsaved recording/);
+    fireEvent.click(screen.getByText('Retry now'));
+
+    await waitFor(() => expect(onRetry).toHaveBeenCalled());
+    const call = onRetry.mock.calls[0];
+    expect(call[3]).toEqual({});
   });
 
   it('refreshes when the vault emits engram:audio-vault-changed', async () => {

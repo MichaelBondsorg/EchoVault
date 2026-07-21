@@ -8,6 +8,7 @@ const pluginMock = vi.hoisted(() => ({
   readDraft: vi.fn(),
   deleteDraft: vi.fn(),
   updateDraftStatus: vi.fn(),
+  markChapter: vi.fn(),
 }));
 
 vi.mock('@capacitor/core', () => ({
@@ -200,5 +201,15 @@ describe('recoverNativeDrafts', () => {
     expect(pluginMock.updateDraftStatus).toHaveBeenCalledWith({
       ownerUid: OWNER, draftId: 'stale-1', status: 'needsReview',
     });
+  });
+});
+
+describe('nativeCaptureAdapter.markChapter (Voice Chapters, flag: voiceChapters)', () => {
+  it('forwards to the native plugin and returns its tMs', async () => {
+    pluginMock.markChapter.mockResolvedValue({ tMs: 2500 });
+    const result = await nativeCaptureAdapter.markChapter!(OWNER, 'draft-1');
+
+    expect(pluginMock.markChapter).toHaveBeenCalledWith({ ownerUid: OWNER, draftId: 'draft-1' });
+    expect(result).toEqual({ tMs: 2500 });
   });
 });

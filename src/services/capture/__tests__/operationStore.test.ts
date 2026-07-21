@@ -49,6 +49,30 @@ describe('operationStore', () => {
     expect(persisted[0].opId).toBe(op.opId);
   });
 
+  it('createOperation stores optional markers/durationMs when provided (Voice Chapters)', async () => {
+    const op = await createOperation(OWNER, {
+      recordingId: 'rec_ch_abcdef',
+      markers: [{ tMs: 1200 }, { tMs: 3400 }],
+      durationMs: 5000,
+    });
+    expect(op.markers).toEqual([{ tMs: 1200 }, { tMs: 3400 }]);
+    expect(op.durationMs).toBe(5000);
+
+    const [stored] = raw(OWNER);
+    expect(stored.markers).toEqual([{ tMs: 1200 }, { tMs: 3400 }]);
+    expect(stored.durationMs).toBe(5000);
+  });
+
+  it('createOperation omits markers/durationMs when not provided (no behavior change)', async () => {
+    const op = await createOperation(OWNER, { recordingId: 'rec_nm_abcdef' });
+    expect(op).not.toHaveProperty('markers');
+    expect(op).not.toHaveProperty('durationMs');
+
+    const [stored] = raw(OWNER);
+    expect(stored).not.toHaveProperty('markers');
+    expect(stored).not.toHaveProperty('durationMs');
+  });
+
   it('advance updates stage, updatedAt and merges entryId', async () => {
     const op = await createOperation(OWNER, { recordingId: 'rec_2_abcdef' });
     await advance(OWNER, op.opId, 'transcribing');

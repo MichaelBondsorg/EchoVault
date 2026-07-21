@@ -90,6 +90,21 @@ final class CaptureCoordinator: NSObject, AVAudioRecorderDelegate {
         return (draft, data)
     }
 
+    /// Voice Chapters (flag: voiceChapters) — mark a chapter at the current
+    /// recording position. `recorder.currentTime` is the audio clock (not
+    /// JS Date.now(), which would drift relative to the actual recorded
+    /// audio), matching how `stop()` derives durationMilliseconds above.
+    /// The sidecar write (store.addMarker) is atomic and happens before this
+    /// returns, so the marker is durable even if the app is immediately
+    /// backgrounded/interrupted afterward.
+    func markChapter(ownerUid: String, draftId: String) throws -> Int {
+        guard let recorder, let draft = activeDraft else { throw CaptureError.noActiveRecording }
+        guard activeOwnerUid == ownerUid, draft.id == draftId else { throw CaptureError.ownerMismatch }
+        let tMs = Int(recorder.currentTime * 1_000)
+        try store.addMarker(id: draftId, ownerHash: draft.ownerHash, tMs: tMs)
+        return tMs
+    }
+
     func drafts(ownerUid: String) throws -> [CaptureDraft] { try store.drafts(ownerUid: ownerUid) }
 
     func read(ownerUid: String, draftId: String) throws -> (CaptureDraft, Data) {

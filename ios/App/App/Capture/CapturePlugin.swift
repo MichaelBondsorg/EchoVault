@@ -15,6 +15,7 @@ public final class CapturePlugin: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "deleteDraft", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "updateDraftStatus", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "enqueueUpload", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "markChapter", returnType: CAPPluginReturnPromise),
     ]
 
     // Mutation of the listDrafts result buffer is funnelled through this serial
@@ -66,13 +67,31 @@ public final class CapturePlugin: CAPPlugin, CAPBridgedPlugin {
         }
         do {
             let (draft, data) = try CaptureCoordinator.shared.stop(ownerUid: ownerUid, draftId: draftId)
-            call.resolve([
+            var result: [String: Any] = [
                 "draftId": draft.id,
                 "assetId": draft.id,
                 "mime": draft.mime,
                 "durationMs": draft.durationMilliseconds,
                 "base64": data.base64EncodedString(),
-            ])
+            ]
+            // Voice Chapters (flag: voiceChapters) — only present when at
+            // least one chapter was tapped, so a recording without chapters
+            // resolves with exactly the same keys as before this feature.
+            if let markers = draft.markers, !markers.isEmpty {
+                result["markers"] = markers.map { ["tMs": $0.tMs] }
+            }
+            call.resolve(result)
+        } catch { call.reject(error.localizedDescription) }
+    }
+
+    @objc func markChapter(_ call: CAPPluginCall) {
+        guard let ownerUid = call.getString("ownerUid"), let draftId = call.getString("draftId") else {
+            call.reject("capture_arguments_required")
+            return
+        }
+        do {
+            let tMs = try CaptureCoordinator.shared.markChapter(ownerUid: ownerUid, draftId: draftId)
+            call.resolve(["tMs": tMs])
         } catch { call.reject(error.localizedDescription) }
     }
 

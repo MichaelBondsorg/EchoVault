@@ -22,9 +22,14 @@
  * @param {string} args.base64
  * @param {string} args.mimeType
  * @param {string} [args.existingRecordingId]  Retry of an already-vaulted recording.
- * @param {Object} args.audioVault             Must expose saveRecording(uid, base64, mime).
+ * @param {Object} args.audioVault             Must expose saveRecording(uid, base64, mime, extra?).
  * @param {string} [args.nativeDraftId]        Native draft to delete AFTER vault confirm (native only).
  * @param {(uid: string, draftId: string) => Promise<void>} [args.deleteNativeDraft]
+ * @param {Array} [args.markers]   Voice Chapters (flag: voiceChapters) tap timestamps, forwarded
+ *                                 verbatim onto the vault index entry. Omitted on retry (already
+ *                                 durable from the original attempt) and omitted from the
+ *                                 saveRecording call entirely when absent — no empty-array stuffing.
+ * @param {number} [args.durationMs]
  * @returns {Promise<{ ok: true, recordingId: string } | { ok: false, blocked: true, reason: string }>}
  */
 export async function prepareDurableRecording({
@@ -35,9 +40,13 @@ export async function prepareDurableRecording({
   audioVault,
   nativeDraftId,
   deleteNativeDraft,
+  markers,
+  durationMs,
 }) {
   // Retry path: the recording is already durable in the vault. Reuse its id;
   // the native draft (if any) was already handed off on the original attempt.
+  // Markers/durationMs (if any) were already persisted onto the vault index
+  // entry on the original attempt — the caller re-reads them from there.
   if (existingRecordingId) {
     return { ok: true, recordingId: existingRecordingId };
   }
@@ -45,7 +54,10 @@ export async function prepareDurableRecording({
   // Durable local backup BEFORE any network call. saveRecording returns
   // { id } on success / { error } on failure and never throws; treat a null
   // (legacy shim) as an I/O failure too.
-  const result = await audioVault.saveRecording(ownerUid, base64, mimeType);
+  const result = await audioVault.saveRecording(ownerUid, base64, mimeType, {
+    ...(markers && markers.length ? { markers } : {}),
+    ...(durationMs != null ? { durationMs } : {}),
+  });
   const recordingId = result?.id;
   if (!recordingId) {
     return { ok: false, blocked: true, reason: result?.error || 'io' };

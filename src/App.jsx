@@ -1937,7 +1937,14 @@ export default function App() {
     // onEntryRef: optional side-channel forwarded through to saveEntry/
     // doSaveEntry, see doSaveEntry's jsdoc — additive, never changes this
     // function's own boolean return contract.
-    const { existingRecordingId, nativeDraftId, operationId: resumeOperationId, onEntryRef = null } = options;
+    const {
+      existingRecordingId, nativeDraftId, operationId: resumeOperationId, onEntryRef = null,
+      // Voice Chapters (flag: voiceChapters) — present only when EntryBar
+      // (fresh save) or PendingAudioBanner (retry, re-read from the vault
+      // index) has them; undefined otherwise, threaded straight through to
+      // the vault entry / op record with no empty-array stuffing.
+      markers, durationMs,
+    } = options;
     if (!aiProcessingEnabled) {
       setNeedsAiConsent(true);
       return false;
@@ -1984,6 +1991,8 @@ export default function App() {
       // Only hand off (and thereby delete) the native draft on native.
       nativeDraftId: Capacitor.isNativePlatform() ? nativeDraftId : undefined,
       deleteNativeDraft,
+      markers,
+      durationMs,
     });
 
     if (!prep.ok) {
@@ -2014,7 +2023,7 @@ export default function App() {
       operationId = existingOp?.opId || null;
     }
     if (!operationId) {
-      const op = await createOperation(user.uid, { recordingId }).catch(() => null);
+      const op = await createOperation(user.uid, { recordingId, markers, durationMs }).catch(() => null);
       operationId = op?.opId || null;
     }
     await recordStage(user.uid, operationId, STAGES.LOCAL_READY, {});
@@ -3045,7 +3054,13 @@ export default function App() {
           pipeline isn't "unsaved" yet, and showing it here invited a Retry
           click that would race the in-flight pipeline and duplicate it. */}
       {!processing && (
-        <PendingAudioBanner ownerUid={user?.uid} onRetry={(base64, mime, recordingId) => handleAudioWrapper(base64, mime, { existingRecordingId: recordingId })} />
+        <PendingAudioBanner
+          ownerUid={user?.uid}
+          onRetry={(base64, mime, recordingId, chapterExtras = {}) => handleAudioWrapper(base64, mime, {
+            existingRecordingId: recordingId,
+            ...chapterExtras,
+          })}
+        />
       )}
 
       {/* Decompression Screen */}

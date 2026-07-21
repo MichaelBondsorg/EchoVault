@@ -46,6 +46,11 @@ export type CaptureOp = {
   updatedAt: number;
   attempts: number;
   lastError?: string;
+  // Voice Chapters (flag: voiceChapters) — mirrors the vault index entry's
+  // markers/durationMs. Optional and additive: absent for every op created
+  // before this feature, and for any recording with no chapters tapped.
+  markers?: unknown[];
+  durationMs?: number;
 };
 
 type AdvanceMeta = { entryId?: string };
@@ -92,7 +97,7 @@ function newId(): string {
  */
 export async function createOperation(
   ownerUid: string,
-  { recordingId }: { recordingId?: string } = {},
+  { recordingId, markers, durationMs }: { recordingId?: string; markers?: unknown[]; durationMs?: number } = {},
 ): Promise<CaptureOp> {
   const owner = parseOwnerUid(ownerUid);
   const now = Date.now();
@@ -104,6 +109,8 @@ export async function createOperation(
     updatedAt: now,
     attempts: 0,
     ...(recordingId ? { recordingId } : {}),
+    ...(markers && markers.length ? { markers } : {}),
+    ...(durationMs != null ? { durationMs } : {}),
   };
   const ops = await readOps(owner);
   ops.push(op);

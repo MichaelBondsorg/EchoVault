@@ -8,11 +8,18 @@ export type StoredCapture = {
   mime: string;
   durationMs: number;
   base64: string;
+  // Voice Chapters (flag: voiceChapters) — present only when at least one
+  // chapter was tapped during the recording; omitted otherwise so a
+  // recording without chapters looks identical to today's payload.
+  markers?: Array<{ tMs: number }>;
 };
 
 export interface CaptureAdapter {
   start(ownerUid: string, requestId: string): Promise<{ draftId: string; startedAt: string }>;
   stop(ownerUid: string, draftId: string): Promise<StoredCapture>;
+  // Optional: adapters that don't support Voice Chapters (or platforms where
+  // it isn't wired) simply omit this — CaptureService.markChapter() no-ops.
+  markChapter?(ownerUid: string, draftId: string): Promise<{ tMs: number }>;
 }
 
 export class CaptureService {
@@ -82,4 +89,24 @@ export class CaptureService {
   }
 
   reset(): void { this.dispatch({ type: 'RESET' }); }
+
+  /**
+   * Voice Chapters (flag: voiceChapters) — mark a chapter at the current
+   * recording position. Deliberately NOT routed through dispatch/reduceCapture:
+   * a chapter mark doesn't change the capture state machine, it's a durable
+   * side-note recorded on the native sidecar (see CaptureDraftStore.addMarker).
+   * Never throws — a failed native call is swallowed (the caller, e.g.
+   * EntryBar, keeps its own in-memory marker list as the fallback source for
+   * the eventual stop() payload) so a chapter tap can never interrupt or
+   * fail a recording in progress.
+   */
+  async markChapter(): Promise<void> {
+    if (this.state.status !== 'recording' || !this.adapter.markChapter) return;
+    const { draftId } = this.state;
+    try {
+      await this.adapter.markChapter(this.ownerUid, draftId);
+    } catch {
+      // Swallowed by design — see jsdoc above.
+    }
+  }
 }

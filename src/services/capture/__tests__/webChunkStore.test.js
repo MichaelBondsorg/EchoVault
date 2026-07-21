@@ -80,7 +80,7 @@ describe('webChunkStore', () => {
     const recovered = await recoverWebDrafts(OWNER, adopt);
 
     expect(recovered).toBe(1);
-    expect(adopt).toHaveBeenCalledWith(expect.any(String), 'audio/webm');
+    expect(adopt).toHaveBeenCalledWith(expect.any(String), 'audio/webm', undefined);
     expect(await listDrafts(OWNER)).toEqual([]);
   });
 
@@ -102,6 +102,28 @@ describe('webChunkStore', () => {
     expect(adopt).not.toHaveBeenCalled();
   });
 
+  it('recoverWebDrafts threads markers through to adopt (survives a tab kill with chapters already tapped)', async () => {
+    const { appendChunk, appendMarker, recoverWebDrafts } = await import('../webChunkStore');
+    await appendChunk(OWNER, 'draft-1', 0, new Blob(['audio-bytes']), 'audio/webm');
+    await appendMarker(OWNER, 'draft-1', 1200);
+    await appendMarker(OWNER, 'draft-1', 3400);
+
+    const adopt = vi.fn().mockResolvedValue('rec_123');
+    await recoverWebDrafts(OWNER, adopt);
+
+    expect(adopt).toHaveBeenCalledWith(expect.any(String), 'audio/webm', [1200, 3400]);
+  });
+
+  it('recoverWebDrafts calls adopt with markers undefined when none were tapped', async () => {
+    const { appendChunk, recoverWebDrafts } = await import('../webChunkStore');
+    await appendChunk(OWNER, 'draft-1', 0, new Blob(['audio-bytes']), 'audio/webm');
+
+    const adopt = vi.fn().mockResolvedValue('rec_123');
+    await recoverWebDrafts(OWNER, adopt);
+
+    expect(adopt).toHaveBeenCalledWith(expect.any(String), 'audio/webm', undefined);
+  });
+
   it('is a no-op returning null when IndexedDB is unavailable', async () => {
     delete globalThis.indexedDB;
     delete globalThis.IDBKeyRange;
@@ -113,5 +135,74 @@ describe('webChunkStore', () => {
     expect(await listDrafts(OWNER)).toBeNull();
     expect(await readDraftBlob(OWNER, 'draft-1')).toBeNull();
     expect(await deleteDraft(OWNER, 'draft-1')).toBeNull();
+  });
+
+  describe('appendMarker (voice chapters — durable at tap)', () => {
+    it('writes a marker into the meta record, durable before any chunk exists', async () => {
+      const { appendMarker, listDrafts } = await import('../webChunkStore');
+      const count = await appendMarker(OWNER, 'draft-1', 1500);
+
+      expect(count).toBe(1);
+      // Confirm it actually persisted to IDB meta, not just returned an
+      // in-memory count — read it back via a fresh transaction.
+      const db = await (await import('../idbCaptureDb')).openCaptureDb();
+      const tx = db.transaction(['meta'], 'readonly');
+      const meta = await new Promise((resolve, reject) => {
+        const req = tx.objectStore('meta').get([OWNER, 'draft-1']);
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error);
+      });
+      expect(meta.markers).toEqual([1500]);
+      void listDrafts;
+    });
+
+    it('appends to existing markers in seq order without clobbering chunk meta (mimeType/startedAt/lastSeq preserved)', async () => {
+      const { appendChunk, appendMarker } = await import('../webChunkStore');
+      await appendChunk(OWNER, 'draft-1', 0, new Blob(['a']), 'audio/webm');
+      await appendMarker(OWNER, 'draft-1', 1000);
+      await appendMarker(OWNER, 'draft-1', 4200);
+
+      const db = await (await import('../idbCaptureDb')).openCaptureDb();
+      const tx = db.transaction(['meta'], 'readonly');
+      const meta = await new Promise((resolve, reject) => {
+        const req = tx.objectStore('meta').get([OWNER, 'draft-1']);
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error);
+      });
+      expect(meta.markers).toEqual([1000, 4200]);
+      expect(meta.mimeType).toBe('audio/webm');
+      expect(meta.lastSeq).toBe(0);
+    });
+
+    it('is a no-op returning null when draftId is falsy', async () => {
+      const { appendMarker } = await import('../webChunkStore');
+      expect(await appendMarker(OWNER, null, 1000)).toBeNull();
+      expect(await appendMarker(OWNER, undefined, 1000)).toBeNull();
+    });
+
+    it('is a no-op returning null when IndexedDB is unavailable', async () => {
+      delete globalThis.indexedDB;
+      delete globalThis.IDBKeyRange;
+      __resetCaptureDb();
+      vi.resetModules();
+      const { appendMarker } = await import('../webChunkStore');
+      expect(await appendMarker(OWNER, 'draft-1', 1000)).toBeNull();
+    });
+
+    it('keeps markers isolated per owner', async () => {
+      const { appendMarker, listDrafts: _ld } = await import('../webChunkStore');
+      await appendMarker(OWNER, 'draft-shared', 500);
+      await appendMarker(OTHER_OWNER, 'draft-shared', 900);
+
+      const db = await (await import('../idbCaptureDb')).openCaptureDb();
+      const tx = db.transaction(['meta'], 'readonly');
+      const ownerMeta = await new Promise((resolve, reject) => {
+        const req = tx.objectStore('meta').get([OWNER, 'draft-shared']);
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error);
+      });
+      expect(ownerMeta.markers).toEqual([500]);
+      void _ld;
+    });
   });
 });
