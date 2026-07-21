@@ -57,7 +57,7 @@ export function parseCaptureObjectPath(name) {
  * durable core fields are written; enrichment stays pending.
  */
 export function buildBackgroundCoreEntry(
-  { cleaned, rawTranscript, userId, operationId, toneAnalysis, capturedAt, captureTimezone },
+  { cleaned, rawTranscript, userId, operationId, toneAnalysis, capturedAt, captureTimezone, spaceId },
   { FieldValue: FV }
 ) {
   const entry = {
@@ -83,6 +83,13 @@ export function buildBackgroundCoreEntry(
     operationId,
     createdOnPlatform: 'ios-background',
   };
+
+  // Context Space (PRD R1 Context Spaces), same no-null-stuffing rule as the
+  // client's buildCoreEntry.js: only set when a space was explicitly
+  // selected at capture time. Unscoped is the default.
+  if (spaceId) {
+    entry.spaceId = spaceId;
+  }
 
   if (toneAnalysis) {
     entry.voiceTone = {
@@ -181,6 +188,9 @@ export async function processCaptureAudioObject(object, deps) {
     // `x-goog-meta-captured-at` / `x-goog-meta-capture-timezone` PUT headers, and
     // GCS surfaces them here under the prefix-stripped, lowercased keys
     // `captured-at` / `capture-timezone` (NOT camelCase). Absent ⇒ null.
+    // `space-id` (Context Spaces) follows the same pattern, but is passed
+    // through to buildBackgroundCoreEntry as-is (not defaulted to null) so
+    // its own no-null-stuffing conditional applies.
     const meta = object.metadata || {};
     const entry = buildBackgroundCoreEntry(
       {
@@ -191,6 +201,7 @@ export async function processCaptureAudioObject(object, deps) {
         toneAnalysis: result.toneAnalysis,
         capturedAt: meta['captured-at'] || null,
         captureTimezone: meta['capture-timezone'] || null,
+        spaceId: meta['space-id'] || null,
       },
       { FieldValue: FV }
     );

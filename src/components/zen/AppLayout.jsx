@@ -71,6 +71,8 @@ const AppLayout = ({
   onAudioSubmit,
   onTextSubmit,
   processing,
+  captureSpaceId,
+  onCaptureSpaceIdChange,
 
   // Quick Log Modal (state lifted to App.jsx)
   showQuickLog,
@@ -491,6 +493,8 @@ const AppLayout = ({
         processing={processing}
         aiProcessingEnabled={aiProcessingEnabled}
         onRequestAiConsent={onRequestAiConsent}
+        captureSpaceId={captureSpaceId}
+        onCaptureSpaceIdChange={onCaptureSpaceIdChange}
         promptContext={isFreshEntry ? null : replyContext}
         initialContext={initialContext}
         onEntrySaved={onEntrySavedCallback}

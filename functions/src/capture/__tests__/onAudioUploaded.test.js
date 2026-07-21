@@ -172,6 +172,20 @@ describe('processCaptureAudioObject — success path', () => {
     expect(entry.capturedAt).toBeNull();
     expect(entry.captureTimezone).toBeNull();
   });
+
+  it('passes space-id metadata through as spaceId on the core entry', async () => {
+    const t = makeDeps();
+    await processCaptureAudioObject(object({ metadata: { 'space-id': 'space-42' } }), t.deps);
+    const entry = t.add.mock.calls[0][0];
+    expect(entry.spaceId).toBe('space-42');
+  });
+
+  it('omits spaceId when no space-id metadata is present', async () => {
+    const t = makeDeps();
+    await processCaptureAudioObject(object({ metadata: {} }), t.deps);
+    const entry = t.add.mock.calls[0][0];
+    expect(entry).not.toHaveProperty('spaceId');
+  });
 });
 
 describe('processCaptureAudioObject — failure path', () => {
@@ -215,6 +229,20 @@ describe('buildBackgroundCoreEntry', () => {
     );
     expect(entry.transcription.rawTranscript).toBe('only clean');
     expect(entry.voiceTone).toBeUndefined();
+  });
+
+  it('includes spaceId only when a non-null space is passed', () => {
+    const withSpace = buildBackgroundCoreEntry(
+      { cleaned: 'hi', rawTranscript: 'hi', userId: 'u', operationId: OP_ID, toneAnalysis: null, spaceId: 'space-1' },
+      { FieldValue }
+    );
+    expect(withSpace.spaceId).toBe('space-1');
+
+    const without = buildBackgroundCoreEntry(
+      { cleaned: 'hi', rawTranscript: 'hi', userId: 'u', operationId: OP_ID, toneAnalysis: null, spaceId: null },
+      { FieldValue }
+    );
+    expect(without).not.toHaveProperty('spaceId');
   });
 });
 

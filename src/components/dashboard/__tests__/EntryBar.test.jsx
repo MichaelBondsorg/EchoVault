@@ -4,6 +4,7 @@ import EntryBar from '../EntryBar';
 import { appendChunk, deleteDraft, recoverWebDrafts } from '../../../services/capture/webChunkStore';
 import { audioVault } from '../../../services/audio/audioVault';
 import { getFlag } from '../../../config/flags';
+import { subscribeSpaces, setLastCaptureSpaceId } from '../../../services/spaces/spacesService';
 
 vi.mock('../../../services/capture/webChunkStore', () => ({
   appendChunk: vi.fn().mockResolvedValue(true),
@@ -17,6 +18,13 @@ vi.mock('../../../services/audio/audioVault', () => ({
 
 vi.mock('../../../config/flags', () => ({
   getFlag: vi.fn(),
+}));
+
+vi.mock('../../../config/firebase', () => ({ db: { __db: true } }));
+
+vi.mock('../../../services/spaces/spacesService', () => ({
+  subscribeSpaces: vi.fn(),
+  setLastCaptureSpaceId: vi.fn().mockResolvedValue(undefined),
 }));
 
 // Minimal fake MediaRecorder — jsdom has no native implementation. `stop()`
@@ -69,6 +77,8 @@ beforeEach(() => {
   deleteDraft.mockClear().mockResolvedValue(true);
   recoverWebDrafts.mockClear().mockResolvedValue(0);
   audioVault.saveRecording.mockReset();
+  subscribeSpaces.mockReset().mockReturnValue(() => {});
+  setLastCaptureSpaceId.mockReset().mockResolvedValue(undefined);
 });
 
 afterEach(() => {
@@ -219,5 +229,93 @@ describe('EntryBar — typed-draft autosave', () => {
     );
     const textarea = await screen.findByPlaceholderText("What's on your mind?");
     expect(textarea.value).toBe('');
+  });
+});
+
+describe('EntryBar — Space pill (flag: contextSpaces)', () => {
+  it('renders nothing (no pill, no subscription) when contextSpaces is off', () => {
+    getFlag.mockImplementation((flag) => flag !== 'contextSpaces');
+    render(
+      <EntryBar ownerUid={OWNER} onVoiceSave={vi.fn()} onTextSave={vi.fn()} embedded preferredMode="text" />
+    );
+    expect(screen.queryByLabelText('Assign a space')).toBeNull();
+    expect(subscribeSpaces).not.toHaveBeenCalled();
+  });
+
+  it('subscribes to active spaces and shows the picker on tap, with a "No space" option', async () => {
+    subscribeSpaces.mockImplementation((_db, _uid, cb) => {
+      cb([{ id: 'space-1', name: 'Work' }, { id: 'space-2', name: 'Personal' }]);
+      return () => {};
+    });
+    render(
+      <EntryBar ownerUid={OWNER} onVoiceSave={vi.fn()} onTextSave={vi.fn()} embedded preferredMode="text" captureSpaceId={null} />
+    );
+    expect(subscribeSpaces).toHaveBeenCalledWith({ __db: true }, OWNER, expect.any(Function));
+
+    const pill = await screen.findByLabelText('Assign a space');
+    fireEvent.click(pill);
+
+    expect(screen.getByText('No space')).toBeTruthy();
+    expect(screen.getByText('Work')).toBeTruthy();
+    expect(screen.getByText('Personal')).toBeTruthy();
+  });
+
+  it('shows the selected space name on the pill when captureSpaceId is set', async () => {
+    subscribeSpaces.mockImplementation((_db, _uid, cb) => {
+      cb([{ id: 'space-1', name: 'Work' }]);
+      return () => {};
+    });
+    render(
+      <EntryBar ownerUid={OWNER} onVoiceSave={vi.fn()} onTextSave={vi.fn()} embedded preferredMode="text" captureSpaceId="space-1" />
+    );
+    expect(await screen.findByLabelText('Space: Work')).toBeTruthy();
+  });
+
+  it('an explicit selection calls the setter prop AND persists it via setLastCaptureSpaceId', async () => {
+    subscribeSpaces.mockImplementation((_db, _uid, cb) => {
+      cb([{ id: 'space-1', name: 'Work' }]);
+      return () => {};
+    });
+    const onCaptureSpaceIdChange = vi.fn();
+    render(
+      <EntryBar
+        ownerUid={OWNER}
+        onVoiceSave={vi.fn()}
+        onTextSave={vi.fn()}
+        embedded
+        preferredMode="text"
+        captureSpaceId={null}
+        onCaptureSpaceIdChange={onCaptureSpaceIdChange}
+      />
+    );
+    fireEvent.click(await screen.findByLabelText('Assign a space'));
+    fireEvent.click(screen.getByText('Work'));
+
+    expect(onCaptureSpaceIdChange).toHaveBeenCalledWith('space-1');
+    await waitFor(() => expect(setLastCaptureSpaceId).toHaveBeenCalledWith({ __db: true }, OWNER, 'space-1'));
+  });
+
+  it('selecting "No space" clears the selection (null) via both the setter and persistence', async () => {
+    subscribeSpaces.mockImplementation((_db, _uid, cb) => {
+      cb([{ id: 'space-1', name: 'Work' }]);
+      return () => {};
+    });
+    const onCaptureSpaceIdChange = vi.fn();
+    render(
+      <EntryBar
+        ownerUid={OWNER}
+        onVoiceSave={vi.fn()}
+        onTextSave={vi.fn()}
+        embedded
+        preferredMode="text"
+        captureSpaceId="space-1"
+        onCaptureSpaceIdChange={onCaptureSpaceIdChange}
+      />
+    );
+    fireEvent.click(await screen.findByLabelText('Space: Work'));
+    fireEvent.click(screen.getByText('No space'));
+
+    expect(onCaptureSpaceIdChange).toHaveBeenCalledWith(null);
+    await waitFor(() => expect(setLastCaptureSpaceId).toHaveBeenCalledWith({ __db: true }, OWNER, null));
   });
 });

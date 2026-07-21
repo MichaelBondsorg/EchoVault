@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Mic, Square, X, Loader2 } from 'lucide-react';
+import { Mic, Square, X, Loader2, Tag } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
 import { CaptureService } from '../../services/capture/captureService';
 import { nativeCaptureAdapter } from '../../services/capture/nativeCaptureAdapter';
@@ -8,7 +8,65 @@ import { appendChunk, deleteDraft, recoverWebDrafts } from '../../services/captu
 import { restoreDraft, writeDraft, clearDraft } from '../../services/capture/draftAutosave';
 import { audioVault } from '../../services/audio/audioVault';
 import { getFlag } from '../../config/flags';
-import { Button } from '../cloud';
+import { db } from '../../config/firebase';
+import { subscribeSpaces, setLastCaptureSpaceId } from '../../services/spaces/spacesService';
+import { Button, Chip } from '../cloud';
+
+/**
+ * SpacePill — capture-time Context Space picker (PRD R1 Context Spaces,
+ * plan task 9). A small tappable Chip showing the currently selected
+ * Space's name (or nothing when unscoped — the icon alone is the tap
+ * affordance), with a lightweight absolutely-positioned popover listing
+ * active spaces + "No space". Entirely local to EntryBar; only rendered
+ * when the `contextSpaces` flag is on.
+ */
+const SpacePill = ({ spaces, selectedId, onSelect, open, onToggle }) => {
+  const selected = spaces.find((s) => s.id === selectedId) || null;
+  return (
+    <div className="relative inline-block">
+      <Chip
+        as="button"
+        type="button"
+        onClick={onToggle}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        aria-label={selected ? `Space: ${selected.name}` : 'Assign a space'}
+      >
+        <Tag size={12} aria-hidden="true" />
+        {selected && <span>{selected.name}</span>}
+      </Chip>
+      {open && (
+        <div
+          role="listbox"
+          aria-label="Choose a space"
+          className="absolute right-0 z-40 mt-1 min-w-[140px] rounded-xl border border-border bg-card p-1 shadow-soft-lg"
+        >
+          <button
+            type="button"
+            role="option"
+            aria-selected={selectedId == null}
+            onClick={() => onSelect(null)}
+            className={`block w-full rounded-lg px-2 py-1.5 text-left text-xs ${selectedId == null ? 'bg-accent-wash text-accent-deep' : 'text-secondary-foreground hover:bg-divider'}`}
+          >
+            No space
+          </button>
+          {spaces.map((space) => (
+            <button
+              key={space.id}
+              type="button"
+              role="option"
+              aria-selected={space.id === selectedId}
+              onClick={() => onSelect(space.id)}
+              className={`block w-full rounded-lg px-2 py-1.5 text-left text-xs ${space.id === selectedId ? 'bg-accent-wash text-accent-deep' : 'text-secondary-foreground hover:bg-divider'}`}
+            >
+              {space.name}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
 
 const ENTRY_DRAFT_PREFIX = 'entry_draft';
 
@@ -27,12 +85,18 @@ const webChunkRecoveryOwners = new Set();
  * - Always visible at bottom of screen
  * - Can show prompt context when responding to a prompt
  */
-const EntryBar = ({ ownerUid, onVoiceSave, onTextSave, onStateChange, loading, disabled, promptContext, onClearPrompt, preferredMode = 'text', embedded = false }) => {
+const EntryBar = ({
+  ownerUid, onVoiceSave, onTextSave, onStateChange, loading, disabled, promptContext, onClearPrompt,
+  preferredMode = 'text', embedded = false, captureSpaceId = null, onCaptureSpaceIdChange,
+}) => {
   const [mode, setMode] = useState('idle'); // idle, recording, typing
   const [recording, setRecording] = useState(false);
   const [mediaRecorder, setMediaRecorder] = useState(null);
   const [recordingSeconds, setRecordingSeconds] = useState(0);
   const [textValue, setTextValue] = useState('');
+  const [spaces, setSpaces] = useState([]);
+  const [spacePickerOpen, setSpacePickerOpen] = useState(false);
+  const contextSpacesOn = getFlag('contextSpaces');
   const timerRef = useRef(null);
   const textInputRef = useRef(null);
   const shouldAutoStartVoice = useRef(false);
@@ -78,6 +142,31 @@ const EntryBar = ({ ownerUid, onVoiceSave, onTextSave, onStateChange, loading, d
     const timeout = setTimeout(() => writeDraft(ENTRY_DRAFT_PREFIX, ownerUid, textValue), 500);
     return () => clearTimeout(timeout);
   }, [ownerUid, textValue]);
+
+  // Context Space picker (flag: contextSpaces): subscribe to the owner's
+  // active spaces so the capture pill can list them + resolve the current
+  // selection's display name.
+  useEffect(() => {
+    if (!contextSpacesOn || !ownerUid) {
+      setSpaces([]);
+      return undefined;
+    }
+    return subscribeSpaces(db, ownerUid, setSpaces);
+  }, [contextSpacesOn, ownerUid]);
+
+  // Explicit selection only: updates the lifted App.jsx state (so the next
+  // save picks it up) and persists it as the new "last capture space" so it
+  // is remembered on the next capture (Michael's product decision — Space
+  // default is unscoped; the pill remembers the last EXPLICIT choice only).
+  const handleSelectSpace = (spaceId) => {
+    onCaptureSpaceIdChange?.(spaceId);
+    if (ownerUid) {
+      setLastCaptureSpaceId(db, ownerUid, spaceId).catch((err) => {
+        console.warn('[Spaces] failed to persist last capture space:', err?.message);
+      });
+    }
+    setSpacePickerOpen(false);
+  };
 
   // One-time-per-session web recording-chunk recovery: adopt any chunks left
   // over from a tab death mid-recording into the durable audio vault. Native
@@ -409,6 +498,18 @@ const EntryBar = ({ ownerUid, onVoiceSave, onTextSave, onStateChange, loading, d
             exit={{ y: 100 }}
           >
             <div className="max-w-md mx-auto">
+              {/* Space pill (flag: contextSpaces) */}
+              {contextSpacesOn && (
+                <div className="mb-2 flex justify-end">
+                  <SpacePill
+                    spaces={spaces}
+                    selectedId={captureSpaceId}
+                    onSelect={handleSelectSpace}
+                    open={spacePickerOpen}
+                    onToggle={() => setSpacePickerOpen((prev) => !prev)}
+                  />
+                </div>
+              )}
               {/* Prompt Context Banner */}
               {promptContext && (
                 <div className="mb-2 px-3 py-2 bg-accent-wash rounded-xl text-xs text-accent-deep">
@@ -506,6 +607,18 @@ const EntryBar = ({ ownerUid, onVoiceSave, onTextSave, onStateChange, loading, d
             animate={{ y: 0 }}
             exit={{ y: 100 }}
           >
+            {/* Space pill (flag: contextSpaces) */}
+            {contextSpacesOn && (
+              <div className="mb-2 flex justify-center">
+                <SpacePill
+                  spaces={spaces}
+                  selectedId={captureSpaceId}
+                  onSelect={handleSelectSpace}
+                  open={spacePickerOpen}
+                  onToggle={() => setSpacePickerOpen((prev) => !prev)}
+                />
+              </div>
+            )}
             <div className="max-w-md mx-auto flex items-center justify-center gap-8">
               {/* Mic Button */}
               <motion.button

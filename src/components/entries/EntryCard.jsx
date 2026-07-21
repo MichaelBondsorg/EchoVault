@@ -2,15 +2,77 @@ import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import {
   Trash2, Calendar, Edit2, Check, RefreshCw, Lightbulb, Wind, Sparkles,
-  Brain, Info, Footprints, Clipboard, X, Compass,
+  Brain, Info, Footprints, Clipboard, X, Compass, Tag,
   Sun, Moon, Cloud, CloudRain, CloudSnow, CloudLightning, CloudFog, CloudDrizzle, CloudSun, CloudMoon,
   Thermometer, Activity, BedDouble, Battery, Zap
 } from 'lucide-react';
 import { safeString, formatMentions } from '../../utils/string';
 import { formatDateForInput, getTodayForInput, parseDateInput, getDateString } from '../../utils/date';
 import { accentForMood } from '../../utils/moodTrend';
+import { getFlag } from '../../config/flags';
+import { db } from '../../config/firebase';
+import { useUser } from '../../stores';
+import { subscribeSpaces } from '../../services/spaces/spacesService';
+import { Chip } from '../cloud';
 import ProvenanceDisclosure from '../ui/ProvenanceDisclosure';
 import IntentSuggestionTray from './IntentSuggestionTray';
+
+/**
+ * SpaceChip — Context Space re-scoping affordance for a saved entry (PRD R1
+ * Context Spaces, plan task 9). Mirrors EntryBar's SpacePill (same popover
+ * pattern), but writes back to the entry itself: selecting a space calls
+ * `onSelect` with the entry's own updateDoc payload, `{spaceId, updatedAt}`
+ * — and nothing else ever changes (createdAt/effectiveDate/transcription
+ * stay untouched).
+ */
+const SpaceChip = ({ spaces, selectedId, onSelect, open, onToggle }) => {
+  const selected = spaces.find((s) => s.id === selectedId) || null;
+  return (
+    <div className="relative inline-block">
+      <Chip
+        as="button"
+        type="button"
+        onClick={onToggle}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        aria-label={selected ? `Space: ${selected.name}` : 'Assign a space'}
+        className="text-[10px]"
+      >
+        <Tag size={10} aria-hidden="true" />
+        {selected && <span>{selected.name}</span>}
+      </Chip>
+      {open && (
+        <div
+          role="listbox"
+          aria-label="Choose a space"
+          className="absolute left-0 z-40 mt-1 min-w-[140px] rounded-xl border border-border bg-card p-1 shadow-soft-lg"
+        >
+          <button
+            type="button"
+            role="option"
+            aria-selected={selectedId == null}
+            onClick={() => onSelect(null)}
+            className={`block w-full rounded-lg px-2 py-1.5 text-left text-xs ${selectedId == null ? 'bg-accent-wash text-accent-deep' : 'text-secondary-foreground hover:bg-divider'}`}
+          >
+            No space
+          </button>
+          {spaces.map((space) => (
+            <button
+              key={space.id}
+              type="button"
+              role="option"
+              aria-selected={space.id === selectedId}
+              onClick={() => onSelect(space.id)}
+              className={`block w-full rounded-lg px-2 py-1.5 text-left text-xs ${space.id === selectedId ? 'bg-accent-wash text-accent-deep' : 'text-secondary-foreground hover:bg-divider'}`}
+            >
+              {space.name}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
 
 // Entity tag emoji lookup (hoisted for performance - used in tag rendering)
 const ENTITY_EMOJIS = {
@@ -120,6 +182,10 @@ const EntryCard = ({ entry, onDelete, onUpdate }) => {
   const [title, setTitle] = useState(entry.title);
   const [showAllTags, setShowAllTags] = useState(false); // LAY-001: Control tag overflow
   const [showCorrections, setShowCorrections] = useState(false);
+  const contextSpacesOn = getFlag('contextSpaces');
+  const uid = useUser()?.uid;
+  const [spaces, setSpaces] = useState([]);
+  const [spacePickerOpen, setSpacePickerOpen] = useState(false);
   // Use effectiveDate if set, otherwise fall back to createdAt
   const [editDate, setEditDate] = useState(
     formatDateForInput(entry.effectiveDate || entry.createdAt)
@@ -136,6 +202,16 @@ const EntryCard = ({ entry, onDelete, onUpdate }) => {
     setEditDate(formatDateForInput(entry.effectiveDate || entry.createdAt));
   }, [entry.effectiveDate, entry.createdAt]);
 
+  // Context Space (flag: contextSpaces) — subscribe to active spaces so the
+  // re-scoping chip can resolve this entry's Space name + list picker options.
+  useEffect(() => {
+    if (!contextSpacesOn || !uid) {
+      setSpaces([]);
+      return undefined;
+    }
+    return subscribeSpaces(db, uid, setSpaces);
+  }, [contextSpacesOn, uid]);
+
   const insightMsg = entry.contextualInsight?.message ? formatMentions(safeString(entry.contextualInsight.message)) : null;
   const cbt = entry.analysis?.cbt_breakdown;
   const actAnalysis = entry.analysis?.act_analysis;
@@ -149,6 +225,14 @@ const EntryCard = ({ entry, onDelete, onUpdate }) => {
   const toggleCategory = () => {
     const newCategory = entry.category === 'work' ? 'personal' : 'work';
     onUpdate(entry.id, { category: newCategory });
+  };
+
+  // Re-scope this entry to a different Space (or clear it). ONLY spaceId +
+  // updatedAt are ever written — createdAt/effectiveDate/transcription/
+  // provenance are never touched by a Space change.
+  const handleSpaceSelect = (spaceId) => {
+    onUpdate(entry.id, { spaceId, updatedAt: new Date().toISOString() });
+    setSpacePickerOpen(false);
   };
 
   const cardStyle = isTask
@@ -395,9 +479,20 @@ const EntryCard = ({ entry, onDelete, onUpdate }) => {
       </div>
 
       {/* Header row 2: tags in their own full-width wrapping region so they
-          never compete with the action controls for width. */}
-      {tags.length > 0 && (
+          never compete with the action controls for width. The Space chip
+          (flag: contextSpaces) lives here too so the row still renders even
+          for a Space-scoped entry with zero tags. */}
+      {(tags.length > 0 || contextSpacesOn) && (
         <div className="flex flex-wrap items-center gap-2 mb-3">
+          {contextSpacesOn && (
+            <SpaceChip
+              spaces={spaces}
+              selectedId={entry.spaceId ?? null}
+              onSelect={handleSpaceSelect}
+              open={spacePickerOpen}
+              onToggle={() => setSpacePickerOpen((prev) => !prev)}
+            />
+          )}
           {/* LAY-001: Limit visible tags to prevent overflow */}
           {(() => {
             const MAX_VISIBLE_TAGS = 5;

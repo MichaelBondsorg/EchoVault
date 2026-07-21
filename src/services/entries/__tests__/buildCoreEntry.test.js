@@ -90,6 +90,7 @@ describe('buildCoreEntry', () => {
     expect(entry).not.toHaveProperty('safety_flagged');
     expect(entry).not.toHaveProperty('has_warning_indicators');
     expect(entry).not.toHaveProperty('operationId');
+    expect(entry).not.toHaveProperty('spaceId');
   });
 
   it('builds the versioned transcription shape when a raw transcript is supplied', () => {
@@ -120,6 +121,13 @@ describe('buildCoreEntry', () => {
   it('includes operationId only when provided', () => {
     expect(buildCoreEntry(baseArgs({ operationId: 'op-123' })).operationId).toBe('op-123');
     expect(buildCoreEntry(baseArgs())).not.toHaveProperty('operationId');
+  });
+
+  it('includes spaceId only when a non-null space is passed', () => {
+    expect(buildCoreEntry(baseArgs({ spaceId: 'space-9' })).spaceId).toBe('space-9');
+    expect(buildCoreEntry(baseArgs())).not.toHaveProperty('spaceId');
+    expect(buildCoreEntry(baseArgs({ spaceId: null }))).not.toHaveProperty('spaceId');
+    expect(buildCoreEntry(baseArgs({ spaceId: undefined }))).not.toHaveProperty('spaceId');
   });
 
   it('sets the invariant core fields (userId, versions, platform, Firestore timestamps)', () => {

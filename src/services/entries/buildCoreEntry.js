@@ -45,6 +45,11 @@ import { Timestamp } from 'firebase/firestore';
  *                                          rule preserved from the legacy path).
  * @param {string} [args.operationId]       Capture pipeline operation id (voice pipeline supplies it
  *                                          in a later task; optional now).
+ * @param {string|null} [args.spaceId]      Context Space (PRD R1 Context Spaces) the entry is
+ *                                          captured into. Omitted from the write entirely when
+ *                                          null/absent — entries are unscoped by default; only an
+ *                                          explicit selection sets this (see EntryBar's capture
+ *                                          pill / spacesService.getLastCaptureSpaceId).
  * @returns {Object} The core entry object to persist FIRST via addDoc.
  */
 export function buildCoreEntry({
@@ -58,6 +63,7 @@ export function buildCoreEntry({
   platform,
   voiceTone = null,
   operationId,
+  spaceId,
 } = {}) {
   const aiProcessingConsent = typeof consentSnapshot === 'boolean'
     ? consentSnapshot
@@ -95,6 +101,13 @@ export function buildCoreEntry({
   // into Firestore.
   if (category) {
     entry.category = category;
+  }
+
+  // Only set spaceId when a space was explicitly selected — same
+  // no-null-stuffing rule as category. Unscoped is the default; entries
+  // never carry a `spaceId: null` field.
+  if (spaceId) {
+    entry.spaceId = spaceId;
   }
 
   const rawTranscript = typeof transcription === 'string'

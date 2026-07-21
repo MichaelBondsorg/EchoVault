@@ -75,6 +75,7 @@ import { resumeIncompleteOperations } from './services/capture/resumeOperations'
 import { recordStage, STAGES } from './services/telemetry/captureTelemetry';
 import { inferCategory } from './services/prompts';
 import { getActiveReflectionPrompts, dismissReflectionPrompt } from './services/prompts/activePrompts';
+import { getLastCaptureSpaceId } from './services/spaces/spacesService';
 import { detectTemporalContext, needsConfirmation, formatEffectiveDate } from './services/temporal';
 import { handleEntryDateChange, calculateStreak, shouldCelebrateNewStreak } from './services/dashboard';
 import { processEntrySignals } from './services/signals/processEntrySignals';
@@ -220,6 +221,13 @@ export default function App() {
   const [needsAiConsent, setNeedsAiConsent] = useState(false);
   const [aiProcessingEnabled, setAiProcessingEnabled] = useState(false);
   const [aiConsentSaving, setAiConsentSaving] = useState(false);
+
+  // Context Space capture pill (PRD R1 Context Spaces, plan task 9). Default
+  // is unscoped (null); when the flag is on, lazily restore the last space
+  // the user EXPLICITLY selected (Michael's product decision — never
+  // auto-select, only remember an explicit choice). EntryBar/EntryComposer
+  // read+set this via props; doSaveEntry below reads it via closure.
+  const [captureSpaceId, setCaptureSpaceId] = useState(null);
 
   useEffect(() => {
     if (!user?.uid) {
@@ -631,6 +639,19 @@ export default function App() {
       setUser(user);
     });
   }, []);
+
+  // Context Space capture pill: lazily restore the last EXPLICITLY-selected
+  // space once we know who's signed in. Fire-and-forget, never blocks first
+  // paint; with contextSpaces off (or no user) this simply stays null —
+  // zero behavior change for anyone not using Spaces.
+  useEffect(() => {
+    if (!user?.uid || !getFlag('contextSpaces')) return undefined;
+    let cancelled = false;
+    getLastCaptureSpaceId(db, user.uid)
+      .then((id) => { if (!cancelled) setCaptureSpaceId(id); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [user?.uid]);
 
   // Data Feed
   useEffect(() => {
@@ -1388,6 +1409,10 @@ export default function App() {
           // launch resume's duplicate-delivery guard can find this entry by
           // operationId and avoid re-transcribing the same recording.
           operationId,
+          // Context Space (flag: contextSpaces) — the capture pill's current
+          // selection. null when unscoped/flag-off; buildCoreEntry omits the
+          // field entirely in that case (same rule as category).
+          spaceId: captureSpaceId,
         });
 
         console.time('⏱️ Firestore save (core-first)');
@@ -2955,6 +2980,8 @@ export default function App() {
       onAudioSubmit={handleAudioWrapper}
       onTextSubmit={saveEntry}
       processing={processing}
+      captureSpaceId={captureSpaceId}
+      onCaptureSpaceIdChange={setCaptureSpaceId}
 
       // Quick Log Modal (state lifted to App.jsx)
       showQuickLog={showQuickLog}

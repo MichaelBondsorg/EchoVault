@@ -34,6 +34,8 @@ const EntryComposer = ({
   reflection,
   initialContext,
   onEntrySaved,
+  captureSpaceId,
+  onCaptureSpaceIdChange,
 }) => {
   const [captureState, setCaptureState] = useState('idle');
   const captureLocked = captureState === 'preparing' || captureState === 'recording';
@@ -144,6 +146,8 @@ const EntryComposer = ({
           preferredMode={mode}
           promptContext={promptContext}
           onStateChange={setCaptureState}
+          captureSpaceId={captureSpaceId}
+          onCaptureSpaceIdChange={onCaptureSpaceIdChange}
         />
         <p className="mt-3 text-center text-xs text-muted-foreground">
           Audio is secured on this device before it is processed.
