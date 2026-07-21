@@ -209,7 +209,9 @@ export const generateBasicInsights = async (userId, entries) => {
     // window-level receipt over the full `entries` set passed in. Single
     // seam: no correlations/*.js file needs to change.
     const basicInsightsTimeWindow = computeTimeWindow(30);
-    const entriesById = new Map(entries.map((e) => [e.id || e.entryId, e]));
+    const entriesById = new Map(
+      entries.filter((e) => e.id || e.entryId).map((e) => [e.id || e.entryId, e])
+    );
     const allInsightsWithReceipts = allInsights.map((insight) =>
       attachBasicInsightReceipt(insight, entriesById, basicInsightsTimeWindow, entries)
     );

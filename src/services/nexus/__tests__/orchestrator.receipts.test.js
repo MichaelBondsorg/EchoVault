@@ -112,7 +112,7 @@ vi.mock('../layer4/recommendationEngine', () => ({
   ])),
 }));
 
-const { getDocs } = await import('firebase/firestore');
+const { getDocs, setDoc } = await import('firebase/firestore');
 const { generateInsights } = await import('../orchestrator');
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -173,6 +173,7 @@ function mockEntriesSnapshot(entries) {
 describe('generateInsights - receipts (R2 Task 8)', () => {
   beforeEach(() => {
     getDocs.mockReset();
+    setDoc.mockClear();
   });
 
   it('attaches a truthy, well-formed receipt to every insight in `active` (100%-receipts invariant)', async () => {
@@ -195,6 +196,22 @@ describe('generateInsights - receipts (R2 Task 8)', () => {
       expect(insight.receipt.versions.computationVersion).toBe(1);
       expect(insight.receipt.versions.generator).toEqual(expect.any(String));
       expect(insight.receipt.versions.generatedAt).toEqual(expect.any(String));
+    }
+
+    // The `setDoc` mock is a no-op, so the assertions above only prove the
+    // in-memory `result.insights` carry receipts — not what actually gets
+    // persisted. Inspect the real payload `saveInsights` handed to `setDoc`
+    // (the call whose data includes an `active` array) so the 100%-receipts
+    // invariant is proven against the SAVED document, not just the return
+    // value. Guard `active.length > 0` so this can't pass vacuously.
+    const persistCall = setDoc.mock.calls.find(
+      (call) => call[1] && Array.isArray(call[1].active)
+    );
+    expect(persistCall).toBeTruthy();
+    const persistedActive = persistCall[1].active;
+    expect(persistedActive.length).toBeGreaterThan(0);
+    for (const insight of persistedActive) {
+      expect(insight.receipt).toBeTruthy();
     }
   });
 

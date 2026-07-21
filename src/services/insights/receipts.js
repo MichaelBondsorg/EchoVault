@@ -33,6 +33,10 @@
  * Excerpts are provenance for the USER'S OWN insight, stored only in their
  * own `nexus/insights` / `basicInsights/current` doc — never logged, and
  * receipts never write back to or mutate the source entries.
+ *
+ * `missingness` is populated only on window-fallback receipts (no precise
+ * source set); precise-source receipts pass `null` by design, since their
+ * exact `sources` list already carries the evidence.
  */
 
 export const RECEIPT_COMPUTATION_VERSION = 1;
