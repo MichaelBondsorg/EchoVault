@@ -459,6 +459,25 @@ describe('EntryCard — Voice Chapters (flag: voiceChapters)', () => {
       expect(screen.queryByLabelText('Chapter actions')).toBeNull();
     });
 
+    it('falls back when a chapter charStart is NaN (would silently slice wrong content via typeof check)', () => {
+      const chapters = makeChapters(CHAPTER_TEXT);
+      const corrupted = [{ ...chapters[0], charStart: NaN }, chapters[1], chapters[2]];
+      const { container } = render(
+        <EntryCard
+          entry={baseEntry({ text: CHAPTER_TEXT, transcription: { chapters: corrupted } })}
+          onDelete={vi.fn()}
+          onUpdate={vi.fn()}
+        />
+      );
+
+      expect(screen.getByText('Chapters no longer match edited text')).toBeTruthy();
+      expect(screen.queryByLabelText('Chapter actions')).toBeNull();
+      const bodyDiv = container.querySelector('.max-w-prose');
+      expect(bodyDiv.className).toBe(
+        'text-secondary-foreground text-sm whitespace-pre-wrap leading-7 font-body max-w-prose [&>*]:mb-3'
+      );
+    });
+
     it('does not crash when entry.text is shorter than the chapters expect', () => {
       const chapters = makeChapters(CHAPTER_TEXT);
       expect(() =>

@@ -215,7 +215,7 @@ function chaptersMatchText(chapters, text) {
   if (typeof text !== 'string') return false;
   let prevEnd = 0;
   for (const c of chapters) {
-    if (typeof c.charStart !== 'number' || typeof c.charEnd !== 'number') return false;
+    if (!Number.isFinite(c.charStart) || !Number.isFinite(c.charEnd)) return false;
     if (c.charStart < 0 || c.charEnd > text.length) return false;
     if (c.charEnd <= c.charStart) return false;
     if (c.charStart < prevEnd) return false;
