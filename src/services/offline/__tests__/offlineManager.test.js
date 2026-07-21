@@ -71,13 +71,15 @@ describe('offlineManager.queueEntry — spaceId passthrough', () => {
 });
 
 describe('offline queue -> sync integration: spaceId survives to the synced payload', () => {
-  // buildCoreEntry is the codebase's single source of truth for the
-  // "conditional field, no null-stuffing" contract that any Firestore write
-  // built from a queued offline entry must honor (see buildCoreEntry.js:106-111
-  // for the identical spaceId rule applied on the online path). This proves
-  // that a spaceId surviving offlineManager.queueEntry's whitelist keeps
-  // surviving all the way through that shared contract, i.e. an entry
-  // captured offline with a selected Context Space does not sync unscoped.
+  // NOTE on scope: this composes queueEntry() with buildCoreEntry() to cover
+  // the core-first re-save path (where a queued entry is rebuilt through
+  // buildCoreEntry's "conditional field, no null-stuffing" contract — see
+  // buildCoreEntry.js:106-111 for the identical spaceId rule). buildCoreEntry
+  // is NOT on the actual offline-drain path: that path is the `saveEntry`
+  // closure in App.jsx, which calls buildOfflineSyncPayload() (extracted to
+  // src/services/offline/offlineSyncPayload.js) before setDoc. The drain
+  // path's spaceId passthrough — including the no-null-stuffing behavior —
+  // is covered by offlineSyncPayload.test.js, not by the tests below.
   const captureArgs = (overrides = {}) => ({
     text: 'queued offline thought',
     user: { uid: 'owner-1' },

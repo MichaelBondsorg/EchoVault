@@ -35,6 +35,7 @@ import { initFlags, getFlag } from './config/flags';
 
 // Utils
 import { safeString, removeUndefined, formatMentions } from './utils/string';
+import { buildOfflineSyncPayload } from './services/offline/offlineSyncPayload';
 import { safeDate, formatDateForInput, getTodayForInput, parseDateInput, getDateString, getISOYearWeek } from './utils/date';
 import { sanitizeEntry } from './utils/entries';
 
@@ -565,37 +566,7 @@ export default function App() {
         ? doc(entriesCol, entryData.offlineId)
         : doc(entriesCol);
 
-      const createdAtDate = entryData.createdAt ? new Date(entryData.createdAt) : new Date();
-      const effectiveDate = entryData.effectiveDate ? new Date(entryData.effectiveDate) : createdAtDate;
-      const aiConsent = entryData.aiProcessingConsent !== false;
-
-      const data = removeUndefined({
-        text: entryData.text,
-        category: entryData.category || undefined,
-        // Context Space (flag: contextSpaces) — carried through from the
-        // offline-queued record (offlineManager.queueEntry now preserves
-        // it). removeUndefined strips this when absent, same no-null-
-        // stuffing convention as buildCoreEntry.js:106-111 on the online
-        // path. Without this line, an entry captured offline with a
-        // selected Space synced unscoped — this was the known R1 blocker.
-        spaceId: entryData.spaceId || undefined,
-        createdAt: Timestamp.fromDate(createdAtDate),
-        effectiveDate: Timestamp.fromDate(effectiveDate),
-        analysisStatus: aiConsent ? 'pending' : 'disabled',
-        aiProcessingConsent: aiConsent,
-        signalExtractionVersion: 1,
-        createdOnPlatform: entryData.platform || undefined,
-        syncedFromOffline: true,
-        offlineId: entryData.offlineId || undefined,
-        localAnalysis: entryData.localAnalysis || undefined,
-        healthContext: entryData.healthContext || undefined,
-        environmentContext: entryData.environmentContext || undefined,
-        voiceTone: entryData.voiceTone || undefined,
-        transcription: entryData.transcription || undefined,
-        safety_flagged: entryData.safety_flagged || undefined,
-        safety_user_response: entryData.safety_user_response || undefined,
-        has_warning_indicators: entryData.has_warning_indicators || undefined,
-      });
+      const data = buildOfflineSyncPayload(entryData);
 
       // setDoc (not addDoc) with the offlineId-derived id makes the sync
       // idempotent — a duplicate delivery overwrites rather than duplicates.

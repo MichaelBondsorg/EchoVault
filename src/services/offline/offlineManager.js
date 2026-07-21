@@ -35,6 +35,7 @@ const RETRY_CONFIG = {
  *
  * @param {Object} entryData - Entry data to queue
  * @param {string} entryData.text - Entry text content
+ * @param {string} [entryData.spaceId] - Context Space (flag: contextSpaces) selected at capture time
  * @param {Object} entryData.localAnalysis - Local analysis results
  * @param {Object} entryData.healthContext - Health context data
  * @param {Object} entryData.environmentContext - Environment data
@@ -47,8 +48,11 @@ export const queueEntry = async (ownerUid, entryData) => {
     text: entryData.text,
     category: entryData.category || null,
     // Context Space (flag: contextSpaces) selected at capture time. Only set
-    // when a space was explicitly chosen — same no-null-stuffing rule as
-    // category/buildCoreEntry: unscoped is the default, never `spaceId: null`.
+    // when a space was explicitly chosen: spaceId is conditionally spread in
+    // (omitted entirely when absent), never null-stuffed like `category`
+    // above. This matches buildCoreEntry's spaceId convention (unscoped is
+    // the default, never `spaceId: null`) even though category here keeps
+    // its own legacy null convention.
     ...(entryData.spaceId ? { spaceId: entryData.spaceId } : {}),
     transcriptionText: entryData.transcriptionText || null,
     localAnalysis: entryData.localAnalysis || null,
