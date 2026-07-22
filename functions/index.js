@@ -2218,6 +2218,12 @@ export const journalReminder = onSchedule(
   }
 );
 
+// Scheduled: Gentle Revisit daily selection (R2 Task 19, flag `gentleRevisit`
+// — OFF pending the safety memo sign-off at docs/quality/gentle-revisit-safety.md).
+// Selection logic + rule enforcement live in functions/src/revisit/selectRevisits.js;
+// this is purely the export wiring.
+export { gentleRevisitDaily } from './src/revisit/selectRevisits.js';
+
 /**
  * Trigger: On entry update (mood analysis complete)
  * 1. Correction invalidation (plan task C4): re-run server analysis when the
