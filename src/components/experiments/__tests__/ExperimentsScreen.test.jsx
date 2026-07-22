@@ -9,7 +9,7 @@
  * exercise genuine behavior, not a mock's stand-in.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, within, act } from '@testing-library/react';
 import ExperimentsScreen from '../ExperimentsScreen';
 import {
   subscribeExperiments,
@@ -26,6 +26,7 @@ import {
 } from '../../../services/experiments/experimentsService';
 import { subscribeSpaces } from '../../../services/spaces/spacesService';
 import { getFlag } from '../../../config/flags';
+import { computeExperimentResult } from '../../../services/experiments/computeResult';
 
 vi.mock('../../../config/firebase', () => ({ db: { __db: true } }));
 vi.mock('../../../config/flags', () => ({ getFlag: vi.fn() }));
@@ -98,6 +99,22 @@ const withSpaces = (spaces) => {
   });
 };
 
+/**
+ * Like `withExperiments`, but keeps a handle on the subscription callback so
+ * a test can emit further snapshots (simulating Firestore pushing a second
+ * update — e.g. the same still-running doc arriving again before a
+ * completion write has round-tripped). Mirrors real `onSnapshot` semantics:
+ * the callback can fire more than once over the component's lifetime.
+ */
+const controlledSubscribe = () => {
+  let cb;
+  subscribeExperiments.mockImplementation((_db, _uid, callback) => {
+    cb = callback;
+    return () => {};
+  });
+  return { emit: (snapshot) => act(() => cb(snapshot)) };
+};
+
 function isoDaysAgo(days, hour = 12) {
   const ms = Date.now() - days * 24 * 60 * 60 * 1000;
   const d = new Date(ms);
@@ -154,9 +171,25 @@ beforeEach(() => {
     return false;
   });
   getExperimentPrefs.mockResolvedValue({ enabled: true });
+  // `vi.clearAllMocks()` clears call history but NOT a custom
+  // `mockImplementation`/pending-promise a test may have installed on
+  // `writeResult` (that's `mockReset`'s job, not `mockClear`'s) — restore
+  // the factory default explicitly every test so the auto-completion tests
+  // below (which override it) can never leak into a later test.
+  writeResult.mockReset();
+  writeResult.mockResolvedValue(undefined);
   withExperiments([]);
   withSpaces([]);
 });
+
+/** An experiment whose window has already fully elapsed (endAt well in the past). */
+function elapsedExperiment(overrides = {}) {
+  return runningExperiment({
+    startAt: isoDaysAgo(40, 0),
+    endAt: isoDaysAgo(10, 0),
+    ...overrides,
+  });
+}
 
 // ---------------------------------------------------------------------------
 // Null / empty / error states
@@ -212,6 +245,17 @@ describe('ExperimentsScreen — gate ordering (binding)', () => {
     const { matchQuestionToTemplate } = await import('../../../services/experiments/templates');
     const direct = matchQuestionToTemplate('does exercise affect my mood stabilizer dose', []);
     expect(direct?.template?.id).toBe('exercise-minutes-mood');
+  });
+
+  it('does NOT call matchQuestionToTemplate for a crisis-verdict question either', async () => {
+    render(<ExperimentsScreen uid={UID} entries={[]} onClose={vi.fn()} onShowSafetyPlan={vi.fn()} />);
+    fireEvent.click(await screen.findByText('New experiment'));
+    const textarea = await screen.findByLabelText(/or ask your own question/i);
+    fireEvent.change(textarea, { target: { value: 'I want to kill myself' } });
+    fireEvent.click(screen.getByText('Ask'));
+
+    expect(await screen.findByText('See my safety plan')).toBeTruthy();
+    expect(matchQuestionToTemplateSpy).not.toHaveBeenCalled();
   });
 });
 
@@ -279,6 +323,30 @@ describe('ExperimentsScreen — decline UX', () => {
     await openCreateAndAsk('What is the meaning of life');
     expect(await screen.findByText(/not something engram can measure/i)).toBeTruthy();
     expect(screen.getByText('Does exercise affect my mood?')).toBeTruthy();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Template picker: tag-presence template only appears with >=1 real tag
+// ---------------------------------------------------------------------------
+
+describe('ExperimentsScreen — template picker (tag template gating)', () => {
+  it('hides the tag-presence template entirely when the user has zero tags', async () => {
+    // sleepEntries() builds every fixture entry with `tags: []` — zero tags
+    // across the whole pool is exactly the case this test pins.
+    render(<ExperimentsScreen uid={UID} entries={sleepEntries(5)} onClose={vi.fn()} />);
+    fireEvent.click(await screen.findByText('New experiment'));
+    await screen.findByText('Pick a question');
+    expect(screen.queryByLabelText('Choose a tag')).toBeNull();
+    expect(screen.queryByText('Does this affect my mood?')).toBeNull();
+  });
+
+  it('shows the tag-presence picker once the user has at least one tag', async () => {
+    const entries = sleepEntries(5);
+    entries[0].tags = ['@person:spencer'];
+    render(<ExperimentsScreen uid={UID} entries={entries} onClose={vi.fn()} />);
+    fireEvent.click(await screen.findByText('New experiment'));
+    expect(await screen.findByLabelText('Choose a tag')).toBeTruthy();
   });
 });
 
@@ -477,5 +545,156 @@ describe('ExperimentsScreen — SpacePicker gated behind contextSpaces', () => {
     fireEvent.click(await screen.findByText('New experiment'));
     fireEvent.click(await screen.findByText('Does exercise affect my mood?'));
     expect(await screen.findByText('Which space should this look at?')).toBeTruthy();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// a11y: single aria-modal="true" node at a time (RecipesScreen.test.jsx
+// :652,662 parity)
+// ---------------------------------------------------------------------------
+
+describe('ExperimentsScreen — a11y', () => {
+  it('exposes a single labelled aria-modal dialog when no nested overlay is open', async () => {
+    withExperiments([runningExperiment()]);
+    render(<ExperimentsScreen uid={UID} entries={sleepEntries(28)} onClose={vi.fn()} />);
+    await screen.findByText('Does how much I sleep affect my mood?');
+
+    const modals = document.querySelectorAll('[aria-modal="true"]');
+    expect(modals).toHaveLength(1);
+    expect(modals[0]).toHaveAttribute('aria-labelledby', 'experiments-title');
+  });
+
+  it('only one aria-modal="true" node exists while the stop-confirm dialog is open', async () => {
+    withExperiments([runningExperiment()]);
+    render(<ExperimentsScreen uid={UID} entries={sleepEntries(28)} onClose={vi.fn()} />);
+    fireEvent.click(await screen.findByLabelText(/stop does how much i sleep affect my mood/i));
+    await screen.findByText('Stop this experiment?');
+
+    expect(document.querySelectorAll('[aria-modal="true"]')).toHaveLength(1);
+  });
+
+  it('only one aria-modal="true" node exists while the delete-confirm dialog is open', async () => {
+    withExperiments([runningExperiment({ status: 'stopped' })]);
+    render(<ExperimentsScreen uid={UID} entries={sleepEntries(28)} onClose={vi.fn()} />);
+    fireEvent.click(await screen.findByLabelText(/delete does how much i sleep affect my mood/i));
+    await screen.findByText('Delete this experiment?');
+
+    expect(document.querySelectorAll('[aria-modal="true"]')).toHaveLength(1);
+  });
+
+  it('never more than one aria-modal="true" node while the one-time explainer is open', async () => {
+    getExperimentPrefs.mockResolvedValue({ enabled: false });
+    render(<ExperimentsScreen uid={UID} entries={[]} onClose={vi.fn()} />);
+    fireEvent.click(await screen.findByText('New experiment'));
+    await screen.findByText('Before your first experiment');
+
+    // The outer screen's own `aria-modal` is dropped while the explainer
+    // (a real Radix `Dialog`, its own portal) is open — the invariant this
+    // pins is "never two simultaneous aria-modal='true' nodes", not "always
+    // exactly one": this installed version of `@radix-ui/react-dialog`
+    // gives its `Dialog.Content` `role="dialog"` but does not itself add an
+    // `aria-modal="true"` attribute, so the genuinely-open explainer dialog
+    // is confirmed via its `role="dialog"` node instead.
+    expect(document.querySelectorAll('[aria-modal="true"]').length).toBeLessThanOrEqual(1);
+    expect(screen.getByRole('dialog', { name: 'Before your first experiment' })).toBeTruthy();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Auto-completion (a design decision this task made — see module doc
+// comment on ExperimentsScreen.jsx). A BACKGROUND Firestore write with no
+// explicit user action, so it gets its own dedicated, thorough coverage.
+// ---------------------------------------------------------------------------
+
+describe('ExperimentsScreen — auto-completion', () => {
+  it('an elapsed running experiment auto-completes: writeResult is called once with a real computed result', async () => {
+    const entries = sleepEntries(40);
+    const experiment = elapsedExperiment();
+    withExperiments([experiment]);
+    render(<ExperimentsScreen uid={UID} entries={entries} onClose={vi.fn()} />);
+
+    await waitFor(() => expect(writeResult).toHaveBeenCalledTimes(1));
+    const [dbArg, uidArg, idArg, payload] = writeResult.mock.calls[0];
+    expect(dbArg).toEqual({ __db: true });
+    expect(uidArg).toBe(UID);
+    expect(idArg).toBe('exp-1');
+    expect(payload.receipt.versions.generator).toBe('experiment_v1');
+    if (payload.status === 'ok') {
+      expect(payload.estimate).toBeTruthy();
+      expect(payload.estimate.n).toBeGreaterThan(0);
+      expect(payload.narrative.summary).toBeTruthy();
+    } else {
+      expect(payload.status).toBe('insufficient');
+      expect(payload.estimate).toBeUndefined();
+      expect(payload.narrative.insufficiency).toBeTruthy();
+    }
+  });
+
+  it('an elapsed PAUSED experiment also auto-completes (paused -> completed path)', async () => {
+    const entries = sleepEntries(40);
+    const experiment = elapsedExperiment({ status: 'paused' });
+    withExperiments([experiment]);
+    render(<ExperimentsScreen uid={UID} entries={entries} onClose={vi.fn()} />);
+
+    await waitFor(() => expect(writeResult).toHaveBeenCalledTimes(1));
+    expect(writeResult.mock.calls[0][2]).toBe('exp-1');
+  });
+
+  it('does NOT auto-complete a running experiment whose window has not elapsed', async () => {
+    withExperiments([runningExperiment()]); // default fixture: endAt 14 days in the future
+    render(<ExperimentsScreen uid={UID} entries={sleepEntries(28)} onClose={vi.fn()} />);
+    await screen.findByText('Does how much I sleep affect my mood?');
+    expect(writeResult).not.toHaveBeenCalled();
+  });
+
+  it('does not double-write when a second snapshot arrives with the SAME still-running doc before the first write resolves (completingRef guard)', async () => {
+    const entries = sleepEntries(40);
+    const experiment = elapsedExperiment();
+
+    let resolveWrite;
+    writeResult.mockImplementation(() => new Promise((resolve) => { resolveWrite = resolve; }));
+
+    const control = controlledSubscribe();
+    render(<ExperimentsScreen uid={UID} entries={entries} onClose={vi.fn()} />);
+    control.emit([experiment]);
+
+    await waitFor(() => expect(writeResult).toHaveBeenCalledTimes(1));
+
+    // Simulated Firestore latency: the SAME still-running doc arrives again
+    // before the pending write above has resolved (and therefore before the
+    // real completed doc would ever come back down the subscription).
+    control.emit([{ ...experiment }]);
+    // Flush a tick so a (wrongly) re-triggered effect would have had a
+    // chance to call writeResult again.
+    await act(async () => { await Promise.resolve(); });
+    expect(writeResult).toHaveBeenCalledTimes(1);
+
+    // Resolving the pending write releases the guard; no further snapshot
+    // is emitted in this test, so no additional call should occur either.
+    resolveWrite();
+    await act(async () => { await Promise.resolve(); });
+    expect(writeResult).toHaveBeenCalledTimes(1);
+  });
+
+  it('a writeResult rejection does not crash the screen; a later snapshot is free to retry (best-effort semantics)', async () => {
+    const entries = sleepEntries(40);
+    const experiment = elapsedExperiment();
+    writeResult.mockRejectedValueOnce(new Error('offline'));
+
+    const control = controlledSubscribe();
+    render(<ExperimentsScreen uid={UID} entries={entries} onClose={vi.fn()} />);
+    control.emit([experiment]);
+
+    await waitFor(() => expect(writeResult).toHaveBeenCalledTimes(1));
+    // No crash: the screen is still up and rendering normally.
+    expect(await screen.findByText('Does how much I sleep affect my mood?')).toBeTruthy();
+
+    // The completingRef guard is released in a `finally`, so once the first
+    // (rejected) attempt has settled, a later snapshot of the SAME
+    // still-elapsed doc retries — this is the documented best-effort
+    // semantics ("a transient failure just means the next render pass...
+    // retries"), pinned precisely here rather than assumed.
+    control.emit([{ ...experiment }]);
+    await waitFor(() => expect(writeResult).toHaveBeenCalledTimes(2));
   });
 });

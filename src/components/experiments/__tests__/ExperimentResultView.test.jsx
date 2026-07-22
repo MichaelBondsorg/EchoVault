@@ -211,7 +211,7 @@ describe('ExperimentResultView — exclusion round trip (real computeExperimentR
     // Day 1 (hours=4, mood=40) is in the LOW group -> excluding it should
     // shift meanLow (and therefore delta) away from the original.
     const excludedDateKey = '2026-01-01';
-    setObservationExcluded.mockResolvedValue([excludedDateKey]);
+    setObservationExcluded.mockResolvedValueOnce([excludedDateKey]);
 
     render(<ExperimentResultView uid={UID} entries={entries} experiment={experiment} onClose={vi.fn()} />);
 
@@ -239,7 +239,32 @@ describe('ExperimentResultView — exclusion round trip (real computeExperimentR
     // Visible rerun: the DOM now reflects the NEW sample size.
     await waitFor(() => expect(screen.getByText(`${originalN - 1} matched days`)).toBeTruthy());
     // The excluded row now offers "Include" instead of "Exclude".
-    expect(await screen.findByRole('button', { name: `Include ${excludedDateKey}` })).toBeTruthy();
+    const includeBtn = await screen.findByRole('button', { name: `Include ${excludedDateKey}` });
+
+    // Un-excluding restores the ORIGINAL pair set. `effectiveEndMs` is
+    // deterministic here regardless of the real wall-clock "now" the
+    // component uses internally (GOLDEN_END is fixed and far in the past,
+    // so `min(GOLDEN_END, anything-after-it) === GOLDEN_END` always) and the
+    // bootstrap seed is derived from the pairs themselves, not from "now" —
+    // so this is a genuine bitwise-restore assertion (Task 5's rails
+    // guarantee), not an approximate one.
+    setObservationExcluded.mockResolvedValueOnce([]);
+    fireEvent.click(includeBtn);
+
+    await waitFor(() => expect(setObservationExcluded).toHaveBeenCalledWith(
+      { __db: true }, UID, 'exp-1', excludedDateKey, false,
+    ));
+    await waitFor(() => expect(writeResult).toHaveBeenCalledTimes(2));
+
+    const restoredResult = writeResult.mock.calls[1][3];
+    expect(restoredResult.estimate).toEqual(originalResult.estimate);
+    expect({ ...restoredResult.receipt, versions: { ...restoredResult.receipt.versions, generatedAt: null } })
+      .toEqual({ ...originalResult.receipt, versions: { ...originalResult.receipt.versions, generatedAt: null } });
+    expect(restoredResult.narrative).toEqual(originalResult.narrative);
+
+    // Visible rerun back to the original sample size.
+    await waitFor(() => expect(screen.getByText(`${originalN} matched days`)).toBeTruthy());
+    expect(await screen.findByRole('button', { name: `Exclude ${excludedDateKey}` })).toBeTruthy();
   });
 
   it('a failed setObservationExcluded surfaces an error and never calls writeResult', async () => {
