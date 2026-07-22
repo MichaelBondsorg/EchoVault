@@ -25,8 +25,7 @@
  */
 import { computeCoverage, MIN_PAIRED_OBSERVATIONS, COVERAGE_FLOOR } from './estimator';
 import { filterEntriesByScope } from '../spaces/scopeFilter';
-import { extractHealthSignals } from '../health/healthFormatter';
-import { extractEnvironmentSignals } from '../environment/environmentFormatter';
+import { exposureValueForEntry as sharedExposureValueForEntry } from './computeResult';
 import { safeDate } from '../../utils/date';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -68,31 +67,20 @@ function windowEndMs(now) {
 // ---------------------------------------------------------------------------
 
 /**
- * The exposure value for one entry, per the template's declared source, or
- * null when this entry carries no usable value for that variable (dropped
- * from the series entirely — never coerced to 0), EXCEPT the tags source,
- * where "no tag present that day" is itself a real, known observation (0),
- * not a missing one — see the tags branch below.
+ * The exposure value for one entry, per the template's declared source.
+ * Delegates to `computeResult.js`'s `exposureValueForEntry` (the shared
+ * series-builder helper, R3 Task 5) so preflight's expected coverage and
+ * Task 5's actual result-series never disagree about which days count.
+ * That shared helper is also where the known-zero fix lives: a
+ * `healthContext.activity` object present with a null/non-finite
+ * `exerciseMinutes`/`steps` extractor value now counts as a KNOWN ZERO day
+ * (kept), not a missing one (dropped) — see its doc comment for the full
+ * rationale. Every other source/field keeps drop-on-null semantics
+ * unchanged, including the tags source's "no tags array -> known absent
+ * (0)" rule.
  */
 function exposureValueForEntry(entry, template, params) {
-  const { source, field } = template.exposure;
-  if (source === 'health') {
-    const signals = extractHealthSignals(entry.healthContext);
-    const v = signals ? signals[field] : null;
-    return Number.isFinite(v) ? v : null;
-  }
-  if (source === 'environment') {
-    const signals = extractEnvironmentSignals(entry.environmentContext);
-    const v = signals ? signals[field] : null;
-    return Number.isFinite(v) ? v : null;
-  }
-  if (source === 'tags') {
-    const tag = params?.tag;
-    if (typeof tag !== 'string' || !tag) return null; // no tag chosen -> can't evaluate at all
-    if (!Array.isArray(entry.tags)) return 0; // day was journaled; tag is known absent
-    return entry.tags.includes(tag) ? 1 : 0;
-  }
-  return null;
+  return sharedExposureValueForEntry(entry, template.exposure, params?.tag);
 }
 
 function buildExposureSeries(entries, template, params) {
@@ -202,6 +190,14 @@ export function preflightExperiment({ entries = [], template, params = {}, scope
     : LONG_DURATION_DAYS;
   const projectedPairs = bindingRate * recommendedDurationDays;
 
+  // NOTE (dominance): because `recommendedDurationDays` falls back to 28
+  // whenever 14 days wouldn't clear the pairing minimum, and because
+  // `COVERAGE_FLOOR (0.5) * 28 days = 14 >= MIN_PAIRED_OBSERVATIONS (10)`,
+  // `coverage_below_floor` structurally dominates: at the current constants,
+  // `projected_pairs_below_minimum` cannot fire on its own once coverage is
+  // measured over the full 28-day window (task-3-report.md's self-review).
+  // Kept as an independent, separately-tested check anyway — it's not dead
+  // code, just usually redundant given today's thresholds.
   const reasons = [];
   if (projectedPairs < MIN_PAIRED_OBSERVATIONS) {
     reasons.push('projected_pairs_below_minimum');

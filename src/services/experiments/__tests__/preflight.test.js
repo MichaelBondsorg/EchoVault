@@ -11,6 +11,7 @@ const NOW = new Date('2026-07-22T12:00:00.000Z'); // fixed reference "today"
 const SLEEP_TEMPLATE = getTemplateById('sleep-hours-mood-same-day');
 const SUNSHINE_TEMPLATE = getTemplateById('sunshine-percent-mood');
 const TAG_TEMPLATE = getTemplateById('tag-presence-mood');
+const EXERCISE_TEMPLATE = getTemplateById('exercise-minutes-mood');
 
 function dateKeyDaysAgo(days) {
   const ms = NOW.getTime() - days * 24 * 60 * 60 * 1000;
@@ -208,6 +209,39 @@ describe('preflightExperiment — tag-presence, zero occurrences', () => {
     const result = preflightExperiment({ entries, template: TAG_TEMPLATE, now: NOW });
     expect(result.missingSources).toContain('no_tag_occurrences');
     expect(result.appropriate).toBe(false);
+  });
+});
+
+describe('preflightExperiment — known-zero activity fix (R3 Task 5 carry-forward, shared helper)', () => {
+  it('counts a zero-exercise day as covered, not missing — `healthContext.activity` present, `totalExerciseMinutes: 0`', () => {
+    const entries = [];
+    for (let i = 0; i < 14; i++) {
+      entries.push({
+        createdAt: dateKeyDaysAgo(i),
+        // Real zero: the user logged a workout-free day and Whoop/HealthKit
+        // reported it. Pre-fix, `extractHealthSignals`'s `|| null` coercion
+        // made this indistinguishable from "no activity data at all".
+        healthContext: { activity: { totalExerciseMinutes: 0, stepsToday: 0 } },
+        analysis: { mood_score: 60 },
+      });
+    }
+    const result = preflightExperiment({ entries, template: EXERCISE_TEMPLATE, now: NOW });
+    expect(result.expectedCoverage.exposure.covered).toBe(14);
+    expect(result.missingSources).not.toContain('no_health_data');
+  });
+
+  it('still treats a day with NO healthContext.activity at all as missing (dropped, not a known zero)', () => {
+    const entries = [];
+    for (let i = 0; i < 14; i++) {
+      entries.push({
+        createdAt: dateKeyDaysAgo(i),
+        healthContext: { sleep: { totalHours: 7 } }, // no `activity` key at all
+        analysis: { mood_score: 60 },
+      });
+    }
+    const result = preflightExperiment({ entries, template: EXERCISE_TEMPLATE, now: NOW });
+    expect(result.expectedCoverage.exposure.covered).toBe(0);
+    expect(result.missingSources).toContain('no_health_data');
   });
 });
 
