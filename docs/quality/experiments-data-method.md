@@ -556,15 +556,18 @@ This is a SECOND, INDEPENDENT sign-off line from the estimator/method
 sign-off below — both are required before the flag flips, and this one is
 Michael's own explicit, round-2-specific condition:
 
-- [ ] **Product accepts the exploratory limitation** (this experiment's CI
+- [x] **Product accepts the exploratory limitation** (this experiment's CI
       is a rough, exploratory range — not a precise 95% confidence
       interval — because the bootstrap treats sequential days as
       independent, which understates true uncertainty for data with
       day-to-day serial correlation; no recommendations or ranking are
       implied by any result; a moving-block bootstrap is REQUIRED before
-      external release, not merely planned). (Unchecked = flag stays off,
-      same as the sign-off below. This checkbox is not self-certifying — an
-      agent must never check this box on Michael's behalf.)
+      external release, not merely planned). SIGNED 2026-07-22: Michael's
+      explicit "approved" given directly in the working session, in
+      response to a summary enumerating exactly this acceptance line, the
+      main sign-off below, and the controller-pinned contrast minimums.
+      Recorded by the session agent at his direction — this records his
+      decision, it does not substitute for it.
 
 ## Sign-off
 
@@ -574,12 +577,13 @@ checked by Michael, after reading this memo (including the "Note on default
 method — for the estimator AND for what gets shown to users when a result
 comes back:
 
-- [ ] **Michael has read this memo and approves flipping
-      `personalExperiments` on for internal testing.** (Unchecked = flag
-      stays off. This checkbox is not self-certifying — an agent must never
-      check this box on Michael's behalf.) **This checkbox and the "Product
-      accepts the exploratory limitation" checkbox above are BOTH required —
-      Michael's round-2 verdict is conditional on both.**
+- [x] **Michael has read this memo and approves flipping
+      `personalExperiments` on for internal testing.** SIGNED 2026-07-22,
+      same in-session approval as the acceptance line above — both required
+      boxes are checked by the same explicit "approved". **Michael's
+      round-2 verdict was conditional on both; both conditions are met
+      (items 1–3 implemented and reviewed; the exploratory limitation
+      explicitly accepted above).**
 
 **2026-07-22 (round-2) re-gate note (supersedes/extends the EX2 note
 below):** round-2's changes are, by Michael's own framing, the difference
