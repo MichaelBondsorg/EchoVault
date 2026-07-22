@@ -3,6 +3,28 @@
  *
  * Manages semantic threads with full metamorphosis support.
  * Threads track ongoing storylines across entries with evolution tracking.
+ *
+ * EMBEDDING SPACE PIN (embeddings v2 migration, plan task M2 — see
+ * docs/superpowers/plans/2026-07-22-embeddings-v2-migration.md): the
+ * `thread.embedding` vector store below is PINNED to v1 (text-embedding-004)
+ * space, explicitly and permanently for this migration. Migrating thread
+ * vectors to v2 is a documented non-goal — it would require a separate
+ * backfill of every stored `thread.embedding` (a different collection from
+ * `entries`, out of scope for the entries-embedding migration this plan
+ * covers).
+ *
+ * Concretely: every embedding call in this file uses the plain
+ * `generateEmbedding(text)` below — NOT the flag-aware
+ * `generateQueryEmbeddings(text)` (ai/embeddings.js) that the M2 retrieval
+ * seams (chat RAG, companion context, etc.) use. `generateEmbedding` always
+ * requests the default v1 vector regardless of the `model.embeddingV2Read`
+ * flag, so thread creation/matching stays v1-only structurally — not by a
+ * runtime flag check that could silently drift, but because this file
+ * simply never imports the flag-aware helper. Do not change these calls to
+ * `generateQueryEmbeddings` — `thread.embedding` values already persisted
+ * are v1 vectors, and `cosineSimilarity(embedding, thread.embedding)` below
+ * would silently corrupt (mix v1/v2 spaces) if a v2 vector were ever
+ * compared against them.
  */
 
 import {
@@ -22,6 +44,9 @@ import {
 import { db } from '../../../config/firebase';
 import { APP_COLLECTION_ID } from '../../../config/constants';
 import { callGemini } from '../../ai/gemini';
+// PINNED v1 (see file-level doc comment above): `generateEmbedding` always
+// requests the default v1 vector, never `generateQueryEmbeddings` (the
+// flag-aware, potentially-v2 helper used by the retrieval seams).
 import { generateEmbedding, cosineSimilarity } from '../../ai/embeddings';
 import { extractSomaticSignals, SOMATIC_TAXONOMY } from './somaticExtractor';
 
@@ -263,7 +288,8 @@ export const createThread = async (userId, threadData) => {
   const now = Timestamp.now();
   const hasSentiment = Number.isFinite(sentiment);
 
-  // Generate embedding
+  // Generate embedding — PINNED v1 (see file-level doc comment): thread
+  // vectors are a v1-space store, migration non-goal for plan M2.
   let embedding = null;
   try {
     embedding = await generateEmbedding(displayName);
@@ -652,6 +678,8 @@ export const identifyThreadAssociation = async (userId, entryId, entryText, sent
       default: {
         // Check for duplicates first
         const proposedName = thread.proposedName || 'Unnamed Thread';
+        // PINNED v1 (see file-level doc comment): matched against existing
+        // thread.embedding values, which are v1-space.
         let embedding = null;
         try {
           embedding = await generateEmbedding(proposedName);

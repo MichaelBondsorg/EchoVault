@@ -4,7 +4,7 @@ import { X, Send, Mic, Headphones, Volume2, StopCircle, Database } from 'lucide-
 import MarkdownLite from '../ui/MarkdownLite';
 import VoiceRecorder from '../input/VoiceRecorder';
 import { synthesizeSpeech } from '../../utils/audio';
-import { callOpenAI, generateEmbedding, cosineSimilarity, transcribeAudio } from '../../services/ai';
+import { callOpenAI, generateQueryEmbeddings, scoreEntryInBestSpace, transcribeAudio } from '../../services/ai';
 
 const Chat = ({ entries, onClose, category }) => {
   const [msgs, setMsgs] = useState([{ role: 'sys', text: `I'm your ${category} journal assistant. Ask me anything about your entries!` }]);
@@ -163,20 +163,29 @@ const Chat = ({ entries, onClose, category }) => {
     setMsgs(p => [...p, { role: 'user', text: textToSend }]);
     setLoading(true);
 
-    // RAG: Generate embedding for the question and retrieve relevant entries
-    const questionEmbedding = await generateEmbedding(textToSend);
+    // RAG: Generate query embedding(s) for the question and retrieve
+    // relevant entries. `generateQueryEmbeddings` is the space-aware
+    // sibling of `generateEmbedding` (embeddings v2 migration plan task
+    // M2): behind `model.embeddingV2Read` OFF it's byte-identical to the
+    // old single-call `generateEmbedding` path; ON, it also requests a v2
+    // vector so entries are scoreable in whichever space they're covered
+    // in (`scoreEntryInBestSpace`, same-space-or-nothing).
+    const queryVectors = await generateQueryEmbeddings(textToSend);
 
     let relevantContext = '';
     let foundEntries = [];
 
-    if (questionEmbedding) {
-      // Use cosine similarity to find most relevant entries
+    if (queryVectors) {
+      // Space-aware similarity: threshold (0.3) applied to whichever space
+      // scored — unchanged per space, a documented M2 assumption (revisit
+      // with real data, see M3 runbook note). Entries with no scoreable
+      // space are excluded, same as today's "no embedding" exclusion.
       foundEntries = entries
-        .filter(e => e.embedding)
-        .map(e => ({
-          ...e,
-          similarity: cosineSimilarity(questionEmbedding, e.embedding)
-        }))
+        .map(e => {
+          const result = scoreEntryInBestSpace(queryVectors, e);
+          return result ? { ...e, similarity: result.score, _scoreSpace: result.space } : null;
+        })
+        .filter(Boolean)
         .filter(e => e.similarity > 0.3) // Only use reasonably relevant entries
         .sort((a, b) => b.similarity - a.similarity)
         .slice(0, 10); // Top 10 most relevant entries

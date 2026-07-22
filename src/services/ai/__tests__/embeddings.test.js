@@ -1,0 +1,159 @@
+/**
+ * Embeddings v2 migration, plan task M2: client space-aware retrieval.
+ * See docs/superpowers/plans/2026-07-22-embeddings-v2-migration.md.
+ */
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+
+const mockGenerateEmbeddingFn = vi.fn();
+const mockGetFlag = vi.fn();
+
+vi.mock('../../../config', () => ({
+  generateEmbeddingFn: (...args) => mockGenerateEmbeddingFn(...args),
+}));
+
+vi.mock('../../../config/flags', () => ({
+  getFlag: (...args) => mockGetFlag(...args),
+}));
+
+const {
+  generateEmbedding,
+  generateQueryEmbeddings,
+  findRelevantMemories,
+  cosineSimilarity,
+} = await import('../embeddings');
+
+beforeEach(() => {
+  mockGenerateEmbeddingFn.mockReset();
+  mockGetFlag.mockReset();
+  mockGetFlag.mockReturnValue(false); // default: flag OFF
+});
+
+describe('generateQueryEmbeddings — flag OFF (byte-identical current behavior)', () => {
+  it('calls the callable exactly once with no version field, returns {v1}', async () => {
+    mockGenerateEmbeddingFn.mockResolvedValue({ data: { embedding: [1, 2, 3] } });
+
+    const result = await generateQueryEmbeddings('hello');
+
+    expect(mockGenerateEmbeddingFn).toHaveBeenCalledTimes(1);
+    expect(mockGenerateEmbeddingFn).toHaveBeenCalledWith({ text: 'hello' });
+    expect(result).toEqual({ v1: [1, 2, 3] });
+  });
+
+  it('is a thin wrapper over the exact same call generateEmbedding makes (spy-provable equivalence)', async () => {
+    mockGenerateEmbeddingFn.mockResolvedValue({ data: { embedding: [9, 9] } });
+    const direct = await generateEmbedding('same text');
+    mockGenerateEmbeddingFn.mockClear();
+    mockGenerateEmbeddingFn.mockResolvedValue({ data: { embedding: [9, 9] } });
+    const viaQuery = await generateQueryEmbeddings('same text');
+
+    expect(mockGenerateEmbeddingFn).toHaveBeenCalledWith({ text: 'same text' });
+    expect(viaQuery).toEqual({ v1: direct });
+  });
+
+  it('returns null (existing null semantics) when the callable yields no embedding, after the existing retry', async () => {
+    mockGenerateEmbeddingFn.mockResolvedValue({ data: {} });
+    const result = await generateQueryEmbeddings('nothing here');
+    expect(result).toBeNull();
+    // existing generateEmbedding retries once on empty/exception path is a
+    // *separate* concern (retryCount only applies inside the exception
+    // branch) — here we just confirm the null passthrough.
+  });
+
+  it('rejects invalid/empty text without calling the callable', async () => {
+    const result = await generateQueryEmbeddings('');
+    expect(result).toBeNull();
+    expect(mockGenerateEmbeddingFn).not.toHaveBeenCalled();
+  });
+});
+
+describe('generateQueryEmbeddings — flag ON (dual-space)', () => {
+  beforeEach(() => {
+    mockGetFlag.mockImplementation((name) => name === 'model.embeddingV2Read');
+  });
+
+  it('requests BOTH v1 and v2 via two callable invocations with explicit versions', async () => {
+    mockGenerateEmbeddingFn.mockImplementation(({ version }) => {
+      if (version === 'v1') return Promise.resolve({ data: { embedding: [1, 0], space: 'v1' } });
+      if (version === 'v2') return Promise.resolve({ data: { embedding: [0, 1], space: 'v2' } });
+      throw new Error('unexpected call shape: ' + JSON.stringify(arguments));
+    });
+
+    const result = await generateQueryEmbeddings('hello');
+
+    expect(mockGenerateEmbeddingFn).toHaveBeenCalledTimes(2);
+    expect(mockGenerateEmbeddingFn).toHaveBeenCalledWith({ text: 'hello', version: 'v1' });
+    expect(mockGenerateEmbeddingFn).toHaveBeenCalledWith({ text: 'hello', version: 'v2' });
+    expect(result).toEqual({ v1: [1, 0], v2: [0, 1] });
+  });
+
+  it('v2 call fails (throws, matching the server fail-loud contract) -> degrades gracefully to v1-only with a console.warn, never hard-fails', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    mockGenerateEmbeddingFn.mockImplementation(({ version }) => {
+      if (version === 'v1') return Promise.resolve({ data: { embedding: [1, 0], space: 'v1' } });
+      if (version === 'v2') return Promise.reject(new Error('v2 unavailable'));
+    });
+
+    const result = await generateQueryEmbeddings('hello');
+
+    expect(result).toEqual({ v1: [1, 0] });
+    expect(result.v2).toBeUndefined();
+    expect(warnSpy).toHaveBeenCalled();
+    warnSpy.mockRestore();
+  });
+
+  it('v1 call fails -> existing null semantics (whole result is null), regardless of v2 outcome', async () => {
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    mockGenerateEmbeddingFn.mockImplementation(({ version }) => {
+      if (version === 'v1') return Promise.reject(new Error('v1 down'));
+      if (version === 'v2') return Promise.resolve({ data: { embedding: [0, 1], space: 'v2' } });
+    });
+
+    const result = await generateQueryEmbeddings('hello');
+
+    expect(result).toBeNull();
+    errSpy.mockRestore();
+  });
+});
+
+describe('findRelevantMemories — routed through scoreEntryInBestSpace (space-aware seam)', () => {
+  const category = 'personal';
+
+  it('flag-off-shaped call (raw v1 vector) is byte-identical to legacy cosine-based scoring', () => {
+    const target = [1, 0];
+    const entries = [
+      { id: 'a', category, embedding: [1, 0] }, // cosine 1
+      { id: 'b', category, embedding: [0, 1] }, // cosine 0 -> below 0.35 threshold
+      { id: 'c', category, embedding: null },   // no embedding -> excluded
+      { id: 'd', category: 'other', embedding: [1, 0] }, // wrong category -> excluded
+    ];
+
+    const result = findRelevantMemories(target, entries, category, 5);
+
+    expect(result.map(e => e.id)).toEqual(['a']);
+    expect(result[0].score).toBeCloseTo(cosineSimilarity([1, 0], [1, 0]));
+  });
+
+  it('dual-space mixed corpus: v2-covered entry scores in v2, uncovered entry scores in v1, both surfaced with sensible ordering', () => {
+    const queryVectors = { v1: [1, 0], v2: [1, 0, 0] };
+    const entries = [
+      // Backfilled: has both, v2 should be used (perfect match in v2 space).
+      { id: 'v2-covered', category, embedding: [0.9, 0.1], embeddingV2: [1, 0, 0] },
+      // Not backfilled yet: only v1, falls back to v1 (perfect match in v1 space).
+      { id: 'v1-only', category, embedding: [1, 0] },
+    ];
+
+    const result = findRelevantMemories(queryVectors, entries, category, 5);
+    const byId = Object.fromEntries(result.map(e => [e.id, e]));
+
+    expect(byId['v2-covered']._scoreSpace).toBe('v2');
+    expect(byId['v2-covered'].score).toBeCloseTo(1);
+    expect(byId['v1-only']._scoreSpace).toBe('v1');
+    expect(byId['v1-only'].score).toBeCloseTo(1);
+    // Both entries are visible (no entry became invisible for lack of v2 coverage).
+    expect(result.map(e => e.id).sort()).toEqual(['v1-only', 'v2-covered']);
+  });
+
+  it('returns [] when given no query vectors at all', () => {
+    expect(findRelevantMemories(null, [{ id: 'a', category, embedding: [1, 0] }], category)).toEqual([]);
+  });
+});

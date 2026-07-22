@@ -1,5 +1,5 @@
 import { analyzeJournalEntryCloud } from '../ai/gemini';
-import { cosineSimilarity } from '../ai/embeddings';
+import { scoreEntryInBestSpace, toQueryVectors } from '../ai/embeddingSpaces';
 import { askJournalAIFn } from '../../config/firebase';
 import { formatHealthForAI, formatHealthDetailed } from '../health/healthFormatter';
 import { formatEnvironmentForAI, formatEnvironmentDetailed } from '../environment/environmentFormatter';
@@ -296,7 +296,15 @@ export const findEntriesByTag = (entries, tagPrefix) => {
  *
  * @param {Array} entries - Candidate entries (pre-scope-filter)
  * @param {string} question
- * @param {number[]|null} questionEmbedding
+ * @param {number[]|{v1?: number[], v2?: number[]}|null} questionEmbedding -
+ *   a legacy raw v1 vector (today's only caller, runRecipe.js, passes this
+ *   pre-computed per-question) OR a `{v1, v2}` query-vectors object
+ *   (embeddings v2 migration plan task M2, see `generateQueryEmbeddings` in
+ *   ai/embeddings.js). `toQueryVectors` normalizes either shape;
+ *   `scoreEntryInBestSpace` then scores same-space-or-nothing (v2
+ *   preferred when both the query and the entry have it, else v1-v1) — a
+ *   legacy raw-vector caller gets byte-identical v1-only scoring against
+ *   `e.embedding`, same 0.3 threshold, same ordering.
  * @param {{spaceId: string}|null} [scope] - Context Space scope. Applied
  *   FIRST, before any semantic/tag/recent candidate selection, so a
  *   Work-scoped call can never surface a Personal-space or unscoped entry.
@@ -313,14 +321,22 @@ export const findEntriesByTag = (entries, tagPrefix) => {
 export const getSmartChatContext = async (entries, question, questionEmbedding, scope = null, { returnIds = false } = {}) => {
   const scopedEntries = filterEntriesByScope(entries, scope);
 
+  // Space-aware scoring (embeddings v2 migration plan task M2). Threshold
+  // (0.3) applied to whichever space scored — unchanged per space, a
+  // documented M2 assumption (different embedding models can have
+  // different similarity distributions; revisit with real data, see M3
+  // runbook note). Entries with no scoreable space are excluded, same as
+  // today's "no embedding" exclusion.
+  const queryVectors = toQueryVectors(questionEmbedding);
+
   let semanticMatches = [];
-  if (questionEmbedding) {
+  if (queryVectors) {
     semanticMatches = scopedEntries
-      .filter(e => e.embedding)
-      .map(e => ({
-        ...e,
-        similarity: cosineSimilarity(questionEmbedding, e.embedding)
-      }))
+      .map(e => {
+        const result = scoreEntryInBestSpace(queryVectors, e);
+        return result ? { ...e, similarity: result.score, _scoreSpace: result.space } : null;
+      })
+      .filter(Boolean)
       .filter(e => e.similarity > 0.3)
       .sort((a, b) => b.similarity - a.similarity)
       .slice(0, 10);

@@ -11,7 +11,7 @@
  * Score = (vector_similarity × 0.4) + (recency_score × 0.3) + (entity_match × 0.2) + (mood_similarity × 0.1)
  */
 
-import { cosineSimilarity } from '../ai/embeddings';
+import { scoreEntryInBestSpace, toQueryVectors } from '../ai/embeddingSpaces';
 
 /**
  * Calculate recency score with exponential decay
@@ -86,7 +86,13 @@ export const calculateMoodSimilarity = (queryMood, entryMood) => {
  * Hybrid retrieval - find relevant entries using multiple signals
  *
  * @param {Object} params
- * @param {number[]} params.queryEmbedding - Vector embedding of query/current entry
+ * @param {number[]|{v1?: number[], v2?: number[]}} params.queryEmbedding -
+ *   Vector embedding of query/current entry. Accepts a legacy raw v1 vector
+ *   OR a `{v1, v2}` query-vectors object (embeddings v2 migration plan task
+ *   M2) — `toQueryVectors` normalizes either shape and `scoreEntryInBestSpace`
+ *   scores each entry same-space-or-nothing (v2 preferred when both the
+ *   query and the entry have it, else v1-v1). A legacy raw-vector caller
+ *   gets byte-identical v1-only scoring against `entry.embedding`.
  * @param {string[]} params.queryEntities - Entities to match
  * @param {number} params.queryMood - Current mood score
  * @param {Object[]} params.entries - All entries to search
@@ -109,12 +115,13 @@ export const hybridRetrieve = ({
     ? entries.filter(e => e.category === category)
     : entries;
 
+  const queryVectors = toQueryVectors(queryEmbedding);
+
   // Score each entry
   const scored = candidates.map(entry => {
-    // Vector similarity
-    const vectorScore = queryEmbedding && entry.embedding
-      ? cosineSimilarity(queryEmbedding, entry.embedding)
-      : 0;
+    // Vector similarity (space-aware, plan M2 seam)
+    const vectorResult = queryVectors ? scoreEntryInBestSpace(queryVectors, entry) : null;
+    const vectorScore = vectorResult ? vectorResult.score : 0;
 
     // Recency
     const recencyScore = calculateRecencyScore(entry.createdAt || entry.effectiveDate);
@@ -134,6 +141,7 @@ export const hybridRetrieve = ({
 
     return {
       ...entry,
+      _vectorScoreSpace: vectorResult?.space,
       _scores: {
         vector: vectorScore,
         recency: recencyScore,

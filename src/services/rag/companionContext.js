@@ -12,7 +12,7 @@
  * De-duplication: Prevents same entry appearing in multiple tiers
  */
 
-import { cosineSimilarity } from '../ai/embeddings';
+import { scoreEntryInBestSpace, toQueryVectors } from '../ai/embeddingSpaces';
 import { getMemoryGraph, formatMemoryForContext } from '../memory';
 import { getSessionBuffer, formatBufferForContext, isExpired } from '../memory/sessionBuffer';
 import { filterEntriesByScope } from '../spaces/scopeFilter';
@@ -139,7 +139,13 @@ const findByEntity = (entries, queryEntities, limit = 10) => {
  * @param {Object} params
  * @param {string} params.userId - User ID
  * @param {string} params.query - Current query/message
- * @param {number[]} params.queryEmbedding - Vector embedding of query
+ * @param {number[]|{v1?: number[], v2?: number[]}} params.queryEmbedding -
+ *   Vector embedding of query. Accepts a legacy raw v1 vector (today's only
+ *   caller, UnifiedConversation.jsx, produces this) OR a `{v1, v2}`
+ *   query-vectors object (embeddings v2 migration plan task M2, see
+ *   `generateQueryEmbeddings` in ai/embeddings.js). Tier 4 routes through
+ *   `scoreEntryInBestSpace` either way — a legacy raw-vector caller gets
+ *   byte-identical v1-only scoring against `entry.embedding`.
  * @param {Object[]} params.entries - All user entries
  * @param {string} params.category - Category filter
  * @param {{spaceId: string}|null} [params.scope] - Context Space scope,
@@ -276,13 +282,23 @@ export const getCompanionContext = async ({
   const remainingBudget = tokenBudget.max - tokenBudget.used;
   const similarLimit = Math.min(20, Math.floor(remainingBudget / 400));
 
-  if (queryEmbedding && similarLimit > 0) {
+  // Space-aware scoring (embeddings v2 migration plan task M2): `toQueryVectors`
+  // normalizes the legacy raw-vector shape into {v1}, so this stays
+  // byte-identical to the pre-M2 filter+cosine below when only a v1 vector
+  // is available. Threshold (0.25) is applied to whichever space actually
+  // scored — unchanged per space, a documented M2 assumption (different
+  // embedding models can have different similarity distributions; revisit
+  // with real data, see M3 runbook note).
+  const queryVectors = toQueryVectors(queryEmbedding);
+
+  if (queryVectors && similarLimit > 0) {
     const similarEntries = filteredEntries
-      .filter(e => e.embedding && !includedEntryIds.has(e.id))
-      .map(e => ({
-        ...e,
-        _similarity: cosineSimilarity(queryEmbedding, e.embedding)
-      }))
+      .filter(e => !includedEntryIds.has(e.id))
+      .map(e => {
+        const result = scoreEntryInBestSpace(queryVectors, e);
+        return result ? { ...e, _similarity: result.score, _scoreSpace: result.space } : null;
+      })
+      .filter(Boolean)
       .filter(e => e._similarity > 0.25)
       .sort((a, b) => b._similarity - a._similarity)
       .slice(0, similarLimit);
