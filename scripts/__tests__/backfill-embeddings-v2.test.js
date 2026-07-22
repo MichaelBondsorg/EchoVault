@@ -18,7 +18,7 @@ import {
   saveCheckpoint,
   DEFAULT_CHECKPOINT_PATH,
   GAP_CHECKPOINT_PATH,
-} from '../backfill-embeddings-v2.js';
+} from '../backfill-embeddings-v2.lib.mjs';
 
 function makeDoc(id, data, { uid = 'user-1' } = {}) {
   return {

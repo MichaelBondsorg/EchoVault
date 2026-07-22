@@ -55,15 +55,19 @@
  */
 import admin from 'firebase-admin';
 import { getModelSync } from '../functions/src/models/registry.js';
+// All pure/injectable helpers live in the admin-free lib so the unit test
+// can import them without resolving firebase-admin (CI installs no
+// scripts/ deps — see the lib's header comment). Re-exported here so this
+// script's public surface is unchanged.
+export * from './backfill-embeddings-v2.lib.mjs';
 import {
-  generateEmbeddingV2,
-  buildEmbeddingMeta,
-  EMBEDDING_V2_TASK_TYPE,
-} from '../functions/src/ai/embeddingV2.js';
+  APP_COLLECTION_ID,
+  resolveCheckpointPath,
+  loadCheckpoint,
+  saveCheckpoint,
+  processEntryDoc,
+} from './backfill-embeddings-v2.lib.mjs';
 
-export const APP_COLLECTION_ID = 'echo-vault-v5-fresh';
-export const DEFAULT_CHECKPOINT_PATH = 'migration_state/embeddingsV2';
-export const GAP_CHECKPOINT_PATH = 'migration_state/embeddingsV2gap';
 const BATCH_SIZE = 50;
 const BATCH_SLEEP_MS = 200;
 
@@ -82,141 +86,9 @@ function requireEnv(name) {
   return v;
 }
 
-/**
- * Which checkpoint doc a run uses — gap mode gets its own so it never races
- * default mode's `lastPath`/counts (M4). Exported for direct unit testing.
- */
-export function resolveCheckpointPath(includeMissingV1) {
-  return includeMissingV1 ? GAP_CHECKPOINT_PATH : DEFAULT_CHECKPOINT_PATH;
-}
-
-export async function loadCheckpoint(db, checkpointPath, restart = false) {
-  if (restart) return { lastPath: null, processed: 0, updated: 0, skipped: 0 };
-  const snap = await db.doc(checkpointPath).get();
-  if (!snap.exists) return { lastPath: null, processed: 0, updated: 0, skipped: 0 };
-  const d = snap.data() || {};
-  return {
-    lastPath: d.lastPath || null,
-    processed: d.processed || 0,
-    updated: d.updated || 0,
-    skipped: d.skipped || 0,
-  };
-}
-
-export async function saveCheckpoint(db, checkpointPath, cp, done = false, dryRun = false) {
-  if (dryRun) return;
-  await db.doc(checkpointPath).set(
-    { ...cp, done, updatedAt: admin.firestore.FieldValue.serverTimestamp() },
-    { merge: true }
-  );
-}
-
-// Per-user consent cache. Only an EXPLICIT aiProcessing:false blocks backfill.
-const consentCache = new Map();
-async function userAllowsAi(db, uid) {
-  if (consentCache.has(uid)) return consentCache.get(uid);
-  let allowed = true;
-  try {
-    const snap = await db.doc(`artifacts/${APP_COLLECTION_ID}/users/${uid}/settings/consent`).get();
-    if (snap.exists && snap.data()?.aiProcessing === false) allowed = false;
-  } catch (e) {
-    console.warn(`[consent] read failed for ${uid}, treating as allowed: ${e?.message}`);
-  }
-  consentCache.set(uid, allowed);
-  return allowed;
-}
-
-function uidFromEntryRef(ref) {
-  // .../users/{uid}/entries/{entryId} -> parent=entries, parent.parent=user doc
-  return ref.parent?.parent?.id || null;
-}
-
-/**
- * Pure eligibility classifier (M4). Kept side-effect free and exported so
- * both modes' entry-selection logic is unit-testable without a live
- * Firestore doc.
- *
- * @param {{embedding?: any, embeddingV2?: any, text?: any}} data - raw entry doc data
- * @param {{includeMissingV1: boolean}} opts
- * @returns {{eligible: boolean, reason?: string}}
- */
-export function classifyEntry(data, { includeMissingV1 } = {}) {
-  const hasV1 = Array.isArray(data?.embedding);
-  const hasV2 = Array.isArray(data?.embeddingV2);
-  const hasText = typeof data?.text === 'string' && data.text.trim().length > 0;
-
-  if (hasV2) return { eligible: false, reason: 'already-has-v2' };
-  if (!hasText) return { eligible: false, reason: 'no-text' };
-
-  if (includeMissingV1) {
-    // Gap mode targets entries with NEITHER vector.
-    if (hasV1) return { eligible: false, reason: 'has-v1-use-default-mode' };
-    return { eligible: true };
-  }
-
-  // Default mode targets entries that already have v1 — unchanged contract.
-  if (!hasV1) return { eligible: false, reason: 'no-v1-use-gap-mode' };
-  return { eligible: true };
-}
-
-/**
- * Process a single entry doc: classify, consent-gate, generate v2 (unless
- * dry-run), write. Mutates `cp` counters in place. Exported for unit
- * testing with a fake doc/db — never reads `process.argv`/env directly.
- *
- * @returns {Promise<{eligible: boolean, reason?: string, dryRun?: boolean, update?: object}>}
- */
-export async function processEntryDoc(doc, cp, {
-  db,
-  apiKey,
-  v2Model,
-  dryRun,
-  includeMissingV1,
-  generateEmbeddingV2Fn = generateEmbeddingV2,
-} = {}) {
-  cp.processed += 1;
-  const data = doc.data() || {};
-
-  const classification = classifyEntry(data, { includeMissingV1 });
-  if (!classification.eligible) {
-    cp.skipped += 1;
-    return classification;
-  }
-
-  const uid = uidFromEntryRef(doc.ref);
-  if (!uid || !(await userAllowsAi(db, uid))) {
-    cp.skipped += 1;
-    return { eligible: false, reason: 'consent' };
-  }
-
-  if (dryRun) {
-    cp.updated += 1;
-    return { eligible: true, dryRun: true };
-  }
-
-  const v2 = await generateEmbeddingV2Fn(data.text, apiKey, {
-    model: v2Model,
-    taskType: EMBEDDING_V2_TASK_TYPE,
-  });
-  if (!v2) {
-    cp.skipped += 1;
-    return { eligible: false, reason: 'v2-generation-failed' };
-  }
-
-  const embeddingMeta = buildEmbeddingMeta({
-    model: v2Model,
-    dim: v2.dim,
-    taskType: EMBEDDING_V2_TASK_TYPE,
-  });
-  // v2-ONLY payload — the `embedding` (v1) key is NEVER written by this
-  // script in either mode: v1 is either already present (default mode, left
-  // untouched) or permanently unavailable upstream (gap mode) and must
-  // never be fabricated.
-  const update = { embeddingV2: v2.embedding, embeddingMeta };
-  await doc.ref.update(update);
-  cp.updated += 1;
-  return { eligible: true, update };
-}
+// Prod checkpoints keep the FieldValue sentinel via injection (lib default
+// is an ISO string purely so the lib stays admin-free for tests).
+const adminServerTimestamp = () => admin.firestore.FieldValue.serverTimestamp();
 
 async function main() {
   const apiKey = requireEnv('GEMINI_API_KEY');
@@ -265,7 +137,7 @@ async function main() {
     }
 
     cp.lastPath = cursor.ref.path;
-    await saveCheckpoint(db, checkpointPath, cp, false, DRY_RUN);
+    await saveCheckpoint(db, checkpointPath, cp, false, DRY_RUN, adminServerTimestamp);
     console.log(
       `[backfill-v2] processed=${cp.processed} updated=${cp.updated} skipped=${cp.skipped} ` +
       `last=${cp.lastPath}`
@@ -273,7 +145,7 @@ async function main() {
     await sleep(BATCH_SLEEP_MS);
   }
 
-  await saveCheckpoint(db, checkpointPath, cp, true, DRY_RUN);
+  await saveCheckpoint(db, checkpointPath, cp, true, DRY_RUN, adminServerTimestamp);
   console.log(
     `[backfill-v2] DONE processed=${cp.processed} updated=${cp.updated} skipped=${cp.skipped}` +
     (DRY_RUN ? ' (dry-run, no writes)' : '')
