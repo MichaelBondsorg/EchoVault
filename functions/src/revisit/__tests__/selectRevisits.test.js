@@ -741,6 +741,36 @@ describe(`weeklyCadenceTripped — Round 2 reversal: dismissal trips cadence too
   it('a "shown" item 8 days ago does NOT trip the gate (the unchanged 7-day queued/shown cadence) — eligible', () => {
     expect(weeklyCadenceTripped([{ status: 'shown', selectedAt: daysAgo(8) }], NOW)).toBe(false);
   });
+
+  // Anchor semantics (review follow-up): the dismissed block runs from the
+  // DISMISSAL action (updatedAt, stamped by dismissRevisit), not from the
+  // original selection — "a dismissal should count as an exposure", and the
+  // exposure the user reacted to is the Not-now tap. selectedAt is only the
+  // legacy fallback.
+  it('dismissed anchors on updatedAt: selected 16d ago but dismissed 5d ago → still blocked (selectedAt anchor would wrongly free it)', () => {
+    expect(weeklyCadenceTripped([
+      { status: 'dismissed', selectedAt: daysAgo(16), updatedAt: daysAgo(5) },
+    ], NOW)).toBe(true);
+  });
+
+  it('dismissed anchors on updatedAt: selected 20d ago, dismissed 15d ago → past the 14-day window either way — eligible', () => {
+    expect(weeklyCadenceTripped([
+      { status: 'dismissed', selectedAt: daysAgo(20), updatedAt: daysAgo(15) },
+    ], NOW)).toBe(false);
+  });
+
+  it('legacy dismissed doc without a parseable updatedAt falls back to selectedAt (6d ago → blocked)', () => {
+    expect(weeklyCadenceTripped([{ status: 'dismissed', selectedAt: daysAgo(6) }], NOW)).toBe(true);
+    expect(weeklyCadenceTripped([
+      { status: 'dismissed', selectedAt: daysAgo(6), updatedAt: 'not-a-date' },
+    ], NOW)).toBe(true);
+  });
+
+  it('live (shown) items keep anchoring on selectedAt even when updatedAt is recent (selected 8d ago, updated 1d ago → eligible)', () => {
+    expect(weeklyCadenceTripped([
+      { status: 'shown', selectedAt: daysAgo(8), updatedAt: daysAgo(1) },
+    ], NOW)).toBe(false);
+  });
 });
 
 // ---------------------------------------------------------------------------

@@ -566,9 +566,23 @@ export function weeklyCadenceTripped(recentQueueWithStatus, nowMs) {
     const isLive = item?.status === 'queued' || item?.status === 'shown';
     const isDismissed = item?.status === 'dismissed';
     if (!isLive && !isDismissed) return false;
-    const selMs = toMillis(item?.selectedAt);
-    if (!Number.isFinite(selMs)) return false;
-    const ageMs = nowMs - selMs;
+    // Anchor choice (round-2 review follow-up): for a DISMISSED item the
+    // 14-day block runs from the dismissal ACTION, not the original
+    // selection — Michael's directive is "a dismissal should count as an
+    // exposure", and the exposure the user reacted to happened when they
+    // tapped "Not now", which `dismissRevisit` stamps onto `updatedAt`. A
+    // card that sat queued for days before being dismissed would otherwise
+    // get a silently shorter post-dismissal block. Fallback to `selectedAt`
+    // for legacy docs without a parseable `updatedAt` (fail toward the
+    // LONGER effective block either way, since selectedAt <= updatedAt).
+    // Live (queued/shown) items keep anchoring on `selectedAt` — their
+    // exposure begins at selection/display.
+    const dismissedAnchorMs = isDismissed ? toMillis(item?.updatedAt) : NaN;
+    const anchorMs = Number.isFinite(dismissedAnchorMs)
+      ? dismissedAnchorMs
+      : toMillis(item?.selectedAt);
+    if (!Number.isFinite(anchorMs)) return false;
+    const ageMs = nowMs - anchorMs;
     const cadenceDays = isDismissed ? DISMISSED_CADENCE_DAYS : WEEKLY_CADENCE_DAYS;
     return ageMs >= 0 && ageMs <= cadenceDays * DAY_MS;
   });

@@ -82,7 +82,7 @@ duplicate — rule 6 (opt-in) is unchanged and kept in its original slot.
 | 0 | **(GR1, new)** Legacy fail-closed: eligibility requires `typeof safety_flagged === 'boolean' AND typeof has_warning_indicators === 'boolean'` (in the pure selector); the scheduled job re-screens whichever field(s) are missing/non-boolean against the entry's text before the entry ever reaches the selector → never eligible if that re-screen can't produce a trustworthy value | See "GR1: legacy entries fail closed" below for the full explanation — this closes a real gap where a pre-existing entry with no explicit boolean field was silently being treated as safe. Numbered 0 (not appended after 9) because it is logically a PRECONDITION every other rule already assumes holds — rules 1-4 only make sense once both fields are known to be trustworthy booleans. |
 | 7 | **(GR1, new)** Current-state gate: the job skips a user's selection ENTIRELY for the day when their RECENT (last 14 days) entries show ANY `safety_flagged`/`has_warning_indicators`, OR sustained low mood (see below) | See "GR1: current-state gate" below. |
 | 8 | *(alias — see rule 0 above; kept as "rule 8" in code comments/PR history because it was the second GR1 item drafted, but renumbered to 0 here since it's a precondition, not a same-tier exclusion check)* | — |
-| 9 | **(GR1, new; Round 2: amended)** Weekly cadence: a user is skipped unless no `queued`/`shown` `revisit_queue` doc exists with `selectedAt` within the last 7 days, **AND no `dismissed` doc exists with `selectedAt` within the last 14 days** | See "Round 2: dismissal now trips cadence (rule 9 reversal)" below. |
+| 9 | **(GR1, new; Round 2: amended)** Weekly cadence: a user is skipped unless no `queued`/`shown` `revisit_queue` doc exists with `selectedAt` within the last 7 days, **AND no `dismissed` doc exists whose dismissal (`updatedAt`, stamped by `dismissRevisit`; `selectedAt` fallback for legacy docs) is within the last 14 days** | See "Round 2: dismissal now trips cadence (rule 9 reversal)" below. |
 | 10 | **(Round 2, new)** Anniversary blackout: age at selection in [351, 379] days (±14 around exactly 365) → never, regardless of mood/content | See "Round 2: anniversary blackout (rule 10)" below. |
 
 Additional (non-safety) selection constraints, also enforced in the same
@@ -299,10 +299,21 @@ date/Space chip, and made a choice about it. Treating that as a non-event
 was wrong.
 
 **The new rule, precisely:** a user is now ALSO skipped when a `dismissed`
-`revisit_queue` doc exists with `selectedAt` within the last
+`revisit_queue` doc exists whose dismissal is within the last
 `DISMISSED_CADENCE_DAYS` = **14 days** — double the normal 7-day
 `queued`/`shown` cadence, not the same window. `queued`/`shown` items are
 unaffected by this change and still use the 7-day window.
+
+**Anchor field (review follow-up):** the 14-day dismissed block runs from
+the dismissal ACTION — `updatedAt`, which `dismissRevisit` stamps — not
+from the original `selectedAt`. "A dismissal should count as an exposure",
+and the exposure the user reacted to happened when they tapped "Not now";
+a card that sat queued for several days before being dismissed would
+otherwise get a silently shorter post-dismissal block. Legacy docs without
+a parseable `updatedAt` fall back to `selectedAt` (which is always ≤ the
+dismissal time, so the fallback errs toward the longer effective block).
+Live `queued`/`shown` items keep anchoring on `selectedAt` — their exposure
+begins at selection/display.
 
 **Why 14, not 7 (pinned, revisable via memo re-sign):** per Michael's own
 framing, an explicit "not now" is read as a STRONGER signal than a passive
