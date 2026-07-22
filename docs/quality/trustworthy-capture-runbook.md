@@ -787,6 +787,12 @@ staleness check. Concretely:
   `active` insight is stamped with the current `generatorVersion`. In
   steady state (every generation after the first) there is nothing left to
   archive, so this is a true one-time cutover per user, not an ongoing cost.
+  Footnote (T6 review): "archived" ≠ "retained forever" — `history` carries
+  a pre-existing, uniform 50-item cap (newest-first by `lastSeen`), so an
+  archived legacy item ages out like any other history entry over many
+  future generations. The cutover write itself never evicts what it just
+  archived (fresh archives sort to the top); the cap is unchanged, uniform
+  retention behavior, not a cutover deletion path.
 - **basicInsights** (`src/services/basicInsights/basicInsightsOrchestrator.js`):
   has no active/history split — its cache doc is a single flat
   `basicInsights/current` doc, wholesale-replaced every generation, so
