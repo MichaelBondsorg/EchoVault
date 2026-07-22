@@ -17,6 +17,7 @@ vi.mock('../../../config/flags', () => ({
 
 const {
   generateEmbedding,
+  generateEmbeddingV2,
   generateQueryEmbeddings,
   findRelevantMemories,
   cosineSimilarity,
@@ -26,6 +27,38 @@ beforeEach(() => {
   mockGenerateEmbeddingFn.mockReset();
   mockGetFlag.mockReset();
   mockGetFlag.mockReturnValue(false); // default: flag OFF
+});
+
+describe('generateEmbeddingV2 — unconditional v2, no flag check (embeddings v2 migration plan M5, thread-vector repair)', () => {
+  it('requests version:"v2" and never consults getFlag', async () => {
+    mockGenerateEmbeddingFn.mockResolvedValue({ data: { embedding: [1, 2, 3], space: 'v2' } });
+
+    const result = await generateEmbeddingV2('some thread name');
+
+    expect(mockGenerateEmbeddingFn).toHaveBeenCalledTimes(1);
+    expect(mockGenerateEmbeddingFn).toHaveBeenCalledWith({ text: 'some thread name', version: 'v2' });
+    expect(mockGetFlag).not.toHaveBeenCalled();
+    expect(result).toEqual([1, 2, 3]);
+  });
+
+  it('rejects invalid/empty text without calling the callable', async () => {
+    const result = await generateEmbeddingV2('');
+    expect(result).toBeNull();
+    expect(mockGenerateEmbeddingFn).not.toHaveBeenCalled();
+  });
+
+  it('returns null when the callable yields no embedding, after one retry (graceful degradation, never throws)', async () => {
+    mockGenerateEmbeddingFn.mockResolvedValue({ data: {} });
+    const result = await generateEmbeddingV2('nothing here');
+    expect(result).toBeNull();
+  });
+
+  it('retries once on exception then returns null on exhausted retry (never hard-fails the caller)', async () => {
+    mockGenerateEmbeddingFn.mockRejectedValue(new Error('v2 down'));
+    const result = await generateEmbeddingV2('flaky text');
+    expect(result).toBeNull();
+    expect(mockGenerateEmbeddingFn).toHaveBeenCalledTimes(2); // initial + 1 retry
+  });
 });
 
 describe('generateQueryEmbeddings — flag OFF (byte-identical current behavior)', () => {

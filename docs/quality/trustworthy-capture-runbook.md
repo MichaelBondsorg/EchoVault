@@ -260,18 +260,30 @@ confirmed by direct code reading before the fix:
   and this fix landing has NEITHER vector. Use
   `scripts/backfill-embeddings-v2.js --include-missing-v1` (step 2 above) to
   close that gap with v2-only writes.
-- **Known, DELIBERATELY NOT fixed in this task (M4):**
+- **RESOLVED (plan task M5, 2026-07-22).**
   `src/services/nexus/layer1/threadManager.js`'s thread-dedup/thread-name
-  embeddings are explicitly PINNED to v1 (plan task M2's documented
-  decision — thread vectors are a separate v1-space store, migration was an
-  explicit non-goal). Since v1 is now permanently dead, thread-similarity
-  matching (`findSimilarThread`/`findEvolutionCandidates`) is **silently
-  degraded** — it still calls the v1-only path, which now always fails, so
-  thread dedup effectively stops matching. This is a pre-existing gap
-  (inherited from M2's pin decision, not introduced by M4) that this task
-  was explicitly scoped NOT to fix. Flagged here as an open follow-up:
-  migrating thread embeddings to v2 (or degrading gracefully instead of
-  silently) needs its own task.
+  embeddings were explicitly PINNED to v1 by M2 (thread vectors were a
+  separate v1-space store, migration an explicit non-goal at the time).
+  Since v1 was permanently retired, that pin left thread-similarity matching
+  (`findSimilarThread`/`findEvolutionCandidates`) silently degraded — it
+  called a v1-only path that always failed, so thread dedup stopped
+  matching in prod with no visible error. Task M5 moved thread vectors to
+  v2 space: new threads embed via the unconditional `generateEmbeddingV2`
+  (`src/services/ai/embeddings.js`, no flag check — thread vectors have no
+  working v1 fallback to gate a rollback to) and store the result on
+  `thread.embeddingV2`; the legacy `thread.embedding` field is never
+  overwritten or reused. `findSimilarThread`/`findEvolutionCandidates` now
+  compare `thread.embeddingV2`-vs-`embeddingV2` exclusively — a thread that
+  only has the legacy v1 `embedding` field is treated as having no
+  comparable vector (same "no semantic match" exclusion that already
+  existed for a thread with no embedding at all), never cross-space
+  compared. No backfill script: `getActiveThreads` only ever compares
+  against the 10 most-recently-updated active/evolved threads per user
+  (`MAX_ACTIVE_THREADS`), so a legacy v1-only thread simply ages out of that
+  window as new threads are created, or gets resolved through normal use —
+  it does not need to be deleted or migrated to stop mattering. Full
+  rationale: `src/services/nexus/layer1/threadManager.js`'s file-level doc
+  comment and `.superpowers/sdd/task-m5-report.md`.
 
 ## Model registry flip procedure
 

@@ -79,6 +79,64 @@ export const generateEmbedding = async (text, retryCount = 0) => {
 };
 
 /**
+ * Generate a v2 (gemini-embedding-2) embedding vector for text,
+ * UNCONDITIONALLY — no flag check (embeddings v2 migration plan task M5,
+ * thread-vector repair; see
+ * docs/superpowers/plans/2026-07-22-embeddings-v2-migration.md and
+ * threadManager.js's file-level doc comment).
+ *
+ * Reuses the exact same M1 callable contract as `generateQueryEmbeddings`'s
+ * flag-ON path (`generateEmbeddingFn({text, version:'v2'})`) but bypasses
+ * the `model.embeddingV2Read` flag check entirely. That flag governs a
+ * ROLLOUT decision for seams that have a working v1 fallback to roll back
+ * to (retrieval query scoring). Thread vectors have no such fallback: v1
+ * (text-embedding-004) is permanently retired upstream, so gating this call
+ * behind the flag would only mean "thread dedup is broken for flag-OFF
+ * users" instead of "thread dedup always worked" — there is no rollback
+ * target, so there is nothing for a flag to gate. This is a repair of a
+ * dead code path, not a feature rollout.
+ *
+ * Retry/error shape mirrors `generateEmbedding` above (retry once on
+ * exception, null on exhausted retry or empty result) so callers get the
+ * same graceful-degradation contract they already rely on — the only
+ * difference is the requested version and that failures log at `warn`
+ * (matching this file's established v2-failure convention — v2 issues are
+ * expected/transient-network class, not screaming-`error` incidents).
+ *
+ * @param {string} text
+ * @param {number} retryCount - internal retry counter
+ * @returns {Promise<number[]|null>} The v2 embedding vector or null on failure
+ */
+export const generateEmbeddingV2 = async (text, retryCount = 0) => {
+  try {
+    if (!text || typeof text !== 'string' || text.trim().length === 0) {
+      console.error('generateEmbeddingV2: Invalid or empty text provided');
+      return null;
+    }
+
+    const result = await generateEmbeddingFn({ text, version: 'v2' });
+    const embedding = result.data?.embedding || null;
+
+    if (!embedding) {
+      console.warn('generateEmbeddingV2: callable returned no embedding values');
+    }
+
+    return embedding;
+  } catch (e) {
+    console.warn('generateEmbeddingV2 exception:', e);
+
+    // Retry once on failure, same policy as generateEmbedding.
+    if (retryCount < 1) {
+      console.log('Retrying v2 embedding generation after exception...');
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      return generateEmbeddingV2(text, retryCount + 1);
+    }
+
+    return null;
+  }
+};
+
+/**
  * Generate QUERY-side embedding vector(s) for retrieval (embeddings v2
  * migration plan task M2). This is the space-aware sibling of
  * `generateEmbedding` above — use this for retrieval query text (chat
@@ -93,7 +151,10 @@ export const generateEmbedding = async (text, retryCount = 0) => {
  *    (`generateEmbeddingFn({text})`, no `version` field) — byte-identical
  *    current behavior, including its retry-once-on-exception semantics.
  *    `generateEmbedding` itself is untouched and still used unmodified by
- *    every one of its other callers (threadManager.js, etc).
+ *    its other callers. (threadManager.js's thread vectors moved OFF this
+ *    function's OFF-path entirely in plan task M5 — they use the
+ *    unconditional `generateEmbeddingV2` below instead, since v1 is a dead
+ *    fallback for them; see that function's doc comment.)
  *  - ON: dual-space robustness policy (no mid-migration cliff) — requests
  *    BOTH v1 and v2 query vectors via TWO separate invocations of the M1
  *    callable contract `generateEmbeddingFn({text, version})`, so entries

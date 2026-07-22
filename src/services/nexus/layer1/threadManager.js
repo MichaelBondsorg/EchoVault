@@ -4,27 +4,72 @@
  * Manages semantic threads with full metamorphosis support.
  * Threads track ongoing storylines across entries with evolution tracking.
  *
- * EMBEDDING SPACE PIN (embeddings v2 migration, plan task M2 — see
- * docs/superpowers/plans/2026-07-22-embeddings-v2-migration.md): the
- * `thread.embedding` vector store below is PINNED to v1 (text-embedding-004)
- * space, explicitly and permanently for this migration. Migrating thread
- * vectors to v2 is a documented non-goal — it would require a separate
- * backfill of every stored `thread.embedding` (a different collection from
- * `entries`, out of scope for the entries-embedding migration this plan
- * covers).
+ * EMBEDDING SPACE: v2 (embeddings v2 migration, plan task M5 — see
+ * docs/superpowers/plans/2026-07-22-embeddings-v2-migration.md and this
+ * task's report at .superpowers/sdd/task-m5-report.md). History: plan task
+ * M2 explicitly PINNED thread vectors to v1 (text-embedding-004) as a
+ * documented non-goal of the entries-embedding migration. Google then
+ * retired text-embedding-004 upstream (unscheduled, confirmed 2026-07-22 —
+ * see the runbook's v1-retirement note), which made that v1 pin a dead code
+ * path: every `generateEmbedding` call below started 404ing, silently, so
+ * thread dedup/continuity stopped semantically matching in prod. Task M5
+ * repairs that by moving thread vectors to v2 space.
  *
- * Concretely: every embedding call in this file uses the plain
- * `generateEmbedding(text)` below — NOT the flag-aware
- * `generateQueryEmbeddings(text)` (ai/embeddings.js) that the M2 retrieval
- * seams (chat RAG, companion context, etc.) use. `generateEmbedding` always
- * requests the default v1 vector regardless of the `model.embeddingV2Read`
- * flag, so thread creation/matching stays v1-only structurally — not by a
- * runtime flag check that could silently drift, but because this file
- * simply never imports the flag-aware helper. Do not change these calls to
- * `generateQueryEmbeddings` — `thread.embedding` values already persisted
- * are v1 vectors, and `cosineSimilarity(embedding, thread.embedding)` below
- * would silently corrupt (mix v1/v2 spaces) if a v2 vector were ever
- * compared against them.
+ * SAME-SPACE-OR-NOTHING (codebase invariant, unchanged by this migration):
+ * new thread vectors are v2 and stored on `thread.embeddingV2` — the legacy
+ * `thread.embedding` field is NEVER overwritten or reused for v2 data.
+ * Comparisons only ever read `thread.embeddingV2` against a v2 query vector;
+ * a thread that has only the legacy `embedding` field (a v1 vector, from
+ * before this task) is treated as having NO comparable vector at all, the
+ * same "no semantic match" exclusion that already existed for a thread with
+ * no embedding — see `findSimilarThread`/`findEvolutionCandidates` below.
+ * cosineSimilarity is never called with one v1 and one v2 argument.
+ *
+ * No backfill script for existing v1-only threads. Rationale, verified
+ * against this file's actual code (not assumed): `getActiveThreads` only
+ * ever compares against the `MAX_ACTIVE_THREADS` (10) most-recently-updated
+ * active/evolved threads per user, ordered by `lastUpdated desc` — a small,
+ * self-rotating comparison window, not the full thread history. A legacy
+ * v1-only thread doesn't need to be deleted or migrated to become
+ * irrelevant: it can never be re-matched against (no v1 vector will ever be
+ * generated again to compare it with), so it simply ages out of that top-10
+ * window as new threads are created, or gets explicitly resolved through
+ * normal use (`resolveThread`). Nothing in this codebase auto-expires or
+ * auto-archives a thread doc on a timer — threads are not literally
+ * ephemeral records — but the MATCHING SURFACE that matters for dedup is
+ * small and recency-bounded, which is what makes "let it decay, don't
+ * backfill" a sound call rather than a hand-wave.
+ *
+ * No flag gates this. `model.embeddingV2Read` gates a ROLLOUT (retrieval
+ * seams that have a working v1 fallback to roll back to). Thread vectors
+ * have no working v1 fallback — v1 is permanently dead upstream — so there
+ * is no rollback target for a flag to protect; gating this behind
+ * `model.embeddingV2Read` would just mean "broken for flag-OFF users"
+ * instead of "always working". This is a repair of a dead code path, not a
+ * feature. Concretely: every embedding call in this file uses the
+ * unconditional `generateEmbeddingV2(text)` (ai/embeddings.js) — never the
+ * flag-aware `generateQueryEmbeddings(text)`.
+ *
+ * Task-type note (asymmetric-vs-symmetric pairing, documented honestly):
+ * the compared vectors here are NOT an entry-doc vs. a query — reading this
+ * file's actual flow, `createThread` embeds `displayName` (a short proposed
+ * thread name) and `findSimilarThread`/`findEvolutionCandidates` compare
+ * that same kind of name-derived vector against OTHER threads'
+ * name-derived vectors. There is no journal-entry text or entry
+ * `embeddingV2` (RETRIEVAL_DOCUMENT-space) document vector anywhere in this
+ * comparison — thread matching never re-embeds or reuses entry text/vectors
+ * at all. So this is a SYMMETRIC text-vs-text comparison, not the
+ * asymmetric query-vs-document shape `generateQueryEmbeddings`'s
+ * RETRIEVAL_QUERY task type was designed for. The theoretically-correct
+ * task type for a symmetric comparison would be SEMANTIC_SIMILARITY, but no
+ * server surface for it exists (M1 only wired RETRIEVAL_QUERY /
+ * RETRIEVAL_DOCUMENT) and adding one is out of this task's scope (no new
+ * server code). Reusing RETRIEVAL_QUERY on both sides via
+ * `generateEmbeddingV2` is the pragmatic choice: cosine similarity between
+ * two RETRIEVAL_QUERY-space vectors is still a reasonable closeness proxy
+ * for two short thread-name phrases, just not the theoretically ideal
+ * pairing. Revisit if a SEMANTIC_SIMILARITY task type is ever added
+ * server-side.
  */
 
 import {
@@ -44,10 +89,11 @@ import {
 import { db } from '../../../config/firebase';
 import { APP_COLLECTION_ID } from '../../../config/constants';
 import { callGemini } from '../../ai/gemini';
-// PINNED v1 (see file-level doc comment above): `generateEmbedding` always
-// requests the default v1 vector, never `generateQueryEmbeddings` (the
-// flag-aware, potentially-v2 helper used by the retrieval seams).
-import { generateEmbedding, cosineSimilarity } from '../../ai/embeddings';
+// PINNED v2, unconditionally (see file-level doc comment above):
+// `generateEmbeddingV2` always requests the v2 vector, never gated by
+// `model.embeddingV2Read` (the flag-aware helper the retrieval seams use) —
+// thread vectors have no working v1 fallback to gate a rollback to.
+import { generateEmbeddingV2, cosineSimilarity } from '../../ai/embeddings';
 import { extractSomaticSignals, SOMATIC_TAXONOMY } from './somaticExtractor';
 
 // ============================================================
@@ -197,15 +243,25 @@ const calculateNameSimilarity = (name1, name2) => {
 
 /**
  * Find similar thread using semantic matching
+ *
+ * @param {string} proposedName
+ * @param {Array} activeThreads
+ * @param {number[]|null} embeddingV2 - v2 query vector for the proposed name
+ *   (see file-level doc comment: SAME-SPACE-OR-NOTHING — only ever compared
+ *   against `thread.embeddingV2`, never `thread.embedding`, which is a dead
+ *   v1 vector no candidate can ever be scored against again).
  */
-export const findSimilarThread = async (proposedName, activeThreads, embedding = null) => {
+export const findSimilarThread = async (proposedName, activeThreads, embeddingV2 = null) => {
   if (!activeThreads?.length) return null;
 
-  // 1. Try semantic embedding match (primary)
-  if (embedding) {
+  // 1. Try semantic embedding match (primary) — v2-vs-v2 only. A thread with
+  // only a legacy `thread.embedding` (v1) is structurally skipped here: this
+  // branch reads `thread.embeddingV2` exclusively, so it can never pair a v2
+  // query against a v1 candidate, regardless of vector length.
+  if (embeddingV2) {
     for (const thread of activeThreads) {
-      if (thread.embedding) {
-        const similarity = cosineSimilarity(embedding, thread.embedding);
+      if (thread.embeddingV2) {
+        const similarity = cosineSimilarity(embeddingV2, thread.embeddingV2);
         if (similarity >= SEMANTIC_SIMILARITY_THRESHOLD) {
           console.log(`[ThreadManager] Semantic match: "${proposedName}" → "${thread.displayName}" (${(similarity * 100).toFixed(1)}%)`);
           return { thread, matchType: 'semantic', similarity };
@@ -228,8 +284,12 @@ export const findSimilarThread = async (proposedName, activeThreads, embedding =
 
 /**
  * Find potential evolution candidates
+ *
+ * @param {number[]|null} embeddingV2 - v2 query vector; same same-space
+ *   discipline as `findSimilarThread` — only ever paired with
+ *   `thread.embeddingV2`.
  */
-export const findEvolutionCandidates = async (proposedName, category, activeThreads, embedding = null) => {
+export const findEvolutionCandidates = async (proposedName, category, activeThreads, embeddingV2 = null) => {
   const candidates = [];
 
   // Filter to same category
@@ -238,8 +298,8 @@ export const findEvolutionCandidates = async (proposedName, category, activeThre
   for (const thread of sameCategoryThreads) {
     let similarity = 0;
 
-    if (embedding && thread.embedding) {
-      similarity = cosineSimilarity(embedding, thread.embedding);
+    if (embeddingV2 && thread.embeddingV2) {
+      similarity = cosineSimilarity(embeddingV2, thread.embeddingV2);
     }
 
     // Threads in same category with moderate similarity are evolution candidates
@@ -288,13 +348,14 @@ export const createThread = async (userId, threadData) => {
   const now = Timestamp.now();
   const hasSentiment = Number.isFinite(sentiment);
 
-  // Generate embedding — PINNED v1 (see file-level doc comment): thread
-  // vectors are a v1-space store, migration non-goal for plan M2.
-  let embedding = null;
+  // Generate embedding — v2, unconditionally (see file-level doc comment,
+  // plan task M5). Failure degrades gracefully to null, same shape as
+  // before: entry processing never hard-fails on an embedding miss.
+  let embeddingV2 = null;
   try {
-    embedding = await generateEmbedding(displayName);
+    embeddingV2 = await generateEmbeddingV2(displayName);
   } catch (error) {
-    console.warn('[ThreadManager] Embedding generation failed:', error);
+    console.warn('[ThreadManager] v2 embedding generation failed:', error);
   }
 
   // Get valid somatic signal IDs
@@ -333,8 +394,10 @@ export const createThread = async (userId, threadData) => {
     entryIds: entryId ? [entryId] : [],
     entryCount: entryId ? 1 : 0,
 
-    // Embedding
-    embedding,
+    // Embedding — v2 space only (see file-level doc comment). Deliberately
+    // NOT setting a legacy `embedding` field here: this is a new-thread
+    // write, so there is no v1 vector to (and no reason to ever) fabricate.
+    embeddingV2,
 
     // Timestamps
     createdAt: now,
@@ -678,15 +741,15 @@ export const identifyThreadAssociation = async (userId, entryId, entryText, sent
       default: {
         // Check for duplicates first
         const proposedName = thread.proposedName || 'Unnamed Thread';
-        // PINNED v1 (see file-level doc comment): matched against existing
-        // thread.embedding values, which are v1-space.
-        let embedding = null;
+        // v2, unconditionally (see file-level doc comment): matched against
+        // existing thread.embeddingV2 values only — same-space discipline.
+        let embeddingV2 = null;
         try {
-          embedding = await generateEmbedding(proposedName);
+          embeddingV2 = await generateEmbeddingV2(proposedName);
         } catch (e) {
-          // Continue without embedding
+          // Continue without embedding — same graceful degradation as before.
         }
-        const similar = await findSimilarThread(proposedName, activeThreads, embedding);
+        const similar = await findSimilarThread(proposedName, activeThreads, embeddingV2);
 
         if (similar) {
           // Deduplicate
