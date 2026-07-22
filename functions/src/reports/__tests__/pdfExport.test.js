@@ -88,6 +88,22 @@ const mockEntryLookups = (count, crisisIds = new Set()) => {
   }
 };
 
+// Helper: mock entry lookups where some entries carry
+// `has_warning_indicators` instead of/alongside `safety_flagged` (Minor 5
+// adversarial fixture — warning-indicator-only entries, no crisis flag).
+const mockEntryLookupsWithFlags = (count, { crisisIds = new Set(), warningIds = new Set() } = {}) => {
+  for (let i = 0; i < count; i++) {
+    const entryId = `e${i + 1}`;
+    mockGet.mockResolvedValueOnce({
+      exists: true,
+      data: () => ({
+        safety_flagged: crisisIds.has(entryId),
+        has_warning_indicators: warningIds.has(entryId),
+      }),
+    });
+  }
+};
+
 describe('pdfExport', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -280,6 +296,30 @@ describe('pdfExport', () => {
       expect(renderedSummary.props.section.entryRefs).toContain('e1');
       // ...and a different section's non-crisis ref is untouched.
       expect(renderedGoals.props.section.entryRefs).toEqual(['e3']);
+    });
+
+    it('never hands a has_warning_indicators-only entry id to the PDF renderer (Minor 5: export redaction asymmetry fix)', async () => {
+      // Adversarial fixture: e2 carries `has_warning_indicators: true` but
+      // NOT `safety_flagged` — before this fix, pdfExport.js's inline
+      // crisis-check only tested `safety_flagged`, so a warning-indicator
+      // (but not crisis-flagged) entry would leak into the exported PDF's
+      // entryRefs, unlike `privacy.js#filterForExport`'s stricter export-path
+      // semantics (strips both flags). e1 carries neither flag and must
+      // survive.
+      mockActiveSubscription();
+      mockGet.mockResolvedValueOnce({ exists: true, data: () => makeReport() });
+      mockGet.mockResolvedValueOnce({ exists: true, data: () => makePrivacy() });
+      mockEntryLookupsWithFlags(4, { warningIds: new Set(['e2']) });
+
+      const { handleExportRequest } = await import('../pdfExport.js');
+      await handleExportRequest({ reportId: VALID_REPORT_ID }, 'user1');
+
+      const pdfDocElement = mockRenderToBuffer.mock.calls[0][0];
+      const [, , ...sectionElements] = pdfDocElement.props.children;
+      const renderedSummary = sectionElements.find((el) => el.props.section.id === 'summary');
+
+      expect(renderedSummary.props.section.entryRefs).not.toContain('e2');
+      expect(renderedSummary.props.section.entryRefs).toContain('e1');
     });
 
     it('URL expires after 24 hours', async () => {

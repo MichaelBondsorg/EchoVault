@@ -19,6 +19,11 @@ vi.mock('../../dashboard', () => ({
   invalidateWeeklyDigest: (...a) => invalidateWeeklyDigest(...a),
 }));
 
+const invalidateBasicInsights = vi.fn(async () => {});
+vi.mock('../../basicInsights/basicInsightsOrchestrator', () => ({
+  invalidateBasicInsights: (...a) => invalidateBasicInsights(...a),
+}));
+
 const { onSourcesChanged } = await import('../recompute.js');
 
 const db = {};
@@ -48,19 +53,28 @@ describe('onSourcesChanged', () => {
     expect(invalidateWeeklyDigest).toHaveBeenCalledTimes(2);
   });
 
-  it('all three fan-outs are awaited before onSourcesChanged resolves — no debounce', async () => {
+  it('invalidates the basicInsights cache (R2 final review, Important 2b)', async () => {
+    await onSourcesChanged(db, UID);
+    expect(invalidateBasicInsights).toHaveBeenCalledWith(UID);
+    expect(invalidateBasicInsights).toHaveBeenCalledTimes(1);
+  });
+
+  it('all four fan-outs are awaited before onSourcesChanged resolves — no debounce', async () => {
     let staleDone = false;
     let dailyDone = false;
     let weeklyDone = false;
+    let basicDone = false;
     markInsightsStale.mockImplementationOnce(async () => { staleDone = true; });
     invalidateDailySummary.mockImplementation(async () => { dailyDone = true; });
     invalidateWeeklyDigest.mockImplementation(async () => { weeklyDone = true; });
+    invalidateBasicInsights.mockImplementationOnce(async () => { basicDone = true; });
 
     await onSourcesChanged(db, UID);
 
     expect(staleDone).toBe(true);
     expect(dailyDone).toBe(true);
     expect(weeklyDone).toBe(true);
+    expect(basicDone).toBe(true);
   });
 });
 

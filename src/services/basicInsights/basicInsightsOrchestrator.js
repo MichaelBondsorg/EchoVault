@@ -13,7 +13,7 @@
  * Firestore Path: artifacts/{APP_COLLECTION_ID}/users/{userId}/basicInsights/current
  */
 
-import { doc, getDoc, setDoc, Timestamp } from 'firebase/firestore';
+import { doc, getDoc, setDoc, deleteDoc, Timestamp } from 'firebase/firestore';
 import { db } from '../../config/firebase';
 import { APP_COLLECTION_ID } from '../../config/constants';
 
@@ -375,6 +375,35 @@ export const getCachedBasicInsights = async (userId, currentEntriesCount = null)
 };
 
 /**
+ * Invalidate the cached basicInsights doc (R2 final review, Important 2b).
+ *
+ * This module has no "stale" boolean field to flip (unlike Nexus's
+ * `nexus/insights.stale`, `src/services/nexus/staleness.js`'s
+ * `markInsightsStale`) — its own staleness contract is entirely
+ * existence/TTL/entriesCount-based (`getCachedBasicInsights` above: a
+ * missing doc, an expired `expiresAt`, or a grown `entriesCount` are all
+ * treated as stale). A hard delete is therefore the mechanism THIS module
+ * already expects and handles (`!snapshot.exists()` → `null`, which
+ * `useBasicInsights` treats as "no cache, regenerate"), not a new one —
+ * mirrors the delete-based invalidation `invalidateDailySummary`/
+ * `invalidateWeeklyDigest` (`src/services/dashboard/index.js`) already use
+ * for the other two caches `recompute.js`'s `onSourcesChanged` fans out to.
+ *
+ * @param {string} userId - User ID
+ */
+export const invalidateBasicInsights = async (userId) => {
+  try {
+    const ref = getInsightsRef(userId);
+    await deleteDoc(ref);
+    console.log('[BasicInsights] Cache invalidated');
+  } catch (error) {
+    // Doc might not exist yet, which is fine — same treatment as
+    // invalidateDailySummary/invalidateWeeklyDigest.
+    console.log('[BasicInsights] No cache to invalidate');
+  }
+};
+
+/**
  * Check if insights are expired
  * @param {Timestamp} expiresAt - Expiration timestamp
  * @returns {boolean} True if expired
@@ -412,5 +441,6 @@ export const checkDataSufficiency = (entries) => {
 export default {
   generateBasicInsights,
   getCachedBasicInsights,
-  checkDataSufficiency
+  checkDataSufficiency,
+  invalidateBasicInsights
 };

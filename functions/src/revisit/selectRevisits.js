@@ -42,7 +42,10 @@
  * exclusion fails closed (still suppresses).
  * Dimension → entry-field match:
  *   - entry:  value === entry.id
- *   - date:   value === entry's createdAt date, 'YYYY-MM-DD' (UTC)
+ *   - date:   entry's createdAt date ('YYYY-MM-DD', UTC) is within ±1 DAY of
+ *             `value` (Minor 3+6, R2 final review — see `matchesExclusion`'s
+ *             own doc comment for the timezone-seam rationale; exact match
+ *             is a special case of this, not a separate branch)
  *   - space:  value === entry.spaceId
  *   - person: an entry.entities item with category 'person' and matching id/name
  *   - tag:    value present in entry.tags
@@ -90,6 +93,12 @@ function dateKeyUtc(ms) {
   return new Date(ms).toISOString().slice(0, 10);
 }
 
+/** Midnight-UTC epoch ms for a 'YYYY-MM-DD' date key. NaN if malformed. */
+function dateKeyToMs(dateKey) {
+  const ms = Date.parse(`${dateKey}T00:00:00.000Z`);
+  return Number.isFinite(ms) ? ms : NaN;
+}
+
 function monthKeyUtc(ms) {
   return new Date(ms).toISOString().slice(0, 7);
 }
@@ -134,8 +143,27 @@ export function matchesExclusion(entry, exclusion, entryMs) {
   switch (dimension) {
     case 'entry':
       return entry.id === value;
-    case 'date':
-      return dateKeyUtc(entryMs) === value;
+    case 'date': {
+      // Minor 3+6 (R2 final review): the client's date-dimension exclusion
+      // picker writes `value` from the DEVICE'S LOCAL date, but this compares
+      // against the entry's UTC dateKey — a device west of UTC (or a day
+      // near midnight UTC) can be off by a day, which used to make an
+      // intended exclusion silently not match. Widened to a ±1-day window:
+      // over-excluding (occasionally suppressing a neighboring day the user
+      // didn't explicitly pick) is the SAFE direction on a "hide this from
+      // Gentle Revisit" surface — the cost of a false-positive exclusion is
+      // "one extra day never resurfaces," while the cost of a false
+      // negative is "a day the user explicitly asked to hide gets
+      // resurfaced anyway," which is the actual harm this feature's safety
+      // memo (`docs/quality/gentle-revisit-safety.md`) rule 5 exists to
+      // prevent. Same-day (0), +1, and -1 all match; ±2 or more does not.
+      const entryDateMs = dateKeyToMs(dateKeyUtc(entryMs));
+      const valueDateMs = dateKeyToMs(value);
+      if (!Number.isFinite(entryDateMs) || !Number.isFinite(valueDateMs)) {
+        return dateKeyUtc(entryMs) === value; // malformed value: fall back to exact match
+      }
+      return Math.abs(entryDateMs - valueDateMs) <= DAY_MS;
+    }
     case 'space':
       return entry.spaceId != null && entry.spaceId === value;
     case 'person':

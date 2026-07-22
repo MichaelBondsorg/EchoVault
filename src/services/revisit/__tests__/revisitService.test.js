@@ -190,11 +190,18 @@ describe('getRevisitPrefs', () => {
 });
 
 describe('subscribeTodayRevisit', () => {
-  it('queries revisit_queue where dueDate == today', () => {
+  it('queries revisit_queue where dueDate is IN a 3-day device-local window (yesterday/today/tomorrow)', () => {
     subscribeTodayRevisit(db, UID, () => {});
     expect(mocks.collection).toHaveBeenCalledWith(db, QUEUE_PATH);
     const [, whereClause] = mocks.query.mock.calls[0];
-    expect(whereClause).toEqual({ __where: ['dueDate', '==', expect.any(String)] });
+    expect(whereClause.__where[0]).toBe('dueDate');
+    expect(whereClause.__where[1]).toBe('in');
+    expect(whereClause.__where[2]).toHaveLength(3);
+    whereClause.__where[2].forEach((d) => expect(d).toMatch(/^\d{4}-\d{2}-\d{2}$/));
+    // Middle entry is today; the window is chronologically ordered.
+    const [yesterday, today, tomorrow] = whereClause.__where[2];
+    expect(new Date(today) - new Date(yesterday)).toBe(24 * 60 * 60 * 1000);
+    expect(new Date(tomorrow) - new Date(today)).toBe(24 * 60 * 60 * 1000);
   });
 
   it('calls back with null when the snapshot is empty', () => {
@@ -223,6 +230,50 @@ describe('subscribeTodayRevisit', () => {
     mocks.onSnapshot.mockImplementationOnce((_q, _onNext, onErr) => { onErr(err); return () => {}; });
     subscribeTodayRevisit(db, UID, () => {}, onError);
     expect(onError).toHaveBeenCalledWith(err);
+  });
+
+  describe('±1-day tolerance (Minor 3+6, R2 final review — UTC+11-style device ahead of LA)', () => {
+    it('picks the most recently selectedAt doc when multiple qualify within the window (e.g. a device date matching the server LA-pinned "yesterday" AND a fresh "today" doc both queued)', () => {
+      const cb = vi.fn();
+      mocks.onSnapshot.mockImplementationOnce((_q, onNext) => {
+        onNext({
+          empty: false,
+          docs: [
+            { id: 'rq-old', data: () => ({ entryId: 'e-old', status: 'queued', dueDate: '2026-07-20', selectedAt: '2026-07-20T16:00:00.000Z' }) },
+            { id: 'rq-new', data: () => ({ entryId: 'e-new', status: 'queued', dueDate: '2026-07-21', selectedAt: '2026-07-21T16:00:00.000Z' }) },
+          ],
+        });
+        return () => {};
+      });
+      subscribeTodayRevisit(db, UID, cb);
+      expect(cb).toHaveBeenCalledWith(expect.objectContaining({ id: 'rq-new' }));
+    });
+
+    it('handles a Firestore Timestamp-shaped selectedAt (toMillis) the same as an ISO string', () => {
+      const cb = vi.fn();
+      mocks.onSnapshot.mockImplementationOnce((_q, onNext) => {
+        onNext({
+          empty: false,
+          docs: [
+            { id: 'rq-ts-old', data: () => ({ entryId: 'e-a', status: 'queued', selectedAt: { toMillis: () => Date.parse('2026-07-20T00:00:00.000Z') } }) },
+            { id: 'rq-ts-new', data: () => ({ entryId: 'e-b', status: 'queued', selectedAt: { toMillis: () => Date.parse('2026-07-21T00:00:00.000Z') } }) },
+          ],
+        });
+        return () => {};
+      });
+      subscribeTodayRevisit(db, UID, cb);
+      expect(cb).toHaveBeenCalledWith(expect.objectContaining({ id: 'rq-ts-new' }));
+    });
+
+    it('a single qualifying doc (the common case) is forwarded regardless of selectedAt shape', () => {
+      const cb = vi.fn();
+      mocks.onSnapshot.mockImplementationOnce((_q, onNext) => {
+        onNext({ empty: false, docs: [{ id: 'rq-1', data: () => ({ entryId: 'e1', status: 'queued', dueDate: '2026-07-20' }) }] });
+        return () => {};
+      });
+      subscribeTodayRevisit(db, UID, cb);
+      expect(cb).toHaveBeenCalledWith(expect.objectContaining({ id: 'rq-1' }));
+    });
   });
 });
 

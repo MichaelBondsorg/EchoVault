@@ -393,9 +393,16 @@ describe('ReceiptSheet — distinct repair actions call the exact service with e
     expect(screen.queryByRole('dialog', { name: /exclude this entry/i })).toBeNull();
   });
 
-  it('shows "This will recompute affected insights" for the immediate Wrong-source path too, not only inside the confirm dialog', () => {
+  it('does NOT promise a recompute for the immediate Wrong-source path (Minor 4 fix: pattern-scoped exclusions have zero generation consumers)', () => {
     renderSheet();
-    expect(screen.getByText('This will recompute affected insights.')).toBeTruthy();
+    // The shared SourceList footer (sitting next to both "Wrong source" and
+    // "Exclude source") must use the softened, accurate copy — the
+    // recompute promise is scoped to the Exclude-source (appliesTo:'all')
+    // confirm dialog only, asserted separately above.
+    expect(
+      screen.getByText("This source won't be used for this kind of insight in the future.")
+    ).toBeTruthy();
+    expect(screen.queryByText('This will recompute affected insights.')).toBeNull();
   });
 });
 

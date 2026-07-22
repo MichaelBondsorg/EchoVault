@@ -20,7 +20,8 @@
 export {
   generateBasicInsights,
   getCachedBasicInsights,
-  checkDataSufficiency
+  checkDataSufficiency,
+  invalidateBasicInsights
 } from './basicInsightsOrchestrator';
 
 // Individual correlation modules (for direct access if needed)

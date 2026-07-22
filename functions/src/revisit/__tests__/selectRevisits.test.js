@@ -134,15 +134,55 @@ describe('selectRevisitCandidate — rule 5: revisit_exclusions', () => {
     expect(result?.id).toBe('fallback');
   });
 
-  it('dimension "date": excludes every entry created on the excluded UTC date', () => {
+  it('dimension "date": excludes every entry created on the excluded UTC date (and, per the ±1-day tolerance below, its immediate UTC neighbors)', () => {
     const target = baseEntry({ id: 'excl-date', createdAt: Date.parse('2026-04-01T12:00:00.000Z') });
-    const fallback = baseEntry({ id: 'fallback', createdAt: Date.parse('2026-04-02T12:00:00.000Z') });
+    // Minor 3+6 fix: the ±1-day tolerance means 2026-04-02 (exactly +1 day
+    // from the excluded value) ALSO matches now — a fallback candidate must
+    // sit outside the window (2026-04-05, +4 days) to survive.
+    const fallback = baseEntry({ id: 'fallback', createdAt: Date.parse('2026-04-05T12:00:00.000Z') });
     const result = selectRevisitCandidate({
       entries: [target, fallback],
       exclusions: [{ dimension: 'date', value: '2026-04-01' }],
       now: NOW,
     });
     expect(result?.id).toBe('fallback');
+  });
+
+  describe('dimension "date" — ±1-day tolerance boundary (Minor 3+6, R2 final review)', () => {
+    // matchesExclusion is exported and pure — exercise the boundary directly
+    // rather than through the full selector, per the codebase's existing
+    // "matchesExclusion — family dimension" precedent below.
+    const excl = { dimension: 'date', value: '2026-04-01' };
+
+    it('matches an entry created on the exact excluded UTC date (0 days)', () => {
+      const ms = Date.parse('2026-04-01T09:00:00.000Z');
+      expect(matchesExclusion(baseEntry({ createdAt: ms }), excl, ms)).toBe(true);
+    });
+
+    it('matches an entry created exactly +1 day after the excluded UTC date', () => {
+      const ms = Date.parse('2026-04-02T09:00:00.000Z');
+      expect(matchesExclusion(baseEntry({ createdAt: ms }), excl, ms)).toBe(true);
+    });
+
+    it('matches an entry created exactly -1 day before the excluded UTC date', () => {
+      const ms = Date.parse('2026-03-31T09:00:00.000Z');
+      expect(matchesExclusion(baseEntry({ createdAt: ms }), excl, ms)).toBe(true);
+    });
+
+    it('does NOT match an entry created +2 days after the excluded UTC date', () => {
+      const ms = Date.parse('2026-04-03T09:00:00.000Z');
+      expect(matchesExclusion(baseEntry({ createdAt: ms }), excl, ms)).toBe(false);
+    });
+
+    it('does NOT match an entry created -2 days before the excluded UTC date', () => {
+      const ms = Date.parse('2026-03-30T09:00:00.000Z');
+      expect(matchesExclusion(baseEntry({ createdAt: ms }), excl, ms)).toBe(false);
+    });
+
+    it('falls back to an exact string match when the excluded value is malformed', () => {
+      const ms = Date.parse('2026-04-01T09:00:00.000Z');
+      expect(matchesExclusion(baseEntry({ createdAt: ms }), { dimension: 'date', value: 'not-a-date' }, ms)).toBe(false);
+    });
   });
 
   it('dimension "space": excludes every entry in the excluded space', () => {

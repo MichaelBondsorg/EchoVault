@@ -214,6 +214,18 @@ function citedEntriesFromReceipt(receipt, entriesById) {
 }
 
 const RECOMPUTE_COPY = 'This will recompute affected insights.';
+// Minor 4 (R2 final review): pattern-scoped exclusions (appliesTo =
+// patternType, written by "Wrong source" below) have ZERO generation
+// consumers today — `src/services/insights/sourceExclusions.js`'s own doc
+// comment (:5-9) says only `appliesTo === 'all'` exclusions are read back by
+// `getExcludedEntryIds`/any generator. `RECOMPUTE_COPY` is only true for the
+// "Exclude source" (appliesTo:'all') confirm flow below. This copy sits next
+// to BOTH source actions (SourceList's shared footer) but is worded for what
+// "Wrong source" actually does — feeds `feedbackLearning`'s confidence
+// suppression for that pattern family, not a recompute — so it never
+// over-promises. "Exclude source" keeps its own accurate RECOMPUTE_COPY in
+// its confirm dialog (below), unchanged.
+const WRONG_SOURCE_COPY = "This source won't be used for this kind of insight in the future.";
 
 /**
  * Builds the `feedback` object `recordFeedbackAndLearn` actually expects
@@ -424,7 +436,7 @@ const ReceiptSheet = ({
                         </button>
                       </>
                     )}
-                    footer={<p className="text-xs text-muted-foreground">{RECOMPUTE_COPY}</p>}
+                    footer={<p className="text-xs text-muted-foreground">{WRONG_SOURCE_COPY}</p>}
                   />
                 </div>
 

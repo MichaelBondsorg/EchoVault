@@ -60,12 +60,41 @@ function nowIso() {
   return new Date().toISOString();
 }
 
-function todayLocalDateString() {
-  const d = new Date();
+function localDateString(d) {
   const y = d.getFullYear();
   const m = String(d.getMonth() + 1).padStart(2, '0');
   const day = String(d.getDate()).padStart(2, '0');
   return `${y}-${m}-${day}`;
+}
+
+function todayLocalDateString() {
+  return localDateString(new Date());
+}
+
+/**
+ * Device-local date ± 1 day, as three 'YYYY-MM-DD' strings (yesterday,
+ * today, tomorrow). See `subscribeTodayRevisit`'s doc comment for why this
+ * window exists.
+ */
+function toleranceDateWindow(now = new Date()) {
+  const yesterday = new Date(now);
+  yesterday.setDate(now.getDate() - 1);
+  const tomorrow = new Date(now);
+  tomorrow.setDate(now.getDate() + 1);
+  return [localDateString(yesterday), localDateString(now), localDateString(tomorrow)];
+}
+
+/** Coerce a Firestore Timestamp/ISO-string/Date `selectedAt` to epoch ms (0 if missing/uncoercible). */
+function selectedAtMs(item) {
+  const v = item?.selectedAt;
+  if (!v) return 0;
+  if (typeof v.toMillis === 'function') return v.toMillis();
+  if (typeof v === 'string') {
+    const t = Date.parse(v);
+    return Number.isNaN(t) ? 0 : t;
+  }
+  if (v instanceof Date) return v.getTime();
+  return 0;
 }
 
 /**
@@ -128,11 +157,29 @@ export async function getRevisitPrefs(db, uid) {
 }
 
 /**
- * Subscribe to today's revisit_queue doc, if any (server writes at most one
- * per local day, keyed by `dueDate`). Fires `cb(null)` when there is none.
- * No status filter here — a widget consuming this decides whether a
+ * Subscribe to today's revisit_queue doc, if any. The server job
+ * (`runGentleRevisitDaily`, `functions/src/revisit/selectRevisits.js`)
+ * stamps `dueDate` as an LA-LOCAL (`America/Los_Angeles`) 'YYYY-MM-DD' — job
+ * cadence is intentionally LA-pinned, unchanged by this fix. A device
+ * running far enough ahead of LA time (e.g. Australia/Sydney, UTC+10/11)
+ * can see `dueDate` stamped "yesterday" relative to its own local calendar
+ * day; a device far enough behind can see it stamped "tomorrow" — either
+ * way, a strict `dueDate == deviceLocalToday` query would never match, and
+ * the widget would silently never show a card for that device (Minor 3+6,
+ * R2 final review).
+ *
+ * Fix: subscribe to a ±1-day window around the DEVICE's local date
+ * (`dueDate IN [yesterday, today, tomorrow]`, all device-local) instead of
+ * an exact match. At most one `revisit_queue` doc is expected per LA day by
+ * construction, so more than one doc qualifying only happens right at the
+ * ±1-day boundary — when that occurs, the most recently `selectedAt` doc
+ * wins. No status filter here — a widget consuming this decides whether a
  * `dismissed` doc should still render (this service only surfaces what
- * exists); at most one doc is expected per day by construction.
+ * exists).
+ *
+ * Server side is deliberately UNCHANGED: the job's LA-pinned cadence is by
+ * design (see the module's own doc comment in `selectRevisits.js`), so the
+ * tolerance lives entirely on the read side here.
  *
  * @param {object} db
  * @param {string} uid
@@ -141,14 +188,15 @@ export async function getRevisitPrefs(db, uid) {
  * @returns {Function} unsubscribe
  */
 export function subscribeTodayRevisit(db, uid, cb, onError) {
-  const today = todayLocalDateString();
-  const q = query(collection(db, queuePath(uid)), where('dueDate', '==', today));
+  const dates = toleranceDateWindow();
+  const q = query(collection(db, queuePath(uid)), where('dueDate', 'in', dates));
   return onSnapshot(
     q,
     (snap) => {
       if (snap.empty) { cb(null); return; }
-      const d = snap.docs[0];
-      cb({ id: d.id, ...d.data() });
+      const docs = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      docs.sort((a, b) => selectedAtMs(b) - selectedAtMs(a));
+      cb(docs[0]);
     },
     (err) => {
       if (typeof onError === 'function') onError(err);

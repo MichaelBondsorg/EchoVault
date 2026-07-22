@@ -13,6 +13,8 @@ import {
   generateBasicInsights,
   checkDataSufficiency
 } from '../services/basicInsights/basicInsightsOrchestrator';
+import { getExcludedEntryIds } from '../services/insights/sourceExclusions';
+import { db } from '../config/firebase';
 
 /**
  * Hook for accessing basic insights
@@ -104,7 +106,30 @@ export const useBasicInsights = (user, entries, options = {}) => {
     setError(null);
 
     try {
-      const result = await generateBasicInsights(user.uid, entries);
+      // R2 final review, Important 2(a): drop source-excluded entries
+      // (appliesTo:'all', `src/services/insights/sourceExclusions.js`) from
+      // the pool BEFORE generateBasicInsights ever sees them. Exclusions are
+      // read unconditionally here, same as the Nexus orchestrator's
+      // `generateInsights` and the report `readEntries` consumer — NOT
+      // gated behind `insightReceipts` (source exclusions already created
+      // stay in effect regardless of that flag; see the runbook's
+      // `insightReceipts` row).
+      //
+      // Deliberately NOT wrapped in its own try/catch: mirrors the Nexus
+      // orchestrator's fail-closed precedent (`src/services/nexus/
+      // orchestrator.js`'s `generateInsights` — "a failed exclusions read
+      // must never silently produce insights as if no exclusions existed").
+      // A thrown read here falls straight into this function's own
+      // pre-existing catch block below, which already does `setError` and
+      // skips generation — the same failure shape this hook has always
+      // used, so a read failure can never silently fall through to
+      // generating over the unfiltered pool.
+      const excludedIds = await getExcludedEntryIds(db, user.uid);
+      const poolEntries = excludedIds.size > 0
+        ? entries.filter((e) => !excludedIds.has(e.id || e.entryId))
+        : entries;
+
+      const result = await generateBasicInsights(user.uid, poolEntries);
 
       if (result.success) {
         setInsights(result.insights);

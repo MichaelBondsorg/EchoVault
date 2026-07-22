@@ -19,9 +19,17 @@
  * each resolve their own `db` from `config/firebase` internally, same as
  * `markInsightsStale`/`invalidateDailySummary`/`invalidateWeeklyDigest`
  * already do.
+ *
+ * R2 final review, Important 2b: `invalidateBasicInsights`
+ * (`src/services/basicInsights/basicInsightsOrchestrator.js`) joins the
+ * fan-out below — before this fix, a source exclusion invalidated Nexus and
+ * the dashboard daily/weekly caches but left the `basicInsights/current`
+ * doc serving stale (unfiltered) content until its own TTL/entriesCount
+ * staleness happened to trip independently.
  */
 import { markInsightsStale } from '../nexus/staleness';
 import { invalidateDailySummary, invalidateWeeklyDigest } from '../dashboard';
+import { invalidateBasicInsights } from '../basicInsights/basicInsightsOrchestrator';
 
 const CATEGORIES = ['personal', 'work'];
 
@@ -36,6 +44,7 @@ export async function onSourcesChanged(db, uid) {
     markInsightsStale(uid),
     ...CATEGORIES.map((category) => invalidateDailySummary(uid, category, now)),
     ...CATEGORIES.map((category) => invalidateWeeklyDigest(uid, category, now)),
+    invalidateBasicInsights(uid),
   ]);
 }
 

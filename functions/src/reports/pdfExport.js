@@ -273,13 +273,20 @@ export async function handleExportRequest(data, userId) {
   const privacySnap = await db.doc(`${userBase}/report_preferences/${reportId}`).get();
   const privacy = privacySnap.exists ? privacySnap.data() : null;
 
-  // 5. Collect crisis-flagged entry IDs (safety-critical: never export crisis content)
+  // 5. Collect crisis-flagged entry IDs (safety-critical: never export crisis
+  // content). Minor 5 (R2 final review): this used to check ONLY
+  // `safety_flagged`, an asymmetry with `privacy.js#filterForExport` — the
+  // codebase's other export-strictness filter — which strips both
+  // `safety_flagged` AND `has_warning_indicators`. Matching that here so a
+  // warning-indicator (but not crisis-flagged) entry can no longer leak into
+  // an exported report PDF via its `entryRefs`.
   const allEntryRefs = new Set(report.sections.flatMap(s => s.entryRefs || []));
   const crisisEntryIds = new Set();
   if (allEntryRefs.size > 0) {
     const entryChecks = [...allEntryRefs].map(async (entryId) => {
       const entrySnap = await db.doc(`${userBase}/entries/${entryId}`).get();
-      if (entrySnap.exists && entrySnap.data()?.safety_flagged) {
+      const data = entrySnap.exists ? entrySnap.data() : null;
+      if (data?.safety_flagged || data?.has_warning_indicators) {
         crisisEntryIds.add(entryId);
       }
     });
