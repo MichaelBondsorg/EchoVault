@@ -95,7 +95,13 @@ function toValidDate(now) {
  * the estimator's current spec thresholds (`MIN_PAIRED_OBSERVATIONS`,
  * `COVERAGE_FLOOR`) into the plan at declare-time — per plan-freeze, this
  * value never changes for the life of the experiment even if the estimator
- * module's constants are revised later.
+ * module's constants are revised later. `computeResult.js`'s
+ * `computeExperimentResult` is what actually READS `plan.minPairedObservations`
+ * / `plan.coverageFloor` back (with a `?? MIN_PAIRED_OBSERVATIONS` /
+ * `?? COVERAGE_FLOOR` fallback for a legacy plan predating this snapshot) —
+ * this function's job is only to write the snapshot; see that module's
+ * "FROZEN THRESHOLD SNAPSHOT" doc comment for why this used to be
+ * write-only/decorative and is now actually enforced (R3 final review).
  *
  * Also snapshots the template's fixed narrative caveat strings
  * (`confounders`, `whatThisDoesNotProve`) onto the plan (R3 Task 5 review

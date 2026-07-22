@@ -57,6 +57,23 @@ to silently loosen the constants in code — any change to these two numbers
 should come back through this same sign-off process, because it changes what
 "a result" is allowed to mean.
 
+## Known limitations (revisit list)
+
+Small, deliberately-not-fixed-here gaps, called out so they don't get
+rediscovered as surprises later:
+
+- **Zero-sleep nights currently drop as missing, not as a known zero.**
+  `src/services/health/healthFormatter.js`'s `extractHealthSignals` reads
+  `sleepHours: healthContext.sleep?.totalHours || null` — a genuine
+  zero-hours night is indistinguishable from "no sleep data recorded at
+  all" and is dropped from the sleep-hours templates' day-series, exactly
+  the same coercion bug the known-zero fix (see
+  `computeResult.js`'s `exposureValueForEntry`) already fixed for
+  `exerciseMinutes`/`steps`. It was not extended to `sleepHours` in this
+  task — revisit alongside any future sleep-template calibration or a
+  `healthFormatter.js` change, since `extractHealthSignals` has other
+  consumers this module deliberately did not touch.
+
 ## Estimator implementation notes (for reviewers of the code, not just this doc)
 
 - **Pairing** (`pairObservations`) drops non-finite/missing values (NaN,

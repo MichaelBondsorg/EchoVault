@@ -39,12 +39,16 @@ import ExperimentResultView, { reasonCopy } from './ExperimentResultView';
  * convention as `RecipesScreen`'s own `contextSpacesOn`.
  *
  * BINDING ORDERING REQUIREMENT (plan, Task 3/4 reviews): every path into the
- * create flow — a canned template tap OR free-text — calls `screenQuestion`
- * FIRST and only calls `matchQuestionToTemplate` when the verdict is 'ok'.
- * A non-'ok' verdict is a terminal decline for that attempt; the matcher is
- * never reached (see `proceedWithQuestion` below — this is the single
- * choke point every entry path funnels through, so there is no second code
- * path that could accidentally call the matcher first).
+ * create flow — a canned template tap, the tag-template picker, OR
+ * free-text — calls `screenQuestion` FIRST via the shared `screenAndProceed`
+ * choke point below. A non-'ok' verdict is a terminal decline for that
+ * attempt. `matchQuestionToTemplate` is invoked ONLY by the free-text path
+ * (`proceedWithQuestion`), which genuinely has to guess a template from
+ * arbitrary text; a canned picker tap or a chosen tag already KNOWS its
+ * target template, so `handleTemplateTap`/`handleTagTemplateAsk` select it
+ * DIRECTLY after `screenQuestion` passes, never re-deriving it through the
+ * matcher (R3 final review fix — see those functions' own comments for the
+ * keyword-collision dead-end this closes).
  *
  * Create flow: question (template picker + free text) -> questionGate
  * decline (crisis surfaces the safety plan via `onShowSafetyPlan`, medical
@@ -76,6 +80,26 @@ import ExperimentResultView, { reasonCopy } from './ExperimentResultView';
  * pause/resume (pausing does not extend the deadline) — see the
  * `completingRef` effect below. A per-id in-flight guard prevents a
  * duplicate write while one completion is already being computed.
+ *
+ * ENTRIES-READY GUARD (Minor review fix, R3 final review): the effect below
+ * used to compute straight from whatever `entries` array it was handed,
+ * with no readiness check. `entries` is a prop straight from `AppLayout`,
+ * which (as of this review) has no companion "entries finished loading"
+ * signal anywhere in the codebase — a transiently empty or partial
+ * `entries` array (e.g. mid-fetch, or a stale render before the real
+ * Firestore snapshot arrives) could otherwise get computed into a WRONG
+ * `insufficient` result and PERSISTED via `writeResult`, which never
+ * self-corrects (nothing re-runs auto-completion for an already-`completed`
+ * experiment). An optional `entriesLoaded` prop is accepted for a future
+ * caller that DOES have a real readiness signal to pass; absent that, this
+ * falls back to the pragmatic guard of skipping while `entries.length ===
+ * 0`. RESIDUAL RISK (documented, not silently assumed away): a small but
+ * non-empty `entries` array that is still mid-load (e.g. one cached entry
+ * present, the rest still loading) passes the length guard and could still
+ * auto-complete on incomplete data — the length check alone cannot
+ * distinguish "fully loaded" from "partially loaded but non-empty." Fixing
+ * that fully requires a real `entriesLoaded` signal from the entries
+ * source, which is out of scope for this file.
  *
  * Nested-overlay a11y (RecipesScreen/RevisitControls precedent): only one
  * `aria-modal` dialog is ever active. The one-time explainer is a real
@@ -121,7 +145,7 @@ function coverageLine(coverage, label) {
   return `${coverage.covered} of ${coverage.total} days have ${label} data`;
 }
 
-const ExperimentsScreen = ({ uid, entries = [], onClose, onShowSafetyPlan, onOpenRecipes }) => {
+const ExperimentsScreen = ({ uid, entries = [], entriesLoaded, onClose, onShowSafetyPlan, onOpenRecipes }) => {
   const [experiments, setExperiments] = useState([]);
   const [experimentsLoaded, setExperimentsLoaded] = useState(false);
   const [loadError, setLoadError] = useState(false);
@@ -165,6 +189,11 @@ const ExperimentsScreen = ({ uid, entries = [], onClose, onShowSafetyPlan, onOpe
   const completingRef = useRef(new Set());
 
   const availableTags = useMemo(() => uniqueTags(entries), [entries]);
+
+  // The single tag-presence template, looked up once and reused by both the
+  // tag-template picker handler (direct selection, see BINDING ORDERING
+  // REQUIREMENT above) and the render below (picker gating).
+  const tagTemplate = TEMPLATES.find((t) => t.exposure.source === 'tags');
 
   useEffect(() => {
     if (!uid) return undefined;
@@ -214,6 +243,11 @@ const ExperimentsScreen = ({ uid, entries = [], onClose, onShowSafetyPlan, onOpe
   // is attempted at most once concurrently.
   useEffect(() => {
     if (!uid) return;
+    // ENTRIES-READY GUARD — see module doc comment. Trust an explicit
+    // `entriesLoaded` prop when the caller supplies one; otherwise fall
+    // back to skipping while `entries` is still empty.
+    const entriesReady = entriesLoaded !== undefined ? entriesLoaded === true : entries.length > 0;
+    if (!entriesReady) return;
     const now = new Date();
     for (const experiment of experiments) {
       if (experiment.status !== 'running' && experiment.status !== 'paused') continue;
@@ -234,7 +268,7 @@ const ExperimentsScreen = ({ uid, entries = [], onClose, onShowSafetyPlan, onOpe
         }
       })();
     }
-  }, [experiments, entries, uid]);
+  }, [experiments, entries, uid, entriesLoaded]);
 
   const preflightResult = useMemo(() => {
     if (!selectedTemplate) return null;
@@ -302,9 +336,10 @@ const ExperimentsScreen = ({ uid, entries = [], onClose, onShowSafetyPlan, onOpe
 
   // The single choke point every entry path into the create flow funnels
   // through — see the BINDING ORDERING REQUIREMENT in the module doc
-  // comment. `text` is the raw question (typed, or a canned template's own
-  // title / a composed tag-template question).
-  const proceedWithQuestion = (text) => {
+  // comment. Screens `text` and, only on an 'ok' verdict, hands the
+  // trimmed text to `onOk` — a non-'ok' verdict is always a terminal
+  // decline for that attempt, regardless of caller.
+  const screenAndProceed = (text, onOk) => {
     setCreateError(null);
     setUnmappableNotice(false);
     const trimmed = typeof text === 'string' ? text.trim() : '';
@@ -317,25 +352,59 @@ const ExperimentsScreen = ({ uid, entries = [], onClose, onShowSafetyPlan, onOpe
       return;
     }
 
-    const match = matchQuestionToTemplate(trimmed, availableTags);
-    if (!match) {
-      setUnmappableNotice(true);
-      return;
-    }
+    onOk(trimmed);
+  };
 
-    setSelectedTemplate(match.template);
-    setSelectedParams(match.params);
+  const selectTemplateAndAdvance = (template, params, trimmed) => {
+    setSelectedTemplate(template);
+    setSelectedParams(params);
     setFinalQuestionText(trimmed);
     setCreateStep(contextSpacesOn ? 'space' : 'duration');
   };
 
-  const handleTemplateTap = (template) => {
-    proceedWithQuestion(template.title);
+  // Free-text path: screenQuestion, THEN matchQuestionToTemplate — this is
+  // the only path that has to guess a template from arbitrary text, so it's
+  // the only one that still calls the matcher.
+  const proceedWithQuestion = (text) => {
+    screenAndProceed(text, (trimmed) => {
+      const match = matchQuestionToTemplate(trimmed, availableTags);
+      if (!match) {
+        setUnmappableNotice(true);
+        return;
+      }
+      selectTemplateAndAdvance(match.template, match.params, trimmed);
+    });
   };
 
+  // Canned picker tap: `template` is already known, so after screenQuestion
+  // passes on its canonical title, select it DIRECTLY — never re-derive it
+  // via `matchQuestionToTemplate` (R3 final review fix). Re-deriving used to
+  // dead-end a canned button whenever the user had an unrelated tag whose
+  // display value happened to collide with the template's own keywords
+  // (e.g. a "exercise"/"sleep"/"gym"/"walking" tag): the matcher would then
+  // see BOTH the keyword template and the tag-presence template as
+  // candidates, call it ambiguous, return null, and the screen would show
+  // "not something Engram can measure" for a button that says exactly what
+  // it measures. screenQuestion still runs first (the safety choke point is
+  // unchanged) — only the post-screening template lookup is skipped.
+  const handleTemplateTap = (template) => {
+    screenAndProceed(template.title, (trimmed) => {
+      selectTemplateAndAdvance(template, null, trimmed);
+    });
+  };
+
+  // Tag-template picker: the user already chose a concrete tag from their
+  // own tags, so the selection (tag-presence template + that exact tag) is
+  // composed and set DIRECTLY, same fix and same rationale as
+  // `handleTemplateTap` above — this also sidesteps `matchAvailableTag`
+  // re-scanning the composed text for a tag match, which is redundant when
+  // the caller already knows which tag was picked.
   const handleTagTemplateAsk = () => {
-    if (!selectedTagInput) return;
-    proceedWithQuestion(`Does ${tagLabel(selectedTagInput)} affect my mood?`);
+    if (!selectedTagInput || !tagTemplate) return;
+    const composed = `Does ${tagLabel(selectedTagInput)} affect my mood?`;
+    screenAndProceed(composed, (trimmed) => {
+      selectTemplateAndAdvance(tagTemplate, { tag: selectedTagInput }, trimmed);
+    });
   };
 
   const handleFreeTextAsk = () => {
@@ -479,7 +548,7 @@ const ExperimentsScreen = ({ uid, entries = [], onClose, onShowSafetyPlan, onOpe
 
   const nestedOverlayOpen = showExplainer || Boolean(stopTarget) || Boolean(deleteTarget);
 
-  const tagTemplate = TEMPLATES.find((t) => t.exposure.source === 'tags');
+  // `tagTemplate` is declared once, above, and reused here (picker gating).
   const pickableTemplates = TEMPLATES.filter((t) => t.exposure.source !== 'tags');
 
   return (

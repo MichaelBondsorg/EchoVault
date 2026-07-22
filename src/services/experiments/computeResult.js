@@ -87,14 +87,16 @@
  * ("missingness/coverage thresholds are checked by the caller... BEFORE
  * calling this function"). This module is that caller: EACH of
  * `exposureCoverage`/`outcomeCoverage` (over the experiment window, not a
- * lookback window) is compared against `COVERAGE_FLOOR` (imported from
- * `estimator.js`, never re-hardcoded) BEFORE trusting an otherwise-`ok`
- * analysis. Without this check, a sparse-but-lucky sample (e.g. sleep data
- * on only 12 of 60 elapsed days, all 12 of which happen to pair with mood)
- * can clear `MIN_PAIRED_OBSERVATIONS` on raw pair count alone while still
- * being a biased, non-representative slice of the window — exactly the
- * failure mode default #2 exists to catch. When either variable's coverage
- * ratio is `< COVERAGE_FLOOR`, the result is `insufficient` regardless of
+ * lookback window) is compared against the plan's OWN frozen
+ * `coverageFloor` (see "FROZEN THRESHOLD SNAPSHOT" below; falls back to
+ * `COVERAGE_FLOOR` imported from `estimator.js` for a legacy plan with no
+ * snapshot) BEFORE trusting an otherwise-`ok` analysis. Without this check,
+ * a sparse-but-lucky sample (e.g. sleep data on only 12 of 60 elapsed days,
+ * all 12 of which happen to pair with mood) can clear the minimum
+ * paired-observations threshold on raw pair count alone while still being a
+ * biased, non-representative slice of the window — exactly the failure mode
+ * default #2 exists to catch. When either variable's coverage ratio is
+ * below the effective floor, the result is `insufficient` regardless of
  * what `runAnalysisPlan` would have said, with machine-readable
  * `reasons: string[]` (`'exposure_coverage_below_floor'` /
  * `'outcome_coverage_below_floor'`, snake_case matching `preflight.js`'s
@@ -102,14 +104,46 @@
  * result — present only when `status: 'insufficient'`, mirroring the
  * absence-not-undefined pattern already used for `estimate`/`summary`. When
  * coverage already fails, this module still cheaply checks `pairs.length <
- * MIN_PAIRED_OBSERVATIONS` (no bootstrap — that check is O(1) and doesn't
- * invoke `runAnalysisPlan`'s expensive resampling) so
+ * effectiveMinPairedObservations` (no bootstrap — that check is O(1) and
+ * doesn't invoke `runAnalysisPlan`'s expensive resampling) so
  * `'insufficient_paired_observations'` can appear alongside a coverage
  * reason when both are true; it does NOT additionally invoke the full
  * `runAnalysisPlan` in that branch (which would spend 2,000 bootstrap
  * resamples computing an estimate that's going to be discarded anyway) —
  * so `'degenerate_exposure_split'`/`'lag_mismatch'` are only surfaced when
  * coverage passes and `runAnalysisPlan` itself is the one that fails.
+ *
+ * FROZEN THRESHOLD SNAPSHOT (Important review fix, R3 final review):
+ * `experimentsService.buildAnalysisPlan` has always snapshotted
+ * `minPairedObservations`/`coverageFloor` (the estimator's spec constants at
+ * the moment the plan was created) onto `experiment.analysisPlan`, with a
+ * docblock promising they "never change for the life of the experiment" —
+ * but until this fix nothing ever READ those two fields back, so the
+ * promise was decorative: every experiment silently used whatever
+ * `MIN_PAIRED_OBSERVATIONS`/`COVERAGE_FLOOR` happen to be live in
+ * `estimator.js` today, even if the spec's thresholds were revised (through
+ * their own re-sign-off process, see the data-method spec's "Note on
+ * default #1/#2 thresholds") after this experiment was created — the exact
+ * opposite of a freeze. This module now reads
+ * `plan.minPairedObservations ?? MIN_PAIRED_OBSERVATIONS` and
+ * `plan.coverageFloor ?? COVERAGE_FLOOR` (the `??` fallback keeps a LEGACY
+ * plan written before the snapshot existed working unchanged) and uses
+ * those effective values for both the coverage-floor comparison above and
+ * the paired-observations check below. `runAnalysisPlan` itself is NOT
+ * given a plan-supplied threshold — its own docblock is explicit that
+ * `plan` is accepted for forward-compat/lag-validation only and its
+ * ≥`MIN_PAIRED_OBSERVATIONS` gate is a fixed module constant, not a knob
+ * (data-method spec default #7: one pre-declared estimate, not something
+ * tunable after the fact) — so this module enforces the plan's OWN
+ * paired-observations threshold itself, BEFORE ever calling
+ * `runAnalysisPlan`, rather than trying to thread it through. Practically,
+ * this makes `estimator.js`'s `MIN_PAIRED_OBSERVATIONS` a FLOOR OF LAST
+ * RESORT underneath the plan's frozen threshold: a plan that ever snapshots
+ * a value LOWER than the module constant (not expected in practice — the
+ * only way to change the constant is the spec's sign-off process, and this
+ * module has no code path that writes a lower value) would still be
+ * blocked by `runAnalysisPlan`'s own internal check once pairs are handed
+ * to it, since that check is never bypassed or overridden here.
  *
  * NARRATIVE SNAPSHOT (review fix): `alternatives`/`whatThisDoesNotProve`
  * are read from `experiment.analysisPlan.confounders`/`.whatThisDoesNotProve`
@@ -171,9 +205,16 @@ export const CI_SPANS_ZERO_COPY =
  * `extractHealthSignals` is ambiguous between "no data for this field at
  * all" and "true zero coerced to null by `healthContext.activity?.X ||
  * null`" (see module doc comment). Only these two fields carry that
- * ambiguity today — every other health field's `|| null` is a genuine
- * "unmeasured" signal (sleep/recovery/HRV never legitimately read as a
- * meaningful zero the way exercise minutes or steps can). Maps the
+ * ambiguity today — every other health field's `|| null` is treated as a
+ * genuine "unmeasured" signal here (recovery/HRV essentially never read as
+ * a meaningful zero). `sleepHours` is a known, ACCEPTED gap in that
+ * treatment, not a case where the same ambiguity is provably absent: a
+ * true zero-sleep night is a real (if rare) possibility, and
+ * `healthFormatter.js`'s `sleep?.totalHours || null` coerces it to
+ * indistinguishable-from-missing exactly like the exerciseMinutes/steps bug
+ * this fix addresses — this module just doesn't extend the known-zero fix
+ * to it (out of scope for this task; see
+ * `docs/quality/experiments-data-method.md`'s revisit list). Maps the
  * extractor's output key to the RAW key on `healthContext.activity` so the
  * known-zero check can be precise about which specific field is present,
  * not just whether the `activity` object exists at all.
@@ -491,13 +532,23 @@ export function computeExperimentResult({ experiment, entries = [], now } = {}) 
   const excludedSet = new Set(Array.isArray(experiment.excludedObservations) ? experiment.excludedObservations : []);
   const pairs = allPairs.filter((p) => !excludedSet.has(p.dateKey));
 
+  // --- FROZEN THRESHOLD SNAPSHOT (see module doc comment) -----------------
+  // Read the plan's own frozen thresholds; `??` falls back to the live
+  // module constants only for a legacy plan written before the snapshot
+  // existed. These effective values, not the module constants directly,
+  // are what every threshold check below compares against.
+  const effectiveMinPairedObservations = Number.isFinite(plan.minPairedObservations)
+    ? plan.minPairedObservations
+    : MIN_PAIRED_OBSERVATIONS;
+  const effectiveCoverageFloor = Number.isFinite(plan.coverageFloor) ? plan.coverageFloor : COVERAGE_FLOOR;
+
   // --- coverage floor (spec default #2 — see module doc comment) ---------
   // estimator.runAnalysisPlan deliberately does NOT enforce this itself;
   // this module is the caller its docblock says must check coverage BEFORE
   // trusting an otherwise-`ok` analysis.
   const coverageReasons = [];
-  if (coverageRatio(exposureCoverage) < COVERAGE_FLOOR) coverageReasons.push('exposure_coverage_below_floor');
-  if (coverageRatio(outcomeCoverage) < COVERAGE_FLOOR) coverageReasons.push('outcome_coverage_below_floor');
+  if (coverageRatio(exposureCoverage) < effectiveCoverageFloor) coverageReasons.push('exposure_coverage_below_floor');
+  if (coverageRatio(outcomeCoverage) < effectiveCoverageFloor) coverageReasons.push('outcome_coverage_below_floor');
 
   // --- narrative fixed strings: FROZEN plan snapshot first, catalog fallback
   const template = getTemplateById(plan.templateId);
@@ -517,7 +568,7 @@ export function computeExperimentResult({ experiment, entries = [], now } = {}) 
     // already passed) so the reasons list isn't artificially truncated to
     // "whichever check happened to run first."
     const reasons = [...coverageReasons];
-    if (pairs.length < MIN_PAIRED_OBSERVATIONS) {
+    if (pairs.length < effectiveMinPairedObservations) {
       reasons.push('insufficient_paired_observations');
     }
     return buildInsufficientResult({
@@ -532,7 +583,29 @@ export function computeExperimentResult({ experiment, entries = [], now } = {}) 
     });
   }
 
-  // --- estimator: the FROZEN plan is the authority ------------------------
+  // --- plan's own paired-observations threshold (see "FROZEN THRESHOLD
+  // SNAPSHOT" in the module doc comment) — enforced HERE, before
+  // `runAnalysisPlan`, because `runAnalysisPlan` only ever enforces its own
+  // fixed module constant (a floor of last resort), never a plan-supplied
+  // value. Coverage already passed at this point, so this is the plan's
+  // pair-count gate in isolation (no bootstrap spent on data that's going
+  // to be discarded anyway).
+  if (pairs.length < effectiveMinPairedObservations) {
+    return buildInsufficientResult({
+      coverage,
+      reasons: ['insufficient_paired_observations'],
+      windowed,
+      pairs,
+      experiment,
+      effectiveEndMs,
+      exposureCoverage,
+      outcomeCoverage,
+    });
+  }
+
+  // --- estimator: the FROZEN plan is the authority (its own internal
+  // MIN_PAIRED_OBSERVATIONS check is the floor-of-last-resort described
+  // above — see the module doc comment) -----------------------------------
   const analysis = runAnalysisPlan({ pairs, plan });
 
   if (analysis.status !== 'ok') {

@@ -256,6 +256,17 @@ const ExperimentResultView = ({ uid, entries = [], experiment, onClose }) => {
           <p className="text-xs text-[var(--muted-foreground)]">
             Exclude a day to leave it out of the result — the result updates right away.
           </p>
+          {/* MINOR review fix (R3 final review): this table is rebuilt LIVE
+              from `entries` on every render (`buildObservationRows`), while
+              the summary/estimate sections above render the STORED
+              `experiment.result` from whenever it was last computed —
+              editing a journal entry after completion can make the two
+              visibly disagree until the next toggle recomputes both. Copy
+              only, not an architecture change (see the finding this
+              addresses). */}
+          <p className="text-xs text-[var(--muted-foreground)]">
+            Reflects your entries as of now; the summary above is from when this result was last computed — toggling an observation recomputes both.
+          </p>
           <div className="overflow-x-auto">
             <table className="w-full text-left text-sm">
               <thead>

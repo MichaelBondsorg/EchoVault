@@ -184,6 +184,54 @@ describe('ExperimentResultView — insufficient result', () => {
 });
 
 // ---------------------------------------------------------------------------
+// MINOR review fix (R3 final review): provenance caption on the Paired-days
+// table — the table is rebuilt LIVE from `entries` on every render while
+// the summary above renders the STORED result, so the two can visibly
+// disagree after a post-completion entry edit. Copy-only fix.
+// ---------------------------------------------------------------------------
+
+describe('ExperimentResultView — Paired-days provenance caption', () => {
+  it('shows a caption explaining the table is live while the summary above is from when the result was last computed', () => {
+    const entries = buildGoldenEntries();
+    const result = computeExperimentResult({ experiment: goldenExperiment(), entries, now: GOLDEN_NOW });
+    const experiment = goldenExperiment({ result });
+    render(<ExperimentResultView uid={UID} entries={entries} experiment={experiment} onClose={vi.fn()} />);
+
+    expect(screen.getByText(
+      'Reflects your entries as of now; the summary above is from when this result was last computed — toggling an observation recomputes both.',
+    )).toBeTruthy();
+  });
+
+  it('the caption is also present on an insufficient result (Paired-days table renders in both states)', () => {
+    const insufficientResult = {
+      status: 'insufficient',
+      coverage: {
+        exposure: { covered: 3, total: 14, label: '3 of 14 days' },
+        outcome: { covered: 3, total: 14, label: '3 of 14 days' },
+      },
+      receipt: {
+        sources: [],
+        scope: null,
+        timeWindow: { start: GOLDEN_START, end: GOLDEN_END },
+        sampleSize: 3,
+        missingness: null,
+        versions: { generator: 'experiment_v1', computationVersion: 1, generatedAt: GOLDEN_START, model: null, promptVersion: null },
+      },
+      reasons: ['insufficient_paired_observations'],
+      narrative: {
+        alternatives: [],
+        whatThisDoesNotProve: [],
+        insufficiency: "There isn't enough data yet to say anything about this. Keep going, or check back once you have more days recorded.",
+      },
+    };
+    const experiment = goldenExperiment({ result: insufficientResult });
+    render(<ExperimentResultView uid={UID} entries={[]} experiment={experiment} onClose={vi.fn()} />);
+
+    expect(screen.getByText(/toggling an observation recomputes both/)).toBeTruthy();
+  });
+});
+
+// ---------------------------------------------------------------------------
 // buildObservationRows — cross-check against the real pipeline
 // ---------------------------------------------------------------------------
 

@@ -338,6 +338,125 @@ describe('computeExperimentResult — coverage floor (spec default #2) enforceme
   });
 });
 
+// ---------------------------------------------------------------------------
+// IMPORTANT review fix (R3 final review): the plan's OWN frozen
+// `minPairedObservations`/`coverageFloor` snapshot must actually be honored,
+// not just carried on the doc decoratively. Reproduction: a plan with a
+// STRICTER frozen threshold than the module's live constants must still
+// gate a result that the module constants alone would have let through as
+// `ok` — proving `computeExperimentResult` reads the plan, not just
+// `estimator.js`'s live `MIN_PAIRED_OBSERVATIONS`/`COVERAGE_FLOOR`.
+// ---------------------------------------------------------------------------
+
+describe('computeExperimentResult — plan-frozen thresholds are honored (Important review fix)', () => {
+  const THRESH_BASE_MS = Date.UTC(2028, 0, 1);
+  const THRESH_START = new Date(THRESH_BASE_MS).toISOString();
+  const THRESH_END = new Date(THRESH_BASE_MS + 20 * DAY_MS).toISOString(); // 20-day window
+  const THRESH_NOW = new Date(THRESH_BASE_MS + 40 * DAY_MS); // well after end
+
+  /** 20 days; sleep (exposure) present on only the first `exposureDays`; mood present every day. */
+  function buildEntries(exposureDays) {
+    const entries = [];
+    for (let i = 0; i < 20; i++) {
+      entries.push({
+        id: `thresh-${i + 1}`,
+        createdAt: isoAtOffset(THRESH_BASE_MS, i),
+        healthContext: i < exposureDays ? { sleep: { totalHours: 4 + (i % 7) } } : undefined,
+        analysis: { mood_score: 50 + i },
+      });
+    }
+    return entries;
+  }
+
+  it('plan snapshot 12/0.6: 11 pairs (55% coverage) is insufficient with BOTH a coverage reason and a pair-count reason, proving the plan (not the module defaults) wins', () => {
+    const entries = buildEntries(11); // 11 of 20 days -> 55% exposure coverage, 11 pairs
+    const experiment = baseExperiment({
+      template: SLEEP_TEMPLATE,
+      startAt: THRESH_START,
+      endAt: THRESH_END,
+      durationDays: 20,
+    });
+    experiment.analysisPlan = {
+      ...experiment.analysisPlan,
+      minPairedObservations: 12,
+      coverageFloor: 0.6,
+    };
+    const result = computeExperimentResult({ experiment, entries, now: THRESH_NOW });
+
+    expect(result.coverage.exposure).toEqual({ covered: 11, total: 20, label: '11 of 20 days' });
+    expect(result.status).toBe('insufficient');
+    expect(result.reasons).toEqual(['exposure_coverage_below_floor', 'insufficient_paired_observations']);
+  });
+
+  it('the SAME data with the module-default thresholds (10/0.5) is `ok` — isolates that the stricter numbers above came from the plan snapshot, not some other confound', () => {
+    const entries = buildEntries(11);
+    const experiment = baseExperiment({
+      template: SLEEP_TEMPLATE,
+      startAt: THRESH_START,
+      endAt: THRESH_END,
+      durationDays: 20,
+    });
+    // analysisPlan already carries the module defaults (10/0.5) via
+    // baseExperiment's local buildAnalysisPlan helper — asserted explicitly
+    // here so the contrast with the test above is visible in this file.
+    expect(experiment.analysisPlan.minPairedObservations).toBe(MIN_PAIRED_OBSERVATIONS);
+    expect(experiment.analysisPlan.coverageFloor).toBe(COVERAGE_FLOOR);
+    const result = computeExperimentResult({ experiment, entries, now: THRESH_NOW });
+
+    expect(result.status).toBe('ok');
+    expect(result.estimate.n).toBe(11);
+  });
+
+  it('a LEGACY plan with no minPairedObservations/coverageFloor keys falls back to the module constants (10/0.5) — same result as passing them explicitly', () => {
+    const entries = buildEntries(11);
+    const experiment = baseExperiment({
+      template: SLEEP_TEMPLATE,
+      startAt: THRESH_START,
+      endAt: THRESH_END,
+      durationDays: 20,
+    });
+    const { minPairedObservations, coverageFloor, ...legacyPlan } = experiment.analysisPlan;
+    experiment.analysisPlan = legacyPlan;
+
+    const result = computeExperimentResult({ experiment, entries, now: THRESH_NOW });
+    expect(result.status).toBe('ok');
+    expect(result.estimate.n).toBe(11);
+  });
+
+  it('a plan threshold LOWER than the module constant is still blocked by the estimator\'s own internal floor-of-last-resort', () => {
+    // 8 pairs, full coverage on both variables (so the coverage-floor check
+    // never fires) — clears a plan-frozen minPairedObservations of 5, but
+    // NOT the estimator's own hardcoded MIN_PAIRED_OBSERVATIONS (10). This
+    // pins that runAnalysisPlan's internal gate is never bypassed, even
+    // when a plan (hypothetically) snapshots a lower number.
+    const entries = [];
+    for (let i = 0; i < 8; i++) {
+      entries.push({
+        id: `floor-${i + 1}`,
+        createdAt: isoAtOffset(THRESH_BASE_MS, i),
+        healthContext: { sleep: { totalHours: 4 + (i % 7) } },
+        analysis: { mood_score: 50 + i },
+      });
+    }
+    const experiment = baseExperiment({
+      template: SLEEP_TEMPLATE,
+      startAt: THRESH_START,
+      endAt: new Date(THRESH_BASE_MS + 8 * DAY_MS).toISOString(),
+      durationDays: 14,
+    });
+    experiment.analysisPlan = {
+      ...experiment.analysisPlan,
+      minPairedObservations: 5,
+      coverageFloor: 0.5,
+    };
+    const result = computeExperimentResult({ experiment, entries, now: THRESH_NOW });
+
+    expect(result.coverage.exposure).toEqual({ covered: 8, total: 8, label: '8 of 8 days' });
+    expect(result.status).toBe('insufficient');
+    expect(result.reasons).toEqual(['insufficient_paired_observations']);
+  });
+});
+
 describe('computeExperimentResult — insufficiency payload-exactness', () => {
   it('below MIN_PAIRED_OBSERVATIONS: absolutely no `estimate`/`summary` keys, insufficiency copy present, receipt still carried', () => {
     const entries = [];

@@ -43,6 +43,18 @@ vi.mock('../../../services/experiments/templates', async (importOriginal) => {
   return { ...actual, matchQuestionToTemplate: (...args) => matchQuestionToTemplateSpy(...args) };
 });
 
+// Same partial-mock-plus-spy pattern for `screenQuestion` — lets the
+// "picker path is still screened" test (R3 final review, Important 2) force
+// a non-'ok' verdict for an otherwise-benign canned title without faking
+// the gate for every other test in this file, which exercise the genuine
+// screener.
+const { screenQuestionSpy } = vi.hoisted(() => ({ screenQuestionSpy: vi.fn() }));
+vi.mock('../../../services/experiments/questionGate', async (importOriginal) => {
+  const actual = await importOriginal();
+  screenQuestionSpy.mockImplementation(actual.screenQuestion);
+  return { ...actual, screenQuestion: (...args) => screenQuestionSpy(...args) };
+});
+
 vi.mock('../../../services/experiments/experimentsService', () => ({
   subscribeExperiments: vi.fn(),
   createExperiment: vi.fn().mockResolvedValue({ id: 'new-exp' }),
@@ -347,6 +359,69 @@ describe('ExperimentsScreen — template picker (tag template gating)', () => {
     render(<ExperimentsScreen uid={UID} entries={entries} onClose={vi.fn()} />);
     fireEvent.click(await screen.findByText('New experiment'));
     expect(await screen.findByLabelText('Choose a tag')).toBeTruthy();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// IMPORTANT review fix (R3 final review): a canned template tap / the
+// tag-template picker select the template DIRECTLY after screenQuestion
+// passes, instead of re-deriving it through matchQuestionToTemplate — see
+// ExperimentsScreen.jsx's BINDING ORDERING REQUIREMENT + handleTemplateTap/
+// handleTagTemplateAsk doc comments for the keyword-collision dead-end this
+// closes.
+// ---------------------------------------------------------------------------
+
+describe('ExperimentsScreen — picker/tag direct template selection (Important review fix)', () => {
+  it('a canned template tap is STILL screened by screenQuestion first (a forced non-ok verdict declines even though the button picks a known-safe template)', async () => {
+    render(<ExperimentsScreen uid={UID} entries={[]} onClose={vi.fn()} onOpenRecipes={vi.fn()} />);
+    fireEvent.click(await screen.findByText('New experiment'));
+    await screen.findByText('Does exercise affect my mood?');
+
+    // Force the NEXT screenQuestion call (this tap's) to decline, proving
+    // the picker path still funnels through the safety gate even though it
+    // never calls matchQuestionToTemplate.
+    screenQuestionSpy.mockReturnValueOnce({ verdict: 'medical' });
+    fireEvent.click(screen.getByText('Does exercise affect my mood?'));
+
+    expect(await screen.findByText(DECLINE_MEDICAL_SNIPPET)).toBeTruthy();
+    expect(matchQuestionToTemplateSpy).not.toHaveBeenCalled();
+  });
+
+  it('an "exercise"-tagged user can tap the canned exercise button (no ambiguous-match dead-end, no matcher call)', async () => {
+    const entries = sleepEntries(5);
+    entries[0].tags = ['@habit:exercise']; // tagLabel -> "exercise", colliding with EXERCISE_ALT keywords
+    render(<ExperimentsScreen uid={UID} entries={entries} onClose={vi.fn()} />);
+    fireEvent.click(await screen.findByText('New experiment'));
+    await screen.findByLabelText('Choose a tag'); // sanity: the tag picker is present too
+
+    fireEvent.click(screen.getByText('Does exercise affect my mood?'));
+
+    // Proceeds straight to duration (no SpacePicker in this test's flag
+    // config) instead of dead-ending on the unmappable notice.
+    expect(await screen.findByText('How long should this run?')).toBeTruthy();
+    expect(screen.queryByText(/not something engram can measure/i)).toBeNull();
+    expect(matchQuestionToTemplateSpy).not.toHaveBeenCalled();
+  });
+
+  it('the SAME "exercise"-tagged user can ALSO run a tag experiment on their own "exercise" tag via the tag picker', async () => {
+    const entries = sleepEntries(5);
+    entries[0].tags = ['@habit:exercise'];
+    render(<ExperimentsScreen uid={UID} entries={entries} onClose={vi.fn()} />);
+    fireEvent.click(await screen.findByText('New experiment'));
+
+    const tagSelect = await screen.findByLabelText('Choose a tag');
+    fireEvent.change(tagSelect, { target: { value: '@habit:exercise' } });
+    fireEvent.click(screen.getByText('Does this affect my mood?'));
+
+    expect(await screen.findByText('How long should this run?')).toBeTruthy();
+    expect(screen.queryByText(/not something engram can measure/i)).toBeNull();
+    expect(matchQuestionToTemplateSpy).not.toHaveBeenCalled();
+  });
+
+  it('sanity check: the ambiguity this fix closes is real — matchQuestionToTemplate alone returns null (ambiguous) for the colliding text', async () => {
+    const { matchQuestionToTemplate } = await import('../../../services/experiments/templates');
+    const direct = matchQuestionToTemplate('Does exercise affect my mood?', ['@habit:exercise']);
+    expect(direct).toBeNull();
   });
 });
 
@@ -696,5 +771,53 @@ describe('ExperimentsScreen — auto-completion', () => {
     // retries"), pinned precisely here rather than assumed.
     control.emit([{ ...experiment }]);
     await waitFor(() => expect(writeResult).toHaveBeenCalledTimes(2));
+  });
+
+  // -------------------------------------------------------------------
+  // MINOR review fix (R3 final review): entries-ready guard — see module
+  // doc comment's "ENTRIES-READY GUARD" section.
+  // -------------------------------------------------------------------
+
+  it('does NOT auto-complete an elapsed experiment while `entries` is still an empty array (no entries-ready signal)', async () => {
+    const experiment = elapsedExperiment();
+    withExperiments([experiment]);
+    render(<ExperimentsScreen uid={UID} entries={[]} onClose={vi.fn()} />);
+    await screen.findByText('Does how much I sleep affect my mood?');
+    // Give any (wrongly) fired effect a tick to have called writeResult.
+    await act(async () => { await Promise.resolve(); });
+    expect(writeResult).not.toHaveBeenCalled();
+  });
+
+  it('auto-completes once entries arrive on a later render (same elapsed experiment, entries prop goes from [] to populated)', async () => {
+    const experiment = elapsedExperiment();
+    withExperiments([experiment]);
+    const { rerender } = render(<ExperimentsScreen uid={UID} entries={[]} onClose={vi.fn()} />);
+    await screen.findByText('Does how much I sleep affect my mood?');
+    await act(async () => { await Promise.resolve(); });
+    expect(writeResult).not.toHaveBeenCalled();
+
+    rerender(<ExperimentsScreen uid={UID} entries={sleepEntries(40)} onClose={vi.fn()} />);
+    await waitFor(() => expect(writeResult).toHaveBeenCalledTimes(1));
+    expect(writeResult.mock.calls[0][2]).toBe('exp-1');
+  });
+
+  it('an explicit `entriesLoaded={true}` prop is trusted even with zero entries (skips the length fallback)', async () => {
+    // A genuinely-empty-but-loaded entries pool: computeExperimentResult
+    // still runs (and, for this fixture, comes back `insufficient` — no
+    // entries at all — but the point pinned here is that it RUNS).
+    const experiment = elapsedExperiment();
+    withExperiments([experiment]);
+    render(<ExperimentsScreen uid={UID} entries={[]} entriesLoaded onClose={vi.fn()} />);
+    await waitFor(() => expect(writeResult).toHaveBeenCalledTimes(1));
+    expect(writeResult.mock.calls[0][3].status).toBe('insufficient');
+  });
+
+  it('an explicit `entriesLoaded={false}` prop blocks auto-completion even with a non-empty entries pool', async () => {
+    const experiment = elapsedExperiment();
+    withExperiments([experiment]);
+    render(<ExperimentsScreen uid={UID} entries={sleepEntries(40)} entriesLoaded={false} onClose={vi.fn()} />);
+    await screen.findByText('Does how much I sleep affect my mood?');
+    await act(async () => { await Promise.resolve(); });
+    expect(writeResult).not.toHaveBeenCalled();
   });
 });
