@@ -76,6 +76,18 @@ import { isCrisisText } from '../safety/crisisKeywords.js';
 const DAY_MS = 24 * 60 * 60 * 1000;
 export const MIN_AGE_DAYS = 30;
 export const MAX_AGE_DAYS = 400;
+// ROUND 2 (Michael's direct review, `.superpowers/sdd/task-gr-r2-report.md`):
+// an anniversary blackout — entries whose age at selection falls in this
+// window (±14 days around exactly 365) are never eligible, regardless of how
+// clean/calm/entity-rich they otherwise score. Grief/trauma intensification
+// around anniversaries is a real, documented risk the mood/entity scoring
+// heuristic cannot see (a genuinely high-mood, entity-rich entry from
+// exactly a year ago is exactly what the scorer prefers most, and exactly
+// the wrong day to resurface it on). This is the most protective of the
+// three options Michael's review raised (avoid / require user-curation /
+// accept-and-document) that still preserves the feature for v1 — see the
+// memo's "Anniversary blackout" section for the two rejected alternatives.
+export const ANNIVERSARY_BLACKOUT_DAYS = [351, 379];
 export const ADJACENCY_DAYS = 3;
 export const DEDUP_WINDOW_DAYS = 60;
 // GR1 (Michael's review): the v1 floor of 0.4 was too permissive — it let
@@ -119,8 +131,20 @@ export const LOW_MOOD_THRESHOLD = 0.4;
 // revisit_queue doc exists with selectedAt within this many days. Separate
 // from the 60-day DEDUP_WINDOW_DAYS above, which governs which individual
 // ENTRY a fresh selection is allowed to re-pick, not whether a fresh
-// selection happens at all.
+// selection happens at all. ROUND 2: a `dismissed` doc ALSO trips this gate
+// now (at its own, longer cadence — see DISMISSED_CADENCE_DAYS below), so
+// this constant now governs queued/shown only.
 export const WEEKLY_CADENCE_DAYS = 7;
+// ROUND 2 (Michael's direct review, `.superpowers/sdd/task-gr-r2-report.md`):
+// a dismissal ("not now") is itself an exposure — the user saw the card
+// exists and actively said no to it right now — so it must trip cadence too,
+// not be exempt from it (the GR1 choice below, reversed). AND, because an
+// explicit "not now" is read as a STRONGER signal than a passive
+// queued/shown exposure the user may not have even opened, it blocks for
+// LONGER than the normal 7-day cadence: 2x, pinned at 14 days. This is a
+// conservative, revisable pin (not a derived constant) — re-sign via the
+// memo if the multiplier should change.
+export const DISMISSED_CADENCE_DAYS = 14;
 
 // GR1 rule 8 (legacy entries fail closed): duplicated from
 // `src/config/constants.js` WARNING_INDICATORS, mirroring the existing
@@ -263,7 +287,9 @@ export function matchesExclusion(entry, exclusion, entryMs) {
  * eligible at all — order does not affect the result, every rule is always
  * applied). Numbered to match the memo (`docs/quality/gentle-revisit-safety.md`);
  * rule 0 is new in GR1 (Michael's review), rules 3/4 were amended in GR1
- * (widened / retuned respectively) — see the memo for full rationale on each:
+ * (widened / retuned respectively), rule 10 is new in Round 2 (Michael's
+ * direct review, `.superpowers/sdd/task-gr-r2-report.md`) — see the memo for
+ * full rationale on each:
  *   0. **(GR1) Legacy fail-closed.** `typeof entry.safety_flagged !==
  *      'boolean'` OR `typeof entry.has_warning_indicators !== 'boolean'` →
  *      never. This function is PURE and has no access to entry text, so it
@@ -284,6 +310,10 @@ export function matchesExclusion(entry, exclusion, entryMs) {
  *   4. **(GR1: retuned)** `analysis.mood_score < {@link MOOD_FLOOR}` (now
  *      0.6, was 0.4) or missing/non-numeric → never.
  *   5. Any `exclusions` match (see `matchesExclusion`) → never.
+ *   10. **(Round 2, new)** Anniversary blackout: age at selection falls in
+ *      {@link ANNIVERSARY_BLACKOUT_DAYS} (351-379 days, ±14 around exactly
+ *      365) → never, regardless of mood/content — see that constant's doc
+ *      comment for the grief/trauma-anniversary rationale.
  *   Additionally: age must be {@link MIN_AGE_DAYS}-{@link MAX_AGE_DAYS} days
  *   old (inclusive), and the entry must not already be in `recentQueue`
  *   within the last {@link DEDUP_WINDOW_DAYS} days.
@@ -347,6 +377,13 @@ export function selectRevisitCandidate({ entries = [], exclusions = [], recentQu
 
     const ageDays = (nowMs - entryMs) / DAY_MS;
     if (ageDays < MIN_AGE_DAYS || ageDays > MAX_AGE_DAYS) continue;
+
+    // ROUND 2 rule 10: anniversary blackout — see ANNIVERSARY_BLACKOUT_DAYS'
+    // doc comment. Checked unconditionally (before mood/content are even
+    // looked at), so a "bait" entry (high mood, rich entities/tags) at
+    // exactly 365 days old is excluded exactly like a plain one would be —
+    // this is a hard gate, not a scoring penalty.
+    if (ageDays >= ANNIVERSARY_BLACKOUT_DAYS[0] && ageDays <= ANNIVERSARY_BLACKOUT_DAYS[1]) continue;
 
     // GR1 rule 0: legacy fail-closed. Only the scheduled job can turn an
     // "unknown" legacy entry into a trustworthy boolean (by re-screening its
@@ -498,20 +535,25 @@ export function currentStateGateTripped(recentEntries) {
 }
 
 /**
- * GR1 rule 9 (weekly cadence): whether the user already has a live
- * (`queued` or `shown` — NOT `dismissed`) revisit_queue selection within the
- * last {@link WEEKLY_CADENCE_DAYS} days, in which case a fresh selection is
- * skipped today. Deliberately excludes `dismissed` items — a user who
- * dismissed this week's card has effectively asked for nothing more this
- * week either, but that's `revisit_exclusions`/rule 5's job (per-entry, via
- * "Never show"/"Less like this"), not this cadence gate's; a dismissed item
- * with no further exclusion recorded should not itself block next week's
- * (or even a later day's, if the product ever shortens cadence) selection
- * beyond what the dedup/exclusion rules already handle. `dismissed` items
- * ARE still counted by rule 5's 60-day dedup (`recentQueue` in
- * `selectRevisitCandidate`) for the specific entry they named — this gate is
- * a coarser "did we already offer this user something this week at all"
- * check layered on top.
+ * GR1 rule 9 (weekly cadence), REVERSED in Round 2 (Michael's direct review,
+ * `.superpowers/sdd/task-gr-r2-report.md`): whether the user already has a
+ * live (`queued`/`shown`) OR `dismissed` revisit_queue selection recently
+ * enough to skip a fresh selection today.
+ *
+ * **Round 2 reversal:** GR1 deliberately excluded `dismissed` items from
+ * this gate (a dismissal was treated as "not an exposure"). Michael's
+ * round-2 review overturned that: a dismissal ("not now") IS an exposure —
+ * the user saw the card and made an active choice about it — so it must
+ * trip cadence too. AND, because "not now" is read as a STRONGER signal
+ * than a passive queued/shown exposure the user may never have opened, a
+ * dismissal blocks for LONGER: {@link DISMISSED_CADENCE_DAYS} (14 days, 2x
+ * {@link WEEKLY_CADENCE_DAYS}) instead of 7. `queued`/`shown` items are
+ * unaffected by this change and still use the 7-day window.
+ *
+ * `dismissed` items are ALSO still counted by rule 5's 60-day dedup
+ * (`recentQueue` in `selectRevisitCandidate`) for the specific entry they
+ * named — this gate is a coarser "did we already offer this user something
+ * recently at all" check layered on top, now covering dismissals too.
  *
  * @param {Array<{status?:string, selectedAt:*}>} recentQueueWithStatus - the
  *   same last-{@link DEDUP_WINDOW_DAYS}-day `revisit_queue` read used for
@@ -521,11 +563,14 @@ export function currentStateGateTripped(recentEntries) {
  */
 export function weeklyCadenceTripped(recentQueueWithStatus, nowMs) {
   return (recentQueueWithStatus || []).some((item) => {
-    if (item?.status !== 'queued' && item?.status !== 'shown') return false;
+    const isLive = item?.status === 'queued' || item?.status === 'shown';
+    const isDismissed = item?.status === 'dismissed';
+    if (!isLive && !isDismissed) return false;
     const selMs = toMillis(item?.selectedAt);
     if (!Number.isFinite(selMs)) return false;
     const ageMs = nowMs - selMs;
-    return ageMs >= 0 && ageMs <= WEEKLY_CADENCE_DAYS * DAY_MS;
+    const cadenceDays = isDismissed ? DISMISSED_CADENCE_DAYS : WEEKLY_CADENCE_DAYS;
+    return ageMs >= 0 && ageMs <= cadenceDays * DAY_MS;
   });
 }
 
@@ -573,10 +618,19 @@ export function weeklyCadenceTripped(recentQueueWithStatus, nowMs) {
  * most days, for an opted-in user, this is why nothing gets selected) never
  * pays for the current-state read either.
  *
+ * ROUND 2 (Michael's direct review) adds a THIRD kind of per-user "skip
+ * today": at-cap coverage-unknown (see `coverageUnknown` below), checked
+ * immediately after each of the four entries-collection reads that could
+ * silently drop a safety-relevant doc if it hit its own limit. Counted
+ * separately from `skipped` via `skippedCoverageUnknown`, and rule 9's
+ * weekly-cadence gate now ALSO trips on a `dismissed` doc (at a longer,
+ * 14-day cadence — {@link DISMISSED_CADENCE_DAYS}), reversing GR1's
+ * "dismissal doesn't count" choice.
+ *
  * @param {object} db - Firestore instance (Admin SDK, or a test double with
  *   the same `.doc`/`.collection`/`.runTransaction` surface).
  * @param {{now?: Date}} [options]
- * @returns {Promise<{processed:number, selected:number, skipped:number}>}
+ * @returns {Promise<{processed:number, selected:number, skipped:number, skippedCoverageUnknown:number}>}
  */
 export async function runGentleRevisitDaily(db, { now = new Date() } = {}) {
   const nowDate = now instanceof Date ? now : new Date(now);
@@ -585,7 +639,7 @@ export async function runGentleRevisitDaily(db, { now = new Date() } = {}) {
   const flagOn = await getServerFlag(db, 'gentleRevisit', false);
   if (!flagOn) {
     console.log('[gentleRevisitDaily] server flag off — skipping all users');
-    return { processed: 0, selected: 0, skipped: 0 };
+    return { processed: 0, selected: 0, skipped: 0, skippedCoverageUnknown: 0 };
   }
 
   const dateStr = localDateString(nowDate, 'America/Los_Angeles');
@@ -596,6 +650,32 @@ export async function runGentleRevisitDaily(db, { now = new Date() } = {}) {
   let processed = 0;
   let selected = 0;
   let skipped = 0;
+  let skippedCoverageUnknown = 0;
+
+  // ROUND 2 (Michael's direct review, `.superpowers/sdd/task-gr-r2-report.md`):
+  // "If a query hits its cap, treat safety coverage as unknown and skip
+  // selection." A snapshot whose `.size` exactly equals the limit it was
+  // read with means the true result set may be larger than what was
+  // returned — the cap could have silently sliced off a safety-relevant doc
+  // (a flagged/warning-indicator anchor, or a recent-window entry the
+  // current-state gate needs to see). Rather than proceed on a possibly
+  // incomplete safety picture, this treats "at cap" as "coverage unknown"
+  // and skips the user's selection entirely for today — no partial/best-
+  // effort selection on unknown coverage. Logged with a distinct,
+  // structured line and counted separately from ordinary `skipped` (opt-out/
+  // marker/error) so this specific failure mode is observable on its own.
+  function coverageUnknown(userId, queryName, snapshot, limit) {
+    if (snapshot.size !== limit) return false;
+    skippedCoverageUnknown++;
+    console.warn(JSON.stringify({
+      msg: '[gentleRevisitDaily] safety coverage unknown — read hit its cap, skipping selection',
+      userId,
+      query: queryName,
+      limit,
+      size: snapshot.size,
+    }));
+    return true;
+  }
 
   for (const userDoc of usersSnap.docs) {
     const userId = userDoc.id;
@@ -641,6 +721,7 @@ export async function runGentleRevisitDaily(db, { now = new Date() } = {}) {
         .orderBy('createdAt', 'desc')
         .limit(RECENT_READ_LIMIT)
         .get();
+      if (coverageUnknown(userId, 'recentWindow', recentWindowSnap, RECENT_READ_LIMIT)) continue;
       const recentWindowEntries = [];
       recentWindowSnap.forEach((d) => recentWindowEntries.push(mapEntryDoc(d.id, d.data() || {})));
       if (currentStateGateTripped(recentWindowEntries)) continue; // skip today — live safety signal or sustained low mood
@@ -700,6 +781,15 @@ export async function runGentleRevisitDaily(db, { now = new Date() } = {}) {
         db.collection(`${userBase}/revisit_exclusions`).get(),
       ]);
 
+      // ROUND 2: at-cap on any of the three padded-window entries reads
+      // below means safety coverage for this candidate window is unknown —
+      // skip today rather than select on a possibly-incomplete picture.
+      if (
+        coverageUnknown(userId, 'candidates', entriesSnap, CANDIDATE_READ_LIMIT)
+        || coverageUnknown(userId, 'flaggedAnchor', flaggedAnchorSnap, FLAGGED_ANCHOR_READ_LIMIT)
+        || coverageUnknown(userId, 'warningAnchor', warningAnchorSnap, WARNING_ANCHOR_READ_LIMIT)
+      ) continue;
+
       const entries = [];
       const seenEntryIds = new Set();
       entriesSnap.forEach((d) => {
@@ -739,8 +829,8 @@ export async function runGentleRevisitDaily(db, { now = new Date() } = {}) {
     }
   }
 
-  console.log(`[gentleRevisitDaily] processed=${processed} selected=${selected} skipped=${skipped} of ${usersSnap.size}`);
-  return { processed, selected, skipped };
+  console.log(`[gentleRevisitDaily] processed=${processed} selected=${selected} skipped=${skipped} skippedCoverageUnknown=${skippedCoverageUnknown} of ${usersSnap.size}`);
+  return { processed, selected, skipped, skippedCoverageUnknown };
 }
 
 export const gentleRevisitDaily = onSchedule(

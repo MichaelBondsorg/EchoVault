@@ -223,12 +223,24 @@ describe('RevisitWidget — preview (status "queued")', () => {
   });
 });
 
-describe('RevisitWidget — status "shown" (remount after Show)', () => {
-  it('renders revealed directly, with no Show button', async () => {
+describe('RevisitWidget — status "shown" (remount after Show, Round 2 per-session reveal)', () => {
+  it('renders the PREVIEW (entry text withheld) on a fresh mount, with the Show action present again', async () => {
     pushQueueItem(queueItem({ status: 'shown' }));
     await renderWidget();
+    expect(screen.queryByText(/quiet afternoon by the lake/)).toBeNull();
+    expect(screen.getByText('Show')).toBeTruthy();
+    // The card itself is still rendered (live selection, other actions apply).
+    expect(screen.getByText('A calm moment from March 2026')).toBeTruthy();
+  });
+
+  it('tapping Show on a remounted "shown" doc reveals locally WITHOUT re-calling markShown (no duplicate write)', async () => {
+    pushQueueItem(queueItem({ status: 'shown' }));
+    await renderWidget();
+
+    fireEvent.click(screen.getByText('Show'));
+
     expect(screen.getByText(/quiet afternoon by the lake/)).toBeTruthy();
-    expect(screen.queryByText('Show')).toBeNull();
+    expect(mocks.updateDoc).not.toHaveBeenCalled();
   });
 });
 

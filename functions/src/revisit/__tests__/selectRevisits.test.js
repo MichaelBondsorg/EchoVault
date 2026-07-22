@@ -40,6 +40,8 @@ const {
   LOW_MOOD_MIN_SCORED,
   LOW_MOOD_THRESHOLD,
   WEEKLY_CADENCE_DAYS,
+  DISMISSED_CADENCE_DAYS,
+  ANNIVERSARY_BLACKOUT_DAYS,
 } = await import('../selectRevisits.js');
 const { _clearFlagCacheForTest } = await import('../../shared/flags.js');
 
@@ -438,6 +440,50 @@ describe('selectRevisitCandidate — age window (30-400 days)', () => {
   });
 });
 
+describe(`selectRevisitCandidate — Round 2: anniversary blackout (${ANNIVERSARY_BLACKOUT_DAYS[0]}-${ANNIVERSARY_BLACKOUT_DAYS[1]} days, ±14 around 365)`, () => {
+  it('ANNIVERSARY_BLACKOUT_DAYS is exactly [351, 379]', () => {
+    expect(ANNIVERSARY_BLACKOUT_DAYS).toEqual([351, 379]);
+  });
+
+  it('excludes an entry exactly 351 days old (lower boundary, inclusive)', () => {
+    const entry = baseEntry({ id: 'anniv-351', createdAt: daysAgo(351) });
+    expect(selectRevisitCandidate({ entries: [entry], now: NOW })).toBeNull();
+  });
+
+  it('excludes an entry exactly 365 days old (the anniversary itself)', () => {
+    const entry = baseEntry({ id: 'anniv-365', createdAt: daysAgo(365) });
+    expect(selectRevisitCandidate({ entries: [entry], now: NOW })).toBeNull();
+  });
+
+  it('excludes an entry exactly 379 days old (upper boundary, inclusive)', () => {
+    const entry = baseEntry({ id: 'anniv-379', createdAt: daysAgo(379) });
+    expect(selectRevisitCandidate({ entries: [entry], now: NOW })).toBeNull();
+  });
+
+  it('includes an entry exactly 350 days old (one day short of the blackout)', () => {
+    const entry = baseEntry({ id: 'anniv-350', createdAt: daysAgo(350) });
+    expect(selectRevisitCandidate({ entries: [entry], now: NOW })?.id).toBe('anniv-350');
+  });
+
+  it('includes an entry exactly 380 days old (one day past the blackout)', () => {
+    const entry = baseEntry({ id: 'anniv-380', createdAt: daysAgo(380) });
+    expect(selectRevisitCandidate({ entries: [entry], now: NOW })?.id).toBe('anniv-380');
+  });
+
+  it('the blackout applies even to a maximally attractive "bait" entry (high mood, rich entities/tags) — proves this is a hard gate, not a scoring penalty', () => {
+    const bait = baseEntry({
+      id: 'anniv-bait',
+      createdAt: daysAgo(365),
+      tags: ['reunion', 'good-news'],
+      entities: [{ id: 'p1', name: 'Sam', category: 'person' }],
+      analysis: { mood_score: 0.95 },
+    });
+    const fallback = baseEntry({ id: 'fallback', createdAt: daysAgo(100), analysis: { mood_score: MOOD_FLOOR } });
+    const result = selectRevisitCandidate({ entries: [bait, fallback], now: NOW });
+    expect(result?.id).toBe('fallback');
+  });
+});
+
 describe('selectRevisitCandidate — dedup vs recent queue', () => {
   it(`excludes an entry already selected within the last ${DEDUP_WINDOW_DAYS} days`, () => {
     const target = baseEntry({ id: 'already-shown' });
@@ -503,6 +549,10 @@ describe('selectRevisitCandidate — 100% coverage of the stated exclusion rules
       // GR1 addition: a legacy entry (non-boolean safety fields) with
       // otherwise-ideal bait attributes must also never be selected.
       { id: 'unsafe-legacy', createdAt: daysAgo(140), ...bait },
+      // Round 2 addition: an entry sitting exactly at the anniversary
+      // (day 365, deep inside the blackout window) with otherwise-ideal
+      // bait attributes must also never be selected.
+      baseEntry({ id: 'unsafe-anniversary', createdAt: daysAgo(365), ...bait }),
     ];
     const exclusions = [{ dimension: 'entry', value: 'unsafe-excluded-entry' }];
 
@@ -649,15 +699,11 @@ describe(`weeklyCadenceTripped (rule 9): live selection within ${WEEKLY_CADENCE_
     expect(weeklyCadenceTripped([{ status: 'shown', selectedAt: daysAgo(2) }], NOW)).toBe(true);
   });
 
-  it('does NOT trip for a "dismissed" item within the cadence window', () => {
-    expect(weeklyCadenceTripped([{ status: 'dismissed', selectedAt: daysAgo(2) }], NOW)).toBe(false);
-  });
-
-  it('does NOT trip for a queued item older than the cadence window', () => {
+  it('does NOT trip for a queued item older than the 7-day cadence window', () => {
     expect(weeklyCadenceTripped([{ status: 'queued', selectedAt: daysAgo(WEEKLY_CADENCE_DAYS + 1) }], NOW)).toBe(false);
   });
 
-  it(`trips at exactly ${WEEKLY_CADENCE_DAYS} days (boundary inclusive)`, () => {
+  it(`trips at exactly ${WEEKLY_CADENCE_DAYS} days (boundary inclusive) for a queued/shown item`, () => {
     expect(weeklyCadenceTripped([{ status: 'queued', selectedAt: daysAgo(WEEKLY_CADENCE_DAYS) }], NOW)).toBe(true);
   });
 
@@ -667,6 +713,33 @@ describe(`weeklyCadenceTripped (rule 9): live selection within ${WEEKLY_CADENCE_
 
   it('ignores an item with an uncoercible selectedAt rather than throwing', () => {
     expect(weeklyCadenceTripped([{ status: 'queued', selectedAt: 'not-a-date' }], NOW)).toBe(false);
+  });
+});
+
+describe(`weeklyCadenceTripped — Round 2 reversal: dismissal trips cadence too, at its own longer ${DISMISSED_CADENCE_DAYS}-day window (Michael's round-2 review)`, () => {
+  it('DISMISSED_CADENCE_DAYS === 14 (2x WEEKLY_CADENCE_DAYS)', () => {
+    expect(DISMISSED_CADENCE_DAYS).toBe(14);
+    expect(DISMISSED_CADENCE_DAYS).toBe(WEEKLY_CADENCE_DAYS * 2);
+  });
+
+  it('a "dismissed" item 6 days ago trips the gate (skip today)', () => {
+    expect(weeklyCadenceTripped([{ status: 'dismissed', selectedAt: daysAgo(6) }], NOW)).toBe(true);
+  });
+
+  it('a "dismissed" item 13 days ago still trips the gate', () => {
+    expect(weeklyCadenceTripped([{ status: 'dismissed', selectedAt: daysAgo(13) }], NOW)).toBe(true);
+  });
+
+  it(`a "dismissed" item at exactly ${DISMISSED_CADENCE_DAYS} days trips (boundary inclusive)`, () => {
+    expect(weeklyCadenceTripped([{ status: 'dismissed', selectedAt: daysAgo(DISMISSED_CADENCE_DAYS) }], NOW)).toBe(true);
+  });
+
+  it('a "dismissed" item 15 days ago does NOT trip the gate (past the 14-day dismissed cadence) — eligible', () => {
+    expect(weeklyCadenceTripped([{ status: 'dismissed', selectedAt: daysAgo(15) }], NOW)).toBe(false);
+  });
+
+  it('a "shown" item 8 days ago does NOT trip the gate (the unchanged 7-day queued/shown cadence) — eligible', () => {
+    expect(weeklyCadenceTripped([{ status: 'shown', selectedAt: daysAgo(8) }], NOW)).toBe(false);
   });
 });
 
@@ -851,7 +924,7 @@ describe('runGentleRevisitDaily — server flag gate', () => {
   it('skips every user without reading the users collection when the server flag is off', async () => {
     const { db } = buildFakeDb({ flags: { gentleRevisit: false }, userIds: ['u1'] });
     const result = await runGentleRevisitDaily(db, { now: RUN_NOW });
-    expect(result).toEqual({ processed: 0, selected: 0, skipped: 0 });
+    expect(result).toEqual({ processed: 0, selected: 0, skipped: 0, skippedCoverageUnknown: 0 });
     expect(db.collection).not.toHaveBeenCalledWith(`artifacts/${APP}/users`);
   });
 });
@@ -1274,12 +1347,25 @@ describe('runGentleRevisitDaily — weekly cadence (GR1 rule 9)', () => {
     expect(queueWrites).toHaveLength(0);
   });
 
-  it('does NOT skip when the only recent revisit_queue doc is "dismissed"', async () => {
+  it('Round 2 reversal: a "dismissed" doc within the last 14 days now DOES skip selection (dismissal is an exposure, longer cadence)', async () => {
     const { db, queueWrites } = buildFakeDb({
       userIds: ['u1'],
       prefsByUser: { u1: { enabled: true } },
       entriesByUser: { u1: [eligibleEntryDoc('entry-1')] },
       queueByUser: { u1: [{ id: 'q1', data: { status: 'dismissed', selectedAt: new Date(RUN_NOW.getTime() - 2 * DAY_MS) } }] },
+    });
+    const result = await runGentleRevisitDaily(db, { now: RUN_NOW });
+    expect(result.processed).toBe(1);
+    expect(result.selected).toBe(0);
+    expect(queueWrites).toHaveLength(0);
+  });
+
+  it('a "dismissed" doc 15 days ago (past the 14-day dismissed cadence) does NOT skip selection', async () => {
+    const { db, queueWrites } = buildFakeDb({
+      userIds: ['u1'],
+      prefsByUser: { u1: { enabled: true } },
+      entriesByUser: { u1: [eligibleEntryDoc('entry-1')] },
+      queueByUser: { u1: [{ id: 'q1', data: { status: 'dismissed', selectedAt: new Date(RUN_NOW.getTime() - 15 * DAY_MS) } }] },
     });
     const result = await runGentleRevisitDaily(db, { now: RUN_NOW });
     expect(result.selected).toBe(1);
@@ -1295,6 +1381,92 @@ describe('runGentleRevisitDaily — weekly cadence (GR1 rule 9)', () => {
     });
     const result = await runGentleRevisitDaily(db, { now: RUN_NOW });
     expect(result.selected).toBe(1);
+  });
+});
+
+describe('runGentleRevisitDaily — Round 2: at-cap reads treat safety coverage as unknown and skip (Michael\'s round-2 review)', () => {
+  it('recent-window read at cap (50) → skip today, counted in skippedCoverageUnknown, no further entries reads', async () => {
+    const recentDocs = Array.from({ length: 50 }, (_, i) => eligibleEntryDoc(`recent-${i}`, {
+      createdAt: new Date(RUN_NOW.getTime() - 1 * DAY_MS),
+    }));
+    const oldCandidate = eligibleEntryDoc('old-candidate'); // would otherwise be selected
+    const { db, queueWrites, entriesQueryCalls } = buildFakeDb({
+      userIds: ['u1'],
+      prefsByUser: { u1: { enabled: true } },
+      entriesByUser: { u1: [...recentDocs, oldCandidate] },
+    });
+    const result = await runGentleRevisitDaily(db, { now: RUN_NOW });
+    expect(result.processed).toBe(1);
+    expect(result.selected).toBe(0);
+    expect(result.skippedCoverageUnknown).toBe(1);
+    expect(queueWrites).toHaveLength(0);
+    expect(entriesQueryCalls).toHaveLength(1); // gated before the padded/anchor reads
+  });
+
+  it('main candidate read at cap (200) → skip today, counted in skippedCoverageUnknown', async () => {
+    const fillers = Array.from({ length: 200 }, (_, i) => eligibleEntryDoc(`filler-${i}`, {
+      createdAt: new Date(RUN_NOW.getTime() - 200 * DAY_MS),
+    }));
+    const { db, queueWrites } = buildFakeDb({
+      userIds: ['u1'],
+      prefsByUser: { u1: { enabled: true } },
+      entriesByUser: { u1: fillers },
+    });
+    const result = await runGentleRevisitDaily(db, { now: RUN_NOW });
+    expect(result.selected).toBe(0);
+    expect(result.skippedCoverageUnknown).toBe(1);
+    expect(queueWrites).toHaveLength(0);
+  });
+
+  it('flagged-anchor backfill read at cap (50) → skip today, counted in skippedCoverageUnknown', async () => {
+    const flaggedDocs = Array.from({ length: 50 }, (_, i) => eligibleEntryDoc(`flagged-${i}`, {
+      createdAt: new Date(RUN_NOW.getTime() - 200 * DAY_MS),
+      safety_flagged: true,
+    }));
+    const oldCandidate = eligibleEntryDoc('old-candidate', { createdAt: new Date(RUN_NOW.getTime() - 50 * DAY_MS) });
+    const { db, queueWrites } = buildFakeDb({
+      userIds: ['u1'],
+      prefsByUser: { u1: { enabled: true } },
+      entriesByUser: { u1: [...flaggedDocs, oldCandidate] },
+    });
+    const result = await runGentleRevisitDaily(db, { now: RUN_NOW });
+    expect(result.selected).toBe(0);
+    expect(result.skippedCoverageUnknown).toBe(1);
+    expect(queueWrites).toHaveLength(0);
+  });
+
+  it('warning-indicator anchor backfill read at cap (50) → skip today, counted in skippedCoverageUnknown', async () => {
+    const warnedDocs = Array.from({ length: 50 }, (_, i) => eligibleEntryDoc(`warned-${i}`, {
+      createdAt: new Date(RUN_NOW.getTime() - 200 * DAY_MS),
+      has_warning_indicators: true,
+    }));
+    const oldCandidate = eligibleEntryDoc('old-candidate', { createdAt: new Date(RUN_NOW.getTime() - 50 * DAY_MS) });
+    const { db, queueWrites } = buildFakeDb({
+      userIds: ['u1'],
+      prefsByUser: { u1: { enabled: true } },
+      entriesByUser: { u1: [...warnedDocs, oldCandidate] },
+    });
+    const result = await runGentleRevisitDaily(db, { now: RUN_NOW });
+    expect(result.selected).toBe(0);
+    expect(result.skippedCoverageUnknown).toBe(1);
+    expect(queueWrites).toHaveLength(0);
+  });
+
+  it('one entry under every cap (199/49/49/49) proceeds normally — the at-cap check does not false-positive one below the limit', async () => {
+    const fillers = Array.from({ length: 199 }, (_, i) => eligibleEntryDoc(`filler-${i}`, {
+      createdAt: new Date(RUN_NOW.getTime() - 200 * DAY_MS),
+    }));
+    const { db, queueWrites, entriesQueryCalls } = buildFakeDb({
+      userIds: ['u1'],
+      prefsByUser: { u1: { enabled: true } },
+      entriesByUser: { u1: fillers },
+    });
+    const result = await runGentleRevisitDaily(db, { now: RUN_NOW });
+    expect(result.selected).toBe(1);
+    expect(result.skippedCoverageUnknown).toBe(0);
+    expect(queueWrites).toHaveLength(1);
+    const mainSnap = await entriesQueryCalls[1].get();
+    expect(mainSnap.size).toBe(199);
   });
 });
 

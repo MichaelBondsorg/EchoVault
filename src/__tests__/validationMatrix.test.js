@@ -2081,13 +2081,15 @@ describe('Hardening Matrix row (h3): mood floor is 0.6 — 0.55 is never selecte
 
 // ===========================================================================
 // Hardening Row (h4): weekly cadence — a queued selection 6 days ago blocks
-// a new one, 8 days ago does not, a dismissed one never trips it (Michael
-// review hardening, Task GR1, item 5 — real weeklyCadenceTripped)
+// a new one, 8 days ago does not; REVISED Round 2 (Michael's direct review):
+// a dismissal now ALSO trips cadence, at its own longer 14-day window
+// (real weeklyCadenceTripped)
 // ===========================================================================
-describe('Hardening Matrix row (h4): weekly cadence blocks a fresh selection within 7 days of the last live one', () => {
-  it('WEEKLY_CADENCE_DAYS === 7; a queued item 6 days old trips the gate, 8 days old does not, and a dismissed item at 6 days never trips it', async () => {
-    const { weeklyCadenceTripped, WEEKLY_CADENCE_DAYS } = await import('../../functions/src/revisit/selectRevisits.js');
+describe('Hardening Matrix row (h4): weekly cadence blocks a fresh selection within 7 days of the last live one; a dismissal blocks for 14 (Round 2)', () => {
+  it('WEEKLY_CADENCE_DAYS === 7, DISMISSED_CADENCE_DAYS === 14; a queued item 6 days old trips the gate, 8 days old does not; a dismissed item 13 days old trips, 15 days old does not', async () => {
+    const { weeklyCadenceTripped, WEEKLY_CADENCE_DAYS, DISMISSED_CADENCE_DAYS } = await import('../../functions/src/revisit/selectRevisits.js');
     expect(WEEKLY_CADENCE_DAYS).toBe(7);
+    expect(DISMISSED_CADENCE_DAYS).toBe(14);
     const NOW = Date.parse('2026-07-21T12:00:00.000Z');
     const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -2097,10 +2099,15 @@ describe('Hardening Matrix row (h4): weekly cadence blocks a fresh selection wit
     const eightDaysAgo = [{ status: 'queued', selectedAt: new Date(NOW - 8 * DAY_MS).toISOString() }];
     expect(weeklyCadenceTripped(eightDaysAgo, NOW)).toBe(false);
 
-    // Pinned rule (GR1): a dismissed item never trips cadence, even within
-    // the window — that's revisit_exclusions' job, not this gate's.
-    const dismissedSixDaysAgo = [{ status: 'dismissed', selectedAt: new Date(NOW - 6 * DAY_MS).toISOString() }];
-    expect(weeklyCadenceTripped(dismissedSixDaysAgo, NOW)).toBe(false);
+    // Round 2 reversal (was GR1's "dismissal never trips cadence"): a
+    // dismissal IS an exposure and, as the stronger "not now" signal, blocks
+    // for LONGER (14d, 2x the 7d queued/shown cadence) — mutation-check
+    // both sides of that new 14-day boundary.
+    const dismissedThirteenDaysAgo = [{ status: 'dismissed', selectedAt: new Date(NOW - 13 * DAY_MS).toISOString() }];
+    expect(weeklyCadenceTripped(dismissedThirteenDaysAgo, NOW)).toBe(true);
+
+    const dismissedFifteenDaysAgo = [{ status: 'dismissed', selectedAt: new Date(NOW - 15 * DAY_MS).toISOString() }];
+    expect(weeklyCadenceTripped(dismissedFifteenDaysAgo, NOW)).toBe(false);
   });
 });
 
@@ -2276,5 +2283,46 @@ describe('Hardening Matrix row (h8): a 4-high/8-low split is insufficient on gro
 
     expect(result.status).toBe('insufficient');
     expect(result.reasons).toEqual(['group_too_small']);
+  });
+});
+
+// ===========================================================================
+// Hardening Row (h9): anniversary blackout — entries at 351/365/379 days
+// old are never selected, 350/380 are eligible, and the blackout is a hard
+// gate even against a maximally attractive "bait" entry (Michael's round-2
+// direct review — real selectRevisitCandidate + ANNIVERSARY_BLACKOUT_DAYS)
+// ===========================================================================
+describe('Hardening Matrix row (h9): anniversary blackout (351-379 days) excludes even a high-mood, entity-rich "bait" entry', () => {
+  it('351/365/379-day-old entries are excluded; 350/380-day-old entries are eligible; the blackout beats a bait entry\'s scoring advantage', async () => {
+    const { selectRevisitCandidate, ANNIVERSARY_BLACKOUT_DAYS, MOOD_FLOOR } = await import('../../functions/src/revisit/selectRevisits.js');
+    expect(ANNIVERSARY_BLACKOUT_DAYS).toEqual([351, 379]);
+
+    const NOW = Date.parse('2026-07-21T16:00:00.000Z');
+    const DAY_MS = 24 * 60 * 60 * 1000;
+    const daysAgo = (d) => NOW - d * DAY_MS;
+    const clean = (id, days) => ({
+      id, createdAt: daysAgo(days), safety_flagged: false, has_warning_indicators: false,
+      analysis: { mood_score: 0.7 }, tags: [], entities: [],
+    });
+
+    for (const days of [351, 365, 379]) {
+      expect(selectRevisitCandidate({ entries: [clean(`d${days}`, days)], now: NOW })).toBeNull();
+    }
+    for (const days of [350, 380]) {
+      expect(selectRevisitCandidate({ entries: [clean(`d${days}`, days)], now: NOW })?.id).toBe(`d${days}`);
+    }
+
+    // Bait fixture: a high-mood, entity/tag-rich entry sitting exactly on
+    // the anniversary must still be excluded, and a plainer-but-eligible
+    // fallback (right at MOOD_FLOOR, no tags/entities) must win — proving
+    // the blackout is a hard gate the scorer never gets to override.
+    const bait = clean('bait', 365);
+    bait.tags = ['reunion', 'good-news'];
+    bait.entities = [{ id: 'p1', name: 'Sam', category: 'person' }];
+    bait.analysis = { mood_score: 0.95 };
+    const fallback = clean('fallback', 100);
+    fallback.analysis = { mood_score: MOOD_FLOOR };
+    const result = selectRevisitCandidate({ entries: [bait, fallback], now: NOW });
+    expect(result?.id).toBe('fallback');
   });
 });

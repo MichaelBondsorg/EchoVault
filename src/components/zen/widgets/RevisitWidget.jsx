@@ -155,11 +155,16 @@ export function currentStateGateTripped(entries, nowMs = Date.now()) {
  * resolves that itself:
  *   - `status === 'queued'` — preview card (reason + Space chip + date;
  *     entry text withheld) with the full action row.
- *   - `status === 'shown'` — the user already tapped Show this session (or
- *     remounted after doing so) — render revealed (entry text visible)
- *     directly, no need to tap Show again. Local `revealed` state also
- *     drives this so the very same click that fires `markShown` reveals
- *     immediately, without waiting on the round-trip.
+ *   - `status === 'shown'` — the doc is still shown as the SAME preview card
+ *     (reason/date/Space chip, Show action present) on every fresh mount.
+ *     Entry text is rendered ONLY from session-local `localRevealed` state
+ *     (Round 2, Michael's direct review, `.superpowers/sdd/task-gr-r2-report.md`)
+ *     — it is NEVER auto-derived from `status === 'shown'` alone, so a
+ *     remount (navigate away and back, app relaunch, another device) shows
+ *     the preview again and requires a fresh tap of Show before the entry
+ *     text renders. Tapping Show on an already-`shown` doc re-reveals
+ *     locally WITHOUT re-calling `markShown` (see `handleShow`) — the
+ *     server-side status doesn't change, and no duplicate write happens.
  *   - `status === 'dismissed'` (or any other/unknown status) — render null.
  *     Absence is the correct state; no guilt/streak copy anywhere here.
  *
@@ -271,13 +276,15 @@ const RevisitWidget = ({ size = '2x1', isEditing = false, onDelete, entries = []
   // otherwise yank RevisitControls out from under the user the instant they
   // toggle off, before they've had a chance to close it themselves).
   // `status === 'shown'` is included deliberately (not just 'queued') — a
-  // remount after the user already tapped Show should show revealed content
-  // directly rather than re-hiding it. This is a deliberate product
-  // interpretation of the brief's "renders...when status 'queued'" line,
-  // adjudicated reasonable in review; the PRD sign-off note for this lands
-  // in PROJECT_STATUS.md at Task 21. `'dismissed'`/anything else is already
-  // excluded by this being an allow-list of exactly the two live statuses
-  // (no separate `!== 'dismissed'` clause needed).
+  // remount after the user already tapped Show should still show the CARD
+  // (as a preview) rather than rendering nothing, since the selection is
+  // still live and actionable (Manage/Not now/Less like this/Never show all
+  // still apply). See the module doc above and `revealed` below for why the
+  // ENTRY TEXT itself is a separate, session-local-only decision (Round 2)
+  // — this flag only controls whether the card exists at all.
+  // `'dismissed'`/anything else is already excluded by this being an
+  // allow-list of exactly the two live statuses (no separate
+  // `!== 'dismissed'` clause needed).
   //
   // GR1 (Michael's review): `!currentStateGateTripped(entries)` is the
   // client-side defense-in-depth half of the current-state gate — see that
@@ -290,7 +297,13 @@ const RevisitWidget = ({ size = '2x1', isEditing = false, onDelete, entries = []
   );
 
   const entry = cardVisible ? entries.find((e) => e.id === item.entryId) : null;
-  const revealed = cardVisible && (localRevealed || item.status === 'shown');
+  // Round 2 (Michael's direct review): entry text renders ONLY from
+  // session-local `localRevealed` — NEVER auto-derived from
+  // `item.status === 'shown'`. A fresh mount always starts unrevealed
+  // (see the `localRevealed` reset effect keyed on `item?.id`, and the
+  // fact that a full component remount re-initializes this state to
+  // `false` regardless), requiring a fresh tap of Show every session.
+  const revealed = cardVisible && localRevealed;
   const dateLabel = monthYearLabel(entry);
   const spaceName = cardVisible && contextSpacesOn && item.spaceId
     ? spaces.find((s) => s.id === item.spaceId)?.name || item.spaceId
@@ -302,8 +315,17 @@ const RevisitWidget = ({ size = '2x1', isEditing = false, onDelete, entries = []
   const handleShow = async () => {
     if (!uid || !cardVisible || showBusy) return;
     setCardError(null);
+    setLocalRevealed(true); // session-local reveal — always happens immediately
+
+    // Round 2 (Michael's direct review): if the server-side doc is already
+    // `status === 'shown'` (a prior Show this feature-lifetime, now revealed
+    // again after a remount per the memo's "fresh, session-local reveal"
+    // rule), there is nothing new to persist — avoid a duplicate
+    // `markShown` write. The reveal above already happened; this is the
+    // ENTIRE handler in that case.
+    if (item.status === 'shown') return;
+
     setShowBusy(true);
-    setLocalRevealed(true); // optimistic reveal
     try {
       await markShown(db, uid, item.id);
     } catch {
