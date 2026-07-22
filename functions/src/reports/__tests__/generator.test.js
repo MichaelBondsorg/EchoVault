@@ -343,10 +343,10 @@ describe('generateReport — entryRefs receipts + metadata (weekly, real narrati
 
   it('populates section entryRefs, excludes source-excluded entries, and stamps scope/model/promptVersion/sourceEntryCount', async () => {
     const entries = [
-      entryDoc('e1', { moodScore: 7 }),
+      entryDoc('e1', { moodScore: 0.7 }),
       entryDoc('e2', { moodScore: null }), // no mood score -> absent from mood_trend entryRefs
-      entryDoc('e3', { moodScore: 5 }),
-      entryDoc('excluded', { moodScore: 9 }), // dropped by source_exclusions
+      entryDoc('e3', { moodScore: 0.5 }),
+      entryDoc('excluded', { moodScore: 0.9 }), // dropped by source_exclusions
     ];
     const exclusions = [exclusionDoc('x1', { entryId: 'excluded', appliesTo: 'all' })];
     const db = buildFakeDb({ entries, exclusions });
