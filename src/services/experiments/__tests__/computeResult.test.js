@@ -16,6 +16,7 @@ import {
   INSUFFICIENCY_COPY,
   CI_SPANS_ZERO_COPY,
   SMALL_EFFECT_COPY,
+  STABILITY_CAVEAT_COPY,
 } from '../computeResult';
 import { getTemplateById } from '../templates';
 import { MIN_PAIRED_OBSERVATIONS, COVERAGE_FLOOR } from '../estimator';
@@ -1323,5 +1324,107 @@ describe('computeExperimentResult — practical significance / small-effect clas
     const result = computeExperimentResult({ experiment, entries, now: GOLDEN_NOW });
     expect(Math.abs(result.estimate.delta)).toBeGreaterThan(5);
     expect(result.narrative.summary).not.toContain(SMALL_EFFECT_COPY);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Final hardening review, Important 2: signConsistent wired into the
+// narrative. Sign-inconsistent fixture is the exact same hand-verified
+// exposure/outcome arithmetic as estimator.test.js's own
+// "leave-one-day-out stability" sign-flip fixture (see that file's comment
+// for the full hand-computed deltaMin/deltaMax derivation) — reused here at
+// the computeResult layer (entries -> template -> narrative) rather than the
+// raw estimator layer, since this is the layer under test.
+// ---------------------------------------------------------------------------
+
+describe('computeExperimentResult — stability caveat wired into the narrative (final hardening review, Important 2)', () => {
+  const STAB_BASE_MS = Date.UTC(2026, 10, 1); // 2026-11-01
+
+  function buildSignInconsistentEntries() {
+    const exposure = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
+    const outcome = [10, 10, 10, 10, 10, 90, 20, 20, 20, 20, 20, 20]; // 0-100 scale; /100 below for the 0-1 raw field
+    const entries = [];
+    for (let i = 0; i < 12; i++) {
+      entries.push({
+        id: `stab-${i + 1}`,
+        createdAt: isoAtOffset(STAB_BASE_MS, i),
+        healthContext: { sleep: { totalHours: exposure[i] } },
+        analysis: { mood_score: outcome[i] / 100 },
+      });
+    }
+    return entries;
+  }
+
+  it('appends STABILITY_CAVEAT_COPY to narrative.summary when signConsistent is false', () => {
+    const entries = buildSignInconsistentEntries();
+    const experiment = baseExperiment({
+      template: SLEEP_TEMPLATE,
+      startAt: new Date(STAB_BASE_MS).toISOString(),
+      endAt: new Date(STAB_BASE_MS + 12 * DAY_MS).toISOString(),
+      durationDays: 14,
+    });
+    const result = computeExperimentResult({ experiment, entries, now: new Date(STAB_BASE_MS + 30 * DAY_MS) });
+
+    expect(result.status).toBe('ok');
+    expect(result.estimate.stability.signConsistent).toBe(false);
+    expect(result.narrative.summary).toContain(STABILITY_CAVEAT_COPY);
+  });
+
+  it('does NOT append the caveat when signConsistent is true (golden fixture)', () => {
+    const entries = buildGoldenEntries();
+    const experiment = baseExperiment({ template: SLEEP_TEMPLATE, startAt: GOLDEN_START, endAt: GOLDEN_END, durationDays: 28 });
+    const result = computeExperimentResult({ experiment, entries, now: GOLDEN_NOW });
+
+    expect(result.estimate.stability.signConsistent).toBe(true);
+    expect(result.narrative.summary).not.toContain(STABILITY_CAVEAT_COPY);
+  });
+
+  it('an insufficient result carries no stability copy at all (no narrative.summary key to append to)', () => {
+    const experiment = baseExperiment({
+      template: SLEEP_TEMPLATE,
+      startAt: isoDay(2026, 3, 1, 0),
+      endAt: isoDay(2026, 3, 29, 0),
+      durationDays: 28,
+    });
+    const result = computeExperimentResult({ experiment, entries: [], now: new Date(isoDay(2026, 4, 5, 0)) });
+
+    expect(result.status).toBe('insufficient');
+    expect(result.narrative).not.toHaveProperty('summary');
+    expect(JSON.stringify(result.narrative)).not.toContain(STABILITY_CAVEAT_COPY);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Final hardening review, Important 1: receipt.computation mirrors nHigh/
+// nLow/splitThreshold/exposureContrast off the estimate so the STORED
+// receipt object itself carries the provenance fields, independent of what
+// the UI reads.
+// ---------------------------------------------------------------------------
+
+describe('computeExperimentResult — receipt.computation mirrors provenance fields (final hardening review, Important 1)', () => {
+  it('mirrors nHigh/nLow/splitThreshold/exposureContrast onto receipt.computation for an ok result', () => {
+    const entries = buildGoldenEntries();
+    const experiment = baseExperiment({ template: SLEEP_TEMPLATE, startAt: GOLDEN_START, endAt: GOLDEN_END, durationDays: 28 });
+    const result = computeExperimentResult({ experiment, entries, now: GOLDEN_NOW });
+
+    expect(result.receipt.computation).toEqual({
+      nHigh: result.estimate.nHigh,
+      nLow: result.estimate.nLow,
+      splitThreshold: result.estimate.splitThreshold,
+      exposureContrast: result.estimate.exposureContrast,
+    });
+  });
+
+  it('is absent on an insufficient result (no estimate exists to mirror)', () => {
+    const experiment = baseExperiment({
+      template: SLEEP_TEMPLATE,
+      startAt: isoDay(2026, 3, 1, 0),
+      endAt: isoDay(2026, 3, 29, 0),
+      durationDays: 28,
+    });
+    const result = computeExperimentResult({ experiment, entries: [], now: new Date(isoDay(2026, 4, 5, 0)) });
+
+    expect(result.status).toBe('insufficient');
+    expect(result.receipt).not.toHaveProperty('computation');
   });
 });

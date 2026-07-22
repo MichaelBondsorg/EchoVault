@@ -420,6 +420,91 @@ describe('normalizeStoredResult', () => {
 // Sensitive-day disclosure (Michael review hardening, item 5)
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// "How this was computed" section (final hardening review, Important 1 —
+// Michael's directive: "nHigh, nLow, the split threshold, and exposure
+// contrast in the result receipt"). These fields have existed on `estimate`
+// since EX1 but rendered nowhere until this fix.
+// ---------------------------------------------------------------------------
+
+function roundToOneDecimal(n) {
+  return Math.round(n * 10) / 10;
+}
+
+describe('ExperimentResultView — "How this was computed" section (final hardening review, Important 1)', () => {
+  it('renders nHigh/nLow, a numeric split point + unit (median mode), exposure contrast, and the positive stability line', () => {
+    const entries = buildGoldenEntries();
+    const result = computeExperimentResult({ experiment: goldenExperiment(), entries, now: GOLDEN_NOW });
+    expect(result.estimate.splitThreshold).not.toBeNull(); // sanity: median mode really produces a numeric threshold
+    expect(result.estimate.stability.signConsistent).toBe(true); // sanity: golden fixture is direction-stable
+
+    const experiment = goldenExperiment({ result });
+    render(<ExperimentResultView uid={UID} entries={entries} experiment={experiment} onClose={vi.fn()} />);
+
+    expect(screen.getByText('How this was computed')).toBeTruthy();
+    expect(screen.getByText(
+      `${result.estimate.nHigh} higher-sleep hours days vs ${result.estimate.nLow} lower-sleep hours days`,
+    )).toBeTruthy();
+    expect(screen.getByText(`Split point: ${roundToOneDecimal(result.estimate.splitThreshold)} sleep hours`)).toBeTruthy();
+    expect(screen.getByText(
+      `Contrast between the higher and lower groups: ${roundToOneDecimal(result.estimate.exposureContrast)} sleep hours`,
+    )).toBeTruthy();
+    expect(screen.getByText(
+      new RegExp(`Leaving out any single day moved the difference between ${roundToOneDecimal(result.estimate.stability.deltaMin)} and ${roundToOneDecimal(result.estimate.stability.deltaMax)} points \\(0-100\\)\\. The result held its direction when any single day was removed\\.`),
+    )).toBeTruthy();
+  });
+
+  it('renders "present vs absent" wording for a binary-split (tag-presence) result, where splitThreshold is null', () => {
+    const TAG_TEMPLATE = getTemplateById('tag-presence-mood');
+    const TAG = '@person:spencer';
+    const entries = [];
+    for (let day = 1; day <= 14; day++) {
+      entries.push({
+        id: `tag-${day}`,
+        createdAt: isoDay(2026, 8, day),
+        tags: day % 2 === 0 ? [TAG] : [],
+        analysis: { mood_score: (day % 2 === 0 ? 40 : 70) / 100 },
+      });
+    }
+    const tagExperiment = {
+      id: 'exp-tag',
+      question: 'How does this tag move with my mood?',
+      template: TAG_TEMPLATE.id,
+      analysisPlan: {
+        templateId: TAG_TEMPLATE.id,
+        lag: TAG_TEMPLATE.lag,
+        exposure: { ...TAG_TEMPLATE.exposure, tag: TAG },
+        outcome: { ...TAG_TEMPLATE.outcome },
+        minPairedObservations: 10,
+        coverageFloor: 0.5,
+        splitMode: 'binary',
+        confounders: [...TAG_TEMPLATE.confounders],
+        whatThisDoesNotProve: [...TAG_TEMPLATE.whatThisDoesNotProve],
+      },
+      scope: null,
+      status: 'completed',
+      startAt: isoDay(2026, 7, 31, 0),
+      endAt: isoDay(2026, 8, 15, 0),
+      durationDays: 14,
+      excludedObservations: [],
+      createdAt: isoDay(2026, 7, 31, 0),
+      updatedAt: isoDay(2026, 7, 31, 0),
+    };
+    const now = new Date(isoDay(2026, 9, 1, 0));
+    const result = computeExperimentResult({ experiment: tagExperiment, entries, now });
+    expect(result.status).toBe('ok');
+    expect(result.estimate.splitThreshold).toBeNull(); // sanity: binary mode really produces no numeric threshold
+
+    render(<ExperimentResultView uid={UID} entries={entries} experiment={{ ...tagExperiment, result }} onClose={vi.fn()} />);
+
+    expect(screen.getByText('Split: present vs absent')).toBeTruthy();
+    expect(screen.getByText(
+      `${result.estimate.nHigh} higher-tag presence days vs ${result.estimate.nLow} lower-tag presence days`,
+    )).toBeTruthy();
+    expect(screen.queryByText(/^Split point:/)).toBeNull();
+  });
+});
+
 describe('ExperimentResultView — sensitive-day disclosure', () => {
   it('shows the disclosure sentence and hides raw values for a sensitive paired day, keeping the Exclude toggle available', () => {
     const entries = buildGoldenEntries().map((e, i) => (i === 0 ? { ...e, safety_flagged: true } : e));

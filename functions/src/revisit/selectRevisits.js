@@ -684,12 +684,12 @@ export async function runGentleRevisitDaily(db, { now = new Date() } = {}) {
         // GR1 rule 3b: mirrors the flagged-anchor backfill above, for
         // has_warning_indicators — same far-edge-of-the-200-cap problem,
         // same fix. Composite index: firestore.indexes.json
-        // (entries: has_warning_indicators ASC, createdAt ASC). NOT YET
-        // PROVISIONED as of GR1 — see the runbook's index section; the
-        // per-user try/catch below fails this user closed (skipped, no
-        // selection) rather than selecting without this safety data if the
-        // index is missing, same behavior as the existing flagged-anchor
-        // index gap already documented there.
+        // (entries: has_warning_indicators ASC, createdAt ASC) — provisioned
+        // 2026-07-22, verified READY in production; see the runbook's index
+        // section. The per-user try/catch below still fails this user
+        // closed (skipped, no selection) rather than selecting without this
+        // safety data on any future index/query error, same behavior as the
+        // existing flagged-anchor index gap already documented there.
         db.collection(`${userBase}/entries`)
           .where('has_warning_indicators', '==', true)
           .where('createdAt', '>=', new Date(windowStartMs))

@@ -13,6 +13,7 @@ import {
   localDateKeyForMs,
   shiftLocalDateKey,
   localMidnightUtcMs,
+  STABILITY_CAVEAT_COPY,
 } from '../../services/experiments/computeResult';
 import {
   setObservationExcluded,
@@ -78,6 +79,24 @@ import { safeDate } from '../../utils/date';
  * exposure/outcome numbers — the dateKey stays visible and the
  * Exclude/Include toggle stays available (the user may exclude their own
  * sensitive day like any other).
+ *
+ * "HOW THIS WAS COMPUTED" (final hardening review, item 1 — Michael's
+ * directive: "nHigh, nLow, the split threshold, and exposure contrast in the
+ * result receipt"): these fields have existed on `estimate` since EX1's
+ * statistical hardening but rendered nowhere in this view. A compact section
+ * now surfaces `nHigh`/`nLow` (as an "N higher-X days vs M lower-X days"
+ * sentence using the template's exposure label), `splitThreshold` (the
+ * median value with the exposure's own label as its unit in median mode;
+ * literal "present vs absent" wording in binary mode, where `splitThreshold`
+ * is `null` by design — see `estimator.js`'s `binarySplit` doc comment),
+ * `exposureContrast` (in the exposure's own units), `resampleFallbackCount`
+ * (only when `> 0` — a plain sentence, omitted entirely otherwise), and the
+ * leave-one-out `stability` range (`deltaMin`..`deltaMax`), followed by
+ * either the positive "held its direction" sentence or, when
+ * `signConsistent` is `false`, the SAME `STABILITY_CAVEAT_COPY` sentence
+ * `computeResult.js`'s `buildSummary` already appended to `narrative.summary`
+ * above (final hardening review, item 2) — reused here, not re-typed. All of
+ * this reads from the STORED `estimate`, exactly like the rest of this view.
  */
 
 // Shared token -> plain-language copy map (binding: "render both uniformly,
@@ -439,6 +458,43 @@ const ExperimentResultView = ({ uid, entries = [], experiment, onClose }) => {
               <p className="text-xs text-[var(--muted-foreground)]">
                 Difference: {roundToOneDecimal(result.estimate.delta)} points (0-100) (95% range: {roundToOneDecimal(result.estimate.ci[0])} to {roundToOneDecimal(result.estimate.ci[1])})
               </p>
+            </section>
+
+            {/* IMPORTANT review fix (final hardening review, item 1 —
+                Michael's directive: "nHigh, nLow, the split threshold, and
+                exposure contrast in the result receipt"). These fields have
+                existed on `estimate` since EX1 but rendered nowhere — this
+                section surfaces them, reading from `estimate` exactly as the
+                rest of this view already does (the STORED result, not a
+                fresh computation). `receipt.computation` also mirrors the
+                four core fields (see computeResult.js) so the persisted
+                receipt object itself carries them, independent of this UI. */}
+            <section className="cloud-sheet space-y-1.5 rounded-2xl border p-4 shadow-sm">
+              <p className="font-semibold">How this was computed</p>
+              <ul className="space-y-1 text-xs text-[var(--muted-foreground)]">
+                <li>
+                  {result.estimate.nHigh} higher-{exposureLabel} days vs {result.estimate.nLow} lower-{exposureLabel} days
+                </li>
+                <li>
+                  {result.estimate.splitThreshold === null
+                    ? 'Split: present vs absent'
+                    : `Split point: ${roundToOneDecimal(result.estimate.splitThreshold)} ${exposureLabel}`}
+                </li>
+                <li>
+                  Contrast between the higher and lower groups: {roundToOneDecimal(result.estimate.exposureContrast)} {exposureLabel}
+                </li>
+                {result.estimate.resampleFallbackCount > 0 && (
+                  <li>
+                    {result.estimate.resampleFallbackCount} of the bootstrap's resamples needed a fallback split, because of how the days divided.
+                  </li>
+                )}
+                <li>
+                  Leaving out any single day moved the difference between {roundToOneDecimal(result.estimate.stability.deltaMin)} and {roundToOneDecimal(result.estimate.stability.deltaMax)} points (0-100).{' '}
+                  {result.estimate.stability.signConsistent
+                    ? 'The result held its direction when any single day was removed.'
+                    : STABILITY_CAVEAT_COPY}
+                </li>
+              </ul>
             </section>
 
             {result.narrative?.alternatives?.length > 0 && (

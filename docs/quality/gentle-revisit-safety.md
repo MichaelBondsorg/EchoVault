@@ -221,13 +221,30 @@ entries in the first place (previously flagged-only) — see rule 3's own row
 in the table above for why that's a deliberate scope widening, not merely a
 retrieval-completeness fix. **New composite index required:**
 `entries (has_warning_indicators ASC, createdAt ASC)`, added to
-`firestore.indexes.json` — **NOT YET PROVISIONED** as of this writing; see
-`docs/quality/trustworthy-capture-runbook.md`'s index-provisioning section
-for the `gcloud` command. Provisioning is required before `gentleRevisit` is
-enabled anywhere, including internal testing — without it, this query fails
-and the affected user's selection fails closed (skipped, silently, same
-behavior as the existing flagged-anchor index gap already documented in the
-runbook).
+`firestore.indexes.json` — **provisioned 2026-07-22, verified READY in
+production**; see `docs/quality/trustworthy-capture-runbook.md`'s
+index-provisioning section for the `gcloud` command used. Before
+provisioning, this query would have failed and the affected user's selection
+would have failed closed (skipped, silently, same behavior as the existing
+flagged-anchor index gap already documented in the runbook) — now that the
+index is live, that failure mode no longer applies to this specific query.
+
+**Residual completeness gap, acknowledged (final hardening review, Minor 2):**
+each anchor backfill query is still capped at 50 (`FLAGGED_ANCHOR_READ_LIMIT`/
+`WARNING_ANCHOR_READ_LIMIT`), oldest-first, on top of the main 200-cap
+recency-ordered read — so with more than 50 flagged (or warning-indicator)
+entries inside the padded window AND more than 200 total entries in that
+window, an anchor sitting in the MIDDLE of that range (too old for the main
+query's recency slice, not among the oldest 50 its own backfill query
+recovers) can fall through both reads entirely and lose its adjacency veto
+over a nearby candidate — an extreme-history corner (roughly weekly
+crisis-shaped entries sustained for a year) accepted as a known v1 gap rather
+than solved here. This does not create a new safety-flagged/warning-indicator
+entry from becoming selectable itself: rules 1/2 exclude those entries
+directly, in every case, regardless of which query found them (or whether
+any query found them at all) — the residual risk is scoped entirely to a
+*neighboring* entry's adjacency veto going unenforced, not to the flagged/
+warning entry's own exclusion.
 
 ## GR1: weekly cadence (rule 9)
 

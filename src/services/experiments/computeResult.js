@@ -211,6 +211,24 @@ export const CI_SPANS_ZERO_COPY =
 export const SMALL_EFFECT_COPY =
   'This difference is small — worth noticing, not worth reorganizing your life around.';
 
+/**
+ * Stability caveat (final hardening review — H4 wiring): appended to
+ * `narrative.summary` whenever `estimate.stability.signConsistent` is
+ * `false` — see `docs/quality/experiments-data-method.md`'s H4 row and
+ * "Fixed strings" section (this string is copied verbatim from there, per
+ * default #8's frozen-strings convention). H4 (Michael review hardening,
+ * `estimator.js`) computes `stability` but deliberately never decides how to
+ * present it — this is the narrative layer's decision, wired here. Appended
+ * AFTER every other clause (small-effect suffix included, whether or not the
+ * CI spans zero) — this is a caveat about the estimate's OWN fragility,
+ * layered on top of whatever headline was already shown, never a
+ * replacement for it. When `signConsistent` is `true`, nothing is appended —
+ * the result-view's "How this was computed" section already covers the
+ * positive case with its own stability line.
+ */
+export const STABILITY_CAVEAT_COPY =
+  'This direction was not consistent — removing a single day could flip it, so hold this result especially lightly.';
+
 // ---------------------------------------------------------------------------
 // Shared series-builder helper (the carry-forward fix from Task 3's review).
 // `preflight.js` imports `exposureValueForEntry` from here instead of
@@ -582,13 +600,25 @@ function coverageRatio(coverage) {
  * already communicates "no clear direction," and layering a second
  * "...and it's small" caveat on top of that would be redundant/confusing
  * (there is no direction for a magnitude judgment to attach to).
+ *
+ * STABILITY CAVEAT (final hardening review, H4 wiring): when
+ * `estimate.stability.signConsistent` is `false`, `STABILITY_CAVEAT_COPY` is
+ * appended after every other clause above -- regardless of whether the CI
+ * spans zero or a small-effect suffix already fired. Unlike the small-effect
+ * suffix, this one is NOT skipped when the CI spans zero: "no clear
+ * direction" (CI-spans-zero) and "the direction wasn't stable across single
+ * days" (sign-inconsistent) are two different, non-redundant observations
+ * about the same estimate. `signConsistent: true` appends nothing here --
+ * the result view's own "How this was computed" section covers the positive
+ * case.
  */
 function buildSummary({ exposureLabel, outcomeLabel, estimate, ciSpansZero }) {
-  const { delta, n } = estimate;
+  const { delta, n, stability } = estimate;
+  const stabilitySuffix = stability && stability.signConsistent === false ? ` ${STABILITY_CAVEAT_COPY}` : '';
   if (ciSpansZero) {
     return (
       `On days with more ${exposureLabel} than usual, compared to days with less ` +
-      `(based on ${n} paired days): ${CI_SPANS_ZERO_COPY} ${NON_CAUSAL_FRAMING}`
+      `(based on ${n} paired days): ${CI_SPANS_ZERO_COPY} ${NON_CAUSAL_FRAMING}${stabilitySuffix}`
     );
   }
   const direction = delta >= 0 ? 'higher' : 'lower';
@@ -596,7 +626,7 @@ function buildSummary({ exposureLabel, outcomeLabel, estimate, ciSpansZero }) {
   const smallEffectSuffix = Math.abs(delta) < SMALL_EFFECT_DELTA ? ` ${SMALL_EFFECT_COPY}` : '';
   return (
     `On days with more ${exposureLabel} than usual, ${outcomeLabel} averaged ${magnitude} points (0-100) ` +
-    `${direction} than on days with less (based on ${n} paired days). ${NON_CAUSAL_FRAMING}${smallEffectSuffix}`
+    `${direction} than on days with less (based on ${n} paired days). ${NON_CAUSAL_FRAMING}${smallEffectSuffix}${stabilitySuffix}`
   );
 }
 
@@ -717,7 +747,11 @@ function buildInsufficientResult({ coverage, reasons, windowed, pairs, experimen
  *   reasons?:string[], narrative:{summary?:string, alternatives:string[],
  *     whatThisDoesNotProve:string[], insufficiency?:string}}} `reasons` is
  *   present only when `status: 'insufficient'` (coverage-floor and/or
- *   estimator reasons — see the module doc comment).
+ *   estimator reasons — see the module doc comment). On a `status: 'ok'`
+ *   result, `receipt.computation = {nHigh, nLow, splitThreshold,
+ *   exposureContrast}` mirrors those four fields off `estimate` (final
+ *   hardening review, Important 1) — absent on an `insufficient` result,
+ *   which never has an `estimate` to mirror.
  */
 export function computeExperimentResult({ experiment, entries = [], now } = {}) {
   if (!experiment || typeof experiment !== 'object') {
@@ -915,6 +949,24 @@ export function computeExperimentResult({ experiment, entries = [], now } = {}) 
   const ciSpansZero = estimate.ci[0] <= 0 && 0 <= estimate.ci[1];
   const summary = buildSummary({ exposureLabel, outcomeLabel, estimate, ciSpansZero });
 
+  // PROVENANCE RECEIPT MIRROR (final hardening review, Important 1 — Michael's
+  // directive: "nHigh, nLow, the split threshold, and exposure contrast in the
+  // result receipt"). `receipt` (`insights/receipts.js`'s `buildReceipt`
+  // output) carries no fixed shape in `firestore.rules` (the `result` field is
+  // opaque there — verified: `experimentUpdateAllowed` only gates WHEN
+  // `result` may be written, never its internal keys), so this additive
+  // `computation` map is safe to attach. The UI (`ExperimentResultView.jsx`)
+  // still reads these four fields from `estimate` directly, as it already did
+  // before this change — this mirror exists so the STORED receipt object
+  // itself also honors the directive, independent of what the UI happens to
+  // read from.
+  receipt.computation = {
+    nHigh: estimate.nHigh,
+    nLow: estimate.nLow,
+    splitThreshold: estimate.splitThreshold,
+    exposureContrast: estimate.exposureContrast,
+  };
+
   return {
     status: 'ok',
     estimate,
@@ -934,6 +986,7 @@ export default {
   INSUFFICIENCY_COPY,
   CI_SPANS_ZERO_COPY,
   SMALL_EFFECT_COPY,
+  STABILITY_CAVEAT_COPY,
   resolveDeviceTimezone,
   localDateKeyForMs,
   pseudoMsFromDateKey,
