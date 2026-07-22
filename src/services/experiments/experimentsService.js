@@ -1,5 +1,10 @@
 /**
- * Personal Experiments — client CRUD service (R3 Task 3).
+ * Personal Experiments — client CRUD service (R3 Task 3; `getExperimentPrefs`/
+ * `markExplainerSeen` added in Task 6 for the UI's one-time explainer —
+ * co-located here rather than in a new file so every experiments-domain
+ * Firestore write, including the small `settings/experimentPrefs` doc,
+ * stays behind this one service module, per the "zero direct Firestore in
+ * UI" global constraint).
  *
  * Mirrors the `(db, uid, ...)` / ISO-string-timestamp / `subscribeX(db, uid,
  * cb, onError)` conventions established by `recipeService.js` and
@@ -57,6 +62,7 @@ import {
   updateDoc,
   deleteDoc,
   getDoc,
+  setDoc,
 } from '../../config/firebase';
 import { APP_COLLECTION_ID } from '../../config/constants';
 import { MIN_PAIRED_OBSERVATIONS, COVERAGE_FLOOR } from './estimator';
@@ -67,6 +73,10 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 
 function experimentsPath(uid) {
   return `artifacts/${APP_COLLECTION_ID}/users/${uid}/experiments`;
+}
+
+function settingsPath(uid) {
+  return `artifacts/${APP_COLLECTION_ID}/users/${uid}/settings`;
 }
 
 function nowIso() {
@@ -346,6 +356,47 @@ export async function writeResult(db, uid, experimentId, result) {
   });
 }
 
+/**
+ * Read `settings/experimentPrefs` (the revisitPrefs twin — see
+ * firestore.rules' `settingId != 'experimentPrefs'` clause comment): records
+ * only whether the user has seen the one-time "associations, not proof"
+ * explainer before their first experiment create flow. Experiments
+ * themselves are NOT tracked here (they live in their own `experiments`
+ * collection) — this doc is only the explainer flag.
+ *
+ * @param {object} db
+ * @param {string} uid
+ * @returns {Promise<{enabled: boolean}>} `enabled: false` (not yet seen)
+ *   when the doc doesn't exist.
+ */
+export async function getExperimentPrefs(db, uid) {
+  const snap = await getDoc(doc(db, settingsPath(uid), 'experimentPrefs'));
+  if (!snap.exists()) return { enabled: false };
+  const data = snap.data() || {};
+  return { enabled: data.enabled === true };
+}
+
+/**
+ * Mark the one-time "associations, not proof" explainer as seen. Mirrors
+ * `revisitService.js`'s `setRevisitEnabled(true)` first-opt-in-timestamp
+ * convention: `optInAt` is set only once (preserved across repeat calls,
+ * never overwritten to a later "last seen" time) via `merge: true` +
+ * checking the existing doc first.
+ *
+ * @param {object} db
+ * @param {string} uid
+ */
+export async function markExplainerSeen(db, uid) {
+  const prefsRef = doc(db, settingsPath(uid), 'experimentPrefs');
+  const existing = await getDoc(prefsRef);
+  const now = nowIso();
+  const payload = { enabled: true, updatedAt: now };
+  if (!existing.exists() || !existing.data()?.optInAt) {
+    payload.optInAt = now;
+  }
+  await setDoc(prefsRef, payload, { merge: true });
+}
+
 export default {
   buildAnalysisPlan,
   subscribeExperiments,
@@ -357,4 +408,6 @@ export default {
   deleteExperiment,
   setObservationExcluded,
   writeResult,
+  getExperimentPrefs,
+  markExplainerSeen,
 };

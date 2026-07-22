@@ -66,6 +66,7 @@ const SettingsPage = ({
   onOpenControlCenter,
   onOpenRecipes,
   onOpenSessionPrep,
+  onOpenExperiments,
   onRequestNotifications,
   onLogout,
   notificationPermission,
@@ -331,11 +332,22 @@ const SettingsPage = ({
     onClick: () => setShowRevisitControls(true),
   };
 
+  // Personal Experiments (flag: personalExperiments, R3 Task 6) — explore a
+  // personally meaningful relationship in your own data (an association,
+  // never proof). Flag-gated: filtered out entirely when off, same
+  // convention as `contextSpacesItem`/`recipesItem` above.
+  const experimentsItem = {
+    label: 'Experiments',
+    description: 'Explore a pattern in your own data',
+    onClick: onOpenExperiments,
+  };
+
   const appNavRows = [
     getFlag('contextSpaces') && contextSpacesItem,
     getFlag('reflectionRecipes') && recipesItem,
     getFlag('sessionPrep') && sessionPrepItem,
     getFlag('gentleRevisit') && revisitItem,
+    getFlag('personalExperiments') && experimentsItem,
     notificationsItem,
   ].filter(Boolean);
 

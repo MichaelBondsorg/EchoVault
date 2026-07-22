@@ -27,6 +27,7 @@ import SpaceManager from '../spaces/SpaceManager';
 import InsightControlCenter from '../insights/InsightControlCenter';
 import RecipesScreen from '../reflections/RecipesScreen';
 import SessionPrepScreen from '../reflections/SessionPrepScreen';
+import ExperimentsScreen from '../experiments/ExperimentsScreen';
 import { getFlag } from '../../config/flags';
 
 /**
@@ -107,6 +108,7 @@ const AppLayout = ({
   const [showControlCenter, setShowControlCenter] = useState(false);
   const [showRecipes, setShowRecipes] = useState(false);
   const [showSessionPrep, setShowSessionPrep] = useState(false);
+  const [showExperiments, setShowExperiments] = useState(false);
   const [entryMode, setEntryMode] = useState('text'); // 'voice' or 'text'
   const [isFreshEntry, setIsFreshEntry] = useState(true); // true = FAB entry, false = responding to prompt
   const [currentPrompt, setCurrentPrompt] = useState(null); // Track prompt being answered for auto-dismiss
@@ -439,6 +441,7 @@ const AppLayout = ({
                 onOpenControlCenter={() => setShowControlCenter(true)}
                 onOpenRecipes={() => setShowRecipes(true)}
                 onOpenSessionPrep={() => setShowSessionPrep(true)}
+                onOpenExperiments={() => setShowExperiments(true)}
                 onOpenSafetyPlan={onShowSafetyPlan}
                 onOpenExport={onShowExport}
                 onRequestNotifications={onRequestNotifications}
@@ -608,6 +611,28 @@ const AppLayout = ({
           uid={user?.uid}
           entries={entries}
           onClose={() => setShowSessionPrep(false)}
+        />
+      )}
+
+      {/* Personal Experiments (R3 Task 6) — double-gated on the flag (not
+          just the nav row that's the only way to flip showExperiments
+          true), mirroring Reflection Recipes'/Session Prep's own mount
+          sites above. `onShowSafetyPlan` is the existing crisis-decline
+          surface reuse (App.jsx's real SafetyPlanScreen, already wired
+          through this prop for every other safety-plan entry point in this
+          file — see `onShowSafetyPlan={() => setShowSafetyPlan(true)}` at
+          the top-level call site); `onOpenRecipes` is the medical-decline
+          "Reflection Recipe" CTA, reusing the same `setShowRecipes` state
+          RecipesScreen's own mount site above uses. Both close the
+          Experiments screen first so only one full-screen overlay is ever
+          visible at a time. */}
+      {getFlag('personalExperiments') && showExperiments && (
+        <ExperimentsScreen
+          uid={user?.uid}
+          entries={entries}
+          onClose={() => setShowExperiments(false)}
+          onShowSafetyPlan={() => { setShowExperiments(false); onShowSafetyPlan?.(); }}
+          onOpenRecipes={() => { setShowExperiments(false); setShowRecipes(true); }}
         />
       )}
 

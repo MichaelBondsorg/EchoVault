@@ -17,6 +17,7 @@ const mocks = {
   updateDoc: vi.fn(async () => {}),
   deleteDoc: vi.fn(async () => {}),
   getDoc: vi.fn(async () => ({ exists: () => false, data: () => undefined })),
+  setDoc: vi.fn(async () => {}),
 };
 
 vi.mock('../../../config/firebase', () => mocks);
@@ -33,6 +34,8 @@ const {
   deleteExperiment,
   setObservationExcluded,
   writeResult,
+  getExperimentPrefs,
+  markExplainerSeen,
 } = await import('../experimentsService.js');
 
 const { MIN_PAIRED_OBSERVATIONS, COVERAGE_FLOOR } = await import('../estimator.js');
@@ -394,5 +397,40 @@ describe('writeResult — sets result + status:completed in one update', () => {
   it('rejects a non-object result', async () => {
     await expect(writeResult(db, UID, 'exp-1', null)).rejects.toThrow();
     await expect(writeResult(db, UID, 'exp-1', 'not an object')).rejects.toThrow();
+  });
+});
+
+describe('getExperimentPrefs / markExplainerSeen — settings/experimentPrefs (revisitPrefs twin)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('getExperimentPrefs returns {enabled:false} when the doc does not exist', async () => {
+    mocks.getDoc.mockResolvedValue({ exists: () => false, data: () => undefined });
+    await expect(getExperimentPrefs(db, UID)).resolves.toEqual({ enabled: false });
+  });
+
+  it('getExperimentPrefs reads {enabled:true} from an existing doc', async () => {
+    mocks.getDoc.mockResolvedValue({ exists: () => true, data: () => ({ enabled: true, optInAt: 'x' }) });
+    await expect(getExperimentPrefs(db, UID)).resolves.toEqual({ enabled: true });
+  });
+
+  it('markExplainerSeen writes exactly {enabled:true, optInAt, updatedAt} on first call (rules hasOnly)', async () => {
+    mocks.getDoc.mockResolvedValue({ exists: () => false, data: () => undefined });
+    await markExplainerSeen(db, UID);
+    expect(mocks.setDoc).toHaveBeenCalledTimes(1);
+    const [ref, payload, opts] = mocks.setDoc.mock.calls[0];
+    expect(ref.__doc).toBe(`artifacts/echo-vault-v5-fresh/users/${UID}/settings/experimentPrefs`);
+    expect(Object.keys(payload).sort()).toEqual(['enabled', 'optInAt', 'updatedAt']);
+    expect(payload.enabled).toBe(true);
+    expect(opts).toEqual({ merge: true });
+  });
+
+  it('markExplainerSeen never overwrites an existing optInAt on a repeat call', async () => {
+    mocks.getDoc.mockResolvedValue({ exists: () => true, data: () => ({ enabled: true, optInAt: 'first-time' }) });
+    await markExplainerSeen(db, UID);
+    const payload = mocks.setDoc.mock.calls[0][1];
+    expect(Object.keys(payload).sort()).toEqual(['enabled', 'updatedAt']);
+    expect(payload.optInAt).toBeUndefined();
   });
 });
