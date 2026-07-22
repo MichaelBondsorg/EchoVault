@@ -141,7 +141,7 @@ function sleepEntries(n) {
       id: `entry-${i}`,
       createdAt: isoDaysAgo(i),
       healthContext: { sleep: { totalHours: 7 + (i % 3) } },
-      analysis: { mood_score: 60 + (i % 20) },
+      analysis: { mood_score: (60 + (i % 20)) / 100 },
       tags: [],
     });
   }
