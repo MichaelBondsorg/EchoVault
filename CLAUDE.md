@@ -619,7 +619,18 @@ Gentle Revisit is a server-side, no-LLM heuristic job
 suppressed by `revisit_exclusions` — it **stays internal until Michael signs
 off `docs/quality/gentle-revisit-safety.md`**, a hard PRD safety gate on top
 of the flag itself (the flag also gates the server job). R1's offline
-`spaceId` gap above is now closed. Full detail: runbook's "R2 flags" section.
+`spaceId` gap above is now closed. **R3 (Personal Experiments)** adds one
+more flag, `personalExperiments` (default OFF, entirely client-side —
+`src/services/experiments/{templates,questionGate,estimator,computeResult,
+experimentsService,preflight}.js`, UI in `src/components/experiments/`),
+binding two hard invariants — plan-freeze (`question`/`analysisPlan`/
+`template`/`scope`/`createdAt` immutable once an experiment leaves `draft`,
+enforced independently in `firestore.rules` and `experimentsService.js`) and
+coverage-floor/insufficiency (below 10 paired days or 50% per-variable
+coverage, a result is `insufficient` with no estimate at all) — and, like
+Gentle Revisit, **stays OFF until Michael signs off
+`docs/quality/experiments-data-method.md`**. Full detail: runbook's "R2
+flags"/"R3 flag" sections.
 
 ## Crash Reporting
 

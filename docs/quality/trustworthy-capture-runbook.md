@@ -556,3 +556,80 @@ build + physical-device sanity check — see
 (`PROJECT_STATUS.md` Active Work); it has not yet been run as of this
 writing, so `voiceChapters` should not default on for native users until it
 has.
+
+## R3 flag (Personal Experiments)
+
+The R3 plan (`docs/superpowers/plans/2026-07-22-r3-personal-experiments.md`,
+batches R3-1..R3-4) shipped one more client flag — `personalExperiments`,
+**default OFF**, independent of every flag above. Same mechanism as the rest
+of this doc: `config/flags` Firestore doc, no deploy required,
+`src/config/flags.js` `FLAG_DEFAULTS`.
+
+**DATA-METHOD SIGN-OFF GATE (non-negotiable, gentleRevisit's twin):**
+`docs/quality/experiments-data-method.md` must be read and signed off by
+Michael (the checkbox under that doc's "Sign-off" heading) **BEFORE
+`personalExperiments` is EVER flipped on, including for internal testing.**
+This mirrors `gentleRevisit`'s safety-memo gate exactly: the flag mechanism
+alone is not sufficient permission to enable this surface, because the memo
+is where the actual statistical-design judgment call lives (minimum paired
+observations, coverage floor, median-split-and-bootstrap vs. Pearson,
+outlier handling) — code enforces whatever the memo says, but only a human
+can decide the memo says the right thing for a mental-health app's users. An
+agent must never check that box on Michael's behalf.
+
+| Flag | Default | What it enables | Turning it OFF restores | Verification |
+|---|---|---|---|---|
+| `personalExperiments` | `false` | The "Experiments" nav row (Settings/AppLayout, double-gated `personalExperiments` — RecipesScreen mount precedent) and `ExperimentsScreen`/`ExperimentResultView` (`src/components/experiments/`): create a 14/28-day observational experiment from a template catalog (`src/services/experiments/templates.js`) or a free-text question screened by `questionGate.js`, an explicit Start that freezes the analysis plan, a running/paused card with data-coverage-not-streak copy, and a result view (estimate + CI, plain-language non-causal narrative, observation inspector with exclude/rerun). **ALL data storage and computation is client-side** — no scheduled Cloud Function, no server trigger, no LLM/provider call anywhere in the pipeline (decision 4: `computeResult.js`'s pure `computeExperimentResult` runs in the browser/app from the user's own already-loaded entries; the result narrative is template-composed fixed strings with slotted numbers, never model-generated). **No new composite index needed** — verified by grepping `src/services/experiments/*.js` for `where(`: zero hits. `subscribeExperiments` (`experimentsService.js`) is a plain `collection(...).orderBy('createdAt', 'desc')` subscribe with no `where()` clause, which Firestore's automatic single-field indexing covers without any manual `gcloud firestore indexes composite create` step — unlike the three R2 indexes below, which DO require one. | Nav row disappears; no way to create, view, or run an experiment. Existing `experiments/*` docs (any created while the flag was on, e.g. during internal testing) are untouched in Firestore — they simply become unreachable from the UI until the flag flips back on, at which point `subscribeExperiments` immediately re-surfaces them exactly as left, including any already-computed `result`. The client-side auto-completion effect (see below) also stops running while the flag is off, so an experiment whose `endAt` elapses during that window simply waits — it auto-completes on the next render after the flag (and screen) is live again, not lost. | `src/__tests__/validationMatrix.test.js` R3 rows (a)-(g); `src/services/experiments/__tests__/{questionGate,estimator,computeResult,experimentsService,templates,preflight}.test.js`; `src/components/experiments/__tests__/{ExperimentsScreen,ExperimentResultView}.test.jsx`. **Extra gate, non-negotiable:** read and sign off `docs/quality/experiments-data-method.md` before this flag is EVER flipped on outside internal testing — see above. |
+
+**Plan-freeze enforcement, both layers.** `question`/`analysisPlan`/
+`template`/`scope`/`createdAt` are immutable on an `/experiments/{id}` doc
+once created — enforced in `firestore.rules`
+(`experimentUpdateAllowed`/`experimentTransitionAllowed`: those five keys
+are simply absent from the update `affectedKeys` allow-list, so no client
+write can ever touch them post-create, running or not) AND, independently,
+client-side in `experimentsService.js` (no function past `createExperiment`
+accepts or writes any of those five fields at all — see R3 validation
+matrix row (b), which pins this structurally rather than by probing the
+rules). The rules half rides the same CI-only path as every other rules
+suite in this repo (`functions/src/__tests__/firestoreRules.test.js`,
+excluded from local `npm test`, runs only via `firebase emulators:exec` in
+CI) — it is not re-executed by the client-side row above; the two layers are
+deliberately redundant, not substitutes for each other.
+
+**Insufficiency is a first-class result state, not a placeholder.** Below
+either spec threshold (`MIN_PAIRED_OBSERVATIONS = 10` paired days,
+`COVERAGE_FLOOR = 0.5` per-variable coverage — both defined once in
+`src/services/experiments/estimator.js` and imported everywhere else that
+needs them, never re-hardcoded), `computeExperimentResult` returns
+`status: 'insufficient'` with NO `estimate`/`narrative.summary` keys at
+all (true key absence, not `undefined` — payload-exactness) — the UI renders
+only the fixed insufficiency copy, nothing estimate-shaped. Both `ok` and
+`insufficient` results carry a receipt (`versions.generator:
+'experiment_v1'`), matching the R2 receipt invariant's posture that every
+computed result is inspectable regardless of outcome.
+
+**Safety: flagged entries count in stats, never in citations.** An entry
+with `safety_flagged`/`has_warning_indicators` set still contributes its
+data point to the estimate (excluding it would bias the mood estimate away
+from exactly the days that matter most) but is filtered out of
+`receipt.sources` entirely — id and excerpt both — matching Session Prep
+export's posture from R2. See R3 validation matrix row (g).
+
+**Execution-time decisions made during the build (not in the original 8
+plan decisions — see `PROJECT_STATUS.md` Recent Decisions for the full
+rationale of each):** (i) `paused -> completed` is a legal transition
+(`firestore.rules`' `experimentTransitionAllowed`) alongside `running ->
+completed`, since v1's variables are all passive/computed-from-existing-data
+— pausing never blocks the underlying data from continuing to exist; (ii)
+`ExperimentsScreen.jsx` auto-completes an elapsed `running`/`paused`
+experiment on view (client-side, best-effort, `completingRef`-guarded
+against duplicate writes, covered by
+`ExperimentsScreen.test.jsx`'s "auto-completion" describe block) — a
+deliberate design choice this task made since decision #4 commits to
+"no scheduled function," so completion has to happen somewhere client-side;
+(iii) a result's non-causal-wording caveats (`confounders`,
+`whatThisDoesNotProve`) are snapshotted onto `analysisPlan` at create time
+(`experimentsService.buildAnalysisPlan`), not re-looked-up from the template
+catalog at result time — so a later wording edit to the catalog (or a
+template's removal) can never silently change or blank out the safety text
+an already-`completed` result shows.

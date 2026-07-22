@@ -23,6 +23,23 @@
  * orchestrator.receipts.test.js / orchestrator.exclusions.test.js (Task 8/10's
  * own dedicated test files) already establish, so Layer 1 pattern detection
  * and the orchestrator's own entity-correlation math stay genuinely real.
+ *
+ * R3 rows (a)-(g), appended below R2 row (h), cover
+ * docs/superpowers/plans/2026-07-22-r3-personal-experiments.md (Task 7).
+ * `src/services/experiments/{questionGate,estimator,computeResult}.js` and
+ * their import graph (`templates.js`, `spaces/scopeFilter.js`,
+ * `insights/receipts.js`, `health/healthFormatter.js`,
+ * `environment/environmentFormatter.js`, `safety/index.js`) are entirely
+ * Firebase-free — verified by reading every file in that graph — so rows
+ * (a), (c), (d), (f), (g) import and call them directly with zero additional
+ * mocking, exactly like their own dedicated test files
+ * (questionGate.test.js, estimator.test.js, computeResult.test.js). Rows (b)
+ * and (e) exercise the real `experimentsService.js` against this file's
+ * existing shared `config/firebase` mock (same resolved module
+ * `src/config/firebase.js` that `experimentsService.js`'s
+ * `'../../config/firebase'` import resolves to) — `deleteDoc` was added to
+ * `firestoreMocks` above for this module's import graph; no row here calls
+ * `deleteExperiment`, so it is otherwise inert.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import React from 'react';
@@ -133,6 +150,7 @@ const firestoreMocks = {
   onSnapshot: vi.fn(() => () => {}),
   addDoc: vi.fn(async () => ({ id: 'auto-id' })),
   updateDoc: vi.fn(async () => {}),
+  deleteDoc: vi.fn(async () => {}),
   getDoc: vi.fn(async () => ({ exists: () => false, data: () => undefined })),
   getDocs: vi.fn(async () => ({ docs: [] })),
   setDoc: vi.fn(async () => {}),
@@ -1479,5 +1497,466 @@ describe('R2 Matrix row (h): budget day-cap honored across a simulated midnight 
     // was recorded) — this isolates the gate re-evaluating against a fresh
     // `now`, which is exactly what the live tick exists to trigger.
     expect(applyInsightBudget(candidate(), { mode: 'quiet', shownLog, now: Date.now() }).map((i) => i.id)).toEqual(['candidate']);
+  });
+});
+
+// ===========================================================================
+// R3 shared fixture helpers (Personal Experiments, plan Task 7)
+// ===========================================================================
+
+const R3_DAY_MS = 24 * 60 * 60 * 1000;
+
+function r3IsoDay(y, m, d, hour = 12) {
+  return new Date(Date.UTC(y, m - 1, d, hour)).toISOString();
+}
+
+function r3DateKeyFor(y, m, d) {
+  return r3IsoDay(y, m, d, 0).slice(0, 10);
+}
+
+/**
+ * Local stand-in for `experimentsService.buildAnalysisPlan` (identical
+ * output shape) — deliberately not imported from that module for rows (c),
+ * (d), (f), (g): those rows exercise the Firebase-free estimator/computeResult
+ * pipeline directly (like `computeResult.test.js` itself), so they stay
+ * decoupled from experimentsService's Firestore import graph. Rows (b)/(e)
+ * DO import the real `experimentsService.js` (see the file-level R3 comment
+ * above for why that's safe against this file's shared `config/firebase`
+ * mock).
+ */
+function r3AnalysisPlan(template, params = {}) {
+  const exposure = { ...template.exposure };
+  if (template.exposure.source === 'tags') exposure.tag = params.tag;
+  return {
+    templateId: template.id,
+    lag: template.lag,
+    exposure,
+    outcome: { ...template.outcome },
+    confounders: [...(template.confounders || [])],
+    whatThisDoesNotProve: [...(template.whatThisDoesNotProve || [])],
+  };
+}
+
+function r3BaseExperiment({ template, params = {}, startAt, endAt, durationDays, excludedObservations = [], scope = null }) {
+  return {
+    id: 'r3-exp-test',
+    question: 'test question',
+    template: template.id,
+    analysisPlan: r3AnalysisPlan(template, params),
+    scope,
+    status: 'running',
+    startAt,
+    endAt,
+    durationDays,
+    excludedObservations,
+    createdAt: startAt,
+    updatedAt: startAt,
+  };
+}
+
+// ===========================================================================
+// R3 Row (a): unsafe-question fixture set declined 100% (real questionGate)
+// ===========================================================================
+describe('R3 Matrix row (a): unsafe-question fixture set declined 100% — real questionGate', () => {
+  // Representative subset of questionGate.test.js's own adversarial fixture
+  // groups (not re-exported from that test file, so reproduced here rather
+  // than imported — see that file for the full ~40-fixture set and its
+  // per-pattern rationale comments). DOSE_CHANGE below is the exact family
+  // added by the Task 4 CRITICAL review-round-2 fix (dose-change verb +
+  // dose-noun co-occurrence, in either word order, without naming a specific
+  // drug) — included in full, not just a sample, per this row's brief.
+  const OBVIOUS_MEDICAL = [
+    "What's the right dosage of Zoloft for me?",
+    'Do I have bipolar disorder?',
+    'Should I stop taking my antidepressants?',
+    'Is it safe to taper off Xanax on my own?',
+    'Can you diagnose me with ADHD based on my entries?',
+  ];
+  const OBLIQUE_MEDICAL = [
+    'Would journaling more mean I need less of my prescription?',
+    'Does my mood improve on days I skip my morning meds?',
+    'Could stopping my SSRI be affecting my sleep?',
+    'Am I manic or just having a good week?',
+  ];
+  const DOSE_CHANGE_MEDICAL = [
+    'does cutting my dose improve my mood?',
+    'since halving the white pills',
+    'halved my pills this week, mood better?',
+    'should I lower my dose?',
+    'increasing my dose lately, does that track with mood?',
+    'reducing how much medicine I take, mood impact?',
+  ];
+  const CRISIS = [
+    'Does exercise change how often I think about suicide?',
+    "Do I feel more hopeless on days I don't get sunshine?",
+    'Is there a pattern between poor sleep and wanting to hurt myself?',
+    'Do my steps go down on the days I want to give up?',
+  ];
+  const CRISIS_AND_MEDICAL = ['Should I stop taking my antidepressants because I want to die?'];
+  const BENIGN = [
+    "I'm sick of meetings -- does that affect my mood?",
+    'My job is killing my vibe lately.',
+    'Does more sleep improve my mood?',
+    "I'm increasing my exercise minutes this week -- does that affect my mood?",
+    'I did medicine-ball workouts today -- does that affect my mood?',
+  ];
+
+  it('every unsafe fixture (obvious/oblique/dose-change/crisis) declines with a non-ok verdict — 100%, zero misses', async () => {
+    const { screenQuestion } = await import('../services/experiments/questionGate.js');
+    const unsafe = [...OBVIOUS_MEDICAL, ...OBLIQUE_MEDICAL, ...DOSE_CHANGE_MEDICAL, ...CRISIS, ...CRISIS_AND_MEDICAL];
+    for (const text of unsafe) {
+      const { verdict } = screenQuestion(text);
+      expect(verdict, `expected "${text}" to be declined, got verdict "${verdict}"`).not.toBe('ok');
+    }
+  });
+
+  it('crisis wins priority over medical on text that trips both patterns', async () => {
+    const { screenQuestion } = await import('../services/experiments/questionGate.js');
+    for (const text of CRISIS_AND_MEDICAL) {
+      expect(screenQuestion(text).verdict).toBe('crisis');
+    }
+  });
+
+  it('mutation guard: the benign control set still passes ok — proves the 100% above is a real filter, not a "decline everything" stub', async () => {
+    const { screenQuestion } = await import('../services/experiments/questionGate.js');
+    for (const text of BENIGN) {
+      expect(screenQuestion(text).verdict, `expected "${text}" to pass ok`).toBe('ok');
+    }
+  });
+});
+
+// ===========================================================================
+// R3 Row (b): plan fields immutable service-side after start (real
+// experimentsService against mocked-firebase write capture)
+// ===========================================================================
+describe('R3 Matrix row (b): plan fields immutable service-side after start — real experimentsService', () => {
+  // NOTE on scope: firestore.rules' experimentUpdateAllowed (question/
+  // template/analysisPlan/scope/createdAt are simply absent from its
+  // affectedKeys allow-list) is the actual server-authoritative enforcement
+  // of plan-freeze, and is exercised by
+  // functions/src/__tests__/firestoreRules.test.js — a CI-only executor per
+  // the plan's Global Constraints, not runnable from this Vitest suite. What
+  // THIS row pins is the client contract: experimentsService.js has no code
+  // path, anywhere past `createExperiment`, that ever includes
+  // question/template/analysisPlan/scope/createdAt in an update payload —
+  // so even a compromised/buggy caller of this service cannot construct a
+  // write that would need the rules layer to reject it for those fields.
+  const FROZEN_KEYS = ['question', 'template', 'analysisPlan', 'scope', 'createdAt'];
+  const UID = 'user-r3-freeze';
+
+  beforeEach(async () => {
+    const { getTemplateById } = await import('../services/experiments/templates.js');
+    firestoreMocks.getDoc.mockResolvedValue({
+      exists: () => true,
+      data: () => ({
+        status: 'running',
+        excludedObservations: [],
+        analysisPlan: r3AnalysisPlan(getTemplateById('sleep-hours-mood-same-day')),
+      }),
+    });
+  });
+
+  it('createExperiment -> startExperiment -> pause/resume/setObservationExcluded/writeResult (a legal running->completed->completed-rerun sequence): no post-create update payload ever includes a frozen key', async () => {
+    const {
+      createExperiment,
+      startExperiment,
+      pauseExperiment,
+      resumeExperiment,
+      setObservationExcluded,
+      writeResult,
+    } = await import('../services/experiments/experimentsService.js');
+    const { getTemplateById } = await import('../services/experiments/templates.js');
+
+    const template = getTemplateById('sleep-hours-mood-same-day');
+    const created = await createExperiment({}, UID, {
+      question: 'Does sleep affect my mood?',
+      template: template.id,
+      analysisPlan: r3AnalysisPlan(template),
+      durationDays: 14,
+    });
+    // Sanity: create IS allowed to write the plan fields (draft-time only).
+    const createPayload = firestoreMocks.addDoc.mock.calls[0][1];
+    expect(createPayload.question).toBeTruthy();
+    expect(createPayload.analysisPlan).toBeTruthy();
+
+    firestoreMocks.updateDoc.mockClear();
+    // Legal transition chain per firestore.rules' experimentTransitionAllowed
+    // (draft->running->paused->running->completed->completed-rerun) — the
+    // service itself does not gate transitions (that's the rules layer, see
+    // the describe-level comment above), but staying on a legal chain keeps
+    // this row representative of a real client sequence rather than an
+    // artificial one.
+    await startExperiment({}, UID, created.id, 14, new Date('2026-07-22T00:00:00.000Z'));
+    await pauseExperiment({}, UID, created.id);
+    await resumeExperiment({}, UID, created.id);
+    await setObservationExcluded({}, UID, created.id, '2026-07-23', true);
+    await writeResult({}, UID, created.id, { status: 'ok' });
+    await setObservationExcluded({}, UID, created.id, '2026-07-24', true); // completed-rerun case
+
+    expect(firestoreMocks.updateDoc.mock.calls.length).toBeGreaterThanOrEqual(5);
+    for (const [, payload] of firestoreMocks.updateDoc.mock.calls) {
+      for (const key of FROZEN_KEYS) {
+        expect(payload).not.toHaveProperty(key);
+      }
+    }
+    // startExperiment's own payload is exactly the freeze-moment fields —
+    // the ONLY call in this sequence that touches startAt/endAt.
+    const startPayload = firestoreMocks.updateDoc.mock.calls[0][1];
+    expect(Object.keys(startPayload).sort()).toEqual(['endAt', 'startAt', 'status', 'updatedAt']);
+  });
+});
+
+// ===========================================================================
+// R3 Row (c): insufficiency below spec thresholds yields no estimate (real
+// estimator + real computeResult boundary fixtures — 9-pairs AND
+// coverage-below-floor)
+// ===========================================================================
+describe('R3 Matrix row (c): insufficiency below spec thresholds yields no estimate', () => {
+  it('estimator boundary: exactly 9 paired days is insufficient (no estimate key); exactly 10 is ok', async () => {
+    const { pairObservations, runAnalysisPlan, MIN_PAIRED_OBSERVATIONS } = await import('../services/experiments/estimator.js');
+    expect(MIN_PAIRED_OBSERVATIONS).toBe(10);
+
+    const exposureSeries = [];
+    const outcomeSeries = [];
+    for (let i = 1; i <= 10; i++) {
+      const dateKey = r3DateKeyFor(2026, 3, i);
+      exposureSeries.push({ dateKey, value: i });
+      outcomeSeries.push({ dateKey, value: i * 10 });
+    }
+
+    const ninePairs = pairObservations({ exposureSeries: exposureSeries.slice(0, 9), outcomeSeries: outcomeSeries.slice(0, 9), lag: 0 });
+    expect(ninePairs).toHaveLength(9);
+    const insufficientResult = runAnalysisPlan({ pairs: ninePairs, plan: { lag: 0 }, seed: 1 });
+    expect(insufficientResult.status).toBe('insufficient');
+    expect(insufficientResult.reasons).toContain('insufficient_paired_observations');
+    expect(insufficientResult).not.toHaveProperty('estimate');
+
+    const tenPairs = pairObservations({ exposureSeries, outcomeSeries, lag: 0 });
+    expect(tenPairs).toHaveLength(10);
+    const okResult = runAnalysisPlan({ pairs: tenPairs, plan: { lag: 0 }, seed: 1 });
+    expect(okResult.status).toBe('ok');
+    expect(okResult.estimate.n).toBe(10);
+  });
+
+  it('computeResult boundary (Task 5 Critical fix): 12 of 60 exposure days (20%) clears MIN_PAIRED_OBSERVATIONS on raw count but fails the 50% coverage floor -> insufficient, no estimate', async () => {
+    const { computeExperimentResult } = await import('../services/experiments/computeResult.js');
+    const { getTemplateById } = await import('../services/experiments/templates.js');
+    const { COVERAGE_FLOOR } = await import('../services/experiments/estimator.js');
+    expect(COVERAGE_FLOOR).toBe(0.5);
+
+    const template = getTemplateById('sleep-hours-mood-same-day');
+    const baseMs = Date.UTC(2027, 5, 1);
+    const entries = [];
+    for (let i = 0; i < 60; i++) {
+      entries.push({
+        id: `r3-sparse-${i + 1}`,
+        createdAt: new Date(baseMs + i * R3_DAY_MS + 12 * 60 * 60 * 1000).toISOString(),
+        healthContext: i < 12 ? { sleep: { totalHours: 6 + (i % 3) } } : undefined,
+        analysis: { mood_score: 50 + (i % 10) },
+      });
+    }
+    const experiment = r3BaseExperiment({
+      template,
+      startAt: new Date(baseMs).toISOString(),
+      endAt: new Date(baseMs + 60 * R3_DAY_MS).toISOString(),
+      durationDays: 60,
+    });
+    const now = new Date(baseMs + 90 * R3_DAY_MS);
+
+    const result = computeExperimentResult({ experiment, entries, now });
+
+    expect(result.status).toBe('insufficient');
+    expect(result.coverage.exposure).toEqual({ covered: 12, total: 60, label: '12 of 60 days' });
+    expect(result.reasons).toEqual(['exposure_coverage_below_floor']);
+    expect(result).not.toHaveProperty('estimate');
+    expect(result.narrative).not.toHaveProperty('summary');
+  });
+});
+
+// ===========================================================================
+// R3 Row (d): every result — ok and insufficient — carries a receipt with
+// generator 'experiment_v1'
+// ===========================================================================
+describe('R3 Matrix row (d): every result carries a receipt with generator experiment_v1, ok and insufficient alike', () => {
+  it('an ok result and an insufficient result both carry a truthy receipt stamped generator: experiment_v1', async () => {
+    const { computeExperimentResult } = await import('../services/experiments/computeResult.js');
+    const { getTemplateById } = await import('../services/experiments/templates.js');
+    const template = getTemplateById('sleep-hours-mood-same-day');
+
+    // ok: 14 days, perfect linear sleep -> mood.
+    const okEntries = [];
+    for (let i = 0; i < 14; i++) {
+      okEntries.push({
+        id: `r3-ok-${i + 1}`,
+        createdAt: r3IsoDay(2026, 4, i + 1),
+        healthContext: { sleep: { totalHours: 4 + i } },
+        analysis: { mood_score: 50 + i },
+      });
+    }
+    const okExperiment = r3BaseExperiment({
+      template,
+      startAt: r3IsoDay(2026, 4, 1, 0),
+      endAt: r3IsoDay(2026, 4, 15, 0),
+      durationDays: 14,
+    });
+    const okResult = computeExperimentResult({ experiment: okExperiment, entries: okEntries, now: new Date(r3IsoDay(2026, 5, 1)) });
+    expect(okResult.status).toBe('ok');
+    expect(okResult.receipt).toBeTruthy();
+    expect(okResult.receipt.versions.generator).toBe('experiment_v1');
+    expect(Array.isArray(okResult.receipt.sources)).toBe(true);
+
+    // insufficient: only 5 days, well below MIN_PAIRED_OBSERVATIONS.
+    const fewEntries = okEntries.slice(0, 5);
+    const fewExperiment = r3BaseExperiment({
+      template,
+      startAt: r3IsoDay(2026, 4, 1, 0),
+      endAt: r3IsoDay(2026, 4, 6, 0),
+      durationDays: 14,
+    });
+    const insufficientResult = computeExperimentResult({ experiment: fewExperiment, entries: fewEntries, now: new Date(r3IsoDay(2026, 5, 1)) });
+    expect(insufficientResult.status).toBe('insufficient');
+    expect(insufficientResult.receipt).toBeTruthy();
+    expect(insufficientResult.receipt.versions.generator).toBe('experiment_v1');
+    expect(Array.isArray(insufficientResult.receipt.sources)).toBe(true);
+  });
+});
+
+// ===========================================================================
+// R3 Row (e): stop is immediate and writes nothing to entries (service
+// payload capture)
+// ===========================================================================
+describe('R3 Matrix row (e): stop is immediate and writes nothing to entries', () => {
+  it('stopExperiment writes exactly {status:stopped, updatedAt} to the experiments doc, never touches /entries/, never creates anything', async () => {
+    const { stopExperiment } = await import('../services/experiments/experimentsService.js');
+    firestoreMocks.updateDoc.mockClear();
+    firestoreMocks.addDoc.mockClear();
+    firestoreMocks.doc.mockClear();
+    firestoreMocks.collection.mockClear();
+
+    await stopExperiment({}, 'user-r3-stop', 'exp-to-stop');
+
+    expect(firestoreMocks.updateDoc).toHaveBeenCalledTimes(1);
+    const [ref, payload] = firestoreMocks.updateDoc.mock.calls[0];
+    expect(ref.__doc).toContain('/experiments/exp-to-stop');
+    expect(ref.__doc).not.toContain('/entries/');
+    expect(Object.keys(payload).sort()).toEqual(['status', 'updatedAt']);
+    expect(payload.status).toBe('stopped');
+
+    // Immediate: no entry created, and no call site in this module's
+    // execution ever addressed the entries collection.
+    expect(firestoreMocks.addDoc).not.toHaveBeenCalled();
+    const anyEntriesPath = [
+      ...firestoreMocks.doc.mock.calls.flat(),
+      ...firestoreMocks.collection.mock.calls.flat(),
+    ].some((arg) => typeof arg === 'string' && arg.includes('/entries'));
+    expect(anyEntriesPath).toBe(false);
+  });
+});
+
+// ===========================================================================
+// R3 Row (f): excluded observation changes exactly its contribution on
+// rerun and un-exclude restores bitwise (real computeResult)
+// ===========================================================================
+describe('R3 Matrix row (f): excluded observation changes exactly its contribution on rerun; un-exclude restores bitwise', () => {
+  /** Deep-clones a result and strips receipt.versions.generatedAt (real-wall-clock metadata, not part of the determinism contract). */
+  function stripGeneratedAt(result) {
+    const clone = JSON.parse(JSON.stringify(result));
+    if (clone?.receipt?.versions) delete clone.receipt.versions.generatedAt;
+    return clone;
+  }
+
+  it('excluding one paired day drops exactly that day from n/receipt.sources; un-excluding reproduces the original result bitwise', async () => {
+    const { computeExperimentResult } = await import('../services/experiments/computeResult.js');
+    const { getTemplateById } = await import('../services/experiments/templates.js');
+    const template = getTemplateById('sleep-hours-mood-same-day');
+
+    const entries = [];
+    for (let i = 0; i < 14; i++) {
+      entries.push({
+        id: `r3-excl-${i + 1}`,
+        createdAt: r3IsoDay(2026, 6, i + 1),
+        healthContext: { sleep: { totalHours: 4 + i } }, // distinct values, no ties
+        analysis: { mood_score: 50 + i },
+      });
+    }
+    const experiment = r3BaseExperiment({
+      template,
+      startAt: r3IsoDay(2026, 6, 1, 0),
+      endAt: r3IsoDay(2026, 6, 15, 0),
+      durationDays: 14,
+    });
+    const now = new Date(r3IsoDay(2026, 7, 1));
+
+    const original = computeExperimentResult({ experiment, entries, now });
+    expect(original.status).toBe('ok');
+    expect(original.estimate.n).toBe(14);
+
+    const excludedDateKey = r3DateKeyFor(2026, 6, 5); // day 5 of 14
+    const excludedEntryId = 'r3-excl-5';
+    expect(original.receipt.sources.some((s) => s.entryId === excludedEntryId)).toBe(true);
+
+    const withExclusion = computeExperimentResult({
+      experiment: { ...experiment, excludedObservations: [excludedDateKey] },
+      entries,
+      now,
+    });
+    expect(withExclusion.status).toBe('ok');
+    // Exactly one observation's contribution is gone: n drops by exactly 1.
+    expect(withExclusion.estimate.n).toBe(13);
+    expect(withExclusion.receipt.sampleSize).toBe(13);
+    expect(withExclusion.receipt.sources.some((s) => s.entryId === excludedEntryId)).toBe(false);
+    // Coverage answers "how much data exists" — unaffected by the exclusion toggle.
+    expect(withExclusion.coverage).toEqual(original.coverage);
+
+    const restored = computeExperimentResult({
+      experiment: { ...experiment, excludedObservations: [] },
+      entries,
+      now,
+    });
+    expect(stripGeneratedAt(restored)).toEqual(stripGeneratedAt(original));
+  });
+});
+
+// ===========================================================================
+// R3 Row (g): flagged-entry excerpts never in receipt sources while still
+// counted in stats (adversarial fixture)
+// ===========================================================================
+describe('R3 Matrix row (g): flagged-entry excerpts never appear in receipt sources, while still counted in stats', () => {
+  it('a safety_flagged entry contributes to n/receipt.sampleSize but its id and text never appear in receipt.sources or anywhere in the serialized receipt', async () => {
+    const { computeExperimentResult } = await import('../services/experiments/computeResult.js');
+    const { getTemplateById } = await import('../services/experiments/templates.js');
+    const template = getTemplateById('sleep-hours-mood-same-day');
+
+    const FLAGGED_TEXT = 'flagged content that must never be cited in a receipt';
+    const entries = [];
+    for (let i = 0; i < 14; i++) {
+      const flagged = i === 4;
+      entries.push({
+        id: `r3-flag-${i + 1}`,
+        createdAt: r3IsoDay(2026, 8, i + 1),
+        healthContext: { sleep: { totalHours: 4 + i } },
+        analysis: { mood_score: 50 + i },
+        ...(flagged ? { text: FLAGGED_TEXT, content: FLAGGED_TEXT, safety_flagged: true } : {}),
+      });
+    }
+    const experiment = r3BaseExperiment({
+      template,
+      startAt: r3IsoDay(2026, 8, 1, 0),
+      endAt: r3IsoDay(2026, 8, 15, 0),
+      durationDays: 14,
+    });
+    const now = new Date(r3IsoDay(2026, 9, 1));
+
+    const result = computeExperimentResult({ experiment, entries, now });
+
+    // Counted in stats: n is 14, not 13 — excluding it would bias the estimate.
+    expect(result.status).toBe('ok');
+    expect(result.estimate.n).toBe(14);
+    expect(result.receipt.sampleSize).toBe(14);
+
+    // Never in receipt sources — id or text, anywhere in the serialized receipt.
+    expect(result.receipt.sources.some((s) => s.entryId === 'r3-flag-5')).toBe(false);
+    expect(result.receipt.sources).toHaveLength(13);
+    expect(JSON.stringify(result.receipt)).not.toContain(FLAGGED_TEXT);
   });
 });
