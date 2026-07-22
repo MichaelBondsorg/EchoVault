@@ -1,11 +1,6 @@
 name: Deploy Cloud Functions
 
 on:
-  # Manual re-deploys from current main — added 2026-07-22 after the M4
-  # embeddings commit's functions changes failed CI on an unrelated test
-  # and the follow-up fix touched only scripts/ (outside the path filter),
-  # leaving no way to redeploy functions without an artificial commit.
-  workflow_dispatch:
   push:
     branches:
       - main
