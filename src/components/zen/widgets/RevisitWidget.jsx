@@ -110,6 +110,15 @@ function entryTimeMs(entry) {
  * mood-scored recent entries fails OPEN (does not suppress) — insufficient
  * signal is not treated as equivalent to vulnerable, matching the server.
  *
+ * ONE NOTED DIVERGENCE (QA-H): this client copy windows recency by
+ * `effectiveDate || createdAt` (`entryTimeMs` above, matching this widget's
+ * own date-display convention), whereas the server's recent-window
+ * Firestore query filters on raw `createdAt` alone — the server remains
+ * authoritative for selection either way, and this is suppress-only defense
+ * in depth, so the divergence is bounded to "the client might suppress a
+ * card the server's stricter/looser window wouldn't have," never the
+ * reverse.
+ *
  * @param {Array<object>} entries - whatever entries this widget received.
  * @param {number} [nowMs]
  * @returns {boolean} true → suppress the card.

@@ -468,10 +468,10 @@ gcloud firestore indexes composite create \
   --field-config field-path=name,order=ascending
 ```
 
-As of this writing this has not yet been run — flipping `reflectionRecipes`
-on before it is provisioned will surface the query error live.
+**PROVISIONED 2026-07-22** (agent-run, Michael-sanctioned — `PROJECT_STATUS.md`
+Active Work checklist item (7)) and verified **READY** in production.
 
-**The same manual-provisioning requirement applies to the other two R2
+**The same manual-provisioning requirement applies to the following R2/GR1
 composite indexes** recorded in `firestore.indexes.json` (nothing deploys
 them either):
 
@@ -504,15 +504,14 @@ them either):
      --field-config field-path=createdAt,order=ascending
    ```
 
-3. **(GR1, Michael's direct safety review — 4th index, NOT yet provisioned.)**
-   `entries (has_warning_indicators ASC, createdAt ASC)` — backs the new
+3. **(GR1, Michael's direct safety review — 4th index.)** `entries
+   (has_warning_indicators ASC, createdAt ASC)` — backs the new
    warning-indicator anchor-backfill query GR1 added alongside the
    safety_flagged one above (mirrors it exactly: same 200-cap far-edge
    problem, same fix, same failure mode — a missing index fails this user
    closed, silently, no selection, no user-facing signal). Also required
    before rule 3's now-widened adjacency (flagged OR warning-indicator
-   anchors, GR1) can see the full warning-indicator anchor set. Provision
-   before `gentleRevisit` is enabled anywhere, including internal testing:
+   anchors, GR1) can see the full warning-indicator anchor set.
 
    ```
    gcloud firestore indexes composite create \
@@ -521,7 +520,17 @@ them either):
      --field-config field-path=createdAt,order=ascending
    ```
 
-None of the three has been run as of this writing.
+   **PROVISIONED 2026-07-22 by the controller** (same command as above) —
+   spot-check it shows **READY** in the Firebase console/`gcloud firestore
+   indexes composite list` before `gentleRevisit` is ever flipped on, same
+   verification step already applied to indexes 1/2 above and the
+   `reflectionRecipes` index earlier in this section.
+
+All three indexes in this list, plus the `reflectionRecipes` index above,
+were provisioned and verified **READY** in production on 2026-07-22
+(`PROJECT_STATUS.md` Active Work checklist items (7)/(10)) — no index work
+remains before `gentleRevisit` is flipped on, PROVIDED the safety memo
+sign-off gate below (still unchecked) is also satisfied.
 
 | Flag | Default | What it enables | Turning it OFF restores | Verification |
 |---|---|---|---|---|
@@ -596,7 +605,7 @@ agent must never check that box on Michael's behalf.
 
 | Flag | Default | What it enables | Turning it OFF restores | Verification |
 |---|---|---|---|---|
-| `personalExperiments` | `false` | The "Experiments" nav row (Settings/AppLayout, double-gated `personalExperiments` — RecipesScreen mount precedent) and `ExperimentsScreen`/`ExperimentResultView` (`src/components/experiments/`): create a 14/28-day observational experiment from a template catalog (`src/services/experiments/templates.js`) or a free-text question screened by `questionGate.js`, an explicit Start that freezes the analysis plan, a running/paused card with data-coverage-not-streak copy, and a result view (estimate + CI, plain-language non-causal narrative, observation inspector with exclude/rerun). **ALL data storage and computation is client-side** — no scheduled Cloud Function, no server trigger, no LLM/provider call anywhere in the pipeline (decision 4: `computeResult.js`'s pure `computeExperimentResult` runs in the browser/app from the user's own already-loaded entries; the result narrative is template-composed fixed strings with slotted numbers, never model-generated). **No new composite index needed** — verified by grepping `src/services/experiments/*.js` for `where(`: zero hits. `subscribeExperiments` (`experimentsService.js`) is a plain `collection(...).orderBy('createdAt', 'desc')` subscribe with no `where()` clause, which Firestore's automatic single-field indexing covers without any manual `gcloud firestore indexes composite create` step — unlike the three R2 indexes below, which DO require one. | Nav row disappears; no way to create, view, or run an experiment. Existing `experiments/*` docs (any created while the flag was on, e.g. during internal testing) are untouched in Firestore — they simply become unreachable from the UI until the flag flips back on, at which point `subscribeExperiments` immediately re-surfaces them exactly as left, including any already-computed `result`. The client-side auto-completion effect (see below) also stops running while the flag is off, so an experiment whose `endAt` elapses during that window simply waits — it auto-completes on the next render after the flag (and screen) is live again, not lost. | `src/__tests__/validationMatrix.test.js` R3 rows (a)-(g); `src/services/experiments/__tests__/{questionGate,estimator,computeResult,experimentsService,templates,preflight}.test.js`; `src/components/experiments/__tests__/{ExperimentsScreen,ExperimentResultView}.test.jsx`. **Extra gate, non-negotiable:** read and sign off `docs/quality/experiments-data-method.md` before this flag is EVER flipped on outside internal testing — see above. |
+| `personalExperiments` | `false` | The "Experiments" nav row (Settings/AppLayout, double-gated `personalExperiments` — RecipesScreen mount precedent) and `ExperimentsScreen`/`ExperimentResultView` (`src/components/experiments/`): create a 14/28-day observational experiment from a template catalog (`src/services/experiments/templates.js`) or a free-text question screened by `questionGate.js`, an explicit Start that freezes the analysis plan, a running/paused card with data-coverage-not-streak copy, and a result view (estimate + CI, plain-language non-causal narrative, observation inspector with exclude/rerun). **ALL data storage and computation is client-side** — no scheduled Cloud Function, no server trigger, no LLM/provider call anywhere in the pipeline (decision 4: `computeResult.js`'s pure `computeExperimentResult` runs in the browser/app from the user's own already-loaded entries; the result narrative is template-composed fixed strings with slotted numbers, never model-generated). **No new composite index needed** — verified by grepping `src/services/experiments/*.js` for `where(`: zero hits. `subscribeExperiments` (`experimentsService.js`) is a plain `collection(...).orderBy('createdAt', 'desc')` subscribe with no `where()` clause, which Firestore's automatic single-field indexing covers without any manual `gcloud firestore indexes composite create` step — unlike the three R2 indexes below, which DO require one. **Michael review hardening (EX1/EX2), all inside the same flag gate:** the estimate carries `nHigh`/`nLow`/`splitThreshold`/`exposureContrast`/`stability` and enforces group-size/imbalance/exposure-contrast/split-stability guards before returning `ok`; the outcome series is normalized to a frozen 0-100 `mood_0_100` unit (never the raw 0-1 `mood_score`); day-series pairing/coverage use the user's device-local IANA timezone (frozen onto `analysisPlan.timezone` at create) with day 1 = the first FULL local day after `startAt`; a completed result's original computation is immutable (`result.original`), a post-result exclusion writes `result.adjusted` + an appended, reasoned `result.exclusionHistory`, and the UI always labels an adjusted result "Modified after seeing the result." | Nav row disappears; no way to create, view, or run an experiment. Existing `experiments/*` docs (any created while the flag was on, e.g. during internal testing) are untouched in Firestore — they simply become unreachable from the UI until the flag flips back on, at which point `subscribeExperiments` immediately re-surfaces them exactly as left, including any already-computed `result` (original AND any adjusted recomputation/history, all preserved as written). The client-side auto-completion effect (see below) also stops running while the flag is off, so an experiment whose `endAt` elapses during that window simply waits — it auto-completes on the next render after the flag (and screen) is live again, not lost. | `src/__tests__/validationMatrix.test.js` R3 rows (a)-(g) + Hardening rows (h5)-(h8); `src/services/experiments/__tests__/{questionGate,estimator,computeResult,experimentsService,templates,preflight}.test.js`; `src/components/experiments/__tests__/{ExperimentsScreen,ExperimentResultView}.test.jsx`. **Extra gate, non-negotiable:** read and sign off the UPDATED `docs/quality/experiments-data-method.md` before this flag is EVER flipped on outside internal testing — see above and `PROJECT_STATUS.md` checklist item (8). |
 
 **Plan-freeze enforcement, both layers.** `question`/`analysisPlan`/
 `template`/`scope`/`createdAt` are immutable on an `/experiments/{id}` doc
@@ -630,7 +639,14 @@ with `safety_flagged`/`has_warning_indicators` set still contributes its
 data point to the estimate (excluding it would bias the mood estimate away
 from exactly the days that matter most) but is filtered out of
 `receipt.sources` entirely — id and excerpt both — matching Session Prep
-export's posture from R2. See R3 validation matrix row (g).
+export's posture from R2. **Michael review hardening (EX2, item 5):** the
+result additionally discloses the COUNT of contributing sensitive days
+(`result.sensitiveObservationCount`, present on both `ok` and `insufficient`
+results) — "N sensitive days contributed to the statistics; details are
+hidden" — and the observation table renders those specific rows as
+"Sensitive day — details hidden" instead of omitting them outright. See R3
+validation matrix row (g) and Hardening row (h5) (mood normalization
+end-to-end).
 
 **Execution-time decisions made during the build (not in the original 8
 plan decisions — see `PROJECT_STATUS.md` Recent Decisions for the full

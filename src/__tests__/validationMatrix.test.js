@@ -40,6 +40,25 @@
  * `'../../config/firebase'` import resolves to) — `deleteDoc` was added to
  * `firestoreMocks` above for this module's import graph; no row here calls
  * `deleteExperiment`, so it is otherwise inert.
+ *
+ * Hardening rows (h1)-(h8), appended below R3 row (g), cover
+ * docs/superpowers/plans/2026-07-22-michael-review-hardening.md (Task QA-H)
+ * — Michael's direct review of Gentle Revisit (GR1/GR2) and Personal
+ * Experiments (EX1/EX2). Every row calls the real hardened module directly
+ * (`functions/src/revisit/selectRevisits.js`'s `selectRevisitCandidate`/
+ * `currentStateGateTripped`/`weeklyCadenceTripped`/`MOOD_FLOOR`; the
+ * client's own `currentStateGateTripped` from
+ * `src/components/zen/widgets/RevisitWidget.jsx`; `estimator.js`'s
+ * `runAnalysisPlan`/`pairObservations`/`MIN_GROUP_SIZE`; `computeResult.js`'s
+ * `computeExperimentResult`; `experimentsService.js`'s
+ * `buildAdjustedResultUpdate`/`EXCLUSION_REASONS`) — no additional mocking
+ * beyond what rows (c)-(g)/(e) above already established for these same
+ * Firebase-free (or, for RevisitWidget, already-mocked-above) modules. Per
+ * the plan's own instruction, several rows carry an inline mutation-check
+ * control (the identical fixture run through the PRE-hardening behavior)
+ * rather than only asserting the post-hardening result, so a future
+ * regression that silently reverts the hardening fails this row, not just
+ * the dedicated GR1/EX1/EX2 suites.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import React from 'react';
@@ -1978,5 +1997,284 @@ describe('R3 Matrix row (g): flagged-entry excerpts never appear in receipt sour
     expect(result.receipt.sources.some((s) => s.entryId === 'r3-flag-5')).toBe(false);
     expect(result.receipt.sources).toHaveLength(13);
     expect(JSON.stringify(result.receipt)).not.toContain(FLAGGED_TEXT);
+  });
+});
+
+// ===========================================================================
+// Hardening Row (h1): current-state gate — a recent flagged/low-mood signal
+// pauses server selection AND the widget independently suppresses (Michael
+// review hardening, Task GR1, item 1)
+// ===========================================================================
+describe('Hardening Matrix row (h1): current-state gate pauses selection server-side and the widget suppresses independently', () => {
+  const H1_DAY_MS = 24 * 60 * 60 * 1000;
+  const H1_NOW = Date.parse('2026-07-21T12:00:00.000Z');
+
+  it('server: currentStateGateTripped (the pause condition runGentleRevisitDaily evaluates against its 14-day recent-window read) trips on a live safety signal; a clean recent entry does not', async () => {
+    const { currentStateGateTripped } = await import('../../functions/src/revisit/selectRevisits.js');
+
+    const withFlag = [{ id: 'r1', createdAt: new Date(H1_NOW - 2 * H1_DAY_MS).toISOString(), safety_flagged: true, analysis: { mood_score: 0.9 } }];
+    expect(currentStateGateTripped(withFlag)).toBe(true);
+
+    // Mutation-check control: the identical shape with no live signal at all
+    // does not trip — proves this isn't a "trip on anything" stub.
+    const clean = [{ id: 'r2', createdAt: new Date(H1_NOW - 2 * H1_DAY_MS).toISOString(), safety_flagged: false, has_warning_indicators: false, analysis: { mood_score: 0.9 } }];
+    expect(currentStateGateTripped(clean)).toBe(false);
+  });
+
+  it('client: RevisitWidget\'s own currentStateGateTripped windows recency itself (effectiveDate||createdAt) — a flagged entry 13 days old suppresses, 15 days old (outside RECENT_WINDOW_DAYS) does not', async () => {
+    const { currentStateGateTripped } = await import('../components/zen/widgets/RevisitWidget.jsx');
+
+    const withinWindow = [{ id: 'w1', createdAt: new Date(H1_NOW - 13 * H1_DAY_MS).toISOString(), safety_flagged: true, analysis: { mood_score: 0.9 } }];
+    expect(currentStateGateTripped(withinWindow, H1_NOW)).toBe(true);
+
+    const outsideWindow = [{ id: 'w2', createdAt: new Date(H1_NOW - 15 * H1_DAY_MS).toISOString(), safety_flagged: true, analysis: { mood_score: 0.9 } }];
+    expect(currentStateGateTripped(outsideWindow, H1_NOW)).toBe(false);
+  });
+});
+
+// ===========================================================================
+// Hardening Row (h2): legacy entry missing explicit safety booleans is never
+// selected (Michael review hardening, Task GR1, item 2 — real
+// selectRevisitCandidate)
+// ===========================================================================
+describe('Hardening Matrix row (h2): a legacy entry with no explicit safety booleans is never selected', () => {
+  it('an entry missing safety_flagged/has_warning_indicators entirely is excluded even though every other field is eligible; the same entry with explicit false/false booleans is selected', async () => {
+    const { selectRevisitCandidate } = await import('../../functions/src/revisit/selectRevisits.js');
+    const NOW = Date.parse('2026-07-21T12:00:00.000Z');
+    const DAY_MS = 24 * 60 * 60 * 1000;
+
+    const legacyEntry = { id: 'legacy-1', createdAt: NOW - 100 * DAY_MS, analysis: { mood_score: 0.9 } };
+    expect(selectRevisitCandidate({ entries: [legacyEntry], now: NOW })).toBeNull();
+
+    // Mutation-check control: the identical entry, explicitly screened
+    // (both booleans present), IS selected — proves rule 0 is a real
+    // "unknown -> excluded" gate, not an accidental exclusion from some
+    // other field on this fixture.
+    const screened = { ...legacyEntry, safety_flagged: false, has_warning_indicators: false };
+    expect(selectRevisitCandidate({ entries: [screened], now: NOW })?.id).toBe('legacy-1');
+  });
+});
+
+// ===========================================================================
+// Hardening Row (h3): mood floor retuned 0.4 -> 0.6 — 0.55 excluded, 0.6
+// eligible (Michael review hardening, Task GR1, item 3 — real constant +
+// selector)
+// ===========================================================================
+describe('Hardening Matrix row (h3): mood floor is 0.6 — 0.55 is never selected, 0.6 is eligible', () => {
+  it('MOOD_FLOOR === 0.6; an entry at 0.55 is excluded, an otherwise-identical entry at 0.6 is selected', async () => {
+    const { selectRevisitCandidate, MOOD_FLOOR } = await import('../../functions/src/revisit/selectRevisits.js');
+    expect(MOOD_FLOOR).toBe(0.6);
+    const NOW = Date.parse('2026-07-21T12:00:00.000Z');
+    const DAY_MS = 24 * 60 * 60 * 1000;
+    const baseEntry = (mood) => ({
+      id: `mood-${mood}`,
+      createdAt: NOW - 100 * DAY_MS,
+      safety_flagged: false,
+      has_warning_indicators: false,
+      analysis: { mood_score: mood },
+    });
+
+    expect(selectRevisitCandidate({ entries: [baseEntry(0.55)], now: NOW })).toBeNull();
+    expect(selectRevisitCandidate({ entries: [baseEntry(0.6)], now: NOW })?.id).toBe('mood-0.6');
+  });
+});
+
+// ===========================================================================
+// Hardening Row (h4): weekly cadence — a queued selection 6 days ago blocks
+// a new one, 8 days ago does not, a dismissed one never trips it (Michael
+// review hardening, Task GR1, item 5 — real weeklyCadenceTripped)
+// ===========================================================================
+describe('Hardening Matrix row (h4): weekly cadence blocks a fresh selection within 7 days of the last live one', () => {
+  it('WEEKLY_CADENCE_DAYS === 7; a queued item 6 days old trips the gate, 8 days old does not, and a dismissed item at 6 days never trips it', async () => {
+    const { weeklyCadenceTripped, WEEKLY_CADENCE_DAYS } = await import('../../functions/src/revisit/selectRevisits.js');
+    expect(WEEKLY_CADENCE_DAYS).toBe(7);
+    const NOW = Date.parse('2026-07-21T12:00:00.000Z');
+    const DAY_MS = 24 * 60 * 60 * 1000;
+
+    const sixDaysAgo = [{ status: 'queued', selectedAt: new Date(NOW - 6 * DAY_MS).toISOString() }];
+    expect(weeklyCadenceTripped(sixDaysAgo, NOW)).toBe(true);
+
+    const eightDaysAgo = [{ status: 'queued', selectedAt: new Date(NOW - 8 * DAY_MS).toISOString() }];
+    expect(weeklyCadenceTripped(eightDaysAgo, NOW)).toBe(false);
+
+    // Pinned rule (GR1): a dismissed item never trips cadence, even within
+    // the window — that's revisit_exclusions' job, not this gate's.
+    const dismissedSixDaysAgo = [{ status: 'dismissed', selectedAt: new Date(NOW - 6 * DAY_MS).toISOString() }];
+    expect(weeklyCadenceTripped(dismissedSixDaysAgo, NOW)).toBe(false);
+  });
+});
+
+// ===========================================================================
+// Hardening Row (h5): mood normalization launch blocker — 0-1 entry data
+// yields a 0-100 display delta, never a 0-1-scale delta (Michael review
+// hardening, Task EX2, item 1 — real computeExperimentResult)
+// ===========================================================================
+describe('Hardening Matrix row (h5): 0-1 mood inputs normalize to a 0-100 display delta, not a 0-1-scale delta', () => {
+  it('entries at mood 0.62 (high-sleep group) vs 0.54 (low-sleep group) yield delta ~8 points — not ~0.08', async () => {
+    const { computeExperimentResult } = await import('../services/experiments/computeResult.js');
+    const { getTemplateById } = await import('../services/experiments/templates.js');
+    const template = getTemplateById('sleep-hours-mood-same-day');
+
+    const entries = [];
+    for (let i = 0; i < 6; i++) {
+      entries.push({ id: `h5-low-${i + 1}`, createdAt: r3IsoDay(2026, 3, i + 1), healthContext: { sleep: { totalHours: i + 1 } }, analysis: { mood_score: 0.54 } });
+    }
+    for (let i = 0; i < 6; i++) {
+      entries.push({ id: `h5-high-${i + 1}`, createdAt: r3IsoDay(2026, 3, i + 7), healthContext: { sleep: { totalHours: i + 8 } }, analysis: { mood_score: 0.62 } });
+    }
+    const experiment = r3BaseExperiment({
+      template,
+      startAt: r3IsoDay(2026, 3, 1, 0),
+      endAt: r3IsoDay(2026, 3, 13, 0),
+      durationDays: 12,
+    });
+    const result = computeExperimentResult({ experiment, entries, now: new Date(r3IsoDay(2026, 4, 1)) });
+
+    expect(result.status).toBe('ok');
+    expect(result.estimate.meanHigh).toBeCloseTo(62, 5);
+    expect(result.estimate.meanLow).toBeCloseTo(54, 5);
+    expect(result.estimate.delta).toBeCloseTo(8, 5);
+    // The literal launch-blocker regression this row guards against: the
+    // pre-fix pipeline would have reported this same data as ~0.08, not ~8.
+    expect(result.estimate.delta).not.toBeCloseTo(0.08, 5);
+  });
+});
+
+// ===========================================================================
+// Hardening Row (h6): original result stays immutable after an
+// exclusion-driven adjustment; the adjusted result is separately labeled
+// (Michael review hardening, Task EX2, item 3 — real
+// buildAdjustedResultUpdate + computeExperimentResult)
+// ===========================================================================
+describe('Hardening Matrix row (h6): original result is immutable after an exclusion adjustment; adjusted is separately labeled', () => {
+  it('excluding a day recomputes only `adjusted`; `original` is the same object reference and exclusionHistory records reason/dateKey per exclusion', async () => {
+    const { computeExperimentResult } = await import('../services/experiments/computeResult.js');
+    const { getTemplateById } = await import('../services/experiments/templates.js');
+    const { buildAdjustedResultUpdate, EXCLUSION_REASONS } = await import('../services/experiments/experimentsService.js');
+    const template = getTemplateById('sleep-hours-mood-same-day');
+
+    const entries = [];
+    for (let i = 0; i < 14; i++) {
+      entries.push({ id: `h6-${i + 1}`, createdAt: r3IsoDay(2026, 5, i + 1), healthContext: { sleep: { totalHours: 4 + i } }, analysis: { mood_score: (50 + i) / 100 } });
+    }
+    const experiment = r3BaseExperiment({ template, startAt: r3IsoDay(2026, 5, 1, 0), endAt: r3IsoDay(2026, 5, 15, 0), durationDays: 14 });
+    const now = new Date(r3IsoDay(2026, 6, 1));
+
+    const originalResult = computeExperimentResult({ experiment, entries, now });
+    expect(originalResult.status).toBe('ok');
+
+    const excludedDateKey = r3DateKeyFor(2026, 5, 5);
+    const adjustedResult = computeExperimentResult({ experiment: { ...experiment, excludedObservations: [excludedDateKey] }, entries, now });
+    expect(adjustedResult.estimate.n).toBe(13);
+
+    const nowIso = now.toISOString();
+    const next = buildAdjustedResultUpdate(
+      { original: originalResult, exclusionHistory: [] },
+      { adjusted: adjustedResult, dateKey: excludedDateKey, excluded: true, reason: EXCLUSION_REASONS[0], at: nowIso },
+    );
+
+    // Immutable: `original` is the SAME object captured before any exclusion.
+    expect(next.original).toBe(originalResult);
+    expect(next.adjusted).toBe(adjustedResult);
+    expect(next.adjusted).not.toBe(next.original);
+    expect(next.exclusionHistory).toEqual([{ dateKey: excludedDateKey, excluded: true, reason: 'wrong_data', at: nowIso }]);
+
+    // A second exclusion appends to history without disturbing `original`.
+    const nextNext = buildAdjustedResultUpdate(next, {
+      adjusted: adjustedResult, dateKey: r3DateKeyFor(2026, 5, 6), excluded: true, reason: 'other', note: 'testing note', at: nowIso,
+    });
+    expect(nextNext.original).toBe(originalResult);
+    expect(nextNext.exclusionHistory).toHaveLength(2);
+  });
+});
+
+// ===========================================================================
+// Hardening Row (h7): tag-presence template runs the binary split
+// end-to-end without tripping split_unstable (Michael review hardening,
+// EX1's H2 finding + EX2's fix — real computeExperimentResult)
+// ===========================================================================
+describe('Hardening Matrix row (h7): binary tag-presence template reaches an ok result, not split_unstable', () => {
+  it('tag-presence-mood (splitMode: binary) reaches ok over 14 alternating present/absent days; the SAME data through median mode trips split_unstable', async () => {
+    const { computeExperimentResult } = await import('../services/experiments/computeResult.js');
+    const { getTemplateById } = await import('../services/experiments/templates.js');
+    const template = getTemplateById('tag-presence-mood');
+    expect(template.splitMode).toBe('binary');
+
+    const TAG = '@person:sam';
+    const entries = [];
+    for (let day = 1; day <= 14; day++) {
+      entries.push({
+        id: `h7-${day}`,
+        createdAt: r3IsoDay(2026, 6, day),
+        tags: day % 2 === 0 ? [TAG] : [],
+        analysis: { mood_score: (day % 2 === 0 ? 40 : 70) / 100 },
+      });
+    }
+    const exposure = { ...template.exposure, tag: TAG };
+    const binaryPlan = {
+      templateId: template.id,
+      lag: template.lag,
+      exposure,
+      outcome: { ...template.outcome },
+      confounders: [...(template.confounders || [])],
+      whatThisDoesNotProve: [...(template.whatThisDoesNotProve || [])],
+      splitMode: 'binary',
+    };
+    const shiftedStartAt = r3DayBefore(r3IsoDay(2026, 6, 1, 0));
+    const baseExp = {
+      id: 'h7-exp', question: 'test question', template: template.id, scope: null,
+      status: 'running', startAt: shiftedStartAt, endAt: r3IsoDay(2026, 6, 15, 0), durationDays: 14,
+      excludedObservations: [], createdAt: shiftedStartAt, updatedAt: shiftedStartAt,
+    };
+    const now = new Date(r3IsoDay(2026, 7, 1));
+
+    const result = computeExperimentResult({ experiment: { ...baseExp, analysisPlan: binaryPlan }, entries, now });
+    expect(result.status).toBe('ok');
+    expect(result.estimate.meanHigh).toBeCloseTo(40, 10);
+    expect(result.estimate.meanLow).toBeCloseTo(70, 10);
+
+    // Mutation-check control: the identical data through the pre-EX2 default
+    // (median) split mode trips split_unstable — proves the template's
+    // binary pin (EX2 item 4) is load-bearing, not incidental.
+    const medianPlan = { ...binaryPlan, splitMode: undefined };
+    const medianResult = computeExperimentResult({ experiment: { ...baseExp, analysisPlan: medianPlan }, entries, now });
+    expect(medianResult.status).toBe('insufficient');
+    expect(medianResult.reasons).toContain('split_unstable');
+  });
+});
+
+// ===========================================================================
+// Hardening Row (h8): group-size guard — a 4-vs-8 split is insufficient
+// (group_too_small), isolated from the raw-n floor (Michael review
+// hardening, Task EX1, item 1 — real estimator constants)
+// ===========================================================================
+describe('Hardening Matrix row (h8): a 4-high/8-low split is insufficient on group size alone (real MIN_GROUP_SIZE)', () => {
+  it('12 pairs (clears MIN_PAIRED_OBSERVATIONS) split 4-high/8-low by a tie-heavy median trips ONLY group_too_small', async () => {
+    const { pairObservations, runAnalysisPlan, MIN_GROUP_SIZE, MIN_PAIRED_OBSERVATIONS } = await import('../services/experiments/estimator.js');
+    expect(MIN_GROUP_SIZE).toBe(5);
+
+    const exposureSeries = [];
+    const outcomeSeries = [];
+    // 8 tied low-exposure days (all value 5), 4 distinct high-exposure days
+    // (13-16) -> median split puts exactly 4 in the high group (below
+    // MIN_GROUP_SIZE) and 8 in low.
+    for (let i = 1; i <= 8; i++) {
+      const dateKey = r3DateKeyFor(2026, 9, i);
+      exposureSeries.push({ dateKey, value: 5 });
+      outcomeSeries.push({ dateKey, value: 50 + i });
+    }
+    for (let i = 9; i <= 12; i++) {
+      const dateKey = r3DateKeyFor(2026, 9, i);
+      exposureSeries.push({ dateKey, value: 4 + i }); // 13, 14, 15, 16
+      outcomeSeries.push({ dateKey, value: 50 + i });
+    }
+    const pairs = pairObservations({ exposureSeries, outcomeSeries, lag: 0 });
+    expect(pairs).toHaveLength(12);
+    expect(pairs.length).toBeGreaterThanOrEqual(MIN_PAIRED_OBSERVATIONS); // isolates group_too_small from the raw-n floor
+
+    const result = runAnalysisPlan({ pairs, plan: { lag: 0 }, seed: 1 });
+
+    expect(result.status).toBe('insufficient');
+    expect(result.reasons).toEqual(['group_too_small']);
   });
 });
