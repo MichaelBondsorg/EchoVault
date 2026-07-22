@@ -26,6 +26,7 @@ import PrivacyCenter from '../privacy/PrivacyCenter';
 import SpaceManager from '../spaces/SpaceManager';
 import InsightControlCenter from '../insights/InsightControlCenter';
 import RecipesScreen from '../reflections/RecipesScreen';
+import SessionPrepScreen from '../reflections/SessionPrepScreen';
 import { getFlag } from '../../config/flags';
 
 /**
@@ -105,6 +106,7 @@ const AppLayout = ({
   const [showSpaceManager, setShowSpaceManager] = useState(false);
   const [showControlCenter, setShowControlCenter] = useState(false);
   const [showRecipes, setShowRecipes] = useState(false);
+  const [showSessionPrep, setShowSessionPrep] = useState(false);
   const [entryMode, setEntryMode] = useState('text'); // 'voice' or 'text'
   const [isFreshEntry, setIsFreshEntry] = useState(true); // true = FAB entry, false = responding to prompt
   const [currentPrompt, setCurrentPrompt] = useState(null); // Track prompt being answered for auto-dismiss
@@ -436,6 +438,7 @@ const AppLayout = ({
                 onOpenSpaces={() => setShowSpaceManager(true)}
                 onOpenControlCenter={() => setShowControlCenter(true)}
                 onOpenRecipes={() => setShowRecipes(true)}
+                onOpenSessionPrep={() => setShowSessionPrep(true)}
                 onOpenSafetyPlan={onShowSafetyPlan}
                 onOpenExport={onShowExport}
                 onRequestNotifications={onRequestNotifications}
@@ -594,6 +597,17 @@ const AppLayout = ({
           uid={user?.uid}
           entries={entries}
           onClose={() => setShowRecipes(false)}
+        />
+      )}
+
+      {/* Session Prep (R2 Task 18) — double-gated on the flag (not just the
+          nav row that's the only way to flip showSessionPrep true),
+          mirroring Reflection Recipes' own mount site above. */}
+      {getFlag('sessionPrep') && showSessionPrep && (
+        <SessionPrepScreen
+          uid={user?.uid}
+          entries={entries}
+          onClose={() => setShowSessionPrep(false)}
         />
       )}
 

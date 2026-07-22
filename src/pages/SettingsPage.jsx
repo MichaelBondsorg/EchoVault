@@ -64,6 +64,7 @@ const SettingsPage = ({
   onOpenSpaces,
   onOpenControlCenter,
   onOpenRecipes,
+  onOpenSessionPrep,
   onRequestNotifications,
   onLogout,
   notificationPermission,
@@ -303,9 +304,20 @@ const SettingsPage = ({
     onClick: onOpenRecipes,
   };
 
+  // Session Prep (flag: sessionPrep, R2 Task 18) — a private, editable brief
+  // built from the Session-preparation starter questions, with an explicit
+  // safe PDF export. Flag-gated: this row is filtered out entirely when
+  // off, same convention as `contextSpacesItem`/`recipesItem` above.
+  const sessionPrepItem = {
+    label: 'Session prep',
+    description: 'Get ready for your next session with an editable brief',
+    onClick: onOpenSessionPrep,
+  };
+
   const appNavRows = [
     getFlag('contextSpaces') && contextSpacesItem,
     getFlag('reflectionRecipes') && recipesItem,
+    getFlag('sessionPrep') && sessionPrepItem,
     notificationsItem,
   ].filter(Boolean);
 

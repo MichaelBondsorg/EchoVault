@@ -38,6 +38,19 @@
  * to unit test without mocking that seam too. A missing/omitted embedding
  * for a question just means that question's `askJournalAI` call skips
  * semantic matching (tag/recency matching still applies) — never an error.
+ *
+ * `runQuestions` (exported) is the scope -> date-range -> exclusions ->
+ * per-question `askJournalAI` core extracted so Session Prep
+ * (`sessionPrep.js`, R2 Task 18) can build on the exact same pipeline
+ * instead of duplicating it. The only thing `runRecipe` adds on top is
+ * computing `{start, end}` from a recipe's `timeRangeDays` (a count of days
+ * back from "now") — Session Prep instead passes an explicit, user-chosen
+ * `start` (its "since-date", which must never be inferred/recomputed), so
+ * that date-range computation is deliberately NOT part of the shared core.
+ * `loadReflection`/`writeBlocks`/`reflectionsPath` are also exported for
+ * the same reuse reason (Session Prep's `regenerateSection` needs the exact
+ * same load/write-exactly-`{blocks,updatedAt}` contract `updateBlock` etc.
+ * already use here).
  */
 import { filterEntriesByScope } from '../spaces/scopeFilter';
 import { getExcludedEntryIds } from '../insights/sourceExclusions';
@@ -51,7 +64,7 @@ import {
 } from '../../config/firebase';
 import { APP_COLLECTION_ID } from '../../config/constants';
 
-function reflectionsPath(uid) {
+export function reflectionsPath(uid) {
   return `artifacts/${APP_COLLECTION_ID}/users/${uid}/reflections`;
 }
 
@@ -140,6 +153,53 @@ export function previewRecipe(recipe, entries, exclusions = new Set(), spaces = 
 }
 
 /**
+ * The shared core: scope → date-range → exclusions → per-question
+ * `askJournalAI`. Extracted from `runRecipe` so `sessionPrep.js` (Task 18)
+ * can build on the identical pipeline with its own explicit `{start, end}`
+ * instead of a `timeRangeDays` count — see module doc.
+ *
+ * @param {object} db
+ * @param {string} uid
+ * @param {{questions:string[], scope?:{spaceId:string}|null, entries?:Array, embeddings?:Record<string, number[]>, start:Date, end:Date}} params
+ * @returns {Promise<{blocks:Array, filteredEntries:Array}>} one `{id, type:'ai', question, text, sources, editedByUser:false}`
+ *   block per question (in order), plus the exact filtered entry pool that
+ *   was fed to `askJournalAI` (callers can derive sample-size/missingness
+ *   annotations from it without recomputing the filter themselves).
+ */
+export async function runQuestions(db, uid, { questions, scope = null, entries = [], embeddings = {}, start, end }) {
+  const scoped = filterEntriesByScope(entries, scope);
+  const inRange = filterByDateRange(scoped, start, end);
+
+  const excludedIds = await getExcludedEntryIds(db, uid);
+  const filteredEntries = inRange.filter((e) => !excludedIds.has(e.id));
+
+  const blocks = [];
+  for (const question of questions) {
+    const qEmbedding = embeddings?.[question] ?? null;
+    if (qEmbedding == null) {
+      // eslint-disable-next-line no-console -- intentional degrade signal, see module doc.
+      console.warn('[runRecipe] no embedding for question — retrieval degrades to recency/tags:', question.slice(0, 40));
+    }
+    // eslint-disable-next-line no-await-in-loop -- questions must run
+    // sequentially against the same filtered pool; no shared mutable state
+    // to race, but the Cloud Function calls are not parallelized here to
+    // keep behavior easy to reason about/test (small, bounded question
+    // counts — rules cap recipes at 5 questions).
+    const { text, entryIds } = await askJournalAI(filteredEntries, question, qEmbedding, scope, { returnSources: true });
+    blocks.push({
+      id: newBlockId(),
+      type: 'ai',
+      question,
+      text: text ?? null,
+      sources: entryIds ?? [],
+      editedByUser: false,
+    });
+  }
+
+  return { blocks, filteredEntries };
+}
+
+/**
  * Run a recipe: scope → date-range → exclusions → per-question
  * `askJournalAI`, then write a `reflections/{id}` doc.
  *
@@ -157,35 +217,8 @@ export async function runRecipe(db, uid, recipe, { entries = [], embeddings = {}
   }
 
   const scope = recipe.scope ?? null;
-  const scoped = filterEntriesByScope(entries, scope);
   const { start, end } = computeDateRange(recipe.timeRangeDays);
-  const inRange = filterByDateRange(scoped, start, end);
-
-  const excludedIds = await getExcludedEntryIds(db, uid);
-  const filtered = inRange.filter((e) => !excludedIds.has(e.id));
-
-  const blocks = [];
-  for (const question of recipe.questions) {
-    const qEmbedding = embeddings?.[question] ?? null;
-    if (qEmbedding == null) {
-      // eslint-disable-next-line no-console -- intentional degrade signal, see module doc.
-      console.warn('[runRecipe] no embedding for question — retrieval degrades to recency/tags:', question.slice(0, 40));
-    }
-    // eslint-disable-next-line no-await-in-loop -- questions must run
-    // sequentially against the same filtered pool; no shared mutable state
-    // to race, but the Cloud Function calls are not parallelized here to
-    // keep behavior easy to reason about/test (small, bounded question
-    // counts — rules cap recipes at 5 questions).
-    const { text, entryIds } = await askJournalAI(filtered, question, qEmbedding, scope, { returnSources: true });
-    blocks.push({
-      id: newBlockId(),
-      type: 'ai',
-      question,
-      text: text ?? null,
-      sources: entryIds ?? [],
-      editedByUser: false,
-    });
-  }
+  const { blocks } = await runQuestions(db, uid, { questions: recipe.questions, scope, entries, embeddings, start, end });
 
   const now = new Date();
   const monthYear = now.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
@@ -206,7 +239,7 @@ export async function runRecipe(db, uid, recipe, { entries = [], embeddings = {}
   return { id: docRef.id, ...payload };
 }
 
-async function loadReflection(db, uid, reflectionId) {
+export async function loadReflection(db, uid, reflectionId) {
   const snap = await getDoc(doc(db, reflectionsPath(uid), reflectionId));
   if (!snap.exists()) {
     throw new Error(`Reflection ${reflectionId} not found.`);
@@ -214,7 +247,7 @@ async function loadReflection(db, uid, reflectionId) {
   return { id: snap.id, ...snap.data() };
 }
 
-async function writeBlocks(db, uid, reflectionId, blocks) {
+export async function writeBlocks(db, uid, reflectionId, blocks) {
   const updatedAt = nowIso();
   await updateDoc(doc(db, reflectionsPath(uid), reflectionId), { blocks, updatedAt });
   return { blocks, updatedAt };
@@ -313,7 +346,11 @@ export async function reorderBlocks(db, uid, reflectionId, orderedBlockIds) {
 
 export default {
   previewRecipe,
+  runQuestions,
   runRecipe,
+  loadReflection,
+  writeBlocks,
+  reflectionsPath,
   updateBlock,
   addUserBlock,
   removeBlock,
