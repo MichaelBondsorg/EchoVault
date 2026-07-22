@@ -89,6 +89,14 @@
         { "fieldPath": "entryId", "order": "ASCENDING" },
         { "fieldPath": "appliesTo", "order": "ASCENDING" }
       ]
+    },
+    {
+      "collectionGroup": "entries",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "safety_flagged", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "ASCENDING" }
+      ]
     }
   ],
   "fieldOverrides": []

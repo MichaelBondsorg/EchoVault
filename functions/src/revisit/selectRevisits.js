@@ -60,6 +60,7 @@ export const DEDUP_WINDOW_DAYS = 60;
 export const MOOD_FLOOR = 0.4;
 const PREFERRED_MOOD = 0.5;
 const CANDIDATE_READ_LIMIT = 200;
+const FLAGGED_ANCHOR_READ_LIMIT = 50;
 
 const MONTH_NAMES = [
   'January', 'February', 'March', 'April', 'May', 'June',
@@ -256,10 +257,25 @@ function mapEntryDoc(id, data) {
  * Skip conditions (rule 6): server flag `gentleRevisit` off skips EVERY user
  * without even listing them; per-user, `settings/revisitPrefs.enabled !==
  * true` skips that user. Idempotency: a transactional marker
- * `revisit.selectedFor{YYYY-MM-DD}` (America/Los_Angeles calendar day) is
- * claimed on the prefs doc before any candidate read — a second invocation
- * for the same local day is a no-op (mirrors `claimProcessingMarker`'s
- * at-least-once-delivery contract used elsewhere for entry processing).
+ * `selectedFor{YYYY-MM-DD}` (America/Los_Angeles calendar day) is claimed on
+ * a DEDICATED server-only doc, `revisit_job_state/state` — deliberately NOT
+ * on `settings/revisitPrefs`. `firestore.rules`' `settings/{settingId}`
+ * block only special-cases a handful of named ids (`consent`,
+ * `insightBudget`, `spacePrefs`, `revisitPrefs`); any *other* settingId
+ * (which `revisit_job_state` would be, if it lived under `settings/`) falls
+ * through to a plain owner-write-anything grant — so this marker MUST live
+ * outside `settings/` entirely. `revisit_job_state` has no `match` block of
+ * its own anywhere in firestore.rules, so it inherits Firestore's
+ * default-deny: a normal authenticated client can neither read nor write
+ * it, and only the Admin SDK (which bypasses rules) — i.e. this job — ever
+ * touches it. (An earlier version of this job wrongly stored the marker on
+ * `settings/revisitPrefs` itself; that made every subsequent CLIENT write to
+ * that doc — including `setRevisitEnabled`'s disable path — fail
+ * `request.resource.data.keys().hasOnly([...])` after the first run, since
+ * that rule evaluates against the doc's full post-merge key set. Fixed here.)
+ * A second invocation for the same local day is a no-op (mirrors
+ * `claimProcessingMarker`'s at-least-once-delivery contract used elsewhere
+ * for entry processing).
  *
  * @param {object} db - Firestore instance (Admin SDK, or a test double with
  *   the same `.doc`/`.collection`/`.runTransaction` surface).
@@ -277,7 +293,7 @@ export async function runGentleRevisitDaily(db, { now = new Date() } = {}) {
   }
 
   const dateStr = localDateString(nowDate, 'America/Los_Angeles');
-  const markerField = `revisit.selectedFor${dateStr}`;
+  const markerField = `selectedFor${dateStr}`;
 
   const usersSnap = await db.collection(`artifacts/${APP_COLLECTION_ID}/users`).get();
 
@@ -294,7 +310,11 @@ export async function runGentleRevisitDaily(db, { now = new Date() } = {}) {
       const prefs = prefsSnap.exists ? (prefsSnap.data() || {}) : {};
       if (prefs.enabled !== true) { skipped++; continue; }
 
-      const claimed = await claimProcessingMarker(db, prefsRef, markerField);
+      // Server-only marker doc — see the doc comment above for why this is
+      // never `settings/revisitPrefs` (client-writable) or any other
+      // `settings/*` id.
+      const jobStateRef = db.doc(`${userBase}/revisit_job_state/state`);
+      const claimed = await claimProcessingMarker(db, jobStateRef, markerField);
       if (!claimed) { skipped++; continue; } // already selected for this local day
 
       processed++;
@@ -305,12 +325,30 @@ export async function runGentleRevisitDaily(db, { now = new Date() } = {}) {
       const windowStartMs = nowMs - (MAX_AGE_DAYS + ADJACENCY_DAYS) * DAY_MS;
       const windowEndMs = nowMs - (MIN_AGE_DAYS - ADJACENCY_DAYS) * DAY_MS;
 
-      const [entriesSnap, exclusionsSnap, recentQueueSnap] = await Promise.all([
+      const [entriesSnap, flaggedAnchorSnap, exclusionsSnap, recentQueueSnap] = await Promise.all([
         db.collection(`${userBase}/entries`)
           .where('createdAt', '>=', new Date(windowStartMs))
           .where('createdAt', '<=', new Date(windowEndMs))
           .orderBy('createdAt', 'desc')
           .limit(CANDIDATE_READ_LIMIT)
+          .get(),
+        // Rule-3 anchor backfill: the query above takes the CANDIDATE_READ_LIMIT
+        // MOST RECENT entries in the padded window. For a user with more than
+        // that many entries, an older safety-flagged entry near the far
+        // (400+ADJACENCY_DAYS-day) edge can be sliced out of that result even
+        // though it's still inside the window — silently starving its veto
+        // power over an adjacent, more-recent, in-window candidate. This
+        // separate, small-limit, equality-filtered query exists SOLELY to
+        // backfill flagged anchors the recency-capped query might have
+        // dropped; it is never itself a source of selectable candidates (age
+        // window + every other rule is still enforced per-entry inside
+        // `selectRevisitCandidate`). Composite index:
+        // firestore.indexes.json (entries: safety_flagged ASC, createdAt ASC).
+        db.collection(`${userBase}/entries`)
+          .where('safety_flagged', '==', true)
+          .where('createdAt', '>=', new Date(windowStartMs))
+          .where('createdAt', '<=', new Date(windowEndMs))
+          .limit(FLAGGED_ANCHOR_READ_LIMIT)
           .get(),
         db.collection(`${userBase}/revisit_exclusions`).get(),
         db.collection(`${userBase}/revisit_queue`)
@@ -319,7 +357,16 @@ export async function runGentleRevisitDaily(db, { now = new Date() } = {}) {
       ]);
 
       const entries = [];
-      entriesSnap.forEach((d) => entries.push(mapEntryDoc(d.id, d.data() || {})));
+      const seenEntryIds = new Set();
+      entriesSnap.forEach((d) => {
+        entries.push(mapEntryDoc(d.id, d.data() || {}));
+        seenEntryIds.add(d.id);
+      });
+      flaggedAnchorSnap.forEach((d) => {
+        if (seenEntryIds.has(d.id)) return; // already present from the main query
+        entries.push(mapEntryDoc(d.id, d.data() || {}));
+        seenEntryIds.add(d.id);
+      });
 
       const exclusions = [];
       exclusionsSnap.forEach((d) => exclusions.push(d.data() || {}));

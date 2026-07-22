@@ -141,6 +141,39 @@ describe('setRevisitEnabled — disabling', () => {
   });
 });
 
+describe('setRevisitEnabled — payload-exactness regression guard', () => {
+  // Mirrors firestore.rules:161-164 exactly: settings/revisitPrefs writes
+  // must hasOnly(['enabled','optInAt','updatedAt']). This is a dedicated,
+  // explicit-allow-list assertion (not just an incidental Object.keys
+  // equality elsewhere) so a future change that adds any other key to this
+  // doc's payload — e.g. a job marker — fails loudly here instead of
+  // silently getting rejected by rules in production.
+  const RULES_ALLOWED_KEYS = ['enabled', 'optInAt', 'updatedAt'];
+
+  it('every key in the first-opt-in payload is in the rules allow-list', async () => {
+    mocks.getDoc.mockResolvedValueOnce({ exists: () => false, data: () => undefined });
+    await setRevisitEnabled(db, UID, true);
+    const [, payload] = mocks.setDoc.mock.calls[0];
+    expect(Object.keys(payload).every((k) => RULES_ALLOWED_KEYS.includes(k))).toBe(true);
+  });
+
+  it('every key in the repeat-enable payload is in the rules allow-list', async () => {
+    mocks.getDoc.mockResolvedValueOnce({
+      exists: () => true,
+      data: () => ({ enabled: false, optInAt: '2026-01-01T00:00:00.000Z' }),
+    });
+    await setRevisitEnabled(db, UID, true);
+    const [, payload] = mocks.setDoc.mock.calls[0];
+    expect(Object.keys(payload).every((k) => RULES_ALLOWED_KEYS.includes(k))).toBe(true);
+  });
+
+  it('every key in the disable payload is in the rules allow-list', async () => {
+    await setRevisitEnabled(db, UID, false);
+    const [, payload] = mocks.setDoc.mock.calls[0];
+    expect(Object.keys(payload).every((k) => RULES_ALLOWED_KEYS.includes(k))).toBe(true);
+  });
+});
+
 describe('getRevisitPrefs', () => {
   it('returns {enabled:false, optInAt:null} when the doc does not exist', async () => {
     mocks.getDoc.mockResolvedValueOnce({ exists: () => false, data: () => undefined });

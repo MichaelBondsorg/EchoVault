@@ -264,19 +264,24 @@ describe('selectRevisitCandidate — null when nothing qualifies', () => {
 });
 
 describe('selectRevisitCandidate — 100% safety-fixture exclusion gate', () => {
-  it('never selects ANY entry from an adversarial fixture set covering every exclusion rule', () => {
-    const flaggedAnchor = baseEntry({ id: 'anchor-flagged', createdAt: daysAgo(200), safety_flagged: true });
+  it('never selects ANY entry from an adversarial fixture set covering every exclusion rule — including "bait" entries with maximally attractive scoring attributes', () => {
+    // Every unsafe entry below is deliberately given rich entities/tags AND
+    // mood >= 0.5 — the exact attributes the preference-scoring step favors
+    // most — to prove exclusion is a hard gate that runs BEFORE scoring ever
+    // sees these entries, not a soft penalty scoring could outweigh.
+    const bait = { tags: ['reunion', 'good-news'], entities: [{ id: 'p1', name: 'Sam', category: 'person' }], analysis: { mood_score: 0.95 } };
+    const flaggedAnchor = baseEntry({ id: 'anchor-flagged', createdAt: daysAgo(200), safety_flagged: true, ...bait });
     const adversarial = [
       flaggedAnchor,
-      baseEntry({ id: 'unsafe-flagged', safety_flagged: true, createdAt: daysAgo(150) }),
-      baseEntry({ id: 'unsafe-warned', has_warning_indicators: true, createdAt: daysAgo(120) }),
-      baseEntry({ id: 'unsafe-adjacent-plus', createdAt: daysAgo(200) - ADJACENCY_DAYS * DAY_MS }),
-      baseEntry({ id: 'unsafe-adjacent-minus', createdAt: daysAgo(200) + ADJACENCY_DAYS * DAY_MS }),
-      baseEntry({ id: 'unsafe-low-mood', analysis: { mood_score: 0.1 }, createdAt: daysAgo(110) }),
-      baseEntry({ id: 'unsafe-missing-mood', analysis: {}, createdAt: daysAgo(115) }),
-      baseEntry({ id: 'unsafe-excluded-entry', createdAt: daysAgo(130) }),
-      baseEntry({ id: 'unsafe-too-young', createdAt: daysAgo(5) }),
-      baseEntry({ id: 'unsafe-too-old', createdAt: daysAgo(500) }),
+      baseEntry({ id: 'unsafe-flagged', safety_flagged: true, createdAt: daysAgo(150), ...bait }),
+      baseEntry({ id: 'unsafe-warned', has_warning_indicators: true, createdAt: daysAgo(120), ...bait }),
+      baseEntry({ id: 'unsafe-adjacent-plus', createdAt: daysAgo(200) - ADJACENCY_DAYS * DAY_MS, ...bait }),
+      baseEntry({ id: 'unsafe-adjacent-minus', createdAt: daysAgo(200) + ADJACENCY_DAYS * DAY_MS, ...bait }),
+      baseEntry({ id: 'unsafe-low-mood', analysis: { mood_score: 0.1 }, createdAt: daysAgo(110), tags: bait.tags, entities: bait.entities }),
+      baseEntry({ id: 'unsafe-missing-mood', analysis: {}, createdAt: daysAgo(115), tags: bait.tags, entities: bait.entities }),
+      baseEntry({ id: 'unsafe-excluded-entry', createdAt: daysAgo(130), ...bait }),
+      baseEntry({ id: 'unsafe-too-young', createdAt: daysAgo(5), ...bait }),
+      baseEntry({ id: 'unsafe-too-old', createdAt: daysAgo(500), ...bait }),
     ];
     const exclusions = [{ dimension: 'entry', value: 'unsafe-excluded-entry' }];
 
@@ -284,9 +289,11 @@ describe('selectRevisitCandidate — 100% safety-fixture exclusion gate', () => 
     const noneSafe = selectRevisitCandidate({ entries: adversarial, exclusions, now: NOW });
     expect(noneSafe).toBeNull();
 
-    // Adding exactly one genuinely safe entry proves the adversarial ones
-    // really were filtered (not that the input was accidentally empty).
-    const safeControl = baseEntry({ id: 'the-only-safe-one', createdAt: daysAgo(180) });
+    // Adding exactly one genuinely safe entry — deliberately LESS
+    // "attractive" than the bait (no tags/entities, mood right at the
+    // preferred-but-not-maximal 0.5 threshold) — proves the adversarial
+    // ones really were structurally filtered, not merely outscored.
+    const safeControl = baseEntry({ id: 'the-only-safe-one', createdAt: daysAgo(180), analysis: { mood_score: 0.5 } });
     const withControl = selectRevisitCandidate({
       entries: [...adversarial, safeControl],
       exclusions,
@@ -353,6 +360,53 @@ function fakeQuery(snapshot) {
   return q;
 }
 
+function comparable(v) {
+  if (v instanceof Date) return v.getTime();
+  return v;
+}
+
+/**
+ * A REAL (if minimal) query engine over a fixed array of `{id, data}` docs —
+ * used only for the `entries` collection, where the tests below need
+ * `.where()`/`.orderBy()`/`.limit()` to actually filter/sort/slice (unlike
+ * `fakeQuery`, which just resolves a pre-baked snapshot regardless of the
+ * chain). This is what lets the "far-edge flagged anchor gets sliced out of
+ * the 200-cap but is still recovered by the dedicated anchor query" test
+ * exercise the real bug this fixes, instead of asserting against a stub.
+ */
+function makeEntriesQuery(docs) {
+  const wheres = [];
+  let orderField = null;
+  let orderDir = 'asc';
+  let limitN = null;
+  const q = {
+    where: vi.fn((field, op, value) => { wheres.push([field, op, value]); return q; }),
+    orderBy: vi.fn((field, dir) => { orderField = field; orderDir = dir || 'asc'; return q; }),
+    limit: vi.fn((n) => { limitN = n; return q; }),
+    get: vi.fn(async () => {
+      let result = docs.filter((d) => wheres.every(([field, op, value]) => {
+        const actual = comparable(d.data[field]);
+        const expected = comparable(value);
+        switch (op) {
+          case '==': return actual === expected;
+          case '>=': return actual >= expected;
+          case '<=': return actual <= expected;
+          default: return true;
+        }
+      }));
+      if (orderField) {
+        result = [...result].sort((a, b) => {
+          const diff = comparable(a.data[orderField]) - comparable(b.data[orderField]);
+          return orderDir === 'desc' ? -diff : diff;
+        });
+      }
+      if (limitN != null) result = result.slice(0, limitN);
+      return fakeSnap(result);
+    }),
+  };
+  return q;
+}
+
 /**
  * Fake Firestore double supporting exactly the surface `runGentleRevisitDaily`
  * uses: `.doc(path)`/`.collection(path)` with a shared docStore (keyed by
@@ -379,9 +433,11 @@ function buildFakeDb({ flags = { gentleRevisit: true }, userIds = [], prefsByUse
   }
 
   const entriesQueryCalls = [];
+  const docPathsRequested = [];
 
   const db = {
     doc: vi.fn((path) => {
+      docPathsRequested.push(path);
       if (path === 'config/flags') {
         return { get: vi.fn(async () => ({ exists: true, data: () => flags })) };
       }
@@ -394,7 +450,7 @@ function buildFakeDb({ flags = { gentleRevisit: true }, userIds = [], prefsByUse
       const entriesMatch = path.match(new RegExp(`users/([^/]+)/entries$`));
       if (entriesMatch) {
         const uid = entriesMatch[1];
-        const q = fakeQuery(fakeSnap(entriesByUser[uid] || []));
+        const q = makeEntriesQuery(entriesByUser[uid] || []);
         entriesQueryCalls.push(q);
         return q;
       }
@@ -430,7 +486,7 @@ function buildFakeDb({ flags = { gentleRevisit: true }, userIds = [], prefsByUse
     }),
   };
 
-  return { db, queueWrites, entriesQueryCalls, docStore };
+  return { db, queueWrites, entriesQueryCalls, docStore, docPathsRequested };
 }
 
 const RUN_NOW = new Date('2026-07-21T15:00:00.000Z'); // 08:00 America/Los_Angeles
@@ -517,15 +573,17 @@ describe('runGentleRevisitDaily — selection + write', () => {
     });
   });
 
-  it('caps the candidate entries read at 200', async () => {
+  it('caps the main candidate-entries read at 200, and the separate flagged-anchor backfill query at 50', async () => {
     const { db, entriesQueryCalls } = buildFakeDb({
       userIds: ['u1'],
       prefsByUser: { u1: { enabled: true } },
       entriesByUser: { u1: [eligibleEntryDoc('entry-1')] },
     });
     await runGentleRevisitDaily(db, { now: RUN_NOW });
-    expect(entriesQueryCalls).toHaveLength(1);
+    expect(entriesQueryCalls).toHaveLength(2); // main candidate query + flagged-anchor backfill query
     expect(entriesQueryCalls[0].limit).toHaveBeenCalledWith(200);
+    expect(entriesQueryCalls[1].where).toHaveBeenCalledWith('safety_flagged', '==', true);
+    expect(entriesQueryCalls[1].limit).toHaveBeenCalledWith(50);
   });
 
   it('writes spaceId when the selected entry has one', async () => {
@@ -567,7 +625,28 @@ describe('runGentleRevisitDaily — idempotency marker', () => {
     expect(second.processed).toBe(0);
     expect(second.skipped).toBe(1);
     expect(shared.queueWrites).toHaveLength(1); // still just the one write
-    expect(shared.entriesQueryCalls).toHaveLength(1); // entries were only ever read once
+    expect(shared.entriesQueryCalls).toHaveLength(2); // main + anchor query, only from the first (successful) run
+  });
+
+  it('claims the marker on a dedicated revisit_job_state doc, never on settings/revisitPrefs', async () => {
+    const shared = buildFakeDb({
+      userIds: ['u1'],
+      prefsByUser: { u1: { enabled: true, optInAt: '2026-01-01T00:00:00.000Z' } },
+      entriesByUser: { u1: [eligibleEntryDoc('entry-1')] },
+    });
+
+    await runGentleRevisitDaily(shared.db, { now: RUN_NOW });
+
+    expect(shared.docPathsRequested).toContain(`artifacts/${APP}/users/u1/revisit_job_state/state`);
+
+    const jobStateDoc = shared.docStore.get(`artifacts/${APP}/users/u1/revisit_job_state/state`);
+    expect(Object.keys(jobStateDoc.data)).toEqual(['selectedFor2026-07-21']);
+    expect(jobStateDoc.data['selectedFor2026-07-21']).toBeTruthy();
+
+    // The client-writable prefs doc must be untouched by the job — still
+    // exactly what it was seeded with, no `selectedFor*`/`revisit` key added.
+    const prefsDoc = shared.docStore.get(`artifacts/${APP}/users/u1/settings/revisitPrefs`);
+    expect(prefsDoc.data).toEqual({ enabled: true, optInAt: '2026-01-01T00:00:00.000Z' });
   });
 
   it('a run on the following local day claims a fresh marker and can select again', async () => {
@@ -584,6 +663,55 @@ describe('runGentleRevisitDaily — idempotency marker', () => {
     expect(second.processed).toBe(1);
     expect(second.selected).toBe(1);
     expect(shared.queueWrites).toHaveLength(2);
+  });
+});
+
+describe('runGentleRevisitDaily — flagged-anchor backfill (200-cap edge case)', () => {
+  it('a far-edge flagged entry sliced out of the 200-most-recent main query still vetoes its adjacent in-cap candidate', async () => {
+    // 199 recent "filler" entries (ages 30-228 days) — all deliberately
+    // unselectable (low mood) so they can never be the thing that gets
+    // written, isolating the assertion to the candidate/flagged pair below.
+    // They exist purely to push the flagged entry (age 242d) out of the
+    // main query's `.orderBy('createdAt','desc').limit(200)` top-200 —
+    // while the candidate (age 240d, 2 days newer) stays IN the top-200.
+    const fillers = Array.from({ length: 199 }, (_, i) => eligibleEntryDoc(`filler-${i}`, {
+      createdAt: new Date(RUN_NOW.getTime() - (30 + i) * DAY_MS),
+      analysis: { mood_score: 0.1 }, // fails rule 4 — never selectable
+    }));
+    const candidate = eligibleEntryDoc('the-candidate', {
+      createdAt: new Date(RUN_NOW.getTime() - 240 * DAY_MS),
+      analysis: { mood_score: 0.8 },
+      tags: ['calm'],
+    });
+    const flaggedFarEdge = eligibleEntryDoc('flagged-far-edge', {
+      createdAt: new Date(RUN_NOW.getTime() - 242 * DAY_MS), // 2 days from candidate, within ADJACENCY_DAYS
+      safety_flagged: true,
+    });
+
+    const { db, queueWrites, entriesQueryCalls } = buildFakeDb({
+      userIds: ['u1'],
+      prefsByUser: { u1: { enabled: true } },
+      entriesByUser: { u1: [...fillers, candidate, flaggedFarEdge] },
+    });
+
+    const result = await runGentleRevisitDaily(db, { now: RUN_NOW });
+
+    // Sanity-check the premise (re-querying the recorded main-query object,
+    // whose where/orderBy/limit chain is unchanged by re-invoking `.get()`):
+    // the main (capped) query alone must NOT contain the flagged entry, but
+    // MUST contain the candidate — otherwise this test isn't actually
+    // exercising the 200-cap edge case.
+    const mainQuerySnap = await entriesQueryCalls[0].get();
+    const mainIds = [];
+    mainQuerySnap.forEach((d) => mainIds.push(d.id));
+    expect(mainIds).toContain('the-candidate');
+    expect(mainIds).not.toContain('flagged-far-edge');
+
+    // Without the anchor backfill, 'the-candidate' would incorrectly win
+    // (highest mood/content score, no visible flagged neighbor). With it,
+    // the flagged entry is recovered via the anchor query and vetoes it.
+    expect(result.selected).toBe(0);
+    expect(queueWrites).toHaveLength(0);
   });
 });
 
