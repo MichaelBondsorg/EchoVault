@@ -256,9 +256,14 @@ export const normalizeEntryForInsights = (entry, { timeZone } = {}) => {
     category: resolveStringField(entry.category, entry.classification?.primary_category),
     tags: resolveArrayField(entry.tags, entry.analysis?.tags),
     entities: resolveArrayField(entry.entities, entry.analysis?.entities),
-    themes: resolveArrayField(entry.analysis?.themes, entry.themes),
-    emotions: resolveArrayField(entry.analysis?.emotions, entry.emotions),
-    cognitivePatterns: resolveArrayField(entry.analysis?.cognitive_patterns, entry.cognitivePatterns),
+    // Top-level-first, legacy-analysis.*-second — the SAME precedence as
+    // tags/entities/entryType/category above (T1 review, Important: these
+    // three previously resolved analysis-first, an undocumented inversion.
+    // No writer populates either location today, so behavior is unchanged;
+    // consistency means a future writer can't be silently second-guessed).
+    themes: resolveArrayField(entry.themes, entry.analysis?.themes),
+    emotions: resolveArrayField(entry.emotions, entry.analysis?.emotions),
+    cognitivePatterns: resolveArrayField(entry.cognitivePatterns, entry.analysis?.cognitive_patterns),
     memoryMentions: resolveArrayField(entry.memoryMentions, null),
     text: typeof text === 'string' ? text : '',
     hasText: typeof text === 'string' && text.trim().length > 0,

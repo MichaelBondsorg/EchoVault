@@ -291,4 +291,37 @@ describe('entryAdapter', () => {
       expect(n.timestampMs).toBe(Date.parse('2026-01-05T08:00:00.000Z'));
     });
   });
+
+  // T1 review (Important): uniform top-level-first precedence for EVERY
+  // resolveArrayField pair — pinned with both locations populated so a
+  // future writer can never be silently second-guessed by the adapter.
+  describe('field-resolution precedence (top-level-first, uniformly)', () => {
+    it.each([
+      ['tags'],
+      ['entities'],
+      ['themes'],
+      ['emotions'],
+    ])('%s: top-level wins when BOTH locations are populated', (field) => {
+      const analysisKey = field === 'cognitivePatterns' ? 'cognitive_patterns' : field;
+      const entry = {
+        id: 'e1',
+        createdAt: '2026-01-05T08:00:00.000Z',
+        [field]: ['top-level-value'],
+        analysis: { mood_score: 0.5, [analysisKey]: ['legacy-value'] },
+      };
+      const n = normalizeEntryForInsights(entry, { timeZone: TZ });
+      expect(n[field]).toEqual(['top-level-value']);
+    });
+
+    it('cognitivePatterns: top-level wins over legacy analysis.cognitive_patterns', () => {
+      const entry = {
+        id: 'e1',
+        createdAt: '2026-01-05T08:00:00.000Z',
+        cognitivePatterns: ['top-level-value'],
+        analysis: { mood_score: 0.5, cognitive_patterns: ['legacy-value'] },
+      };
+      const n = normalizeEntryForInsights(entry, { timeZone: TZ });
+      expect(n.cognitivePatterns).toEqual(['top-level-value']);
+    });
+  });
 });
