@@ -380,8 +380,8 @@ export const getTodayRecommendations = async (userId, entries, todayHealth, toda
   // Pet-walk effectiveness for mood.
   // R4 T3 (DR finding 5, privacy sweep — an orphaned second recommendation
   // pipeline the sweep found, not routed through orchestrator.js's own
-  // gate): was `sterling_walk` (a pet's name) with a personalized-evidence
-  // claim ("Sterling walks improve your mood by X%") built from a
+  // gate): was a pet-name-keyed intervention with a personalized-evidence
+  // claim ("<pet> walks improve your mood by X%") built from a
   // Mood01-scale `moodDelta.mean` (native 0-1) compared/rendered as if it
   // were already a 0-100 percentage — the exact scale bug class fixed
   // elsewhere in R4 T3, here compounded with a personal literal. Key
