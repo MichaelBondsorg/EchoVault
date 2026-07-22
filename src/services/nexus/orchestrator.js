@@ -48,6 +48,13 @@ import { markInsightsStale } from './staleness';
 // module's own doc comment for the full "why a separate file" rationale)
 import { recordInsightDismissal, getDismissedKeys, dismissalKeyFor } from './insightDismissal';
 
+// Versioned cutover (R4 Task 6, ratified decision 2) — shared with
+// basicInsightsOrchestrator.js so both generators stamp the SAME current
+// version. Re-exported here so existing importers of orchestrator.js (tests
+// included) don't also need to know about the shared module.
+import { generatorVersion } from '../insights/generatorVersion';
+export { generatorVersion };
+
 // ============================================================
 // MOOD01 CONVENTION (R4 T3)
 // ============================================================
@@ -1104,6 +1111,25 @@ const saveInsights = async (userId, insights) => {
 
   console.log(`[Orchestrator] Insights: ${insights.length} generated, ${uniqueNewInsights.length} unique after dedup`);
 
+  // Versioned cutover (R4 Task 6, ratified decision 2 — "legacy artifact
+  // cutover, not migration"). Every newly generated insight gets stamped
+  // with the current `generatorVersion`. Separately: `active` is about to
+  // be wholesale-overwritten below (pre-existing behavior) — any PREVIOUS
+  // active insight that predates versioning (no `generatorVersion` field at
+  // all, i.e. version 1) or was stamped by an older version would otherwise
+  // simply vanish, unrecorded anywhere. Archive those into `history` with a
+  // `legacyVersion: true` mark instead — nothing is ever silently deleted.
+  // In steady state (every generation after the first post-R4 one) this
+  // list is empty: this generation's own `active` items already carry the
+  // current version, so there's nothing to archive next time.
+  const legacyActive = existingActive.filter(
+    (insight) => !insight.generatorVersion || insight.generatorVersion < generatorVersion
+  );
+  const stampedNewInsights = uniqueNewInsights.map((insight) => ({
+    ...insight,
+    generatorVersion
+  }));
+
   // Merge new insights into history (dedupe by id, keep latest)
   const historyMap = new Map();
 
@@ -1114,8 +1140,23 @@ const saveInsights = async (userId, insights) => {
     }
   }
 
+  // Archive legacy actives (cutover) — added AFTER existing history so a
+  // fresher history entry with the same id (shouldn't normally happen, but
+  // defensive) isn't clobbered by an older archived-active copy, and BEFORE
+  // this generation's own new insights below so a genuine same-id refresh
+  // in the SAME generation still wins.
+  for (const insight of legacyActive) {
+    if (insight.id) {
+      historyMap.set(insight.id, {
+        ...insight,
+        legacyVersion: true,
+        lastSeen: insight.lastSeen || Timestamp.now()
+      });
+    }
+  }
+
   // Add/update with new unique insights
-  for (const insight of uniqueNewInsights) {
+  for (const insight of stampedNewInsights) {
     if (insight.id) {
       historyMap.set(insight.id, {
         ...insight,
@@ -1136,7 +1177,7 @@ const saveInsights = async (userId, insights) => {
     .slice(0, 50);
 
   await setDoc(insightRef, {
-    active: uniqueNewInsights,
+    active: stampedNewInsights,
     history: updatedHistory,
     generatedAt: Timestamp.now(),
     expiresAt: Timestamp.fromMillis(Date.now() + 24 * 60 * 60 * 1000), // 24h

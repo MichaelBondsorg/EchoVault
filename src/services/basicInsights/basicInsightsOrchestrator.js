@@ -39,6 +39,11 @@ import { THRESHOLDS, CATEGORIES } from './utils/thresholds';
 // task's scope, and keep reading raw `entries` directly.
 import { normalizeEntriesForInsights } from '../insights/entryAdapter';
 
+// Versioned cutover (R4 Task 6, ratified decision 2) — same shared constant
+// nexus/orchestrator.js's saveInsights stamps, so both generators agree on
+// "current".
+import { generatorVersion } from '../insights/generatorVersion';
+
 // Feedback learning
 import { filterInsightsByLearning, filterFalsePositiveCandidates } from './feedbackLearning';
 
@@ -299,6 +304,7 @@ export const generateBasicInsights = async (userId, entries) => {
       insights: topInsights,
       generatedAt: now,
       expiresAt,
+      generatorVersion, // R4 Task 6 — stamped on every fresh cache doc
       entriesAnalyzed: entries.length,
       entriesCount: entries.length, // Used for staleness check when new entries are added
       categoryCounts: {
@@ -392,9 +398,19 @@ export const getCachedBasicInsights = async (userId, currentEntriesCount = null)
       console.log('[BasicInsights] Entries count changed:', data.entriesCount, '->', currentEntriesCount, '(marking stale)');
     }
 
+    // Versioned cutover (R4 Task 6, ratified decision 2): a cache doc
+    // written by a pre-R4 generation has no `generatorVersion` field at
+    // all; one written by an older R4 generation could in principle carry
+    // an older version number. Either way it's stale — reuses this same
+    // existing stale-computation seam (no separate delete/migration path)
+    // so it gets regenerated exactly once, the next time this doc is read.
+    // After that regeneration the doc carries the current version, so this
+    // check is a no-op again until the next version bump.
+    const versionStale = data.generatorVersion == null || data.generatorVersion < generatorVersion;
+
     return {
       ...data,
-      stale: isExpired || entriesCountChanged
+      stale: isExpired || entriesCountChanged || versionStale
     };
 
   } catch (error) {

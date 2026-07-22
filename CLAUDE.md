@@ -629,8 +629,21 @@ enforced independently in `firestore.rules` and `experimentsService.js`) and
 coverage-floor/insufficiency (below 10 paired days or 50% per-variable
 coverage, a result is `insufficient` with no estimate at all) — and, like
 Gentle Revisit, **stays OFF until Michael signs off
-`docs/quality/experiments-data-method.md`**. Full detail: runbook's "R2
-flags"/"R3 flag" sections.
+`docs/quality/experiments-data-method.md`**. **R4 (Insight Integrity, Phase
+0, no new flag)** statistically repaired the legacy Nexus/basicInsights
+engines (a versioned entry-schema adapter, complement-baseline + unique-day
+gating, the internal 0-1 `Mood01` convention applied consistently, reports
+reading real fields) and privacy-swept personal/brand literals out of
+pattern-detection triggers; new generations stamp a `generatorVersion`
+(`src/services/insights/generatorVersion.js`) so a user's first post-deploy
+generation archives pre-R4 Nexus insights into `history` (never deletes)
+and invalidates the basicInsights cache once, and user feedback/dismissals
+are now durably consumed rather than recorded-and-ignored. Four claim types
+the scale fix would otherwise reactivate (counterfactuals, belief
+dissonance, intervention outcomes, personalized recommendations) stay
+suppressed behind an internal `RISKY_CLAIMS_ENABLED = false` constant until
+Phase 1-2's evidence rails land. Full detail: runbook's "R2 flags"/"R3
+flag"/"R4" sections.
 
 ## Crash Reporting
 

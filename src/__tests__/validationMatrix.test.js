@@ -192,7 +192,11 @@ vi.mock('../config/firebase', () => ({
 // Row 8's getSmartChatContext import graph pulls in ai/gemini.js (unused by
 // the function actually under test) — stub it so importing analysis/index.js
 // never touches a real provider callable.
-vi.mock('../services/ai/gemini', () => ({ analyzeJournalEntryCloud: vi.fn() }));
+// R4 row (c) needs `callGemini` too (counterfactual.js/beliefDissonance.js's
+// real, unmocked modules call it) — returns null so tests exercise the
+// threshold gate itself, not any generated content past the gate (mirrors
+// counterfactual.test.js/beliefDissonance.test.js's own dedicated mocks).
+vi.mock('../services/ai/gemini', () => ({ analyzeJournalEntryCloud: vi.fn(), callGemini: vi.fn(async () => null) }));
 
 // R2 rows (a)/(b) need the REAL `generateInsights`/`fetchRecentEntries` (the
 // receipts-on-every-insight and exclusion-honoring-regeneration invariants
@@ -2327,5 +2331,444 @@ describe('Hardening Matrix row (h9): anniversary blackout (351-379 days) exclude
     fallback.analysis = { mood_score: MOOD_FLOOR };
     const result = selectRevisitCandidate({ entries: [bait, fallback], now: NOW });
     expect(result?.id).toBe('fallback');
+  });
+});
+
+// ===========================================================================
+// R4 rows (a)-(i): docs/superpowers/plans/2026-07-22-r4-insight-integrity.md
+// (Task 6). Each row is a THIN duplicate of its area's own dedicated test
+// file — same fixture/technique, ported here as a representative assertion
+// (plus, where the area's own file already carries one, a mutation-check
+// control) so the validation matrix stays a complete map of every R4
+// hardening area. See the cited dedicated files for exhaustive coverage;
+// nothing here re-derives their full fixture math.
+// ===========================================================================
+
+describe('R4 Matrix row (a): entry-schema adapter contract — CURRENT/LEGACY/EXPORT shapes, UNKNOWN tri-state pinned (real normalizeEntryForInsights)', () => {
+  it('CURRENT shape resolves top-level fields; themes/emotions/cognitivePatterns/entities (never written today) resolve to UNKNOWN, not [] or null', async () => {
+    const { normalizeEntryForInsights, isUnknown } = await import('../services/insights/entryAdapter');
+    const current = {
+      id: 'e1', createdAt: '2026-07-10T12:00:00.000Z', content: 'Went for a yoga class.',
+      category: 'health', entry_type: 'reflection', tags: ['@activity:yoga'],
+      analysis: { mood_score: 0.8 },
+    };
+    const n = normalizeEntryForInsights(current, { timeZone: 'UTC' });
+    expect(n.entryType).toBe('reflection');
+    expect(n.category).toBe('health');
+    expect(n.mood01).toBe(0.8);
+    expect(isUnknown(n.themes)).toBe(true);
+    expect(isUnknown(n.emotions)).toBe(true);
+    expect(isUnknown(n.cognitivePatterns)).toBe(true);
+    expect(isUnknown(n.entities)).toBe(true);
+  });
+
+  it('LEGACY shape (analysis.* nested fields) falls back to entry_type/tags/category correctly', async () => {
+    const { normalizeEntryForInsights } = await import('../services/insights/entryAdapter');
+    const legacy = {
+      id: 'legacy1', createdAt: '2026-05-01T08:00:00.000Z', text: 'Rough day.',
+      analysis: { mood_score: 0.3, entry_type: 'vent', tags: ['@activity:exercise'] },
+      classification: { primary_category: 'work' },
+    };
+    const n = normalizeEntryForInsights(legacy, { timeZone: 'UTC' });
+    expect(n.entryType).toBe('vent');
+    expect(n.tags).toEqual(['@activity:exercise']);
+    expect(n.category).toBe('work');
+  });
+
+  it('EXPORT shape: object-typed healthContext.activity does not crash and derives lowercased activityTypes (the live .toLowerCase() crash site)', async () => {
+    const { normalizeEntryForInsights } = await import('../services/insights/entryAdapter');
+    const exportEntry = {
+      id: 'export1', createdAt: '2026-07-15T09:00:00.000Z', analysis: { mood_score: 0.85 },
+      healthContext: { activity: { stepsToday: 9000, hasWorkout: true, workouts: [{ type: 'Running', durationMinutes: 32 }] } },
+    };
+    expect(() => normalizeEntryForInsights(exportEntry, { timeZone: 'UTC' })).not.toThrow();
+    const n = normalizeEntryForInsights(exportEntry, { timeZone: 'UTC' });
+    expect(n.healthSignals.activityTypes).toEqual(['running']);
+  });
+
+  it('mutation-check control: an explicit empty tags array is known-empty (UNKNOWN=false), distinct from no tags field at all (UNKNOWN=true) — proves the tri-state is not collapsed to a single "absent" bucket', async () => {
+    const { normalizeEntryForInsights, isUnknown } = await import('../services/insights/entryAdapter');
+    const withEmpty = normalizeEntryForInsights({ id: 'e2', createdAt: '2026-06-01T00:00:00Z', analysis: { mood_score: 0.5 }, tags: [] }, { timeZone: 'UTC' });
+    const withNone = normalizeEntryForInsights({ id: 'e3', createdAt: '2026-06-01T00:00:00Z', analysis: { mood_score: 0.5 } }, { timeZone: 'UTC' });
+    expect(isUnknown(withEmpty.tags)).toBe(false);
+    expect(withEmpty.tags).toEqual([]);
+    expect(isUnknown(withNone.tags)).toBe(true);
+  });
+});
+
+describe('R4 Matrix row (b): no-personal-literals — GENERIC_TRIGGERS denylist lint across patternDetector triggers + synthesizer prompt-capture scan', () => {
+  it('every trigger patternDetector.js can match lives in the curated GENERIC_TRIGGERS vocabulary and contains no PERSONAL_TOKEN_DENYLIST token', async () => {
+    const { GENERIC_TRIGGERS, PERSONAL_TOKEN_DENYLIST } = await import('../services/nexus/layer1/genericTriggers');
+    const { NARRATIVE_PATTERNS } = await import('../services/nexus/layer1/patternDetector');
+    expect(NARRATIVE_PATTERNS).toBe(GENERIC_TRIGGERS);
+
+    const allTriggers = Object.values(GENERIC_TRIGGERS).flatMap((p) => p.triggers);
+    expect(allTriggers.length).toBeGreaterThan(0);
+    for (const trigger of allTriggers) {
+      expect(trigger).toMatch(/^[a-z ]+$/);
+      for (const banned of PERSONAL_TOKEN_DENYLIST) {
+        expect(trigger.includes(banned)).toBe(false);
+      }
+    }
+  });
+
+  it('the real synthesis prompt, built from a fully-populated context (threads/baselines/whoop/interventions), never contains a PERSONAL_TOKEN_DENYLIST token — captures the ACTUAL built prompt, not just the static template', async () => {
+    const { PERSONAL_TOKEN_DENYLIST } = await import('../services/nexus/layer1/genericTriggers');
+    const gemini = await import('../services/ai/gemini');
+    gemini.callGemini.mockClear();
+
+    // vi.importActual bypasses this file's own top-of-file `vi.mock` stub of
+    // layer3/synthesizer (needed so orchestrator rows (a)/(b) can control
+    // its output) — this row needs the REAL buildSynthesisPrompt logic.
+    // Its nested imports (layer1/threadManager, layer2/baselineManager,
+    // config/firebase, firebase/firestore, ai/gemini) still resolve through
+    // this file's existing mocks, exactly like the dedicated
+    // synthesizer.test.js's own (much smaller) mock set.
+    const { generateCausalSynthesis } = await vi.importActual('../services/nexus/layer3/synthesizer');
+
+    const now = Date.parse('2026-07-21T12:00:00.000Z');
+    const DAY_MS = 24 * 60 * 60 * 1000;
+    const context = {
+      recentEntries: Array.from({ length: 10 }, (_, i) => ({
+        id: `entry-${i}`, createdAt: new Date(now - i * DAY_MS).toISOString(), text: `Entry number ${i}.`, mood: 0.5,
+      })),
+      activeThreads: [{ displayName: 'Job Search', category: 'career', entryCount: 5, sentimentTrajectory: 'improving', sentimentBaseline: 0.6 }],
+      currentState: { primary: 'career_waiting', confidence: 0.7, secondary: [], durationDays: 5 },
+      baselines: { global: { rhr: { mean: 58 } }, contextual: { 'state:career_waiting': { mood: { mean: 55 }, sampleDays: 10 } } },
+      whoopToday: { heartRate: { resting: 60 }, hrv: { average: 45 }, recovery: { score: 50 } },
+      interventionData: { interventions: { pet_walk: { effectiveness: { global: { score: 0.8 } } } } },
+    };
+
+    await generateCausalSynthesis('user-matrix-r4b', context);
+    const prompt = gemini.callGemini.mock.calls.at(-1)[0].toLowerCase();
+    for (const token of PERSONAL_TOKEN_DENYLIST) {
+      expect(prompt).not.toContain(token.toLowerCase());
+    }
+  });
+});
+
+describe('R4 Matrix row (c): Mood01 threshold invariance — counterfactual + beliefDissonance behave correctly on native 0-1 fixtures (real modules, gated-suppression-seam-only-at-orchestrator so direct unit access stays real)', () => {
+  it('findGoodDayActivities treats 0.60+ (not 60+) as the good-day mood threshold — real counterfactual.js', async () => {
+    // vi.importActual bypasses this file's own layer3/counterfactual stub
+    // (needed for orchestrator rows) to reach the real threshold logic.
+    const { findGoodDayActivities } = await vi.importActual('../services/nexus/layer3/counterfactual');
+    const entries = [
+      ...Array.from({ length: 4 }, (_, i) => ({ id: `yoga-${i}`, text: 'Did yoga this morning', mood: 0.65 })),
+      ...Array.from({ length: 6 }, (_, i) => ({ id: `neutral-${i}`, text: 'A regular day.', mood: 0.5 })),
+    ];
+    const result = findGoodDayActivities(entries, 3);
+    expect(result.some((a) => a.activity === 'yoga')).toBe(true);
+  });
+
+  it('mutation-check control: a below-threshold Mood01 value (0.55) is NOT treated as a good day — proves the 0.60 gate is real, not always-true', async () => {
+    const { findGoodDayActivities } = await vi.importActual('../services/nexus/layer3/counterfactual');
+    const entries = [
+      ...Array.from({ length: 4 }, (_, i) => ({ id: `yoga-${i}`, text: 'Did yoga this morning', mood: 0.55 })),
+      ...Array.from({ length: 6 }, (_, i) => ({ id: `neutral-${i}`, text: 'A regular day.', mood: 0.5 })),
+    ];
+    const result = findGoodDayActivities(entries, 3);
+    expect(result.some((a) => a.activity === 'yoga')).toBe(false);
+  });
+
+  it('generateDissonanceInsight mood gate uses 0.50 (not 50): 0.6 clears it, 0.3 is gated (queued, not generated) — real beliefDissonance.js', async () => {
+    const { generateDissonanceInsight } = await vi.importActual('../services/nexus/layer3/beliefDissonance');
+    const belief = { id: 'b1', statement: 'test belief' };
+    const validation = { dissonanceScore: 0.9, contradictingData: [{ interpretation: 'x' }] };
+
+    const cleared = await generateDissonanceInsight(belief, validation, 0.6);
+    expect(cleared).not.toEqual(expect.objectContaining({ queued: true }));
+
+    const gated = await generateDissonanceInsight(belief, { ...validation, contradictingData: [] }, 0.3);
+    expect(gated).toEqual(expect.objectContaining({ queued: true, reason: 'mood_gate' }));
+  });
+});
+
+describe('R4 Matrix row (d): complement baseline — a hand-computed activityCorrelations fixture through the REAL basicInsights orchestrator path', () => {
+  const dayIso = (day) => `2026-07-${String(day).padStart(2, '0')}T12:00:00.000Z`;
+
+  beforeEach(async () => {
+    const { getDoc, getDocs, setDoc } = await import('firebase/firestore');
+    getDoc.mockReset();
+    getDoc.mockResolvedValue({ exists: () => false, data: () => ({}) });
+    // feedbackLearning.js's getAllPatternLearning reads this collection —
+    // give it a real empty snapshot so "no learning doc" degrades cleanly
+    // (byte-identical passthrough, per T5) instead of throwing internally.
+    getDocs.mockResolvedValue({ forEach: () => {} });
+    setDoc.mockClear();
+  });
+
+  it('baselineMood is the non-overlapping complement average (50), not the all-entries average (70) — real generateBasicInsights end-to-end', async () => {
+    const entries = [];
+    for (let i = 1; i <= 5; i++) {
+      entries.push({ id: `yoga-${i}`, createdAt: dayIso(i), content: 'yoga class', analysis: { mood_score: 0.9 } });
+    }
+    for (let i = 1; i <= 5; i++) {
+      entries.push({ id: `plain-${i}`, createdAt: dayIso(i + 10), content: 'plain day', analysis: { mood_score: 0.5 } });
+    }
+
+    const { generateBasicInsights } = await import('../services/basicInsights/basicInsightsOrchestrator');
+    const result = await generateBasicInsights('user-matrix-r4d', entries);
+
+    expect(result.success).toBe(true);
+    const yoga = result.insights.find((i) => i.activityKey === 'yoga');
+    expect(yoga).toBeTruthy();
+    // Complement (non-yoga) average is exactly 0.5 -> baselineMood 50 —
+    // NOT the all-entries average (0.7 -> would read as baselineMood 70).
+    expect(yoga.baselineMood).toBe(50);
+    expect(yoga.activityMood).toBe(90);
+    expect(yoga.moodDelta).toBe(40);
+  });
+});
+
+describe('R4 Matrix row (e): empty-group abstention — healthCorrelations never fabricates a comparison against a phantom empty group (real computeHealthMoodCorrelations)', () => {
+  const DAY_MS = 24 * 60 * 60 * 1000;
+  const now = Date.parse('2026-07-21T12:00:00.000Z');
+
+  it('sleepMood: does NOT emit an insight when the poor-sleep (<6h) group is empty (regression for average([])->0)', async () => {
+    const { computeHealthMoodCorrelations } = await import('../services/health/healthCorrelations');
+    const padding = Array.from({ length: 2 }, (_, i) => ({
+      id: `pad-${i}`, createdAt: new Date(now - (i + 100) * DAY_MS).toISOString(),
+      analysis: { mood_score: 0.5 }, healthContext: { heart: { restingRate: null } },
+    }));
+    const entries = [
+      ...Array.from({ length: 5 }, (_, i) => ({
+        id: `good-${i}`, createdAt: new Date(now - i * DAY_MS).toISOString(),
+        analysis: { mood_score: 0.6 }, healthContext: { sleep: { totalHours: 8 } },
+      })),
+      ...padding,
+    ];
+    const correlations = computeHealthMoodCorrelations(entries);
+    expect(correlations?.sleepMood).toBeUndefined();
+  });
+
+  it('mutation-check control: sleepMood DOES fire when both the good-sleep AND poor-sleep groups are genuinely populated — proves abstention is a real empty-group guard, not "sleepMood always undefined"', async () => {
+    const { computeHealthMoodCorrelations } = await import('../services/health/healthCorrelations');
+    const entries = [
+      ...Array.from({ length: 4 }, (_, i) => ({
+        id: `good-${i}`, createdAt: new Date(now - i * DAY_MS).toISOString(),
+        analysis: { mood_score: 0.8 }, healthContext: { sleep: { totalHours: 8 } },
+      })),
+      ...Array.from({ length: 4 }, (_, i) => ({
+        id: `poor-${i}`, createdAt: new Date(now - (i + 10) * DAY_MS).toISOString(),
+        analysis: { mood_score: 0.3 }, healthContext: { sleep: { totalHours: 5 } },
+      })),
+    ];
+    const correlations = computeHealthMoodCorrelations(entries);
+    expect(correlations?.sleepMood).toBeTruthy();
+    expect(correlations.sleepMood.goodSleepAvgMood).toBeCloseTo(0.8);
+    expect(correlations.sleepMood.poorSleepAvgMood).toBeCloseTo(0.3);
+  });
+});
+
+describe('R4 Matrix row (f): reports read the singleton nexus/insights doc + the real analysis.mood_score field (real readNexusData/readEntries vs a faked doc)', () => {
+  function fakeSnap(docs) {
+    return {
+      docs: docs.map((d) => ({ id: d.id, data: () => d.data })),
+      forEach(fn) { docs.forEach((d) => fn({ id: d.id, data: () => d.data })); },
+    };
+  }
+  function makeQuery(snapshot) {
+    const q = { where: () => q, orderBy: () => q, limit: () => q, get: async () => snapshot };
+    return q;
+  }
+
+  it('readNexusData reads active[] from the nexus/insights singleton doc (not a phantom by-type collection query)', async () => {
+    const { readNexusData } = await import('../../functions/src/reports/generator.js');
+    const nexusDoc = {
+      active: [{ id: 'pattern_x', type: 'pattern_correlation', title: 'X Effect', receipt: {} }],
+      history: [],
+    };
+    const db = {
+      doc: (path) => (path.endsWith('/nexus/insights')
+        ? { get: async () => ({ exists: true, data: () => nexusDoc }) }
+        : { get: async () => ({ exists: false }) }),
+      collection: () => makeQuery(fakeSnap([])),
+    };
+    const result = await readNexusData(db, 'artifacts/app/users/u1');
+    expect(result.insights).toHaveLength(1);
+    expect(result.insights[0].id).toBe('pattern_x');
+  });
+
+  it('readEntries reads the real analysis.mood_score field (0-1 scale) into entry.moodScore', async () => {
+    const { readEntries } = await import('../../functions/src/reports/generator.js');
+    const entryWithMoodScore = {
+      id: 'e1',
+      data: { createdAt: { toDate: () => new Date('2026-01-10T12:00:00Z') }, text: 't', analysis: { mood_score: 0.62 } },
+    };
+    const db = {
+      doc: () => ({ get: async () => ({ exists: false }) }),
+      collection: (path) => makeQuery(fakeSnap(path.endsWith('/entries') ? [entryWithMoodScore] : [])),
+    };
+    const entries = await readEntries(db, 'artifacts/app/users/u1', new Date('2026-01-01'), new Date('2026-01-31'), 'weekly');
+    expect(entries[0].moodScore).toBe(0.62);
+  });
+
+  it('mutation-check control: a legacy camelCase-only doc (analysis.moodScore, no mood_score) reads as missing (null), never silently misread as the camelCase value', async () => {
+    const { readEntries } = await import('../../functions/src/reports/generator.js');
+    const legacyEntry = {
+      id: 'e2',
+      data: { createdAt: { toDate: () => new Date('2026-01-10T12:00:00Z') }, text: 't', analysis: { moodScore: 0.62 } },
+    };
+    const db = {
+      doc: () => ({ get: async () => ({ exists: false }) }),
+      collection: (path) => makeQuery(fakeSnap(path.endsWith('/entries') ? [legacyEntry] : [])),
+    };
+    const entries = await readEntries(db, 'artifacts/app/users/u1', new Date('2026-01-01'), new Date('2026-01-31'), 'weekly');
+    expect(entries[0].moodScore).toBeNull();
+  });
+});
+
+describe('R4 Matrix row (g): dismissal survives id churn — real dismissalKeyFor round-trip through recordInsightDismissal/getDismissedKeys', () => {
+  let engagementStore;
+
+  beforeEach(async () => {
+    const { doc, getDoc, getDocs, setDoc } = await import('firebase/firestore');
+    engagementStore = new Map();
+    doc.mockImplementation((...args) => ({ __id: args[args.length - 1] }));
+    getDoc.mockResolvedValue({ exists: () => false, data: () => ({}) });
+    setDoc.mockImplementation(async (ref, data, opts) => {
+      if (opts?.merge) {
+        engagementStore.set(ref.__id, { ...(engagementStore.get(ref.__id) || {}), ...data });
+      } else {
+        engagementStore.set(ref.__id, data);
+      }
+    });
+    getDocs.mockImplementation(async () => ({
+      forEach: (cb) => {
+        for (const [id, data] of engagementStore.entries()) cb({ id, data: () => data });
+      },
+    }));
+  });
+
+  it('dismissalKeyFor derives the SAME content key across two Date.now()-churned recommendation ids', async () => {
+    const { dismissalKeyFor } = await import('../services/nexus/insightDismissal');
+    const first = { id: 'recommendation_1000', intervention: 'pet_walk', title: 'Walk the dog' };
+    const second = { id: 'recommendation_2000', intervention: 'pet_walk', title: 'Walk the dog' };
+    expect(dismissalKeyFor(first)).toBe(dismissalKeyFor(second));
+    expect(dismissalKeyFor(first)).toBe('recommendation:pet_walk');
+  });
+
+  it('real recordInsightDismissal -> getDismissedKeys round trip: a dismissal survives lookup by a churned-id insight with the SAME content, and does NOT match reworded content (documented boundary)', async () => {
+    const { recordInsightDismissal, getDismissedKeys, dismissalKeyFor } = await import('../services/nexus/insightDismissal');
+    const original = { id: 'recommendation_1000', intervention: 'pet_walk', title: 'Walk the dog' };
+    const wrote = await recordInsightDismissal('user-r4g', original);
+    expect(wrote).toBe(true);
+
+    const keys = await getDismissedKeys('user-r4g');
+
+    const regenerated = { id: 'recommendation_9999999', intervention: 'pet_walk', title: 'Walk the dog' };
+    expect(keys.has(dismissalKeyFor(regenerated))).toBe(true);
+
+    // Mutation-check control: genuinely different content -> different key,
+    // legitimately resurfaces (not a bug — see insightDismissal.js's own
+    // "honest boundary" comment).
+    const reworked = { id: 'recommendation_777', intervention: 'journal_prompt', title: 'Try journaling' };
+    expect(keys.has(dismissalKeyFor(reworked))).toBe(false);
+  });
+});
+
+describe('R4 Matrix row (h): suppression fails toward holding for an unstamped legacy doc — real shouldShowInsight/evaluateShowDecision', () => {
+  beforeEach(async () => {
+    const { getDoc } = await import('firebase/firestore');
+    getDoc.mockReset();
+    getDoc.mockResolvedValue({ exists: () => false, data: () => ({}) });
+  });
+
+  it('a suppressed learning doc with entriesAtLastEvaluation entirely ABSENT (pre-T5b legacy shape) holds suppression on the very next evaluation — does not resurface just because the unstamped baseline reads as 0', async () => {
+    const { getDoc } = await import('firebase/firestore');
+    getDoc.mockResolvedValueOnce({
+      exists: () => true,
+      data: () => ({
+        totalFeedback: 3,
+        suppressed: true,
+        suppressedAt: { toMillis: () => Date.now() - 1000 },
+        confidenceMultiplier: 0.3,
+        requiredMoodDeltaToResurface: null,
+        // entriesAtLastEvaluation entirely absent — pre-T5b legacy doc
+      }),
+    });
+
+    const { shouldShowInsight } = await import('../services/basicInsights/feedbackLearning');
+    const decision = await shouldShowInsight('user-r4h', { activityKey: 'yoga', moodDelta: 5 }, 500);
+    expect(decision.show).toBe(false);
+    expect(decision.reason).toBe('suppressed');
+  });
+
+  it('mutation-check control: a properly-stamped doc with >=5 genuinely new entries DOES re-evaluate and resurface — proves the fix is not "suppress forever"', async () => {
+    const { getDoc } = await import('firebase/firestore');
+    getDoc.mockResolvedValueOnce({
+      exists: () => true,
+      data: () => ({
+        totalFeedback: 3,
+        suppressed: true,
+        suppressedAt: { toMillis: () => Date.now() - 1000 },
+        confidenceMultiplier: 0.3,
+        requiredMoodDeltaToResurface: null,
+        entriesAtLastEvaluation: 100,
+      }),
+    });
+
+    const { shouldShowInsight } = await import('../services/basicInsights/feedbackLearning');
+    const decision = await shouldShowInsight('user-r4h-2', { activityKey: 'yoga', moodDelta: 5 }, 106);
+    expect(decision.show).toBe(true);
+    expect(decision.reason).toBe('new_data_reevaluation');
+  });
+});
+
+describe('R4 Matrix row (i): versioned cutover — archives-not-deletes + stamps generatorVersion (real generateInsights/saveInsights)', () => {
+  const DAY_MS = 24 * 60 * 60 * 1000;
+
+  function mockEntriesSnapshot(entries) {
+    return { docs: entries.map((e) => ({ id: e.id, data: () => ({ ...e }) })) };
+  }
+  function buildFixtureEntries() {
+    const now = Date.parse('2026-07-21T12:00:00.000Z');
+    const entries = [];
+    for (let i = 0; i < 4; i++) {
+      entries.push({ id: `interview-${i}`, createdAt: new Date(now - i * DAY_MS).toISOString(), text: `Had another interview today, feeling good about it. Entry number ${i}.`, analysis: { mood_score: 0.80 } });
+    }
+    for (let i = 0; i < 4; i++) {
+      entries.push({ id: `yoga-${i}`, createdAt: new Date(now - (i + 4) * DAY_MS).toISOString(), text: `Did yoga this morning, feeling solid. Entry number ${i}.`, analysis: { mood_score: 0.85 } });
+    }
+    for (let i = 0; i < 4; i++) {
+      entries.push({ id: `neutral-${i}`, createdAt: new Date(now - (i + 8) * DAY_MS).toISOString(), text: `A regular day. Nothing special. Entry number ${i}.`, analysis: { mood_score: 0.50 } });
+    }
+    return entries;
+  }
+
+  beforeEach(async () => {
+    const { getDocs, getDoc, setDoc } = await import('firebase/firestore');
+    getDocs.mockReset();
+    getDoc.mockReset();
+    setDoc.mockClear();
+    getExcludedEntryIdsMock.mockReset();
+    getExcludedEntryIdsMock.mockResolvedValue(new Set());
+  });
+
+  it('a legacy active insight (no generatorVersion) is archived into history with legacyVersion:true — never left active, never deleted — while every newly generated active insight is stamped with the current generatorVersion', async () => {
+    const { getDocs, getDoc, setDoc } = await import('firebase/firestore');
+    const legacyInsight = { id: 'pattern_legacy_matrix', type: 'pattern_correlation', title: 'Legacy pattern', summary: 'x', priority: 3 };
+
+    getDoc
+      .mockResolvedValueOnce({ exists: () => false, data: () => ({}) }) // getUserSettings' settings/nexus read
+      .mockResolvedValueOnce({ exists: () => true, data: () => ({ active: [legacyInsight], history: [] }) }); // saveInsights' nexus/insights read
+
+    getDocs.mockResolvedValueOnce(mockEntriesSnapshot(buildFixtureEntries()));
+
+    const { generateInsights, generatorVersion } = await import('../services/nexus/orchestrator');
+    const result = await generateInsights('user-matrix-r4i');
+    expect(result.success).toBe(true);
+
+    const persistCall = setDoc.mock.calls.find((call) => call[1] && Array.isArray(call[1].active));
+    expect(persistCall).toBeTruthy();
+    expect(persistCall[1].active.length).toBeGreaterThan(0);
+    for (const insight of persistCall[1].active) {
+      expect(insight.generatorVersion).toBe(generatorVersion);
+    }
+
+    const archived = persistCall[1].history.find((i) => i.id === 'pattern_legacy_matrix');
+    expect(archived).toBeTruthy();
+    expect(archived.legacyVersion).toBe(true);
+    expect(persistCall[1].active.find((i) => i.id === 'pattern_legacy_matrix')).toBeUndefined();
   });
 });

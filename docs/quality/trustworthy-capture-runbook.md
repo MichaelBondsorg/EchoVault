@@ -736,3 +736,126 @@ deliberate design choice this task made since decision #4 commits to
 catalog at result time — so a later wording edit to the catalog (or a
 template's removal) can never silently change or blank out the safety text
 an already-`completed` result shows.
+
+## R4 (Insight Integrity — Phase 0 containment)
+
+Plan: `docs/superpowers/plans/2026-07-22-r4-insight-integrity.md`. Source:
+Michael's external deep review ("DR") of the legacy Nexus/basicInsights
+engines, adopted as owner direction. Unlike R1-R3, **R4 Phase 0 ships no new
+user-facing flag** — it repairs statistically-broken legacy engines that
+were already live (behind the existing, already-shipped Nexus/basicInsights
+surfaces), sweeps privacy literals out of pattern-detection triggers, and
+adds an internal risky-claim suppression seam. Batches R4-0a (T1-T4,
+disjoint file trees, parallel) + R4-0b (T5, T6) — full task-by-task detail:
+`.superpowers/sdd/task-{1,1b,2,3,4,5,6}-report.md`.
+
+**Scope of Phase 0** (Phases 1-2, canonical claim store + verified
+synthesis, are planned in detail when reached — see the plan's own
+outline): a versioned entry-schema adapter
+(`src/services/insights/entryAdapter.js`) fixing five basicInsights engines'
+field-location bugs and a live `.toLowerCase()`-on-an-object crash, plus
+complement-baseline (non-overlapping exposed-vs-not, not an all-entries
+average) and unique-day-gating floors; personal/brand literals stripped from
+Nexus Layer 1 pattern-detection triggers (`patternDetector.js`'s
+`GENERIC_TRIGGERS`, curated + lint-tested); the internal 0-1 `Mood01`
+convention applied consistently through orchestrator/counterfactual/
+beliefDissonance/synthesizer (previously comparing native 0-1 values against
+0-100-scale literals — always-true or always-false bugs, not real gates);
+reports (`functions/src/reports/generator.js`) reading the real singleton
+`nexus/insights` doc and the real `analysis.mood_score` field instead of a
+phantom by-type collection query and a camelCase field the app never
+writes; and user feedback/dismissals becoming durably consumed inputs (next
+bullet).
+
+**Cutover semantics (ratified decision 2 — "legacy artifact cutover, not
+migration").** There is no data-migration script and no bulk rewrite.
+`generatorVersion` (`src/services/insights/generatorVersion.js`, currently
+`2` — version 1 is implicit: nothing before R4 ever stamped this field, so
+its absence on an existing doc/insight means "written by a pre-R4 engine")
+is stamped on every insight a generation actually produces. **Regeneration
+is entirely client-side, on-demand** — there is no server-side backfill job
+and no scheduled trigger for this; it happens exactly when a generation
+would already have run anyway: Nexus's existing 24h TTL / manual refresh /
+`updateInsightsForNewEntry`, or basicInsights' existing TTL/entries-changed
+staleness check. Concretely:
+- **Nexus** (`src/services/nexus/orchestrator.js`'s `saveInsights`): on the
+  first post-deploy generation for a given user, any previous `active`
+  insight lacking `generatorVersion` (or stamped with an older one) is
+  **archived into `history` with a `legacyVersion: true` mark** instead of
+  being silently dropped when `active` is wholesale-replaced (pre-existing
+  behavior, unchanged) — nothing is ever deleted. Every newly generated
+  `active` insight is stamped with the current `generatorVersion`. In
+  steady state (every generation after the first) there is nothing left to
+  archive, so this is a true one-time cutover per user, not an ongoing cost.
+- **basicInsights** (`src/services/basicInsights/basicInsightsOrchestrator.js`):
+  has no active/history split — its cache doc is a single flat
+  `basicInsights/current` doc, wholesale-replaced every generation, so
+  there is nothing to archive. `generatorVersion` is stamped on every fresh
+  cache doc; `getCachedBasicInsights` treats a doc with a missing or
+  stale-versioned `generatorVersion` as **stale**, reusing its existing
+  TTL/entries-changed staleness computation (no new invalidation path, no
+  hard delete) — the cache regenerates exactly once, the next time it's
+  read, and stays fresh on version grounds after that.
+- `firestore.rules`' `nexus/{docId}` and `basicInsights/{insightId}` rules
+  are both unconstrained owner-read/write maps (no field-shape validation)
+  — verified by reading the rules file directly; the new
+  `generatorVersion`/`legacyVersion` fields needed no rules change.
+- **Feedback/exclusions are preserved by construction, not by any cutover
+  logic touching them.** T5 already made `insightLearning` (basicInsights
+  false-positive/suppression learning) and the Nexus
+  `nexus/insights/insight_engagement` dismissal subcollection durably
+  consumed inputs to generation (see below); the cutover write paths
+  (`saveInsights`, `generateBasicInsights`'s `saveBasicInsights`) never
+  write to either collection — asserted directly by test
+  (`orchestrator.cutover.test.js`'s "never write insightLearning,
+  insight_exclusions, or source_exclusions" case;
+  `basicInsightsOrchestrator.cutover.test.js`'s analogous case).
+
+**Feedback is now consumed (R4 Task 5, DR finding 10 — "feedback is stored
+but never consumed").** Before R4, `falsePositiveEntryIds`/
+`falsePositivePatterns` were recorded on user feedback but never read back
+into generation, Nexus dismissals were an in-tab-only React state Set (gone
+on reload), and a resurfacing bug (`entriesAtLastEvaluation` permanently
+stuck at its `0` default) meant a suppressed basicInsights pattern could
+clear its re-evaluation threshold on literally the next read regardless of
+whether any new entries existed. All three are fixed and durable now:
+`generateBasicInsights` filters false-positive-flagged candidates
+pre-scoring (`filterFalsePositiveCandidates`); Nexus dismissals persist to
+`nexus/insights/insight_engagement/{dismissalKey}` and are filtered at
+every `getCachedInsights` read (`src/services/nexus/insightDismissal.js`),
+keyed by a **content-derived stable key** (`dismissalKeyFor`) rather than
+the raw insight `id` — causal-synthesis/recommendation/entity-correlation
+ids are `Date.now()`-minted and churn every generation, so an id-keyed
+dismissal was a no-op for exactly those types; a genuinely reworded claim
+(different title/intervention/entity+direction) produces a different key
+and legitimately resurfaces (documented boundary, not a bug — see that
+file's own comment); and suppression now **fails toward holding**: an
+unstamped baseline (0/absent, including every pre-T5b legacy doc) is
+treated as "no genuinely new entries yet" rather than "the corpus was
+empty," so it holds suppression and lazily self-heals the doc on that same
+read (`feedbackLearning.js`'s `evaluateShowDecision`), instead of
+resurfacing on the very next evaluation.
+
+**Risky-claims suppression state (ratified decision 4).** Fixing the
+Mood01 scale bugs would, as a side effect, "wake up" four claim types that
+had effectively been dead code (comparing native 0-1 values against
+0-100-scale thresholds — always-true/always-false, never a real gate):
+personal counterfactuals, belief-dissonance insights, intervention "this
+worked" OUTCOME claims, and personalized recommendation reasoning. Michael
+ratified that the scale fix must NOT reactivate them until Phase 1-2's
+evidence rails (typed claim store, verified synthesis) exist. This is
+gated by **`RISKY_CLAIMS_ENABLED = false`, an internal constant exported
+from `src/services/nexus/orchestrator.js`** (not a `config/flags` Firestore
+doc, not user- or environment-configurable) — `generateInsights`'s
+`riskyClaimsEnabled` option can override it, but that seam exists ONLY so
+tests can exercise the scale-corrected logic end-to-end; no production
+caller ever passes it. Recommendations are relabeled as "ideas" carrying no
+personal-evidence claim rather than being suppressed outright; fabricated
+fallback reasoning (invented biometric/mood-improvement numbers) was
+deleted from the code outright, not merely gated. **Revisit when Phase 1-2
+lands** — flip this one constant, no other code change needed to
+re-activate the four claim types.
+
+**Validation:** `src/__tests__/validationMatrix.test.js` R4 rows (a)-(i);
+dedicated per-area test files cited throughout the sections above and in
+`.superpowers/sdd/task-6-report.md`.
