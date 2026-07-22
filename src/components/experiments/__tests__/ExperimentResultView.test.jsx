@@ -53,7 +53,11 @@ function buildGoldenEntries() {
       id: `golden-${day}`,
       createdAt: isoDay(2026, 1, day),
       healthContext: { sleep: { totalHours: hours } },
-      analysis: { mood_score: hours * 10 },
+      // Round-2 review (item 3): analysis.mood_score is on the 0-1 schema —
+      // this fixture's `hours * 10` construction (a clean 40-100 spread) is
+      // divided by 100 here so it lands in the schema's valid [0,1] domain
+      // and is normalized (not dropped) at the series boundary.
+      analysis: { mood_score: (hours * 10) / 100 },
     });
   }
   return entries;
@@ -144,6 +148,20 @@ describe('ExperimentResultView — ok result (golden fixture)', () => {
     }
     // Sources: at least one cited source excerpt/date rendered via SourceList.
     expect(storedResult.receipt.sources.length).toBeGreaterThan(0);
+  });
+
+  // Michael's round-2 statistical review, item 5: the CI is labeled a "rough
+  // range (exploratory)", not a "95% range" — the 95% confidence framing
+  // stays accurate in the spec doc, but the UI leads with the exploratory
+  // wording (see ExperimentResultView.jsx's module doc comment).
+  it('labels the CI "rough range (exploratory)", never "95%", anywhere on the page (item 5)', () => {
+    const entries = buildGoldenEntries();
+    const storedResult = computeExperimentResult({ experiment: goldenExperiment(), entries, now: GOLDEN_NOW });
+    const experiment = goldenExperiment({ result: storedResult });
+    render(<ExperimentResultView uid={UID} entries={entries} experiment={experiment} onClose={vi.fn()} />);
+
+    expect(screen.getByText(/rough range \(exploratory\)/)).toBeTruthy();
+    expect(document.body.textContent).not.toMatch(/95%/);
   });
 
   it('does NOT call computeExperimentResult on mount — renders the stored result object verbatim', () => {
@@ -529,5 +547,34 @@ describe('ExperimentResultView — sensitive-day disclosure', () => {
     expect(result.sensitiveObservationCount).toBe(0);
     render(<ExperimentResultView uid={UID} entries={entries} experiment={goldenExperiment({ result })} onClose={vi.fn()} />);
     expect(screen.queryByText(/sensitive day/i)).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Invalid-observation disclosure (Michael's round-2 statistical review,
+// 2026-07-22, item 3): an out-of-range mood_score is DROPPED, not clamped,
+// and disclosed with a calm one-liner when the dropped count is > 0.
+// ---------------------------------------------------------------------------
+
+describe('ExperimentResultView — invalid-observation disclosure (item 3)', () => {
+  it('shows the disclosure sentence when an out-of-range mood_score was dropped', () => {
+    const entries = buildGoldenEntries().map((e, i) => (i === 0 ? { ...e, analysis: { mood_score: 1.2 } } : e));
+    const result = computeExperimentResult({ experiment: goldenExperiment(), entries, now: GOLDEN_NOW });
+    expect(result.invalidObservationCount).toBeGreaterThan(0);
+    const experiment = goldenExperiment({ result });
+
+    render(<ExperimentResultView uid={UID} entries={entries} experiment={experiment} onClose={vi.fn()} />);
+
+    expect(screen.getByText(
+      `${result.invalidObservationCount} observation${result.invalidObservationCount === 1 ? ' had' : 's had'} out-of-range values and were not used.`,
+    )).toBeTruthy();
+  });
+
+  it('does not show the disclosure sentence when nothing is out of range', () => {
+    const entries = buildGoldenEntries();
+    const result = computeExperimentResult({ experiment: goldenExperiment(), entries, now: GOLDEN_NOW });
+    expect(result.invalidObservationCount).toBe(0);
+    render(<ExperimentResultView uid={UID} entries={entries} experiment={goldenExperiment({ result })} onClose={vi.fn()} />);
+    expect(screen.queryByText(/out-of-range/i)).toBeNull();
   });
 });

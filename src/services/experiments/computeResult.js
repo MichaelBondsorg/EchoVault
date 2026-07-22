@@ -329,36 +329,83 @@ export function exposureValueForEntry(entry, exposure, tag) {
 
 /**
  * Mood normalization (Michael review hardening, EX2 item 1 — launch
- * blocker): `analysis.mood_score` is captured on a 0-1 scale, but every
- * estimate/CI/narrative in this pipeline is on a 0-100 "points" display
- * scale — rendering a raw 0-1 delta as "points" made ordinary differences
- * look 100x smaller than they are. This function is the ONE place that
- * conversion happens (the "series-builder boundary" the plan names): a
- * value in `[0, 1]` is multiplied by 100; a value ALREADY greater than 1
- * (defensive — some future/legacy writer storing an already-0-100 number)
- * passes through WITHOUT being multiplied again, then either way the
- * result is clamped to `[0, 100]`.
+ * blocker; REWRITTEN in Michael's round-2 statistical review, 2026-07-22,
+ * item 3 — see docs/quality/experiments-data-method.md's "Round-2" section).
+ * `analysis.mood_score` is captured on a 0-1 scale, but every estimate/CI/
+ * narrative in this pipeline is on a 0-100 "points" display scale —
+ * rendering a raw 0-1 delta as "points" made ordinary differences look 100x
+ * smaller than they are. This function is the ONE place that conversion
+ * happens (the "series-builder boundary" the plan names).
  *
- * PINNED EDGE CASE (documented, not a bug): a raw value marginally above 1
- * (e.g. `1.2`) is treated as "already on the 0-100 scale" per the rule
- * above, NOT multiplied — it passes through clamped, landing at `1.2`, not
- * `100`. This looks discontinuous right at the `1` boundary, but the
- * alternative (multiplying every value, including already-100-scale
- * legacy data, by 100 again) is worse: it would silently produce a
- * uniformly-clamped-to-100 value for any legacy record already near the
- * top of a 0-100 scale, indistinguishable from a real ceiling effect. No
- * current writer in this codebase produces mood_score outside `[0, 1]`;
- * this branch exists purely as a defensive fallback for that hypothetical
- * legacy/future case, per the plan's explicit instruction, and is called
- * out here so it is never "discovered" later as an oversight.
+ * EXPLICIT SCHEMA (round-2, binding): `plan.outcome.unit === 'mood_0_100'`
+ * means EXACTLY this, and nothing else — source field `analysis.mood_score`
+ * on the 0-1 schema; valid domain `[0, 1]` inclusive; transform `x * 100`.
+ * A value outside `[0, 1]` (or non-finite) is INVALID under this schema and
+ * is REJECTED — returned as `null` (dropped from the series as an unknown
+ * observation by `buildDaySeries`, exactly like a genuinely missing value),
+ * NEVER clamped or otherwise coerced into range.
+ *
+ * PRE-ROUND-2 BEHAVIOR (REMOVED, not merely revised): a raw value already
+ * `> 1` used to pass through UNMULTIPLIED and be clamped to `[0, 100]` — a
+ * defensive allowance for a hypothetical legacy/future writer already
+ * storing an already-0-100 number. Michael's round-2 review: "computeResult.js
+ * treats values at or below 1 as proportions and larger values as
+ * percentages, then clamps out-of-range data. This conflicts with the
+ * plan's 'never infer units from magnitude' principle." That passthrough
+ * branch is deleted entirely — there is no longer any code path in this
+ * function that infers a different unit from how large a number happens to
+ * be, or that silently converts an out-of-range value into `0` or `100`.
+ * If a future writer ever needs to store mood on a different scale, that
+ * needs its OWN explicit `plan.outcome.unit` value (see
+ * `computeExperimentResult`'s outcome-unit gate, which already fails the
+ * whole result closed — `unknown_outcome_unit` — for any unit string other
+ * than `'mood_0_100'`), not a magnitude guess inside this function.
+ *
+ * Callers never see WHY a value was rejected from this function alone
+ * (`null` is the same signal as "missing") — the count of REJECTED (as
+ * opposed to genuinely missing) observations is tracked separately by
+ * `countInvalidOutcomeObservations` below and surfaced on the result as
+ * `invalidObservationCount`, disclosed to the user when `> 0`.
  *
  * @param {number} raw
- * @returns {number|null} null when `raw` is not finite.
+ * @returns {number|null} `null` when `raw` is not finite OR outside `[0, 1]`.
  */
 export function normalizeMoodTo100(raw) {
   if (!Number.isFinite(raw)) return null;
-  const scaled = raw > 1 ? raw : raw * 100;
-  return Math.min(100, Math.max(0, scaled));
+  if (raw < 0 || raw > 1) return null; // outside the declared domain -> INVALID, dropped (never clamped/converted)
+  return raw * 100;
+}
+
+/**
+ * Count observations whose raw outcome value is a FINITE number but OUTSIDE
+ * the `mood_0_100` schema's declared domain `[0, 1]` (Michael's round-2
+ * statistical review, item 3) — these are the ones `normalizeMoodTo100`
+ * rejects as INVALID (as opposed to genuinely missing/non-finite, which is
+ * the ordinary, already-disclosed-via-coverage case and is NOT counted
+ * here). Only meaningful when `outcome.unit === 'mood_0_100'` — any other
+ * (or absent) unit returns `0` unconditionally, since `computeExperimentResult`
+ * already fails the whole result closed (`unknown_outcome_unit`) before an
+ * invalid-domain count would mean anything for a different unit.
+ *
+ * Disclosed on the result as `invalidObservationCount` (present, possibly
+ * `0`, on BOTH `ok` and `insufficient` results — same "always present"
+ * convention as `sensitiveObservationCount`) and, when `> 0`, shown in the
+ * UI as a single calm sentence ("N observations had out-of-range values and
+ * were not used.").
+ *
+ * @param {Array} entries - the windowed (post scope/date-filter) entries.
+ * @param {{field?:string, unit?:string}} outcome
+ * @returns {number}
+ */
+function countInvalidOutcomeObservations(entries, outcome) {
+  if (outcome?.unit !== 'mood_0_100') return 0;
+  const path = outcome?.field || 'analysis.mood_score';
+  let count = 0;
+  for (const entry of entries || []) {
+    const raw = path.split('.').reduce((acc, key) => (acc == null ? undefined : acc[key]), entry);
+    if (Number.isFinite(raw) && (raw < 0 || raw > 1)) count += 1;
+  }
+  return count;
 }
 
 /**
@@ -712,9 +759,11 @@ function buildExperimentReceipt({ windowed, pairs, experiment, effectiveEndMs, e
  * `undefined`), matching the payload-exactness contract.
  * `sensitiveObservationCount` is always present (item 5), even here — the
  * observation table renders in both states, so its hidden-row count must
- * be available regardless of status.
+ * be available regardless of status. `invalidObservationCount` (Michael's
+ * round-2 statistical review, item 3) is likewise always present, even
+ * here, for the same reason.
  */
-function buildInsufficientResult({ coverage, reasons, windowed, pairs, experiment, effectiveEndMs, exposureCoverage, outcomeCoverage, timeZone }) {
+function buildInsufficientResult({ coverage, reasons, windowed, pairs, experiment, effectiveEndMs, exposureCoverage, outcomeCoverage, timeZone, invalidObservationCount }) {
   const receipt = buildExperimentReceipt({ windowed, pairs, experiment, effectiveEndMs, exposureCoverage, outcomeCoverage, timeZone });
   return {
     status: 'insufficient',
@@ -722,6 +771,7 @@ function buildInsufficientResult({ coverage, reasons, windowed, pairs, experimen
     receipt,
     reasons,
     sensitiveObservationCount: countSensitivePairs(windowed, pairs, timeZone),
+    invalidObservationCount,
     narrative: {
       alternatives: [],
       whatThisDoesNotProve: [],
@@ -818,6 +868,12 @@ export function computeExperimentResult({ experiment, entries = [], now } = {}) 
     ? buildDaySeries(windowed, (entry) => outcomeValueForEntry(entry, plan.outcome), timeZone)
     : [];
 
+  // --- invalid-domain outcome disclosure (Michael's round-2 statistical
+  // review, item 3): counted independently of `unitOk` (the helper itself
+  // returns 0 for any non-'mood_0_100' unit) so it's always a real, present
+  // number on every result, not just the ones that reach a real estimate.
+  const invalidObservationCount = countInvalidOutcomeObservations(windowed, plan.outcome);
+
   // --- coverage over the EXPERIMENT window (not preflight's 28d window) --
   // Bounds are in PSEUDO-ms (dateKey-label space, see module doc comment)
   // so they compare consistently against `computeCoverage`'s own (private,
@@ -839,6 +895,7 @@ export function computeExperimentResult({ experiment, entries = [], now } = {}) 
       exposureCoverage,
       outcomeCoverage,
       timeZone,
+      invalidObservationCount,
     });
   }
 
@@ -899,6 +956,7 @@ export function computeExperimentResult({ experiment, entries = [], now } = {}) 
       exposureCoverage,
       outcomeCoverage,
       timeZone,
+      invalidObservationCount,
     });
   }
 
@@ -920,6 +978,7 @@ export function computeExperimentResult({ experiment, entries = [], now } = {}) 
       exposureCoverage,
       outcomeCoverage,
       timeZone,
+      invalidObservationCount,
     });
   }
 
@@ -939,6 +998,7 @@ export function computeExperimentResult({ experiment, entries = [], now } = {}) 
       exposureCoverage,
       outcomeCoverage,
       timeZone,
+      invalidObservationCount,
     });
   }
 
@@ -973,6 +1033,7 @@ export function computeExperimentResult({ experiment, entries = [], now } = {}) 
     coverage,
     receipt,
     sensitiveObservationCount: countSensitivePairs(windowed, pairs, timeZone),
+    invalidObservationCount,
     narrative: {
       summary,
       alternatives,

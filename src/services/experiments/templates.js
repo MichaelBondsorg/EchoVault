@@ -66,6 +66,69 @@
 const MOOD_OUTCOME = Object.freeze({ field: 'analysis.mood_score', label: 'mood', unit: 'mood_0_100' });
 
 /**
+ * Per-template minimum exposure contrast (Michael's round-2 statistical
+ * review, 2026-07-22, item 1 — see docs/quality/experiments-data-method.md's
+ * "Round-2" section). `estimator.js`'s exposure-contrast guard previously
+ * only required the high-group mean exposure to exceed the low-group mean by
+ * ANY amount greater than zero — Michael's own words: "Requiring a
+ * difference greater than zero allows trivially different groups to produce
+ * a result. Define meaningful, template-specific minimums." Each v1 template
+ * below declares `minExposureContrast` IN ITS OWN EXPOSURE UNITS;
+ * `experimentsService.buildAnalysisPlan` freezes it onto the experiment's
+ * `analysisPlan` at create time (same freeze convention as `lag`/
+ * `splitMode`), and `estimator.js`'s `runAnalysisPlan` compares the ACTUAL
+ * computed contrast against `plan.minExposureContrast ?? 0` (the `?? 0`
+ * fallback is for a legacy plan predating this field, or a test-built plan —
+ * see `estimator.js`'s `DEFAULT_MIN_EXPOSURE_CONTRAST`).
+ *
+ * These are v1 CONSERVATIVE DEFAULTS, not derived from a formal analysis —
+ * explicitly revisable, per the same "any change to these numbers comes back
+ * through this sign-off process" rule the spec's default #1/#2 thresholds
+ * already establish:
+ *   - sleep-hours (both templates): 1.0 hour — a real, noticeable hour of
+ *     sleep difference between a person's "more sleep" and "less sleep"
+ *     days; a fraction of an hour is not a difference most people could act
+ *     on or even perceive.
+ *   - exercise-minutes: 15 minutes — roughly the smallest exercise session
+ *     someone would describe as "did a workout" vs. "didn't"; a 2-minute
+ *     difference is noise relative to how exercise is actually logged.
+ *   - steps: 2000 steps — about a mile of walking; small enough to be a
+ *     meaningful, achievable difference, large enough that day-to-day
+ *     pedometer/GPS jitter shouldn't manufacture it.
+ *   - sunshine-percent: 15 percentage points — a difference that would
+ *     plausibly correspond to a visibly sunnier vs. cloudier day, not a
+ *     rounding-level fluctuation in the underlying weather API's percentage.
+ *   - recovery-score: 10 points — recovery scores (e.g. Whoop's 0-100 scale)
+ *     commonly move by single-digit amounts day-to-day for reasons unrelated
+ *     to anything meaningful; 10 points is a difference a user would
+ *     recognize as "a noticeably better/worse recovery day."
+ *   - tag-presence: EXEMPT (pinned to `1`, not skipped outright — see
+ *     `TAG_PRESENCE_MIN_EXPOSURE_CONTRAST`'s own doc comment immediately
+ *     below for why a literal `1` is the correct pin, not a workaround).
+ */
+const SLEEP_HOURS_MIN_EXPOSURE_CONTRAST = 1.0;
+const EXERCISE_MINUTES_MIN_EXPOSURE_CONTRAST = 15;
+const STEPS_MIN_EXPOSURE_CONTRAST = 2000;
+const SUNSHINE_PERCENT_MIN_EXPOSURE_CONTRAST = 15;
+const RECOVERY_SCORE_MIN_EXPOSURE_CONTRAST = 10;
+
+/**
+ * Tag-presence exposure is 0/1-coded (`exposureValueForEntry`'s tags branch:
+ * present -> 1, explicitly-absent -> 0) and split in BINARY mode (`HIGH` =
+ * present, `LOW` = absent) — the contrast between the two groups' MEAN
+ * exposure is therefore structurally EXACTLY `1` whenever the split is
+ * non-degenerate (mean of an all-1s group minus mean of an all-0s group is
+ * always exactly `1`, never more, never less). Pinning
+ * `minExposureContrast: 1` is therefore not an arbitrary "exempt" bypass —
+ * it is the tightest possible minimum that can NEVER reject a legitimate
+ * binary tag-presence result (a real contrast is always `>= 1`, satisfying
+ * a `>=` gate at exactly `1`), while still being a genuine, meaningful
+ * number rather than a magic `0`. Documented explicitly here so a future
+ * reader does not mistake the literal `1` for a typo or an oversight.
+ */
+const TAG_PRESENCE_MIN_EXPOSURE_CONTRAST = 1;
+
+/**
  * Data-method spec's verbatim "what this does not prove" bullets
  * (docs/quality/experiments-data-method.md, "Fixed strings" section), with
  * the {exposure}/{outcome} slots filled per-template. The three bullets that
@@ -149,6 +212,7 @@ export const TEMPLATES = Object.freeze([
     exposure: Object.freeze({ source: 'health', field: 'sleepHours', label: 'sleep hours' }),
     outcome: MOOD_OUTCOME,
     lag: 0,
+    minExposureContrast: SLEEP_HOURS_MIN_EXPOSURE_CONTRAST,
     confounders: Object.freeze([
       'Stressful periods can reduce both sleep and mood.',
       'Weekends and weekdays often have different sleep and mood patterns on their own.',
@@ -163,6 +227,7 @@ export const TEMPLATES = Object.freeze([
     exposure: Object.freeze({ source: 'health', field: 'sleepHours', label: 'sleep hours' }),
     outcome: MOOD_OUTCOME,
     lag: 1,
+    minExposureContrast: SLEEP_HOURS_MIN_EXPOSURE_CONTRAST,
     confounders: Object.freeze([
       'Stressful periods can reduce both sleep and next-day mood.',
       'What happens the next day (plans, workload, social events) can affect mood regardless of the prior night\'s sleep.',
@@ -177,6 +242,7 @@ export const TEMPLATES = Object.freeze([
     exposure: Object.freeze({ source: 'health', field: 'exerciseMinutes', label: 'exercise minutes' }),
     outcome: MOOD_OUTCOME,
     lag: 0,
+    minExposureContrast: EXERCISE_MINUTES_MIN_EXPOSURE_CONTRAST,
     confounders: Object.freeze([
       'Feeling good may lead to more exercise, rather than exercise leading to feeling good.',
       'Social exercise (with friends, a class) can boost mood independent of the exercise itself.',
@@ -191,6 +257,7 @@ export const TEMPLATES = Object.freeze([
     exposure: Object.freeze({ source: 'environment', field: 'sunshinePercent', label: 'sunshine' }),
     outcome: MOOD_OUTCOME,
     lag: 0,
+    minExposureContrast: SUNSHINE_PERCENT_MIN_EXPOSURE_CONTRAST,
     confounders: Object.freeze([
       'Sunny days often come with more time outside, socializing, or activity — any of those could affect mood on their own.',
       'Season and weather patterns change together (temperature, daylight length), so sunshine may be standing in for something else.',
@@ -205,6 +272,7 @@ export const TEMPLATES = Object.freeze([
     exposure: Object.freeze({ source: 'health', field: 'steps', label: 'steps' }),
     outcome: MOOD_OUTCOME,
     lag: 0,
+    minExposureContrast: STEPS_MIN_EXPOSURE_CONTRAST,
     confounders: Object.freeze([
       'Feeling good may lead to walking more, rather than walking more leading to feeling good.',
       'Busy or social days can drive both step count and mood together.',
@@ -219,6 +287,7 @@ export const TEMPLATES = Object.freeze([
     exposure: Object.freeze({ source: 'health', field: 'recoveryScore', label: 'recovery score' }),
     outcome: MOOD_OUTCOME,
     lag: 0,
+    minExposureContrast: RECOVERY_SCORE_MIN_EXPOSURE_CONTRAST,
     confounders: Object.freeze([
       'Stress, illness, or poor sleep can lower both recovery score and mood at the same time.',
       'Alcohol, travel, or big life events can affect both together.',
@@ -253,6 +322,7 @@ export const TEMPLATES = Object.freeze([
     // have this degeneracy).
     splitMode: 'binary',
     lag: 0,
+    minExposureContrast: TAG_PRESENCE_MIN_EXPOSURE_CONTRAST,
     confounders: Object.freeze([
       'Other things happening on the same days this tag appears could explain the mood difference.',
       'The kind of day that leads you to write about this may itself be tied to mood, regardless of the topic.',

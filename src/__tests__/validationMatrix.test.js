@@ -1791,7 +1791,7 @@ describe('R3 Matrix row (c): insufficiency below spec thresholds yields no estim
         id: `r3-sparse-${i + 1}`,
         createdAt: new Date(baseMs + i * R3_DAY_MS + 12 * 60 * 60 * 1000).toISOString(),
         healthContext: i < 12 ? { sleep: { totalHours: 6 + (i % 3) } } : undefined,
-        analysis: { mood_score: 50 + (i % 10) },
+        analysis: { mood_score: (50 + (i % 10)) / 100 },
       });
     }
     const experiment = r3BaseExperiment({
@@ -1829,7 +1829,7 @@ describe('R3 Matrix row (d): every result carries a receipt with generator exper
         id: `r3-ok-${i + 1}`,
         createdAt: r3IsoDay(2026, 4, i + 1),
         healthContext: { sleep: { totalHours: 4 + i } },
-        analysis: { mood_score: 50 + i },
+        analysis: { mood_score: (50 + i) / 100 },
       });
     }
     const okExperiment = r3BaseExperiment({
@@ -1915,7 +1915,7 @@ describe('R3 Matrix row (f): excluded observation changes exactly its contributi
         id: `r3-excl-${i + 1}`,
         createdAt: r3IsoDay(2026, 6, i + 1),
         healthContext: { sleep: { totalHours: 4 + i } }, // distinct values, no ties
-        analysis: { mood_score: 50 + i },
+        analysis: { mood_score: (50 + i) / 100 },
       });
     }
     const experiment = r3BaseExperiment({
@@ -1974,7 +1974,7 @@ describe('R3 Matrix row (g): flagged-entry excerpts never appear in receipt sour
         id: `r3-flag-${i + 1}`,
         createdAt: r3IsoDay(2026, 8, i + 1),
         healthContext: { sleep: { totalHours: 4 + i } },
-        analysis: { mood_score: 50 + i },
+        analysis: { mood_score: (50 + i) / 100 },
         ...(flagged ? { text: FLAGGED_TEXT, content: FLAGGED_TEXT, safety_flagged: true } : {}),
       });
     }

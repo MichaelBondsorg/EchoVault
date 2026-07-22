@@ -114,6 +114,13 @@ function toValidDate(now) {
  * true when the experiment was created, for its whole lifetime — the same
  * plan-freeze guarantee already applied to `exposure`/`outcome`/`lag`.
  *
+ * Also snapshots `template.minExposureContrast` (Michael's round-2
+ * statistical review, 2026-07-22, item 1 — see templates.js's own doc
+ * comment for the pinned per-template values) onto `plan.minExposureContrast`
+ * when the template declares one — the same "declare in the template,
+ * freeze onto the plan, never re-derive at result time" pattern as
+ * `splitMode`.
+ *
  * @param {{id:string, exposure:object, outcome:object, lag:number,
  *   confounders?:string[], whatThisDoesNotProve?:string[]}} template
  * @param {{tag?: string}} [params] - required `params.tag` for the
@@ -175,6 +182,16 @@ export function buildAnalysisPlan(template, params = {}) {
   // 'median'` default still applies unchanged.
   if (template.splitMode === 'binary') {
     plan.splitMode = 'binary';
+  }
+  // minExposureContrast (Michael's round-2 statistical review, 2026-07-22,
+  // item 1) — every REAL v1 template declares its own template-specific,
+  // unit-aware minimum (see templates.js); only carried onto the plan when
+  // the template actually declares one, mirroring splitMode's convention
+  // above, so a hand-built test template that omits it exercises
+  // `runAnalysisPlan`'s own `plan.minExposureContrast ?? DEFAULT_MIN_EXPOSURE_CONTRAST`
+  // legacy fallback rather than silently writing `undefined` onto the plan.
+  if (Number.isFinite(template.minExposureContrast)) {
+    plan.minExposureContrast = template.minExposureContrast;
   }
   return plan;
 }

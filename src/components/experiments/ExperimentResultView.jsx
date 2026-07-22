@@ -89,14 +89,31 @@ import { safeDate } from '../../utils/date';
  * median value with the exposure's own label as its unit in median mode;
  * literal "present vs absent" wording in binary mode, where `splitThreshold`
  * is `null` by design — see `estimator.js`'s `binarySplit` doc comment),
- * `exposureContrast` (in the exposure's own units), `resampleFallbackCount`
- * (only when `> 0` — a plain sentence, omitted entirely otherwise), and the
- * leave-one-out `stability` range (`deltaMin`..`deltaMax`), followed by
- * either the positive "held its direction" sentence or, when
+ * `exposureContrast` (in the exposure's own units), `resampleDiscardCount`
+ * (renamed from `resampleFallbackCount` in Michael's round-2 statistical
+ * review, 2026-07-22, item 4 — the bootstrap no longer falls back to a
+ * fixed-split resample when a resample's OWN split collapses, it discards
+ * that resample outright; shown only when `> 0` — a plain sentence, omitted
+ * entirely otherwise), and the leave-out-out `stability` range
+ * (`deltaMin`..`deltaMax`, `null` when every LOO iteration failed its own
+ * recomputed eligibility gates — see `estimator.js`'s `computeStability`),
+ * followed by either the positive "held its direction" sentence or, when
  * `signConsistent` is `false`, the SAME `STABILITY_CAVEAT_COPY` sentence
  * `computeResult.js`'s `buildSummary` already appended to `narrative.summary`
  * above (final hardening review, item 2) — reused here, not re-typed. All of
  * this reads from the STORED `estimate`, exactly like the rest of this view.
+ *
+ * EXPLORATORY-RANGE LABELING (Michael's round-2 statistical review,
+ * 2026-07-22, item 5 — see docs/quality/experiments-data-method.md's
+ * "Round-2" section): the CI shown next to the headline difference is now
+ * labeled "rough range (exploratory)", not "95% range" — the 95% CONFIDENCE
+ * framing stays accurate and documented in the spec (the underlying
+ * percentile computation is unchanged), but the UI leads with the
+ * exploratory/rough framing Michael's round-2 review asked for, because the
+ * bootstrap's independence-across-days assumption (see the spec's "What the
+ * bootstrap actually assumes" section) is known to understate the true
+ * uncertainty for sequentially-dependent daily data — "rough range" is the
+ * honest headline, not "95% confident."
  */
 
 // Shared token -> plain-language copy map (binding: "render both uniformly,
@@ -356,6 +373,7 @@ const ExperimentResultView = ({ uid, entries = [], experiment, onClose }) => {
 
   const isOk = result.status === 'ok';
   const sensitiveCount = result.sensitiveObservationCount || 0;
+  const invalidCount = result.invalidObservationCount || 0;
 
   return (
     <>
@@ -431,6 +449,11 @@ const ExperimentResultView = ({ uid, entries = [], experiment, onClose }) => {
               {sensitiveCount} sensitive {sensitiveCount === 1 ? 'day' : 'days'} contributed to the statistics; details are hidden.
             </p>
           )}
+          {invalidCount > 0 && (
+            <p className="text-xs text-[var(--muted-foreground)]">
+              {invalidCount} {invalidCount === 1 ? 'observation had' : 'observations had'} out-of-range values and were not used.
+            </p>
+          )}
         </section>
 
         {!isOk && (
@@ -456,7 +479,7 @@ const ExperimentResultView = ({ uid, entries = [], experiment, onClose }) => {
               <p className="font-semibold">What this shows</p>
               <p className="text-sm text-secondary-foreground">{result.narrative?.summary}</p>
               <p className="text-xs text-[var(--muted-foreground)]">
-                Difference: {roundToOneDecimal(result.estimate.delta)} points (0-100) (95% range: {roundToOneDecimal(result.estimate.ci[0])} to {roundToOneDecimal(result.estimate.ci[1])})
+                Difference: {roundToOneDecimal(result.estimate.delta)} points (0-100) (rough range (exploratory): {roundToOneDecimal(result.estimate.ci[0])} to {roundToOneDecimal(result.estimate.ci[1])})
               </p>
             </section>
 
@@ -483,9 +506,9 @@ const ExperimentResultView = ({ uid, entries = [], experiment, onClose }) => {
                 <li>
                   Contrast between the higher and lower groups: {roundToOneDecimal(result.estimate.exposureContrast)} {exposureLabel}
                 </li>
-                {result.estimate.resampleFallbackCount > 0 && (
+                {result.estimate.resampleDiscardCount > 0 && (
                   <li>
-                    {result.estimate.resampleFallbackCount} of the bootstrap's resamples needed a fallback split, because of how the days divided.
+                    {result.estimate.resampleDiscardCount} of the bootstrap's resamples were discarded because their day-split collapsed.
                   </li>
                 )}
                 <li>

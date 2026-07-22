@@ -48,6 +48,18 @@ export const CI_LEVEL = 0.95;
 // constants are new gates/thresholds layered on top of the original 4
 // spec defaults above — see docs/quality/experiments-data-method.md's
 // "Michael review hardening" section for the full rationale on each.
+//
+// ROUND-2 (2026-07-22, same day, second pass — Michael's direct review of
+// THIS hardening): `RESAMPLE_FALLBACK_LIMIT` renamed to
+// `RESAMPLE_DISCARD_LIMIT` (the fallback algorithm it gated is removed
+// entirely, replaced by a discard policy — see
+// `bootstrapDeltaCIPerResampleSplit`'s docblock); `DEFAULT_MIN_EXPOSURE_CONTRAST`
+// added (item 1 — the exposure-contrast guard now reads a PLAN-supplied,
+// template-specific minimum instead of a bare `> 0` check); `computeStability`
+// rewritten to recompute the split and eligibility gates per LOO iteration
+// instead of adjusting the original split's means (item 2). See
+// docs/quality/experiments-data-method.md's "Round-2" section for Michael's
+// exact directive and the full rationale on each.
 // ---------------------------------------------------------------------------
 
 /**
@@ -69,15 +81,20 @@ export const MIN_GROUP_SIZE = 5;
 export const MIN_GROUP_FRACTION = 0.25;
 
 /**
- * Per-resample-split stability guard (item 3): if more than this fraction of
- * the bootstrap's resamples had to fall back to the original-split
- * resampling method (because the resample's OWN recomputed split was
- * degenerate — see `bootstrapDeltaCIPerResampleSplit`'s docblock), the split
- * itself is judged too unstable to trust and the result is insufficient
- * (`split_unstable`), even though every other gate passed. Comparison is
- * strict `>` (a fallback rate of exactly 10% does NOT trigger this).
+ * Per-resample-split stability guard (item 3; RENAMED from
+ * `RESAMPLE_FALLBACK_LIMIT` in Michael's round-2 statistical review,
+ * 2026-07-22 — see docs/quality/experiments-data-method.md's "Round-2"
+ * section): if more than this fraction of the bootstrap's resamples had
+ * their OWN recomputed split degenerate (empty high or low group — see
+ * `bootstrapDeltaCIPerResampleSplit`'s docblock) and were DISCARDED as a
+ * result, the split itself is judged too unstable to trust and the result is
+ * insufficient (`split_unstable`), even though every other gate passed.
+ * Comparison is strict `>` (a discard rate of exactly 10% does NOT trigger
+ * this) — unchanged threshold value and comparison from the pre-round-2
+ * fallback policy, only the numerator's MEANING changed (discarded resamples,
+ * not resamples computed via a fallback algorithm).
  */
-export const RESAMPLE_FALLBACK_LIMIT = 0.1;
+export const RESAMPLE_DISCARD_LIMIT = 0.1;
 
 /**
  * Practical-significance threshold (item 5) — DISPLAY-SCALE (0-100), i.e.
@@ -90,6 +107,22 @@ export const RESAMPLE_FALLBACK_LIMIT = 0.1;
  * exact wording shown to users when a result falls under this threshold.
  */
 export const SMALL_EFFECT_DELTA = 5;
+
+/**
+ * Default exposure-contrast minimum for a LEGACY plan that doesn't declare
+ * its own `minExposureContrast` (Michael's round-2 statistical review,
+ * 2026-07-22, item 1 — see docs/quality/experiments-data-method.md's
+ * "Round-2" section). `runAnalysisPlan` reads `plan.minExposureContrast ??
+ * DEFAULT_MIN_EXPOSURE_CONTRAST` — every REAL v1 template now declares its
+ * own (template-specific, unit-aware) minimum via `templates.js` and
+ * `experimentsService.buildAnalysisPlan` freezes it onto the plan, so this
+ * `0` floor only ever applies to a plan built by test code or a pre-round-2
+ * legacy plan that predates the field. At `0` the guard is the original
+ * (pre-round-2) `contrast > 0` check — structurally unreachable for a
+ * non-degenerate split, exactly as EX1 documented — so "legacy plan without
+ * the field -> old behavior" holds exactly.
+ */
+export const DEFAULT_MIN_EXPOSURE_CONTRAST = 0;
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const DATE_KEY_RE = /^(\d{4})-(\d{2})-(\d{2})$/;
@@ -394,34 +427,10 @@ function computePearsonR(pairs) {
 }
 
 /**
- * Draw one delta by resampling INDEPENDENTLY from each of the two supplied
- * (fixed) outcome arrays — nHigh draws with replacement from `highValues`,
- * nLow from `lowValues` — and returning meanHigh - meanLow for that draw.
- * This is the pre-Task-EX1 bootstrap algorithm (the split was held fixed for
- * the whole bootstrap). It is preserved, unchanged, as the FALLBACK strategy
- * `bootstrapDeltaCIPerResampleSplit` uses when a per-resample split
- * degenerates — see that function's docblock for why this specific fallback
- * was chosen.
- */
-function fallbackDelta(highValues, lowValues, rng) {
-  const nHigh = highValues.length;
-  const nLow = lowValues.length;
-  let sumHigh = 0;
-  for (let j = 0; j < nHigh; j++) {
-    sumHigh += highValues[Math.floor(rng() * nHigh)];
-  }
-  let sumLow = 0;
-  for (let j = 0; j < nLow; j++) {
-    sumLow += lowValues[Math.floor(rng() * nLow)];
-  }
-  return sumHigh / nHigh - sumLow / nLow;
-}
-
-/**
  * Nonparametric bootstrap CI for the difference in group means (meanHigh -
  * meanLow), with the split RECOMPUTED WITHIN EACH RESAMPLE (Michael review
  * hardening, item 3) rather than held fixed for the whole bootstrap (the
- * pre-Task-EX1 behavior, preserved below as the fallback path).
+ * pre-Task-EX1 behavior).
  *
  * Each of `BOOTSTRAP_RESAMPLES` iterations:
  *   1. Draws `n` pairs WITH replacement from the full canonicalized pool
@@ -430,45 +439,49 @@ function fallbackDelta(highValues, lowValues, rng) {
  *      (median-of-the-resample with ties->LOW, or binary present/absent) —
  *      this is what makes the split itself, not just the outcome values,
  *      part of what the CI's resampling variance captures.
- *   3. If that re-split produces an empty high OR low group, FALLS BACK
- *      (see below) rather than computing a mean over zero values.
+ *   3. If that re-split produces an empty high OR low group, the resample is
+ *      DISCARDED (see below) rather than computing a mean over zero values.
  *
- * FALLBACK POLICY (judgment call — flagged for Michael's sign-off, see
- * docs/quality/experiments-data-method.md): the rejected alternative was
- * "record the resample's delta as the ORIGINAL (unresampled) overall
- * delta" — that would freeze every degenerate resample at one fixed number,
- * artificially narrowing the CI (dishonest — it hides exactly the
- * resampling variance a CI exists to show). The rejected alternative
- * "skip and redraw a different resample" would bias the CI toward whatever
- * resamples happen to split cleanly, silently discarding the signal that
- * the split is fragile. The policy actually used: fall back to
- * `fallbackDelta` — resample nHigh/nLow values independently from the
- * ORIGINAL split's two (already-known-non-degenerate, guard-checked)
- * groups, using the SAME rng stream, so the fallback resample still
- * contributes fresh random variance to the CI, it just does so via the old
- * fixed-group algorithm instead of a fresh per-resample split. Every
- * fallback is counted; the count is returned as `fallbackCount` so the
- * caller can expose `resampleFallbackCount` and gate `split_unstable` when
- * fallbacks exceed `RESAMPLE_FALLBACK_LIMIT`.
+ * DISCARD POLICY (Michael's round-2 statistical review, 2026-07-22 —
+ * REPLACES the original ("EX1/H3b") fallback policy; see
+ * docs/quality/experiments-data-method.md's "Round-2" section for the full
+ * directive and rationale). Michael's own words: "The cleaner options are
+ * one predeclared estimand or marking the result insufficient when too many
+ * resamples collapse" — a degenerate resample is no longer recomputed via
+ * the ORIGINAL (whole-sample) split's fixed groups (the pre-round-2 fallback
+ * algorithm, now REMOVED entirely, `fallbackDelta` included) — mixing a
+ * "recomputed-split" estimand with an "original-split" estimand inside ONE
+ * confidence interval was exactly the two-methods-in-one-CI problem Michael's
+ * review flagged. Instead: a degenerate resample contributes NOTHING to the
+ * delta distribution — it is discarded outright, and the CI is the
+ * percentile of the resamples that DID produce a valid recomputed split. The
+ * discard count is tracked (`discardCount`, exposed on the estimate as
+ * `resampleDiscardCount` — renamed from `resampleFallbackCount`, since there
+ * is no longer a fallback, only a discard) and gates the whole result
+ * insufficient (`split_unstable`) when the discard RATE exceeds
+ * `RESAMPLE_DISCARD_LIMIT` (unchanged 10% threshold) — the same protection
+ * the old fallback-counting policy provided, now with an honest, single
+ * estimand instead of two blended together.
  *
  * Determinism is preserved: the SAME seed always produces the SAME sequence
  * of resample draws, the SAME sequence of degenerate/non-degenerate
- * decisions, and therefore the SAME CI and the SAME `fallbackCount` — even
- * though the two branches consume different numbers of rng() calls per
- * iteration (a non-degenerate resample consumes n draws; a fallback
- * resample consumes n + nHigh + nLow draws), the whole sequence is still a
- * pure deterministic function of (canonicalPairs, splitMode, seed).
+ * decisions, and therefore the SAME CI and the SAME `discardCount` — a
+ * discarded resample simply consumes its `n` rng() draws and contributes no
+ * delta, so the rng stream position after each iteration is now IDENTICAL
+ * regardless of whether that iteration was discarded (unlike the old
+ * fallback path, which consumed extra draws only on a fallback) — a
+ * simplification that is itself a nice side effect of the discard policy.
  *
  * The CI itself is the [alpha/2, 1-alpha/2] percentile of the resulting
- * delta distribution using the nearest-rank method (deterministic, no
- * interpolation ambiguity) — unchanged from the pre-Task-EX1 algorithm.
+ * (valid-only) delta distribution using the nearest-rank method
+ * (deterministic, no interpolation ambiguity), computed over however many
+ * deltas actually survived — NOT over `BOOTSTRAP_RESAMPLES` — so a run with
+ * some discards still produces a well-formed CI from its valid subset.
  */
-function bootstrapDeltaCIPerResampleSplit({ pairs, splitMode, originalSplit, rng }) {
+function bootstrapDeltaCIPerResampleSplit({ pairs, splitMode, rng }) {
   const n = pairs.length;
-  const origHighOutcomes = originalSplit.highGroup.map((p) => p.outcome);
-  const origLowOutcomes = originalSplit.lowGroup.map((p) => p.outcome);
-  const deltas = new Array(BOOTSTRAP_RESAMPLES);
-  let fallbackCount = 0;
+  const deltas = [];
+  let discardCount = 0;
 
   for (let i = 0; i < BOOTSTRAP_RESAMPLES; i++) {
     const resample = new Array(n);
@@ -477,66 +490,115 @@ function bootstrapDeltaCIPerResampleSplit({ pairs, splitMode, originalSplit, rng
     }
     const resplit = computeSplit(resample, splitMode);
     if (resplit.highGroup.length === 0 || resplit.lowGroup.length === 0) {
-      fallbackCount++;
-      deltas[i] = fallbackDelta(origHighOutcomes, origLowOutcomes, rng);
-    } else {
-      const meanHighResample = mean(resplit.highGroup.map((p) => p.outcome));
-      const meanLowResample = mean(resplit.lowGroup.map((p) => p.outcome));
-      deltas[i] = meanHighResample - meanLowResample;
+      discardCount++;
+      continue; // discarded: contributes no delta (see docblock)
     }
+    const meanHighResample = mean(resplit.highGroup.map((p) => p.outcome));
+    const meanLowResample = mean(resplit.lowGroup.map((p) => p.outcome));
+    deltas.push(meanHighResample - meanLowResample);
   }
 
   deltas.sort((a, b) => a - b);
   const alpha = (1 - CI_LEVEL) / 2;
-  const lastIdx = BOOTSTRAP_RESAMPLES - 1;
+  const lastIdx = deltas.length - 1;
   const lowerIdx = Math.max(0, Math.floor(alpha * lastIdx));
   const upperIdx = Math.min(lastIdx, Math.ceil((1 - alpha) * lastIdx));
-  return { ci: [deltas[lowerIdx], deltas[upperIdx]], fallbackCount };
+  return { ci: [deltas[lowerIdx], deltas[upperIdx]], discardCount };
 }
 
 /**
- * Leave-one-day-out stability check (Michael review hardening, item 4). For
- * each paired observation, recompute the mean-difference delta with that ONE
- * pair excluded from whichever group it belongs to in the ORIGINAL split —
- * "n cheap re-computations of means, NOT n bootstraps": this does NOT
- * re-derive the split per exclusion (that would be a materially more
- * expensive O(n log n) operation per pair); it only recomputes the affected
- * group's mean via a running-sum adjustment, O(1) per pair after the O(n)
- * setup. Safe from divide-by-zero: `MIN_GROUP_SIZE` (>=5) is enforced before
- * this function is ever called, so excluding one pair always leaves >=4 in
- * the affected group.
+ * Leave-one-day-out stability check (Michael review hardening, item 4;
+ * REWORKED in Michael's round-2 statistical review, 2026-07-22 — see
+ * docs/quality/experiments-data-method.md's "Round-2" section). Michael's
+ * own words: "It retains the original group assignments rather than
+ * recalculating the median split and eligibility gates after each removed
+ * day. Recomputing them is inexpensive at this sample size."
  *
- * `signConsistent` is true only when EVERY leave-one-out delta shares the
- * same strict sign as every other (all positive, or all negative). A LOO
- * delta of exactly 0 counts as an inconsistency (conservative: excluding one
- * day erasing the entire directional signal is exactly the kind of fragility
- * this check exists to surface, not something to wave through as "still
- * technically the same sign").
+ * For EACH of the `n` paired observations, this now re-runs the FULL
+ * deterministic path on the remaining `n-1` pairs — NOT just an O(1) mean
+ * adjustment against the ORIGINAL (whole-sample) split, which is what the
+ * pre-round-2 version did (and which is exactly the bug Michael's review
+ * caught: excluding a day can shift the recomputed MEDIAN enough to move a
+ * DIFFERENT, still-present day across the high/low boundary — the old
+ * per-pair mean-adjustment silently missed this reassignment entirely,
+ * because it never recomputed the split at all):
+ *   1. Recompute the split (median-of-the-remaining-pairs with ties->LOW, or
+ *      binary present/absent, per `splitMode` — same rule the real estimate
+ *      and the bootstrap resamples already use).
+ *   2. Recompute the SAME eligibility gates `runAnalysisPlan` enforces on the
+ *      full sample: both groups non-empty (else degenerate), both groups
+ *      `>= MIN_GROUP_SIZE`, the smaller group `>= MIN_GROUP_FRACTION` of the
+ *      n-1 total, and the exposure contrast `>= minExposureContrast`.
+ *   3. If ANY of those gates fails for this iteration, the iteration is a
+ *      GATE FAILURE — counted in `gateFailures` and treated as instability
+ *      in its own right (this iteration's absence of a trustworthy estimate
+ *      IS the fragility signal — a day whose removal would leave the
+ *      analysis unable to even re-clear its own eligibility bar is not a
+ *      day whose removal the result should describe as "stable"). A gate
+ *      failure contributes NO delta to `deltaMin`/`deltaMax` (there is no
+ *      re-estimate to report), but DOES force `signConsistent: false` for
+ *      the whole stability result, per Michael's own framing above.
+ *   4. Otherwise, delta = recomputed meanHigh - recomputed meanLow for this
+ *      iteration's own fresh split, and its sign is tracked.
  *
- * @returns {{deltaMin: number, deltaMax: number, signConsistent: boolean}}
+ * This is genuinely deterministic (no bootstrap/rng inside LOO — every
+ * iteration is a plain re-split + re-check, `O(n log n)` per iteration,
+ * `O(n^2 log n)` total, "inexpensive at this sample size" per Michael's own
+ * framing) and re-runnable: the SAME (canonicalPairs, splitMode,
+ * minExposureContrast) always produces the SAME `stability` object.
+ *
+ * `signConsistent` is `true` only when: zero gate failures occurred, AND at
+ * least one iteration passed its gates, AND every passing iteration's delta
+ * shares the same strict sign as every other (all positive, or all
+ * negative — a delta of exactly 0 also counts as a break, unchanged from the
+ * pre-round-2 rule). `deltaMin`/`deltaMax` are computed ONLY over the
+ * iterations that passed their gates — `null` when none did (every single
+ * removal made the split ineligible; this can genuinely happen for an
+ * experiment sitting exactly at the group-size floor, e.g. an exactly-5/5
+ * split at n=10: removing any one pair leaves n-1=9, which can never split
+ * two ways both `>= MIN_GROUP_SIZE` (5+5=10 > 9) — that is not a bug in this
+ * function, it is an honest description of how fragile a bare-minimum-sized
+ * experiment's grouping is).
+ *
+ * @returns {{deltaMin: number|null, deltaMax: number|null, signConsistent: boolean, gateFailures: number}}
  */
-function computeStability(canonicalPairs, split) {
-  const { highGroup, lowGroup } = split;
-  const nHigh = highGroup.length;
-  const nLow = lowGroup.length;
-  const sumHigh = highGroup.reduce((a, p) => a + p.outcome, 0);
-  const sumLow = lowGroup.reduce((a, p) => a + p.outcome, 0);
-  const highSet = new Set(highGroup);
-
+function computeStability(canonicalPairs, splitMode, minExposureContrast) {
+  const n = canonicalPairs.length;
   let deltaMin = Infinity;
   let deltaMax = -Infinity;
   let sawPositive = false;
   let sawNegative = false;
   let sawZero = false;
+  let gateFailures = 0;
+  let anyPassed = false;
 
-  for (const p of canonicalPairs) {
-    let mHigh = sumHigh / nHigh;
-    let mLow = sumLow / nLow;
-    if (highSet.has(p)) {
-      mHigh = (sumHigh - p.outcome) / (nHigh - 1);
-    } else {
-      mLow = (sumLow - p.outcome) / (nLow - 1);
+  for (let i = 0; i < n; i++) {
+    const remaining = canonicalPairs.slice(0, i).concat(canonicalPairs.slice(i + 1));
+    const resplit = computeSplit(remaining, splitMode);
+    const nHighI = resplit.highGroup.length;
+    const nLowI = resplit.lowGroup.length;
+
+    let gateFailed = nHighI === 0 || nLowI === 0; // degenerate: no split at all
+    if (!gateFailed) {
+      const smaller = Math.min(nHighI, nLowI);
+      if (smaller < MIN_GROUP_SIZE) {
+        gateFailed = true;
+      } else if (smaller / remaining.length < MIN_GROUP_FRACTION) {
+        gateFailed = true;
+      } else {
+        const contrastI = mean(resplit.highGroup.map((p) => p.exposure)) - mean(resplit.lowGroup.map((p) => p.exposure));
+        if (contrastI < minExposureContrast) gateFailed = true;
+      }
     }
+
+    if (gateFailed) {
+      gateFailures += 1;
+      continue; // no delta to report for this iteration; forces signConsistent:false below
+    }
+
+    anyPassed = true;
+    const mHigh = mean(resplit.highGroup.map((p) => p.outcome));
+    const mLow = mean(resplit.lowGroup.map((p) => p.outcome));
     const d = mHigh - mLow;
     if (d < deltaMin) deltaMin = d;
     if (d > deltaMax) deltaMax = d;
@@ -545,9 +607,13 @@ function computeStability(canonicalPairs, split) {
     else sawZero = true; // exact 0 -> treated as a sign break, see docblock
   }
 
-  // Consistent only if EVERY LOO delta landed strictly on one side of zero.
-  const signConsistent = !sawZero && sawPositive !== sawNegative;
-  return { deltaMin, deltaMax, signConsistent };
+  const signConsistent = gateFailures === 0 && anyPassed && !sawZero && sawPositive !== sawNegative;
+  return {
+    deltaMin: anyPassed ? deltaMin : null,
+    deltaMax: anyPassed ? deltaMax : null,
+    signConsistent,
+    gateFailures,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -605,12 +671,19 @@ function computeStability(canonicalPairs, split) {
  *   `pairs` (never from Math.random()/Date.now()) so "no seed passed" is
  *   still reproducible — and, per the canonicalization above, reproducible
  *   regardless of the input pairs' array order.
+ *     - `plan.minExposureContrast`: template-specific minimum exposure
+ *       contrast, in the exposure's OWN units (Michael's round-2 statistical
+ *       review, 2026-07-22, item 1 — see docs/quality/experiments-data-method.md's
+ *       "Round-2" section). Frozen onto the plan by
+ *       `experimentsService.buildAnalysisPlan` from the template catalog.
+ *       Falls back to `DEFAULT_MIN_EXPOSURE_CONTRAST` (0) for a legacy plan
+ *       that predates this field — see that constant's docblock.
  * @returns {{status:'ok', estimate:{
  *   meanHigh:number, meanLow:number, delta:number, ci:[number,number],
  *   n:number, pearsonR:number|null,
  *   nHigh:number, nLow:number, splitThreshold:number|null,
- *   exposureContrast:number, resampleFallbackCount:number,
- *   stability:{deltaMin:number, deltaMax:number, signConsistent:boolean}}} |
+ *   exposureContrast:number, resampleDiscardCount:number,
+ *   stability:{deltaMin:number|null, deltaMax:number|null, signConsistent:boolean, gateFailures:number}}} |
  *   {status:'insufficient', reasons: string[]}}
  *
  * New machine-readable insufficiency reasons (Michael review hardening,
@@ -620,16 +693,17 @@ function computeStability(canonicalPairs, split) {
  *   - `groups_too_imbalanced`: the smaller split group is under
  *     `MIN_GROUP_FRACTION` (25%) of the total paired observations.
  *   - `exposure_contrast_too_small`: high-group mean exposure minus
- *     low-group mean exposure is not strictly > 0. Structurally
- *     unreachable via `medianSplit`/`binarySplit` as currently defined
- *     (both always produce a strictly positive contrast whenever the split
- *     is non-degenerate) — kept as defense-in-depth and to guarantee
- *     `exposureContrast` is always a meaningful, guarded number on every
- *     `ok` estimate. See the constants block above for why a relative
- *     (rather than absolute-zero) margin was deliberately NOT invented here.
- *   - `split_unstable`: more than `RESAMPLE_FALLBACK_LIMIT` (10%) of the
- *     bootstrap's resamples had a degenerate per-resample split and had to
- *     fall back (see `bootstrapDeltaCIPerResampleSplit`'s docblock).
+ *     low-group mean exposure is below `plan.minExposureContrast` (round-2
+ *     item 1 — GENUINELY reachable now that the plan supplies a real,
+ *     template-specific, unit-aware minimum; see `docs/quality/
+ *     experiments-data-method.md`'s "Round-2" section for the pinned v1
+ *     values). For a LEGACY plan with no `minExposureContrast`, the check
+ *     falls back to `DEFAULT_MIN_EXPOSURE_CONTRAST` (0), which is
+ *     structurally unreachable for a non-degenerate split — the ORIGINAL
+ *     (EX1) behavior, preserved unchanged for that case.
+ *   - `split_unstable`: more than `RESAMPLE_DISCARD_LIMIT` (10%) of the
+ *     bootstrap's resamples had a degenerate per-resample split and were
+ *     discarded (see `bootstrapDeltaCIPerResampleSplit`'s docblock).
  * The three group/contrast checks are evaluated together, immediately after
  * a NON-degenerate split (i.e. they never run when
  * `degenerate_exposure_split` already applies — that case already means
@@ -642,6 +716,9 @@ export function runAnalysisPlan({ pairs = [], plan = {}, seed } = {}) {
   const n = canonicalPairs.length;
   const reasons = [];
   const splitMode = plan?.splitMode === 'binary' ? 'binary' : 'median';
+  const minExposureContrast = Number.isFinite(plan?.minExposureContrast)
+    ? plan.minExposureContrast
+    : DEFAULT_MIN_EXPOSURE_CONTRAST;
 
   if (n < MIN_PAIRED_OBSERVATIONS) {
     reasons.push('insufficient_paired_observations');
@@ -670,7 +747,7 @@ export function runAnalysisPlan({ pairs = [], plan = {}, seed } = {}) {
       if (Math.min(nHighCheck, nLowCheck) / n < MIN_GROUP_FRACTION) {
         reasons.push('groups_too_imbalanced');
       }
-      if (!(contrastCheck > 0)) {
+      if (contrastCheck < minExposureContrast) {
         reasons.push('exposure_contrast_too_small');
       }
     }
@@ -692,18 +769,17 @@ export function runAnalysisPlan({ pairs = [], plan = {}, seed } = {}) {
 
   const resolvedSeed = Number.isFinite(seed) ? seed >>> 0 : deriveSeedFromPairs(canonicalPairs);
   const rng = mulberry32(resolvedSeed);
-  const { ci, fallbackCount } = bootstrapDeltaCIPerResampleSplit({
+  const { ci, discardCount } = bootstrapDeltaCIPerResampleSplit({
     pairs: canonicalPairs,
     splitMode,
-    originalSplit: split,
     rng,
   });
 
-  if (fallbackCount / BOOTSTRAP_RESAMPLES > RESAMPLE_FALLBACK_LIMIT) {
+  if (discardCount / BOOTSTRAP_RESAMPLES > RESAMPLE_DISCARD_LIMIT) {
     return { status: 'insufficient', reasons: ['split_unstable'] };
   }
 
-  const stability = computeStability(canonicalPairs, split);
+  const stability = computeStability(canonicalPairs, splitMode, minExposureContrast);
 
   return {
     status: 'ok',
@@ -718,7 +794,7 @@ export function runAnalysisPlan({ pairs = [], plan = {}, seed } = {}) {
       nLow,
       splitThreshold,
       exposureContrast,
-      resampleFallbackCount: fallbackCount,
+      resampleDiscardCount: discardCount,
       stability,
     },
   };
@@ -731,7 +807,8 @@ export default {
   CI_LEVEL,
   MIN_GROUP_SIZE,
   MIN_GROUP_FRACTION,
-  RESAMPLE_FALLBACK_LIMIT,
+  RESAMPLE_DISCARD_LIMIT,
+  DEFAULT_MIN_EXPOSURE_CONTRAST,
   SMALL_EFFECT_DELTA,
   pairObservations,
   computeCoverage,
