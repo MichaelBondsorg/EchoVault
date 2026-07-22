@@ -14,8 +14,19 @@
  * (Task D3) for the source matrix this file automates, and
  * docs/quality/device-validation-matrix.md for the physical-device rows that
  * cannot be automated here.
+ *
+ * R2 rows (a)-(h), appended below Row 11, cover
+ * docs/superpowers/plans/2026-07-21-r2-trust-surfaces.md (Task 21). Same
+ * philosophy: real modules, boundary-only mocks. Rows (a)/(b) need the real
+ * Nexus orchestrator, which pulls in a large dependency graph (Layer 1-4,
+ * health/whoop, gapDetector) — those are stubbed exactly as
+ * orchestrator.receipts.test.js / orchestrator.exclusions.test.js (Task 8/10's
+ * own dedicated test files) already establish, so Layer 1 pattern detection
+ * and the orchestrator's own entity-correlation math stay genuinely real.
  */
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import React from 'react';
+import { render, screen, fireEvent, renderHook, act } from '@testing-library/react';
 
 // ---------------------------------------------------------------------------
 // Shared platform-boundary fakes
@@ -132,16 +143,159 @@ vi.mock('../config/firebase', () => ({
   revokeAiProcessingFn: (...args) => revokeAiProcessingFn(...args),
   grantAiProcessingFn: (...args) => grantAiProcessingFn(...args),
   askJournalAIFn: (...args) => askJournalAIFn(...args),
+  // R2 row (a)/(b)/(g): the real orchestrator.js/EntryCard.jsx destructure
+  // `db` from this module. Vitest's mock proxy throws on ANY accessed key
+  // this factory doesn't return (even one nothing in this file dereferences
+  // properties of) — an opaque placeholder is enough since every consumer
+  // here only ever passes `db` through to an already-mocked doc()/
+  // collection()/onSnapshot(), never reads off of it directly.
+  db: {},
   ...firestoreMocks,
 }));
 // Row 8's getSmartChatContext import graph pulls in ai/gemini.js (unused by
 // the function actually under test) — stub it so importing analysis/index.js
-// never touches a real provider callable. Row 11's insightBudget.js pulls in
-// nexus/orchestrator.js's isDuplicateInsight for near-dup suppression; stub
-// it to a fixed "never a dupe" so the budget-cap math is what's on trial,
-// not orchestrator's similarity heuristics (covered separately).
+// never touches a real provider callable.
 vi.mock('../services/ai/gemini', () => ({ analyzeJournalEntryCloud: vi.fn() }));
-vi.mock('../services/nexus/orchestrator', () => ({ isDuplicateInsight: vi.fn(() => false) }));
+
+// R2 rows (a)/(b) need the REAL `generateInsights`/`fetchRecentEntries` (the
+// receipts-on-every-insight and exclusion-honoring-regeneration invariants
+// can only be pinned against the real orchestrator, not a stub of it).
+// Row 11's insightBudget.js only needs `isDuplicateInsight` stubbed to a
+// fixed "never a dupe" so the budget-cap math is what's on trial there, not
+// orchestrator's similarity heuristics — `importOriginal` keeps every other
+// export (generateInsights included) genuinely real for everyone.
+vi.mock('../services/nexus/orchestrator', async (importOriginal) => {
+  const actual = await importOriginal();
+  return { ...actual, isDuplicateInsight: vi.fn(() => false) };
+});
+
+// The real orchestrator.js (loaded above) imports 'firebase/firestore'
+// directly (not through config/firebase's mock) plus its full Layer 1-4 /
+// health / gap-detector dependency graph. This block mirrors EXACTLY the
+// mocking already established in orchestrator.receipts.test.js /
+// orchestrator.exclusions.test.js (Task 8/10's own dedicated test files) —
+// Layer 1 pattern detection (`detectPatternsInPeriod`) and the
+// orchestrator's own internal `computeEntityMoodCorrelations` are left REAL
+// so rows (a)/(b) reflect genuine entry-id threading, not a stubbed
+// invariant. No other row in this file touches any of these specifiers.
+vi.mock('firebase/firestore', () => ({
+  doc: vi.fn(() => ({})),
+  getDoc: vi.fn(async () => ({ exists: () => false, data: () => ({}) })),
+  setDoc: vi.fn(async () => {}),
+  collection: vi.fn(() => ({})),
+  query: vi.fn((...args) => ({ __args: args })),
+  orderBy: vi.fn(),
+  limit: vi.fn(),
+  getDocs: vi.fn(),
+  deleteField: vi.fn(() => ({ __op: 'deleteField' })),
+  Timestamp: {
+    now: vi.fn(() => ({ toMillis: () => Date.now() })),
+    fromMillis: vi.fn((ms) => ({ toMillis: () => ms, toDate: () => new Date(ms) })),
+    // Row (d) needs this for real (buildOfflineSyncPayload/buildCoreEntry
+    // both call Timestamp.fromDate(...).toDate().toISOString() elsewhere in
+    // this file's Row 3 too) — return a Date-backed stand-in, not a bare tag.
+    fromDate: vi.fn((d) => ({ toMillis: () => d.getTime(), toDate: () => d })),
+  },
+}));
+vi.mock('../services/health/whoop', () => ({
+  isWhoopLinked: vi.fn(async () => false),
+  getWhoopSummary: vi.fn(async () => null),
+  getWhoopHistory: vi.fn(async () => ({ available: false, days: [] })),
+}));
+vi.mock('../services/nexus/gapDetector', () => ({ detectGaps: vi.fn(async () => []) }));
+vi.mock('../services/nexus/layer1/threadManager', () => ({
+  getActiveThreads: vi.fn(async () => []),
+  identifyThreadAssociation: vi.fn(async () => ({})),
+}));
+vi.mock('../services/nexus/layer1/somaticExtractor', () => ({ extractSomaticSignals: vi.fn(() => []) }));
+vi.mock('../services/nexus/layer2/stateDetector', () => ({
+  detectCurrentState: vi.fn(async () => ({})),
+  updateCurrentState: vi.fn(async () => {}),
+}));
+vi.mock('../services/nexus/layer2/baselineManager', () => ({
+  getBaselines: vi.fn(async () => null),
+  calculateAndSaveBaselines: vi.fn(async () => {}),
+  compareToBaseline: vi.fn(() => ({})),
+}));
+vi.mock('../services/nexus/layer3/synthesizer', () => ({
+  INSIGHT_TYPES: {},
+  generateCausalSynthesis: vi.fn(async () => ({
+    success: true,
+    insight: {
+      id: 'synthesis-1',
+      type: 'causal_synthesis',
+      title: 'Synthesis Insight',
+      summary: 'summary',
+      body: 'body',
+      evidence: { narrative: [], statistical: { sampleSize: 12 } },
+    },
+  })),
+  generateNarrativeArcInsight: vi.fn(async () => null),
+}));
+vi.mock('../services/nexus/layer3/crossThreadDetector', () => ({
+  detectMetaPatterns: vi.fn(async () => []),
+  generateMetaPatternInsight: vi.fn(async () => null),
+}));
+vi.mock('../services/nexus/layer3/beliefDissonance', () => ({
+  extractBeliefsFromEntry: vi.fn(() => []),
+  refineBeliefsWithLLM: vi.fn(async () => []),
+  validateBeliefAgainstData: vi.fn(async () => ({ dissonanceScore: 0 })),
+  generateDissonanceInsight: vi.fn(async () => null),
+  saveBeliefs: vi.fn(async () => {}),
+  getBeliefs: vi.fn(async () => []),
+}));
+vi.mock('../services/nexus/layer3/counterfactual', () => ({
+  identifyMissingInterventions: vi.fn(() => []),
+  generateCounterfactualInsight: vi.fn(async () => null),
+  findGoodDayActivities: vi.fn(() => []),
+}));
+vi.mock('../services/nexus/layer4/interventionTracker', () => ({
+  updateInterventionData: vi.fn(async () => {}),
+  getInterventionData: vi.fn(async () => ({})),
+}));
+vi.mock('../services/nexus/layer4/recommendationEngine', () => ({ generateRecommendations: vi.fn(async () => []) }));
+
+// Row (a)/(b) also need a controllable `getExcludedEntryIds` (R2 Task 10) —
+// mirrors orchestrator.exclusions.test.js's approach: no exclusions by
+// default, overridden per-test via mockResolvedValueOnce.
+const getExcludedEntryIdsMock = vi.fn(async () => new Set());
+vi.mock('../services/insights/sourceExclusions', () => ({
+  getExcludedEntryIds: (...args) => getExcludedEntryIdsMock(...args),
+}));
+
+// Row (c) needs companionContext's Tier1/Tier2 deps controllable — mirrors
+// companionContext.tier1Tier2Scope.test.js's own mocks exactly.
+vi.mock('../services/ai/embeddings', () => ({ cosineSimilarity: () => 0 }));
+vi.mock('../services/memory', () => ({
+  getMemoryGraph: vi.fn(async () => null),
+  formatMemoryForContext: vi.fn(() => null),
+}));
+vi.mock('../services/memory/sessionBuffer', () => ({
+  getSessionBuffer: vi.fn(() => null),
+  formatBufferForContext: vi.fn(() => null),
+  isExpired: vi.fn(() => true),
+}));
+
+// Row (f) needs sessionPrep.js importable without pulling in runRecipe's own
+// heavy deps (askJournalAI/analysis) — mirrors sessionPrep.test.js's own
+// mock of '../runRecipe' verbatim (composeSessionPrepPdf never calls any of
+// these; they only need to exist so the module graph resolves).
+vi.mock('../services/reflections/runRecipe', () => ({
+  runQuestions: vi.fn(),
+  loadReflection: vi.fn(),
+  writeBlocks: vi.fn(),
+  reflectionsPath: vi.fn((uid) => `artifacts/echo-vault-v5-fresh/users/${uid}/reflections`),
+  newBlockId: vi.fn(() => 'block_test'),
+}));
+vi.mock('../utils/pdf', () => ({ loadJsPDF: vi.fn() }));
+
+// Row (g) needs EntryCard's own flag/user seams controllable — mirrors
+// EntryCard.test.jsx's own mocks. spacesService/recompute/intentClient are
+// deliberately left REAL here (Rows 9/10 already exercise them for real in
+// this same file against the config/firebase mock below; mocking them here
+// too would shadow those rows).
+vi.mock('../config/flags', () => ({ getFlag: vi.fn() }));
+vi.mock('../stores', () => ({ useUser: () => ({ uid: 'user-matrix-chapters' }) }));
 
 // localStorage backing store. src/test/setup.js replaces window.localStorage
 // with plain vi.fn() no-op stubs; drive them with an in-memory Map so the
@@ -846,5 +1000,484 @@ describe('Matrix row: Insight budget cap holds across a simulated day of repeate
     );
 
     expect(shown).toEqual([]); // full daily allowance (4) was available; still zero
+  });
+});
+
+// ===========================================================================
+// R2 Row (a): every generated Nexus insight carries a receipt
+// ===========================================================================
+describe('R2 Matrix row (a): every generated Nexus insight carries a receipt', () => {
+  const DAY_MS = 24 * 60 * 60 * 1000;
+
+  // Condensed version of orchestrator.receipts.test.js's own fixture: enough
+  // to exercise TWO distinct real generator families in one pass (Layer 1
+  // pattern_correlation via real detectPatternsInPeriod, entity_correlation
+  // via the orchestrator's own real computeEntityMoodCorrelations) so the
+  // invariant below can't pass vacuously off a single insight.
+  function buildFixtureEntries() {
+    const now = Date.parse('2026-07-21T12:00:00.000Z');
+    const entries = [];
+    for (let i = 0; i < 4; i++) {
+      entries.push({
+        id: `interview-${i}`,
+        createdAt: new Date(now - i * DAY_MS).toISOString(),
+        text: `Had another interview today, feeling good about it. Entry number ${i}.`,
+        analysis: { mood_score: 80 },
+      });
+    }
+    for (let i = 0; i < 4; i++) {
+      entries.push({
+        id: `yoga-${i}`,
+        createdAt: new Date(now - (i + 4) * DAY_MS).toISOString(),
+        text: `Did yoga this morning, feeling solid. Entry number ${i}.`,
+        analysis: { mood_score: 85 },
+      });
+    }
+    for (let i = 0; i < 4; i++) {
+      entries.push({
+        id: `neutral-${i}`,
+        createdAt: new Date(now - (i + 8) * DAY_MS).toISOString(),
+        text: `A regular day. Nothing special. Entry number ${i}.`,
+        analysis: { mood_score: 50 },
+      });
+    }
+    return entries;
+  }
+
+  function mockEntriesSnapshot(entries) {
+    return { docs: entries.map((e) => ({ id: e.id, data: () => ({ ...e }) })) };
+  }
+
+  beforeEach(async () => {
+    const { getDocs, getDoc, setDoc } = await import('firebase/firestore');
+    getDocs.mockReset();
+    getDoc.mockReset();
+    setDoc.mockClear();
+    getDoc.mockResolvedValue({ exists: () => false, data: () => ({}) });
+    getExcludedEntryIdsMock.mockReset();
+    getExcludedEntryIdsMock.mockResolvedValue(new Set());
+  });
+
+  it('mirrors Task 8\'s invariant: the persisted `active` array (the real setDoc payload) has a truthy .receipt on every insight — real generateInsights + real detectPatternsInPeriod', async () => {
+    const { getDocs, setDoc } = await import('firebase/firestore');
+    getDocs.mockResolvedValueOnce(mockEntriesSnapshot(buildFixtureEntries()));
+
+    const { generateInsights } = await import('../services/nexus/orchestrator');
+    const result = await generateInsights('user-matrix-a');
+
+    expect(result.success).toBe(true);
+    // Guard against a vacuous pass: the fixture must actually produce
+    // insights from more than one generator family.
+    const types = new Set(result.insights.map((i) => i.type));
+    expect(types.size).toBeGreaterThanOrEqual(2);
+
+    const persistCall = setDoc.mock.calls.find((call) => call[1] && Array.isArray(call[1].active));
+    expect(persistCall).toBeTruthy();
+    expect(persistCall[1].active.length).toBeGreaterThan(0);
+    for (const insight of persistCall[1].active) {
+      expect(insight.receipt).toBeTruthy();
+      expect(Array.isArray(insight.receipt.sources)).toBe(true);
+      expect(typeof insight.receipt.sampleSize).toBe('number');
+      expect(insight.receipt.versions.generator).toEqual(expect.any(String));
+    }
+  });
+});
+
+// ===========================================================================
+// R2 Row (b): excluded source never appears in regenerated insight
+// sources/stats, nor report readEntries (R2 Task 10 client + Task 9 server)
+// ===========================================================================
+describe('R2 Matrix row (b): excluded source never appears in regenerated insight sources/stats, nor report readEntries', () => {
+  const DAY_MS = 24 * 60 * 60 * 1000;
+
+  // Condensed version of orchestrator.exclusions.test.js's adversarial
+  // fixture: a mis-tagged "yoga" entry that, once excluded, both disappears
+  // from receipts AND flips the entity correlation's stats to reflect its
+  // absence — proving exclusion isn't merely cosmetic.
+  function buildAdversarialEntries() {
+    const now = Date.parse('2026-07-21T12:00:00.000Z');
+    const entries = [
+      {
+        id: 'yoga-excluded',
+        createdAt: new Date(now).toISOString(),
+        text: 'Mentioned yoga in passing, a totally average day otherwise.',
+        analysis: { mood_score: 50 },
+      },
+    ];
+    for (let i = 0; i < 3; i++) {
+      entries.push({
+        id: `yoga-${i}`,
+        createdAt: new Date(now - (i + 1) * DAY_MS).toISOString(),
+        text: `Did yoga this morning, feeling solid and strong. Entry number ${i}.`,
+        analysis: { mood_score: 65 },
+      });
+    }
+    for (let i = 0; i < 8; i++) {
+      entries.push({
+        id: `neutral-${i}`,
+        createdAt: new Date(now - (i + 4) * DAY_MS).toISOString(),
+        text: `A regular day. Nothing special. Entry number ${i}.`,
+        analysis: { mood_score: 50 },
+      });
+    }
+    return entries;
+  }
+
+  beforeEach(async () => {
+    const { getDocs, getDoc, setDoc } = await import('firebase/firestore');
+    getDocs.mockReset();
+    getDoc.mockReset();
+    setDoc.mockClear();
+    getDoc.mockResolvedValue({ exists: () => false, data: () => ({}) });
+    getExcludedEntryIdsMock.mockReset();
+  });
+
+  it('orchestrator: once excluded, the mis-tagged entry never appears in any persisted receipt.sources and the real entity-correlation stats reflect its absence', async () => {
+    const { getDocs, setDoc } = await import('firebase/firestore');
+    getExcludedEntryIdsMock.mockResolvedValueOnce(new Set(['yoga-excluded']));
+    getDocs.mockResolvedValueOnce({
+      docs: buildAdversarialEntries().map((e) => ({ id: e.id, data: () => ({ ...e }) })),
+    });
+
+    const { generateInsights } = await import('../services/nexus/orchestrator');
+    const result = await generateInsights('user-matrix-b');
+
+    const entityInsight = result.insights.find((i) => i.type === 'entity_correlation');
+    expect(entityInsight).toBeTruthy(); // sanity: excluding it reveals the correlation
+    expect(entityInsight.evidence.statistical.sampleSize).toBe(3); // not 4 — its absence is real
+
+    const persistCall = setDoc.mock.calls.find((call) => call[1] && Array.isArray(call[1].active));
+    expect(persistCall).toBeTruthy();
+    for (const insight of persistCall[1].active) {
+      const ids = (insight.receipt?.sources || []).map((s) => s.entryId);
+      expect(ids).not.toContain('yoga-excluded');
+    }
+  });
+
+  it('report generator: the same excluded entry id is absent from readEntries — real functions/src readEntries, appliesTo:"all"', async () => {
+    const { readEntries } = await import('../../functions/src/reports/generator.js');
+
+    function fakeSnap(docs) {
+      return { forEach: (fn) => docs.forEach((d) => fn({ id: d.id, data: () => d.data })) };
+    }
+    function makeQuery(snapshot) {
+      const q = { where: () => q, orderBy: () => q, limit: () => q, select: () => q, get: async () => snapshot };
+      return q;
+    }
+    const entryDocs = [
+      { id: 'yoga-excluded', data: { createdAt: { toDate: () => new Date('2026-07-10') }, text: 'excluded text', analysis: {} } },
+      { id: 'yoga-0', data: { createdAt: { toDate: () => new Date('2026-07-11') }, text: 'kept text', analysis: {} } },
+    ];
+    const exclusionDocs = [
+      { id: 'x1', data: { entryId: 'yoga-excluded', appliesTo: 'all', reason: 'excluded_by_user', permanent: true } },
+    ];
+    const db = {
+      collection: (path) => {
+        if (path.endsWith('/entries')) return makeQuery(fakeSnap(entryDocs));
+        if (path.endsWith('/source_exclusions')) return makeQuery(fakeSnap(exclusionDocs));
+        return makeQuery(fakeSnap([]));
+      },
+    };
+
+    const result = await readEntries(db, 'artifacts/echo-vault-v5-fresh/users/user-matrix-b', new Date('2026-07-01'), new Date('2026-07-20'), 'weekly');
+
+    expect(result.map((e) => e.id)).toEqual(['yoga-0']);
+    expect(result.map((e) => e.id)).not.toContain('yoga-excluded');
+  });
+});
+
+// ===========================================================================
+// R2 Row (c): Work-scoped companion context contains no Personal/unscoped
+// Tier-2 entry and omits Tier-1 (R2 Task 5)
+// ===========================================================================
+describe('R2 Matrix row (c): Work-scoped companion context omits Tier 1 and excludes any non-Work Tier 2 entry', () => {
+  it('adversarial: a Personal-space AND an unscoped recentEntry never reach a Work-scoped context, and Tier 1 memory is omitted entirely (real getCompanionContext)', async () => {
+    const { getCompanionContext } = await import('../services/rag/companionContext');
+    const { getMemoryGraph } = await import('../services/memory');
+    const { formatBufferForContext, isExpired } = await import('../services/memory/sessionBuffer');
+    isExpired.mockReturnValue(false);
+
+    formatBufferForContext.mockReturnValue('[JUST JOURNALED] personal note');
+    const personalResult = await getCompanionContext({
+      userId: 'u1', query: 'anything', queryEmbedding: null, entries: [],
+      scope: { spaceId: 'work' },
+      sessionBuffer: {
+        recentEntry: { id: 'buf-personal-1', spaceId: 'personal', text: 'personal note' },
+        expiresAt: new Date(Date.now() + 60_000).toISOString(),
+      },
+    });
+    expect(personalResult.context.sessionBuffer).toBeNull();
+    expect(getMemoryGraph).not.toHaveBeenCalled();
+    expect(personalResult.context.memory).toBe('(Long-term memory omitted: scoped conversation)');
+    expect(personalResult.stats.hasMemory).toBe(false);
+
+    formatBufferForContext.mockReturnValue('[JUST JOURNALED] unscoped note');
+    const unscopedResult = await getCompanionContext({
+      userId: 'u1', query: 'anything', queryEmbedding: null, entries: [],
+      scope: { spaceId: 'work' },
+      sessionBuffer: {
+        recentEntry: { id: 'buf-unscoped-1', text: 'unscoped note' }, // no spaceId
+        expiresAt: new Date(Date.now() + 60_000).toISOString(),
+      },
+    });
+    expect(unscopedResult.context.sessionBuffer).toBeNull();
+
+    // Control: the SAME-space recentEntry is included — proves the above two
+    // were structurally filtered, not accidentally dropped by the buffer path.
+    formatBufferForContext.mockReturnValue('[JUST JOURNALED] work note');
+    const workResult = await getCompanionContext({
+      userId: 'u1', query: 'anything', queryEmbedding: null, entries: [],
+      scope: { spaceId: 'work' },
+      sessionBuffer: {
+        recentEntry: { id: 'buf-work-1', spaceId: 'work', text: 'work note' },
+        expiresAt: new Date(Date.now() + 60_000).toISOString(),
+      },
+    });
+    expect(workResult.context.sessionBuffer).toBe('[JUST JOURNALED] work note');
+  });
+});
+
+// ===========================================================================
+// R2 Row (d): offline-queued entry preserves spaceId through sync re-save
+// (R2 Task 1)
+// ===========================================================================
+describe('R2 Matrix row (d): offline-queued entry preserves spaceId through sync re-save', () => {
+  it('queueEntry -> buildOfflineSyncPayload (the real drain-path builder App.jsx calls before setDoc) carries spaceId through; absent when none was selected', async () => {
+    const { queueEntry } = await import('../services/offline/offlineManager.js');
+    const { buildOfflineSyncPayload } = await import('../services/offline/offlineSyncPayload.js');
+
+    const queuedWithSpace = await queueEntry('user-matrix-offline', { text: 'queued thought', spaceId: 'space-9' });
+    const syncedWithSpace = buildOfflineSyncPayload(queuedWithSpace);
+    expect(syncedWithSpace.spaceId).toBe('space-9');
+
+    const queuedWithoutSpace = await queueEntry('user-matrix-offline', { text: 'queued thought 2' });
+    const syncedWithoutSpace = buildOfflineSyncPayload(queuedWithoutSpace);
+    expect(syncedWithoutSpace).not.toHaveProperty('spaceId');
+  });
+});
+
+// ===========================================================================
+// R2 Row (e): revisit safety fixtures (incl. adjacency + low-mood + bait
+// attributes) excluded 100% (R2 Task 19)
+// ===========================================================================
+describe('R2 Matrix row (e): revisit safety fixtures excluded 100%, including adjacency + low-mood + "bait" scoring attributes', () => {
+  it('never selects ANY entry from an adversarial fixture covering every exclusion rule — using the REAL selectRevisitCandidate', async () => {
+    const { selectRevisitCandidate } = await import('../../functions/src/revisit/selectRevisits.js');
+
+    const DAY_MS = 24 * 60 * 60 * 1000;
+    const ADJACENCY_DAYS = 3;
+    const NOW = Date.parse('2026-07-21T16:00:00.000Z');
+    const daysAgo = (d) => NOW - d * DAY_MS;
+
+    function baseEntry(overrides = {}) {
+      return {
+        id: `entry-${Math.random().toString(36).slice(2, 8)}`,
+        createdAt: daysAgo(100),
+        spaceId: null,
+        safety_flagged: false,
+        has_warning_indicators: false,
+        analysis: { mood_score: 0.6 },
+        tags: [],
+        entities: [],
+        ...overrides,
+      };
+    }
+
+    // Every "unsafe" entry below is deliberately given rich entities/tags
+    // AND a near-maximal mood — the exact attributes the preference-scoring
+    // step favors most — to prove exclusion is a hard gate that runs BEFORE
+    // scoring ever sees these entries, not a soft penalty scoring could
+    // outweigh.
+    const bait = { tags: ['reunion', 'good-news'], entities: [{ id: 'p1', name: 'Sam', category: 'person' }], analysis: { mood_score: 0.95 } };
+    const flaggedAnchor = baseEntry({ id: 'anchor-flagged', createdAt: daysAgo(200), safety_flagged: true, ...bait });
+    const adversarial = [
+      flaggedAnchor,
+      baseEntry({ id: 'unsafe-flagged', safety_flagged: true, createdAt: daysAgo(150), ...bait }),
+      baseEntry({ id: 'unsafe-warned', has_warning_indicators: true, createdAt: daysAgo(120), ...bait }),
+      baseEntry({ id: 'unsafe-adjacent-plus', createdAt: daysAgo(200) - ADJACENCY_DAYS * DAY_MS, ...bait }),
+      baseEntry({ id: 'unsafe-adjacent-minus', createdAt: daysAgo(200) + ADJACENCY_DAYS * DAY_MS, ...bait }),
+      baseEntry({ id: 'unsafe-low-mood', analysis: { mood_score: 0.1 }, createdAt: daysAgo(110), tags: bait.tags, entities: bait.entities }),
+      baseEntry({ id: 'unsafe-missing-mood', analysis: {}, createdAt: daysAgo(115), tags: bait.tags, entities: bait.entities }),
+      baseEntry({ id: 'unsafe-excluded-entry', createdAt: daysAgo(130), ...bait }),
+    ];
+    const exclusions = [{ dimension: 'entry', value: 'unsafe-excluded-entry' }];
+
+    const noneSafe = selectRevisitCandidate({ entries: adversarial, exclusions, now: NOW });
+    expect(noneSafe).toBeNull();
+
+    // Mutation-check control: a genuinely safe entry, deliberately LESS
+    // "attractive" than the bait (no tags/entities, mood right at the
+    // preferred-but-not-maximal 0.5 threshold), proves the adversarial
+    // entries were structurally filtered — not merely outscored.
+    const safeControl = baseEntry({ id: 'the-only-safe-one', createdAt: daysAgo(180), analysis: { mood_score: 0.5 } });
+    const withControl = selectRevisitCandidate({ entries: [...adversarial, safeControl], exclusions, now: NOW });
+    expect(withControl?.id).toBe('the-only-safe-one');
+  });
+});
+
+// ===========================================================================
+// R2 Row (f): session-prep export contains no safety labels and drops
+// removed-claim citations (R2 Task 18)
+// ===========================================================================
+describe('R2 Matrix row (f): session-prep export carries no safety labels and drops removed-claim citations', () => {
+  // Same FakeJsPDF textCalls approach as sessionPrep.test.js (Task 18).
+  class FakeJsPDF {
+    constructor() {
+      this.textCalls = [];
+      this.pages = 1;
+    }
+    setFontSize() {}
+    setFont() {}
+    splitTextToSize(text) { return [text]; }
+    text(str) { this.textCalls.push(String(str)); }
+    addPage() { this.pages += 1; }
+    save() {}
+  }
+
+  it('never leaks safety_flagged/has_warning_indicators labels or the flagged entry\'s own text, and removing a block removes its citation — real composeSessionPrepPdf', async () => {
+    const { loadJsPDF } = await import('../utils/pdf');
+    loadJsPDF.mockResolvedValue(FakeJsPDF);
+    const { composeSessionPrepPdf } = await import('../services/reflections/sessionPrep.js');
+
+    const FLAGGED_ENTRY = { id: 'flagged-1', createdAt: '2026-07-10T00:00:00.000Z', text: 'crisis content should never appear', safety_flagged: true };
+    const SAFE_ENTRY = { id: 'safe-1', createdAt: '2026-07-09T00:00:00.000Z', text: 'irrelevant' };
+    const fullBrief = {
+      title: 'Session prep — July 2026',
+      period: { start: '2026-07-01T00:00:00.000Z', end: '2026-07-21T00:00:00.000Z' },
+      blocks: [
+        { id: 'b1', type: 'ai', section: 'Changes since', text: 'Kept claim.', sources: ['flagged-1'], editedByUser: false },
+        { id: 'b2', type: 'ai', section: 'Moments to bring up', text: 'Removed claim body.', sources: ['safe-1'], editedByUser: false },
+      ],
+    };
+
+    const doc = await composeSessionPrepPdf(fullBrief, { 'flagged-1': FLAGGED_ENTRY, 'safe-1': SAFE_ENTRY });
+    const all = doc.textCalls.join('\n');
+    expect(all).not.toMatch(/safety_flagged/i);
+    expect(all).not.toMatch(/has_warning_indicators/i);
+    expect(all).not.toContain('crisis content should never appear');
+    expect(all).toContain('Removed claim body.'); // sanity: present before removal
+    // b1's ONLY source is the flagged entry — its citation date must be
+    // dropped entirely (no bare "Sources:" line for it), not merely its
+    // text/field-name. This is the concrete "no safety labels" invariant,
+    // distinct from the block-removal citation check below.
+    const b1Text = all.slice(0, all.indexOf('Moments to bring up'));
+    expect(b1Text).not.toContain('Sources:');
+
+    const afterRemovalBrief = { ...fullBrief, blocks: fullBrief.blocks.filter((b) => b.id !== 'b2') };
+    const afterDoc = await composeSessionPrepPdf(afterRemovalBrief, { 'flagged-1': FLAGGED_ENTRY, 'safe-1': SAFE_ENTRY });
+    const afterAll = afterDoc.textCalls.join('\n');
+    expect(afterAll).not.toContain('Removed claim body.');
+  });
+});
+
+// ===========================================================================
+// R2 Row (g): chapter metadata edits leave text/rawTranscript/createdAt
+// byte-identical (R2 Task 14/15)
+// ===========================================================================
+describe('R2 Matrix row (g): chapter metadata edits leave text/rawTranscript/createdAt byte-identical', () => {
+  it('Rename writes ONLY {"transcription.chapters": next} — text/rawTranscript/createdAt/transcription (as a whole) never touched — real EntryCard render', async () => {
+    const { getFlag } = await import('../config/flags');
+    getFlag.mockImplementation((flag) => flag === 'voiceChapters');
+    const { default: EntryCard } = await import('../components/entries/EntryCard');
+
+    // Chapter offsets built with indexOf against the actual fixture text
+    // (same technique EntryCard.test.jsx uses), so charStart/charEnd are
+    // always correct rather than hand-counted.
+    const text = 'Morning notes here.\n\nAfternoon notes here.\n\nEvening notes here.';
+    const c0 = 'Morning notes here.';
+    const c1 = 'Afternoon notes here.';
+    const s0 = text.indexOf(c0);
+    const e0 = s0 + c0.length;
+    const s1 = text.indexOf(c1, e0);
+    const e1 = s1 + c1.length;
+    const chapters = [
+      { id: 'ch_0', index: 0, startMs: 0, title: 'Morning', charStart: s0, charEnd: e0 },
+      { id: 'ch_1', index: 1, startMs: 65000, title: 'Afternoon', charStart: s1, charEnd: e1 },
+    ];
+    const entry = {
+      id: 'entry-matrix-chapters',
+      text,
+      title: 'Voice entry',
+      category: 'personal',
+      createdAt: new Date('2026-07-20T10:00:00Z'),
+      effectiveDate: new Date('2026-07-20T10:00:00Z'),
+      tags: [],
+      transcription: { chapters, rawTranscript: 'the original raw transcript, must survive untouched' },
+    };
+    const onUpdate = vi.fn();
+
+    render(React.createElement(EntryCard, { entry, onDelete: vi.fn(), onUpdate }));
+
+    fireEvent.click(screen.getAllByLabelText('Chapter actions')[1]);
+    fireEvent.click(screen.getByText('Rename'));
+    const input = screen.getByLabelText('Chapter title');
+    fireEvent.change(input, { target: { value: 'Lunch break' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+
+    expect(onUpdate).toHaveBeenCalledTimes(1);
+    const [entryId, payload] = onUpdate.mock.calls[0];
+    expect(entryId).toBe('entry-matrix-chapters');
+
+    // The invariant: ONLY transcription.chapters changes. text/rawTranscript
+    // (top-level and nested)/createdAt are never among the updated keys.
+    expect(Object.keys(payload)).toEqual(['transcription.chapters']);
+    expect(payload).not.toHaveProperty('text');
+    expect(payload).not.toHaveProperty('rawTranscript');
+    expect(payload).not.toHaveProperty('createdAt');
+    expect(payload).not.toHaveProperty('transcription');
+
+    const next = payload['transcription.chapters'];
+    expect(next[1].title).toBe('Lunch break');
+    expect(next[0]).toEqual(chapters[0]); // untouched chapter is byte-identical
+    expect(next[1]).toEqual({ ...chapters[1], title: 'Lunch break' }); // only title changed
+  });
+});
+
+// ===========================================================================
+// R2 Row (h): budget day-cap honored across a simulated midnight with a live
+// tick (R2 self-review + R1 Task 2's useFreshnessTick/insightBudget)
+// ===========================================================================
+describe('R2 Matrix row (h): budget day-cap honored across a simulated midnight with a live freshness tick', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('quiet mode\'s 1/day cap blocks a same-day repeat; the REAL useFreshnessTick crossing midnight then lets the REAL applyInsightBudget allow the same candidate again', async () => {
+    const { applyInsightBudget } = await import('../services/insights/insightBudget.js');
+    const { useFreshnessTick } = await import('../hooks/useFreshnessTick.js');
+
+    vi.useFakeTimers();
+    // Computed via LOCAL Date methods (not a hardcoded UTC literal) so this
+    // genuinely straddles local midnight regardless of the runtime's
+    // timezone (this sandbox runs America/Los_Angeles; CI may run UTC —
+    // a fixed UTC boundary would cross midnight in one and not the other).
+    const beforeMidnightDate = new Date();
+    beforeMidnightDate.setHours(23, 59, 0, 0);
+    const beforeMidnight = beforeMidnightDate.getTime();
+    const afterMidnight = beforeMidnight + 5 * 60 * 1000; // local next-day 00:04
+    vi.setSystemTime(beforeMidnight);
+    Object.defineProperty(document, 'visibilityState', { value: 'visible', configurable: true });
+
+    const shownLog = [{ id: 'already-shown', title: 'Already shown', shownAt: new Date(beforeMidnight - 5 * 60 * 1000).toISOString() }];
+    const candidate = () => [{ id: 'candidate', title: 'Candidate insight', confidence: 0.9, generatedAt: new Date(Date.now()).toISOString() }];
+
+    // Before midnight: quiet mode's 1/day cap was already spent today -> 0 allowed.
+    expect(applyInsightBudget(candidate(), { mode: 'quiet', shownLog, now: Date.now() })).toEqual([]);
+
+    const { result } = renderHook(() => useFreshnessTick(5 * 60 * 1000));
+    const tickBefore = result.current;
+
+    // Advance the clock across midnight, then let the real 5-minute interval fire.
+    vi.setSystemTime(afterMidnight);
+    act(() => { vi.advanceTimersByTime(5 * 60 * 1000); });
+
+    expect(result.current).toBeGreaterThan(tickBefore); // the live tick actually fired
+
+    // After the tick, a fresh Date.now() read lands on a new calendar day —
+    // the day-count (derived from shownLog vs `now`) resets, so the same
+    // candidate is allowed again. shownLog itself is untouched (nothing new
+    // was recorded) — this isolates the gate re-evaluating against a fresh
+    // `now`, which is exactly what the live tick exists to trigger.
+    expect(applyInsightBudget(candidate(), { mode: 'quiet', shownLog, now: Date.now() }).map((i) => i.id)).toEqual(['candidate']);
   });
 });

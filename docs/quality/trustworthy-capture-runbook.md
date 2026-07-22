@@ -432,3 +432,67 @@ listed above, but digest/report generation was explicitly out of scope for
 this pass. A Work-space user will still see Personal-space content
 summarized in their digest until R2's receipts/space-treatment work lands
 (see `PROJECT_STATUS.md` Active Work).
+
+## R2 flags (Insight Receipts / Control Center / Voice Chapters / Recipes / Session Prep / Gentle Revisit)
+
+The R2 plan (`docs/superpowers/plans/2026-07-21-r2-trust-surfaces.md`, batches
+R2-1..R2-8) shipped five more client flags — `insightReceipts`,
+`voiceChapters`, `reflectionRecipes`, `sessionPrep`, `gentleRevisit` — all
+**default OFF** and independent of each other and of every flag above. Same
+mechanism as the rest of this doc: `config/flags` Firestore doc, no deploy
+required, `src/config/flags.js` `FLAG_DEFAULTS`. Every consumer listed below
+calls `getFlag(name)` inline inside its render/effect body (not once at
+module load and cached) — verified by reading each call site — so a flip
+takes effect on the next app load with no redeploy and no stale in-memory
+state to work around.
+
+| Flag | Default | What it enables | Turning it OFF restores | Verification |
+|---|---|---|---|---|
+| `insightReceipts` | `false` | The "Why am I seeing this?" `ReceiptSheet` (`src/components/insights/ReceiptSheet.jsx`) on Nexus insight cards (`NexusInsightsWidget.jsx`, `InsightsPage.jsx`), the `InsightControlCenter` screen (excluded sources, muted families, recompute, budget-withheld count) and its Settings/AppLayout nav row. Underlying data (`src/services/insights/receipts.js`, `sourceExclusions.js`, `recompute.js`) is flag-**independent** — receipts are attached to every insight at generation time regardless of this flag. | Nexus/Basic insight cards render exactly as they did pre-R2: no "Why am I seeing this?" trigger, no Control Center nav row. Receipt data keeps being computed and persisted in the background (harmless, invisible) so re-enabling needs no backfill. Source exclusions already created stay in effect either way (`getExcludedEntryIds` is read unconditionally by `generateInsights`/report `readEntries`, not flag-gated). | `src/__tests__/validationMatrix.test.js` rows (a)/(b); `src/services/nexus/__tests__/orchestrator.receipts.test.js`, `orchestrator.exclusions.test.js`; `src/components/insights/__tests__/ReceiptSheet.test.jsx`, `InsightControlCenter.test.jsx`. |
+| `voiceChapters` | `false` | The in-recording "Chapter" marker button (`EntryBar.jsx`), marker capture through `src/services/capture/chapterMarkers.js` + the native sidecar, marker-aligned chapter segmentation in `functions/src/transcription/fusedTranscription.js` (`computeChapterBoundaries`), and the chaptered EntryCard render (per-chapter `ChapterHeader.jsx` + rename/merge/remove actions). | Recording UI drops the Chapter button (no new markers get created, so no new entry ever carries `transcription.chapters`); EntryCard falls back to the legacy flat-paragraph body render byte-for-byte, even for entries that already have saved chapter metadata from when the flag was on — that metadata is untouched in Firestore, simply not rendered, so re-enabling immediately restores the chaptered view with no data loss. | `src/__tests__/validationMatrix.test.js` row (g); `src/components/entries/__tests__/EntryCard.test.jsx` ("legacy render is byte-identical" + "chapter action payload exactness" blocks); `functions/src/transcription/__tests__/fusedTranscription.test.js`. |
+| `reflectionRecipes` | `false` | The "Reflection Recipes" nav row (Settings/AppLayout) and `RecipesScreen`/`ReflectionDraft` (`src/components/reflections/`), backed by `src/services/reflections/{recipeService,runRecipe,starterRecipes}.js`. | Nav row disappears; no way to create/run/edit recipes from the UI. Existing `recipes/*` and `reflections/*` docs (recipe runs already generated) are untouched in Firestore — they simply become unreachable until the flag flips back on, at which point they reappear exactly as left. | `src/services/reflections/__tests__/{recipeService,runRecipe,runRecipeAdversarialRetrieval,starterRecipes}.test.js`; `src/components/reflections/__tests__/{RecipesScreen,ReflectionDraft}.test.jsx`. |
+| `sessionPrep` | `false` | The "Session prep" nav row and `SessionPrepScreen` (`src/services/reflections/sessionPrep.js` — since-date/scope brief generation, regenerate-section, the safety-reviewed `composeSessionPrepPdf` export). | Nav row disappears; no way to generate or export a session brief. Existing `reflections/*` docs of `kind:'session_brief'` are untouched, same as above. | `src/__tests__/validationMatrix.test.js` row (f); `src/services/reflections/__tests__/sessionPrep.test.js`; `src/components/reflections/__tests__/SessionPrepScreen.test.jsx`. |
+| `gentleRevisit` | `false` | **Client:** `RevisitWidget` (home surface) + `RevisitControls` (opt-in toggle, hidden-dimension manager) and the "Gentle Revisit" Settings row, backed by `src/services/revisit/revisitService.js`. **Server:** the entire `gentleRevisitDaily` scheduled sweep (`functions/src/revisit/selectRevisits.js`) — `runGentleRevisitDaily` reads the server-side flag via `getServerFlag(db, 'gentleRevisit', false)` as its very first check and returns `{processed:0, selected:0, skipped:0}` for **every** user, before even looking at any user's `revisitPrefs.enabled`, if the flag is off. | **Client:** widget/controls disappear entirely, even if a `revisit_queue` doc already exists for today (it simply isn't rendered — nothing is deleted by the flag itself; only the user's own opt-out toggle inside `RevisitControls` deletes queued docs). **Server:** no new `revisit_queue` docs get written for anyone, for any user, regardless of their individual opt-in state — the daily sweep is a complete no-op while the flag is off. Re-enabling resumes selection from the next scheduled run; nothing needs replaying. | `src/__tests__/validationMatrix.test.js` row (e); `functions/src/revisit/__tests__/selectRevisits.test.js`; `src/components/zen/widgets/__tests__/RevisitWidget.test.jsx`, `src/components/revisit/__tests__/RevisitControls.test.jsx`. **Extra gate, non-negotiable:** read and sign off `docs/quality/gentle-revisit-safety.md` before this flag is EVER flipped on outside internal testing — it documents the six non-negotiable exclusion rules, the automated fixture set, and the PRD's open question on grief/trauma/crisis scenarios. |
+
+**Digest retirement (R2 Task 9).** `generateWeeklyDigests` /
+`generateUserWeeklyDigest` and their prompt/helper code were deleted from
+`functions/index.js` — the weekly digest wrote `digests/weekly`, a doc with
+**no `firestore.rules` read block**, making it permanently client-unreadable;
+it cost a Gemini call per user per week for a surface nobody could ever see,
+and weekly reports (`functions/src/reports/`) already cover the same ground
+with a user-visible, receipt-carrying surface. The exports are gone from the
+codebase, but **Cloud Functions does not un-deploy a function just because
+its source was removed** — the stale `generateWeeklyDigests` function keeps
+running in production (and keeps blocking every subsequent `firebase deploy
+--only functions` with a "function no longer exists in source" prompt, which
+CI cannot answer non-interactively) until it is explicitly deleted. This is a
+**one-time manual step, not yet done as of this writing** — it blocks ALL
+functions deploys until run:
+
+```
+firebase functions:delete generateWeeklyDigests --region us-central1 --force
+```
+
+The `digests/weekly` documents already written are left in place (inert,
+unreadable, harmless) — this command only removes the Cloud Function, not
+historical data.
+
+**Voice-relay scope note.** The relay does not read `contextSpaces` scope
+per-message — `useVoiceRelay.js`'s `connect(sessionType, mode, spaceId)`
+sends the Context Space active in `UnifiedConversation` **once, at session
+start**, and the relay stores it on that connection's `sessionState.spaceId`
+for the life of the session (`relay-server/src/relay/realtimeProxy.ts` +
+`standardPipeline.ts`, both threading it into `searchMemory(userId, args,
+spaceId)`). Switching Spaces mid-conversation does not retroactively rescope
+an already-open voice session; the user has to start a new one. `spaceId:
+null` (unscoped) is the default and produces byte-identical queries to
+pre-R2 behavior.
+
+**Chapters device-validation pointer.** `voiceChapters`' native half (the
+`CaptureDraft` sidecar marker append, `Capture.markChapter()`, and the
+Swift-side `stop()` result carrying `markers`) is exercised only by an Xcode
+build + physical-device sanity check — see
+`docs/quality/device-validation-matrix.md`. This is on the human checklist
+(`PROJECT_STATUS.md` Active Work); it has not yet been run as of this
+writing, so `voiceChapters` should not default on for native users until it
+has.

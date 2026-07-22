@@ -592,6 +592,35 @@ confidence gates to fill the quota. Known gap: offline `queueEntry` drops the
 selected `spaceId` — fix before `contextSpaces` defaults on. Full detail:
 runbook's "R1 flags" section above.
 
+**R2 (Insight Receipts / Control Center / Voice Chapters / Recipes / Session
+Prep / Gentle Revisit), shipped behind flags `insightReceipts`/
+`voiceChapters`/`reflectionRecipes`/`sessionPrep`/`gentleRevisit` (all
+default OFF, independent):** the core invariant is that **every proactive
+insight carries a receipt** — `src/services/insights/receipts.js`'s
+`buildReceipt`/`applyReceiptDefaults` attach `{sources, scope, timeWindow,
+sampleSize, missingness, versions}` to every Nexus/Basic insight at
+generation time regardless of the flag, so 100% of `active` insights are
+inspectable via `ReceiptSheet.jsx`/`InsightControlCenter.jsx` once
+`insightReceipts` is on; corrections flow through `source_exclusions`
+(`sourceExclusions.js`) consumed by `generateInsights`/report `readEntries`
+and fanned out via `recompute.js`'s `onSourcesChanged` (stale within
+seconds, never mutates entry text). Voice Chapters ride durable capture
+(`src/services/capture/chapterMarkers.js`, native `CaptureDraft` sidecar)
+into `functions/src/transcription/fusedTranscription.js`
+(`computeChapterBoundaries`), landing as metadata-only
+`transcription.chapters` — raw `text`/`rawTranscript`/`createdAt` are never
+touched by a chapter edit. Recipes/Session Prep (`src/services/reflections/`)
+are a new `reflections` artifact collection over the existing scope-filtered
+Ask Journal seams, reusing the client-side jsPDF export pathway; Session
+Prep's export is safety-reviewed (never emits `safety_flagged`/
+`has_warning_indicators` labels or a citation for an unsafe/removed source).
+Gentle Revisit is a server-side, no-LLM heuristic job
+(`functions/src/revisit/selectRevisits.js`) writing `revisit_queue`,
+suppressed by `revisit_exclusions` — it **stays internal until Michael signs
+off `docs/quality/gentle-revisit-safety.md`**, a hard PRD safety gate on top
+of the flag itself (the flag also gates the server job). R1's offline
+`spaceId` gap above is now closed. Full detail: runbook's "R2 flags" section.
+
 ## Crash Reporting
 
 The crash reporting service (`src/services/crashReporting.js`) provides Firebase Crashlytics integration.
