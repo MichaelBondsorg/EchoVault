@@ -33,8 +33,8 @@ read-only for clients; only the Admin SDK/Firebase console can write it.
 | `model.<workload>` (string) | (unset) | **Authoritative model lever.** A string value in `config/flags` for a key like `model.classify`, `model.analyze`, `model.insight`, `model.embedding`, `model.embeddingV2`, `model.fusedTranscription`, `model.tone`, `model.digest`, `model.transcriptionFallback` overrides that workload's default. | Removing the key → the compiled `MODEL_DEFAULTS`. | `functions/src/models/registry.js` `getModel(db, workload)` — LIVE at every threaded call site (see § Model registry flip procedure for the real/inventory-only breakdown). |
 | `model.gemini35flash` (bool) | `false` | **Vestigial.** Predates the registry; NO code reads it. To move classify/analyze to `gemini-3.5-flash`, set the string keys `model.classify` / `model.analyze` instead. | n/a | Not consumed anywhere — follow-up: remove from client `FLAG_DEFAULTS`. |
 | `model.fusedTranscription35` (bool) | `false` | **Vestigial.** The registry string key `model.fusedTranscription` WINS. NO code reads this boolean. | n/a | Not consumed — follow-up: remove from client `FLAG_DEFAULTS`. |
-| `model.embeddingWriteV2` (bool) | `false` | Dual-writes a gemini-embedding-2 `embeddingV2` vector + `embeddingMeta` alongside the legacy `embedding` field. | v1-only writes. | `functions/src/models/registry.js` (`MODEL_FLAG_DEFAULTS`) → read in `generateEmbeddingInternal`. LIVE (server write path). |
-| `model.embeddingV2Read` (bool) | `false` | Intended to make retrieval read `embeddingV2` (same-space) instead of the legacy `embedding` field. | Legacy `embedding` reads. | Registered default in the registry, but the RAG scoring consumers are **client-side** (`src/services/rag/*`, `src/services/ai/embeddings.js`) and NOT yet switched to `scoreSameSpace` — so flipping this is currently INERT client-side (follow-up). |
+| `model.embeddingWriteV2` (bool) | `false` | Dual-writes a gemini-embedding-2 `embeddingV2` vector + `embeddingMeta` alongside the legacy `embedding` field, generated INDEPENDENTLY of the v1 attempt (embeddings migration M4). | No v2 writes — new entries then get NO vector at all, since v1 is retired (see v1-retirement note below); this flag is effectively **required ON** for new entries to be retrievable at all. | `functions/src/models/registry.js` (`MODEL_FLAG_DEFAULTS`) → read in `generateEmbeddingInternal`. LIVE (server write path). |
+| `model.embeddingV2Read` (bool) | `false` | Makes client retrieval read `embeddingV2` (same-space, via `scoreEntryInBestSpace`) instead of/alongside the legacy `embedding` field. **Post-M4 this flag is REQUIRED for any semantic retrieval** — see the v1-retirement note below. | Client `generateQueryEmbeddings` requests v1 ONLY, which — now that v1 is retired upstream — always resolves to `null`, so retrieval degrades to keyword-only. This is exactly pre-migration prod behavior, faithfully reproduced (not a new regression). | LIVE both sides as of embeddings migration task M2 (`src/services/ai/embeddingSpaces.js`'s `scoreEntryInBestSpace`, wired through `src/services/ai/embeddings.js`, `src/services/rag/*`, `src/services/analysis/index.js` `getSmartChatContext`, `src/components/chat/Chat.jsx`). |
 
 **Local dev override:** any flag can be forced client-side without touching
 Firestore via `localStorage['engram:flag:' + name] = 'true' | 'false'`
@@ -183,37 +183,95 @@ needs a green gate) is the right response.
 
 ## Embedding v2 cutover steps
 
-Dual-index migration to `gemini-embedding-2` (M3). The v1 space
-(`text-embedding-004`) stays live throughout; the two spaces are never mixed
-(`scoreSameSpace` in `functions/src/ai/embeddingV2.js` throws if a v2 query
-vector is scored against a v1 doc vector, or vice versa).
+Dual-index migration to `gemini-embedding-2` (plan tasks M1/M2). The v1 space
+(`text-embedding-004`) was originally meant to stay live throughout — see the
+**v1-retirement note** immediately below, which supersedes step 5 here: v1 is
+now permanently dead upstream, not a "later" cleanup. The two spaces are
+never mixed regardless (`scoreSameSpace` server-side / `scoreEntryInBestSpace`
+client-side both refuse a cross-space comparison).
 
 1. **Enable dual-write.** Set `model.embeddingWriteV2: true` in the
    `config/flags` doc (default off). Within the 60s flag TTL, `onEntryCreate`
    starts writing `embeddingV2` + `embeddingMeta` ({model, dim, taskType,
-   createdAt}) alongside the legacy `embedding` field. v2 vectors cache under
-   `sha256(uid+':v2:'+text)[:24]` — a distinct keyspace from v1. The write is
-   fail-open: a v2 failure never blocks the v1 vector.
+   createdAt}) alongside the legacy `embedding` field — the two are generated
+   INDEPENDENTLY (M4), so a v1 failure (the permanent case post-retirement)
+   never prevents the v2 write. v2 vectors cache under
+   `sha256(uid+':v2:'+text)[:24]` — a distinct keyspace from v1.
 2. **Backfill existing entries.** Run the admin script (never CI):
    `GOOGLE_APPLICATION_CREDENTIALS=… GEMINI_API_KEY=… NODE_PATH=functions/node_modules
    node scripts/backfill-embeddings-v2.js --dry-run` first to preview counts,
    then without `--dry-run`. It is batched (50, 200ms/batch), resumable
    (checkpoint doc `migration_state/embeddingsV2`; `--restart` to ignore it),
    per-user consent-gated (skips `settings/consent.aiProcessing === false`),
-   and idempotent (skips entries that already have `embeddingV2`).
+   and idempotent (skips entries that already have `embeddingV2`). **Gap mode
+   (M4):** add `--include-missing-v1` to additionally target entries with
+   text but NEITHER vector (created after v1's retirement but before Step 0
+   was fixed to write v2 independently) — writes `embeddingV2` only, never
+   fabricates `embedding`. Gap mode uses its own checkpoint doc
+   (`migration_state/embeddingsV2gap`) so it never races the default mode's
+   `migration_state/embeddingsV2` checkpoint.
 3. **Verify counts** before flipping reads: confirm the bulk of entries now
    carry `embeddingV2` (checkpoint `updated`/`skipped`, or a Firestore query).
-4. **Flip reads.** Set `model.embeddingV2Read: true`. The rule: when the query
-   AND the docs both have v2 vectors, score in the v2 space EXCLUSIVELY; else
-   fall back to v1. **Caveat:** `functions/` only *writes* embeddings — the RAG
-   scoring consumers are client-side (`src/services/rag/*`,
-   `src/services/ai/embeddings.js`) and still read the v1 `embedding` field.
-   Switching those consumers to `scoreSameSpace({vector,space})` is a follow-up
-   outside M3's file ownership; until it lands, flipping the read flag has no
-   client-visible effect.
-5. **(Later) retire v1.** Once every entry has v2 and the read path is v2-only,
-   drop the `embedding` field + the `text-embedding-004` path and the
-   `embedding` workload default.
+4. **Flip reads.** Set `model.embeddingV2Read: true`. LIVE both sides as of
+   plan task M2: the client (`src/services/ai/embeddings.js`
+   `generateQueryEmbeddings`, `src/services/ai/embeddingSpaces.js`
+   `scoreEntryInBestSpace`, wired through every RAG/chat/context retrieval
+   seam) scores an entry in v2 when both the query and the entry have a v2
+   vector, else falls back to v1 — **except that fallback is now moot for new
+   queries, since v1 is permanently dead** (see v1-retirement note). This
+   flag is therefore not merely "flip when ready" anymore — it is **required
+   ON** for any semantic retrieval to function post-retirement.
+5. ~~**(Later) retire v1.**~~ **Superseded — v1 was retired upstream by
+   Google, unscheduled, on/before 2026-07-22.** See the note immediately
+   below. The `embedding` field/`text-embedding-004` code path is being kept
+   as a best-effort legacy path (not deleted), not proactively dropped.
+
+### v1-retirement note (embeddings migration M4, dated 2026-07-22)
+
+**Verified live 2026-07-22:** Google retired `text-embedding-004`. The v1
+`embedContent` endpoint now returns 404 ("not found for API version
+v1beta") on every call, unconditionally — this is not a rate limit or a
+transient outage, and there is no known restoration date. Consequences,
+confirmed by direct code reading before the fix:
+
+- **Server:** `generateEmbeddingInternal`'s v1 fetch threw before the v2
+  block was ever reached, so **every new entry got zero vectors** — Step 0
+  (`onEntryCreate`) silently produced nothing. Fixed (M4): v1 and v2 are now
+  generated INDEPENDENTLY; v1 failure is caught, logged once (structured),
+  and resolves `embedding: null` without blocking the (already flag-gated,
+  already fail-open) v2 attempt.
+- **Client:** `generateQueryEmbeddings` used to null out its ENTIRE result
+  the moment the v1 call failed, even when v2 succeeded — so with
+  `model.embeddingV2Read` ON, every semantic query degraded to keyword-only
+  despite full v2 entry coverage. Fixed (M4): the function now returns
+  whichever space(s) actually succeeded (`{v1,v2}`, `{v2}`, or `{v1}`); it
+  returns `null` only when BOTH fail. A v1 failure is logged at `warn`, not
+  `error` (v1 is known-dead — screaming on every single query is alarm
+  fatigue for a permanent, expected condition).
+- **Net effect:** `embedding`/v1 is now a **frozen legacy field** — best-
+  effort only, never removed outright (in case Google ever restores/aliases
+  the model), but not something new code should depend on. **New entries are
+  effectively v2-only.** `model.embeddingV2Read: true` is now REQUIRED for
+  semantic retrieval to work at all; with it OFF, every user gets
+  keyword-only retrieval (see the flag table above) — this reproduces
+  exactly today's pre-migration prod behavior, not a new regression, but it
+  means the flag is no longer optional for anyone who wants semantic search.
+- **Backfill gap:** any entry created in the window between the retirement
+  and this fix landing has NEITHER vector. Use
+  `scripts/backfill-embeddings-v2.js --include-missing-v1` (step 2 above) to
+  close that gap with v2-only writes.
+- **Known, DELIBERATELY NOT fixed in this task (M4):**
+  `src/services/nexus/layer1/threadManager.js`'s thread-dedup/thread-name
+  embeddings are explicitly PINNED to v1 (plan task M2's documented
+  decision — thread vectors are a separate v1-space store, migration was an
+  explicit non-goal). Since v1 is now permanently dead, thread-similarity
+  matching (`findSimilarThread`/`findEvolutionCandidates`) is **silently
+  degraded** — it still calls the v1-only path, which now always fails, so
+  thread dedup effectively stops matching. This is a pre-existing gap
+  (inherited from M2's pin decision, not introduced by M4) that this task
+  was explicitly scoped NOT to fix. Flagged here as an open follow-up:
+  migrating thread embeddings to v2 (or degrading gracefully instead of
+  silently) needs its own task.
 
 ## Model registry flip procedure
 
@@ -239,7 +297,7 @@ recorded for inventory completeness but reading/writing them does nothing.
 | classify | `gemini-3-flash-preview` | ✅ | orchestrator + `analyzeJournalEntry` + watchdog + reprocess (threaded `{modelId}` into `classifyEntry`/`extractEnhancedContext`) |
 | analyze | `gemini-3-flash-preview` | ✅ | orchestrator + callable + watchdog (`analyzeEntry`); stamped into `analysisMeta.modelId` |
 | insight | `gemini-3-flash-preview` | ✅ | orchestrator + callable (`generateInsight`) |
-| embedding | `text-embedding-004` | ✅ | `generateEmbeddingInternal` (`getModel(db,'embedding')`) — legacy v1 space |
+| embedding | `text-embedding-004` | ✅ (best-effort/legacy — see v1-retirement note above) | `generateEmbeddingInternal` (`getModel(db,'embedding')`) — legacy v1 space; retired upstream by Google 2026-07-22, expected to fail every call |
 | embeddingV2 | `gemini-embedding-2` | ✅ | `generateEmbeddingInternal` when `model.embeddingWriteV2` on |
 | fusedTranscription | `gemini-2.5-flash` | ✅ | `transcribeEntry` callable + server trigger (`runFusedTranscription({modelId})`) |
 | tone | `gemini-3.5-flash` | ✅ | `transcribeAudio` tone call (`getModel(db,'tone')`) |

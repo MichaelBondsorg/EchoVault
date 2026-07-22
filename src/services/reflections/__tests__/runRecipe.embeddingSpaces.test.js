@@ -142,15 +142,19 @@ describe('runRecipe + real generateQueryEmbeddings — flag ON (dual-space, map 
     expect(entriesContext).toContain('the-v2-only-discoverable-recipe-entry');
   });
 
-  it('a null map value (v1 failure -> generateQueryEmbeddings returns null) degrades to tag/recency matching, never an error — runRecipe\'s console.warn contract still fires', async () => {
+  it('a null map value (BOTH v1 and v2 fail -> generateQueryEmbeddings returns null) degrades to tag/recency matching, never an error — runRecipe\'s console.warn contract still fires', async () => {
+    // Embeddings migration M4 inversion: a v1-only failure with v2 OK no
+    // longer nulls out the whole result (v2 carries retrieval alone now —
+    // see embeddings.test.js). This test's null-degrade path therefore now
+    // requires BOTH spaces to fail, not just v1.
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     mockGenerateEmbeddingFn.mockImplementation(({ version }) => {
       if (version === 'v1') return Promise.reject(new Error('v1 down'));
-      if (version === 'v2') return Promise.resolve({ data: { embedding: [0, 1, 0], space: 'v2' } });
+      if (version === 'v2') return Promise.reject(new Error('v2 down'));
       throw new Error('unexpected call');
     });
 
-    const queryVectors = await generateQueryEmbeddings(QUESTION); // null: v1 failed
+    const queryVectors = await generateQueryEmbeddings(QUESTION); // null: both v1 and v2 failed
     expect(queryVectors).toBeNull();
 
     const entries = [{ id: 'e1', text: 'a recent entry', tags: [], createdAt: NOW }];

@@ -458,13 +458,28 @@ export const analyzeJournalEntry = onCall(
  * and the Firestore trigger.
  *
  * Returns `{ embedding, embeddingV2, embeddingMeta }`:
- *  - `embedding`   legacy v1 (text-embedding-004) vector — always present.
+ *  - `embedding`   legacy v1 (text-embedding-004) vector — BEST-EFFORT, may
+ *                  be `null`. **v1-retirement note (embeddings migration
+ *                  M4, verified 2026-07-22): Google retired
+ *                  text-embedding-004 — the v1 `embedContent` endpoint now
+ *                  404s ("not found for API version v1beta") on every call.
+ *                  v1 is therefore expected to be null on every invocation
+ *                  going forward; it is kept as a best-effort legacy path,
+ *                  not removed outright, in case Google restores/aliases the
+ *                  model.**
  *  - `embeddingV2` gemini-embedding-2 vector — present only when the
- *                  `model.embeddingWriteV2` flag is ON and generation succeeds.
+ *                  `model.embeddingWriteV2` flag is ON and generation
+ *                  succeeds. Post-M4, this is the ONLY vector new entries
+ *                  can rely on.
  *  - `embeddingMeta` provenance for the v2 vector ({model, dim, taskType,
  *                  createdAt}) — present iff `embeddingV2` is.
  *
- * The v2 dual-write is fail-open: a v2 failure never blocks the v1 result.
+ * v1 and v2 are generated INDEPENDENTLY (M4): a v1 failure (now the
+ * permanent case) never blocks v2, and — symmetrically — the v2 dual-write
+ * stays fail-open as before, so a v2 failure never blocks a v1 result on the
+ * off chance v1 ever comes back. Neither vector's failure throws; callers
+ * decide what to do when both come back null (see Step 0 / the callable
+ * below).
  */
 async function generateEmbeddingInternal(text, apiKey, uid) {
   if (!text || typeof text !== 'string' || text.trim().length === 0) {
@@ -473,35 +488,50 @@ async function generateEmbeddingInternal(text, apiKey, uid) {
 
   const writeV2 = await getModelFlag(db, 'model.embeddingWriteV2');
 
-  // --- Legacy v1 vector (owner-scoped cache) ---
-  let embedding = await getCachedEmbedding(db, uid, text);
-  if (embedding) {
-    console.log('Embedding cache HIT');
-  } else {
-    const embeddingModel = await getModel(db, 'embedding');
-    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${embeddingModel}:embedContent?key=${apiKey}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ content: { parts: [{ text: text }] } }),
-      signal: AbortSignal.timeout(LLM_TIMEOUT_MS)
-    });
+  // --- Legacy v1 vector (owner-scoped cache) — BEST-EFFORT (M4). Wrapped in
+  // its own try/catch so a v1 failure (the permanent case post-retirement)
+  // can never prevent the v2 attempt below from running. Logged once,
+  // structured, at generation time (not per-caller) to avoid duplicate noise
+  // from both the callable and the Firestore trigger hitting this helper.
+  let embedding = null;
+  try {
+    embedding = await getCachedEmbedding(db, uid, text);
+    if (embedding) {
+      console.log('Embedding cache HIT');
+    } else {
+      const embeddingModel = await getModel(db, 'embedding');
+      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${embeddingModel}:embedContent?key=${apiKey}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: { parts: [{ text: text }] } }),
+        signal: AbortSignal.timeout(LLM_TIMEOUT_MS)
+      });
 
-    if (!res.ok) {
-      const errorData = await res.json().catch(() => ({}));
-      console.error('Embedding API error:', res.status, errorData);
-      throw new Error('Embedding generation failed');
-    }
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(`Embedding API error ${res.status}: ${JSON.stringify(errorData)}`);
+      }
 
-    const data = await res.json();
-    embedding = data.embedding?.values || null;
-    if (!embedding) {
-      throw new Error('No embedding returned');
+      const data = await res.json();
+      const v1Values = data.embedding?.values || null;
+      if (!v1Values) {
+        throw new Error('No embedding returned');
+      }
+      embedding = v1Values;
+      // Cache for future use (owner-scoped, model-tagged, no plaintext preview)
+      await setCachedEmbedding(db, uid, text, embedding, embeddingModel);
     }
-    // Cache for future use (owner-scoped, model-tagged, no plaintext preview)
-    await setCachedEmbedding(db, uid, text, embedding, embeddingModel);
+  } catch (v1Error) {
+    embedding = null;
+    console.error(JSON.stringify({
+      type: 'embedding-v1-failed',
+      uid,
+      err: v1Error?.message,
+    }));
   }
 
-  // --- Dual-index v2 vector (gemini-embedding-2), flag-gated + fail-open ---
+  // --- Dual-index v2 vector (gemini-embedding-2), flag-gated + fail-open,
+  // attempted INDEPENDENTLY of the v1 outcome above (M4) ---
   let embeddingV2;
   let embeddingMeta;
   if (writeV2) {
@@ -529,6 +559,35 @@ async function generateEmbeddingInternal(text, apiKey, uid) {
   }
 
   return { embedding, embeddingV2, embeddingMeta };
+}
+
+/**
+ * Pure helper (embeddings migration M4): decide what Step 0
+ * (`onEntryCreate`) should write to Firestore given
+ * `generateEmbeddingInternal`'s independently-generated vectors.
+ *
+ * Exported and unit-tested directly (rather than only indirectly via a full
+ * `onDocumentCreated` trigger invocation, which would need Firestore/goal-
+ * processing mocking out of proportion to what this decision actually is):
+ *  - both null (v1 dead upstream AND v2 unavailable/flag-off) -> `null`,
+ *    meaning "write nothing" — never clobber the doc with an empty update.
+ *  - only one vector present -> an update containing just that vector's
+ *    field(s) (v1-only unchanged shape when v2 is off; v2-only shape is new
+ *    post-M4 since v1 is now expected to fail every time).
+ *  - both present -> both fields, same shape as pre-M4.
+ *
+ * @param {{embedding?: number[]|null, embeddingV2?: number[]|null, embeddingMeta?: object}} vectors
+ * @returns {null|{embedding?: number[], embeddingV2?: number[], embeddingMeta?: object}}
+ */
+export function buildEmbeddingWriteFromVectors({ embedding, embeddingV2, embeddingMeta } = {}) {
+  if (!embedding && !embeddingV2) return null;
+  const update = {};
+  if (embedding) update.embedding = embedding;
+  if (embeddingV2) {
+    update.embeddingV2 = embeddingV2;
+    update.embeddingMeta = embeddingMeta;
+  }
+  return update;
 }
 
 /**
@@ -597,8 +656,14 @@ async function generateQueryEmbeddingV2Internal(text, apiKey, uid) {
  *
  * Accepts optional `version: 'v1' | 'v2'` (default `'v1'`; any value other
  * than the literal `'v2'` — including omission — resolves to `'v1'`).
- *  - `'v1'` (default): BYTE-IDENTICAL to pre-migration behavior for existing
- *    callers, plus an additive `space: 'v1'` key that old clients ignore.
+ *  - `'v1'` (default): LEGACY path — text-embedding-004 is retired upstream
+ *    as of 2026-07-22 (embeddings migration M4; every v1 `embedContent` call
+ *    now 404s), so `generateEmbeddingInternal` resolves `embedding: null`
+ *    for every request. This path fails LOUD when that happens rather than
+ *    returning a null vector as if it were a normal result — a v1 request
+ *    that can't be served must not fabricate a vector or silently succeed
+ *    with nothing scoreable. Kept only for callers not yet migrated to
+ *    `'v2'`; new/updated callers should request `'v2'` instead.
  *  - `'v2'`: returns a RETRIEVAL_QUERY gemini-embedding-2 vector for
  *    asymmetric retrieval against entries' RETRIEVAL_DOCUMENT vectors (see
  *    `generateQueryEmbeddingV2Internal`). Never silently degrades to v1 on
@@ -641,6 +706,14 @@ export const generateEmbedding = onCall(
       // The callable returns the legacy v1 vector (client retrieval space); the
       // v2 dual-write, if enabled, is persisted server-side via the cache.
       const { embedding } = await generateEmbeddingInternal(text, apiKey, userId);
+      if (!embedding) {
+        // v1 is retired upstream (see doc comment above) —
+        // generateEmbeddingInternal no longer throws on a v1 failure so v2
+        // can be attempted independently. This legacy branch must not turn
+        // that into a silent `{embedding: null}` success, so it fails loud
+        // here instead, same as the v2 branch above.
+        throw new Error('v1 embedding generation failed (v1 is retired upstream — request version: "v2" instead)');
+      }
       return { embedding, space: 'v1', cached: false };  // Caching handled internally
     } catch (error) {
       console.error('generateEmbedding error:', error);
@@ -1941,21 +2014,38 @@ export const onEntryCreate = onDocumentCreated(
       }
 
       // Step 0: Generate embedding if not present (OPTIMIZED: Background processing)
+      //
+      // Condition left as `!entry.embedding && entry.text` (M4 review): this
+      // still fires for EVERY new entry, since a freshly-created entry never
+      // has an `embedding` field yet regardless of which vector space(s) end
+      // up populated — that's sufficient because generateEmbeddingInternal
+      // now attempts v1 AND v2 independently (see its doc comment), so a new
+      // entry gets v2 written here even though v1 is permanently dead
+      // upstream. It deliberately does NOT also fire for an
+      // already-v1-embedded-but-v2-missing entry (`entry.embedding &&
+      // !entry.embeddingV2`) — that population sweep is the backfill
+      // script's job (`scripts/backfill-embeddings-v2.js`, plus its
+      // `--include-missing-v1` gap mode for entries created in the window
+      // between v1's retirement and this fix, which have neither vector),
+      // not this per-write trigger's.
       if (!entry.embedding && entry.text) {
         console.time(`[Entry ${entryId}] Generate embedding`);
         try {
           const apiKey = geminiApiKey.value();
           const { embedding, embeddingV2, embeddingMeta } = await generateEmbeddingInternal(entry.text, apiKey, userId);
-          const embeddingUpdate = { embedding };
-          // Dual-index: when the write-v2 flag is on, persist the v2 vector +
-          // its provenance alongside the legacy field (same-space by field name).
-          if (embeddingV2) {
-            embeddingUpdate.embeddingV2 = embeddingV2;
-            embeddingUpdate.embeddingMeta = embeddingMeta;
+          const embeddingUpdate = buildEmbeddingWriteFromVectors({ embedding, embeddingV2, embeddingMeta });
+
+          if (!embeddingUpdate) {
+            // Both spaces failed — v1 is permanently dead upstream and v2
+            // either failed or the write flag is off. Nothing to persist;
+            // skip the write rather than clobbering the doc with an empty
+            // update. Non-critical - continue with other processing.
+            console.warn(`[Entry ${entryId}] No embedding vector produced (v1 retired upstream; v2 unavailable/flag-off) — skipping embedding write`);
+          } else {
+            await event.data.ref.update(embeddingUpdate);
+            console.log(`✅ Entry ${entryId} enriched with embedding(s): ${[embeddingUpdate.embedding && 'v1', embeddingUpdate.embeddingV2 && 'v2'].filter(Boolean).join('+')}`);
           }
-          await event.data.ref.update(embeddingUpdate);
           console.timeEnd(`[Entry ${entryId}] Generate embedding`);
-          console.log(`✅ Entry ${entryId} enriched with embedding`);
         } catch (embError) {
           console.timeEnd(`[Entry ${entryId}] Generate embedding`);
           console.error(`Failed to generate embedding for entry ${entryId}:`, embError);

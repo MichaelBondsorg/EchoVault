@@ -11,7 +11,7 @@
  * generateEmbeddingV2, the cache keyspaces — are unit-tested directly in
  * embeddingV2.test.js / embeddingCache.test.js).
  */
-import { describe, it, expect, vi, beforeEach, afterAll } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach, afterAll } from 'vitest';
 
 // functions/index.js registers an onObjectFinalized storage trigger at
 // module scope, which needs a resolvable bucket name even though this test
@@ -197,6 +197,38 @@ describe('generateEmbedding — v2 failure is loud, never silently falls back to
       code: 'internal',
     });
     // Space integrity: the v1 path must never have been consulted as a fallback.
+    expect(getCachedEmbedding).not.toHaveBeenCalled();
+  });
+});
+
+describe('generateEmbedding — v1 is retired upstream (embeddings migration M4)', () => {
+  const ORIGINAL_FETCH = global.fetch;
+  afterEach(() => {
+    global.fetch = ORIGINAL_FETCH;
+  });
+
+  it('a v1 cache MISS that 404s from the embedContent endpoint fails loud, never returns {embedding: null}', async () => {
+    getCachedEmbedding.mockResolvedValue(null); // force the real fetch path
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 404,
+      json: async () => ({ error: { message: 'models/text-embedding-004 is not found for API version v1beta' } }),
+    });
+
+    await expect(generateEmbedding.run(req({ text: 'hello', version: 'v1' }))).rejects.toMatchObject({
+      code: 'internal',
+    });
+  });
+
+  it('v1 failure does not block a v2 request in the same process (independent generation)', async () => {
+    getCachedEmbedding.mockResolvedValue(null);
+    global.fetch = vi.fn().mockResolvedValue({ ok: false, status: 404, json: async () => ({}) });
+    generateEmbeddingV2.mockResolvedValue({ embedding: [0.1, 0.2], dim: 2 });
+
+    const result = await generateEmbedding.run(req({ text: 'what did I say?', version: 'v2' }));
+
+    expect(result).toEqual({ embedding: [0.1, 0.2], space: 'v2', model: 'gemini-embedding-2', dim: 2, cached: false });
+    // The v1 fetch was never even relevant to this v2-only path.
     expect(getCachedEmbedding).not.toHaveBeenCalled();
   });
 });

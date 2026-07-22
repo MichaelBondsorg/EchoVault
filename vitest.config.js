@@ -38,6 +38,7 @@ export default defineConfig({
     include: [
       'src/**/*.{test,spec}.{js,jsx,ts,tsx}',
       'functions/src/**/__tests__/**/*.test.js',
+      'scripts/__tests__/**/*.test.js',
     ],
 
     // Exclude patterns. firestoreRules.test.js needs the Firestore emulator and

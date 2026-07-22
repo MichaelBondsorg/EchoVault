@@ -101,7 +101,8 @@ describe('generateQueryEmbeddings — flag ON (dual-space)', () => {
     warnSpy.mockRestore();
   });
 
-  it('v1 call fails -> existing null semantics (whole result is null), regardless of v2 outcome', async () => {
+  it('v1 call fails (embeddings migration M4: v1 is retired upstream), v2 succeeds -> returns {v2} only, with a warn not an error', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     mockGenerateEmbeddingFn.mockImplementation(({ version }) => {
       if (version === 'v1') return Promise.reject(new Error('v1 down'));
@@ -110,8 +111,36 @@ describe('generateQueryEmbeddings — flag ON (dual-space)', () => {
 
     const result = await generateQueryEmbeddings('hello');
 
-    expect(result).toBeNull();
+    expect(result).toEqual({ v2: [0, 1] });
+    expect(result.v1).toBeUndefined();
+    expect(warnSpy).toHaveBeenCalled(); // v1 failure logged, but not screamed
+    expect(errSpy).not.toHaveBeenCalled(); // M4 inversion: no longer console.error
+    warnSpy.mockRestore();
     errSpy.mockRestore();
+  });
+
+  it('both v1 AND v2 fail -> null (the only case that still nulls out, M4)', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    mockGenerateEmbeddingFn.mockImplementation(({ version }) => {
+      if (version === 'v1') return Promise.reject(new Error('v1 down'));
+      if (version === 'v2') return Promise.reject(new Error('v2 down'));
+    });
+
+    const result = await generateQueryEmbeddings('hello');
+
+    expect(result).toBeNull();
+    expect(warnSpy).toHaveBeenCalledTimes(2); // one for v1, one for v2
+    warnSpy.mockRestore();
+  });
+});
+
+describe('generateQueryEmbeddings — flag OFF, v1-retired-upstream reality (M4)', () => {
+  it('flag OFF + v1 dead -> null (keyword-only retrieval) — pre-migration prod behavior, faithfully reproduced, not a new regression', async () => {
+    mockGenerateEmbeddingFn.mockResolvedValue({ data: {} }); // v1 call yields nothing, as it now always does
+    const result = await generateQueryEmbeddings('hello');
+    expect(result).toBeNull();
+    expect(mockGenerateEmbeddingFn).toHaveBeenCalledTimes(1);
+    expect(mockGenerateEmbeddingFn).toHaveBeenCalledWith({ text: 'hello' }); // single call, no version field — unchanged
   });
 });
 
@@ -155,5 +184,19 @@ describe('findRelevantMemories — routed through scoreEntryInBestSpace (space-a
 
   it('returns [] when given no query vectors at all', () => {
     expect(findRelevantMemories(null, [{ id: 'a', category, embedding: [1, 0] }], category)).toEqual([]);
+  });
+
+  it('{v2}-only query vectors (M4: v1-failed shape from generateQueryEmbeddings) score v2-covered entries and correctly exclude v1-only entries as unscoreable', () => {
+    const queryVectors = { v2: [1, 0, 0] }; // no v1 key at all, matching generateQueryEmbeddings' new {v2} return shape
+    const entries = [
+      { id: 'v2-covered', category, embeddingV2: [1, 0, 0] }, // no v1 vector even on the entry
+      { id: 'v1-only', category, embedding: [1, 0] }, // has no v2 -> not scoreable against a v2-only query
+    ];
+
+    const result = findRelevantMemories(queryVectors, entries, category, 5);
+
+    expect(result.map(e => e.id)).toEqual(['v2-covered']);
+    expect(result[0]._scoreSpace).toBe('v2');
+    expect(result[0].score).toBeCloseTo(1);
   });
 });

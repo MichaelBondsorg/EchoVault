@@ -102,18 +102,33 @@ export const generateEmbedding = async (text, retryCount = 0) => {
  *    embeddingSpaces.js). No retry is layered on top of either ON-path
  *    call; failure handling is explicit below instead.
  *
- * Failure semantics (documented, plan-binding):
- *  - v2 call fails/throws (the server's v2 path fails LOUD by design, see
- *    functions/index.js's `generateEmbedding` callable doc comment) ->
- *    degrade gracefully to v1-only with a `console.warn`. Retrieval must
- *    never hard-fail chat just because the newer space is unavailable.
- *  - v1 call fails -> existing null semantics: the whole function resolves
- *    to `null`, exactly like `generateEmbedding` returning `null` today, so
- *    every seam's existing `if (queryVectors) { ... }` guard still no-ops
- *    correctly.
+ * Failure semantics (updated, embeddings migration M4 — v1-retirement
+ * resilience, 2026-07-22: Google retired text-embedding-004 upstream, so
+ * the v1 call below is now EXPECTED to fail on every invocation):
+ *  - Either space can fail independently; the result carries whichever
+ *    space(s) actually succeeded — `{v1, v2}`, `{v2}`, or `{v1}`.
+ *  - `null` is returned ONLY when BOTH spaces fail. This is the inversion
+ *    from pre-M4 behavior (which nulled out the whole result on a v1
+ *    failure alone) — v2 must be able to carry retrieval alone now that v1
+ *    is permanently dead.
+ *  - A v1 failure is logged at `console.warn` (not `console.error`): v1 is
+ *    known-dead upstream, so its failure is an expected, permanent
+ *    condition, not an incident — screaming at `error` level on every
+ *    single query would be pure alarm-fatigue noise. v2 failure was already
+ *    a `console.warn` and stays one.
+ *
+ * IMPORTANT flag-OFF nuance: when `model.embeddingV2Read` is OFF, this
+ * function still requests v1 ONLY (single call, byte-identical shape to
+ * pre-migration). Since v1 is now permanently dead, a flag-OFF user gets
+ * `null` back from every query -> keyword-only retrieval. This is NOT a
+ * regression introduced by M4 — it is exactly today's pre-migration prod
+ * behavior, faithfully reproduced. What M4 changes is the framing: flipping
+ * `model.embeddingV2Read` ON is no longer an optional enhancement layered on
+ * a working v1 baseline — it is now REQUIRED to get any semantic (non-
+ * keyword) retrieval at all. See the runbook's v1-retirement note.
  *
  * @param {string} text
- * @returns {Promise<{v1: number[], v2?: number[]}|null>}
+ * @returns {Promise<{v1?: number[], v2?: number[]}|null>}
  */
 export const generateQueryEmbeddings = async (text) => {
   if (!text || typeof text !== 'string' || text.trim().length === 0) {
@@ -123,7 +138,10 @@ export const generateQueryEmbeddings = async (text) => {
 
   if (!getFlag('model.embeddingV2Read')) {
     // OFF: byte-identical to today — the exact same tested single-call path
-    // (including its retry-once behavior), just repackaged as {v1}.
+    // (including its retry-once behavior), just repackaged as {v1}. Note
+    // (M4): v1 is retired upstream, so this path now resolves to `null` on
+    // every call in practice — the flag being ON is the fix, see doc
+    // comment above.
     const v1 = await generateEmbedding(text);
     return v1 ? { v1 } : null;
   }
@@ -145,12 +163,21 @@ export const generateQueryEmbeddings = async (text) => {
   }
 
   if (v1Result.status === 'rejected' || !v1) {
-    console.error(
-      'generateQueryEmbeddings: v1 embedding failed',
+    // v1 is retired upstream (text-embedding-004 404s permanently) — an
+    // expected, permanent condition, not an incident. One warn per query,
+    // never console.error (M4 — was error pre-M4, see doc comment above).
+    console.warn(
+      'generateQueryEmbeddings: v1 embedding unavailable (v1 is retired upstream)',
       v1Result.status === 'rejected' ? v1Result.reason : 'empty embedding'
     );
-    return null; // existing null semantics preserved
   }
 
-  return v2 ? { v1, v2 } : { v1 };
+  if (!v1 && !v2) {
+    return null; // both spaces failed — nothing to score against (M4: was v1-only-gates-null before)
+  }
+
+  const result = {};
+  if (v1) result.v1 = v1;
+  if (v2) result.v2 = v2;
+  return result;
 };
