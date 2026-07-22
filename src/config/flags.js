@@ -33,6 +33,7 @@ export const FLAG_DEFAULTS = {
   reflectionRecipes: false,
   sessionPrep: false,
   gentleRevisit: false,
+  personalExperiments: false,   // R3 Personal Experiments: gated on Michael signing docs/quality/experiments-data-method.md
 };
 
 const LOCAL_OVERRIDE_PREFIX = 'engram:flag:';

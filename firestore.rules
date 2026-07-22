@@ -31,6 +31,57 @@ service cloud.firestore {
         || from == to;
     }
 
+    // Personal Experiments (R3, PRD "Learn Carefully") status transition
+    // matrix: draft -> running -> (paused <-> running) -> stopped | completed.
+    // Every no-op (from == to) is permitted so status-independent field
+    // updates (excludedObservations while running, the completed-state
+    // rerun-after-exclusion case below) don't also have to supply a
+    // transition. stopped and completed are dead ends: there is no (stopped,
+    // X) or (completed, X) pair here for X other than the same value, so no
+    // further status change is ever legal once either is reached — draft ->
+    // stopped and draft -> completed are deliberately absent (stop is only
+    // meaningful once running/paused; a draft that shouldn't run is deleted).
+    function experimentTransitionAllowed(from, to) {
+      return from == to
+        || (from == 'draft' && to == 'running')
+        || (from == 'running' && to == 'paused')
+        || (from == 'paused' && to == 'running')
+        || (from == 'running' && to == 'stopped')
+        || (from == 'paused' && to == 'stopped')
+        || (from == 'running' && to == 'completed');
+    }
+
+    // Full update-shape + freeze contract for /experiments/{id} (match block
+    // below). A plain diff().affectedKeys().hasOnly([...]) can't express two
+    // things this collection needs, so they're resolved here:
+    //   1. startAt/endAt freeze: the plan says these ride in the CREATE
+    //      hasOnly list (so a draft can be created with them absent/null) but
+    //      the service contract stamps them from durationDays at
+    //      startExperiment — an UPDATE, on the draft->running transition
+    //      (the "freeze moment"). Resolution: startAt/endAt are added to the
+    //      update affectedKeys allow-list, but whenever either key is part of
+    //      the diff, the transition MUST be draft->running. Every other
+    //      update leaves them untouched, so they are effectively writable
+    //      exactly once.
+    //   2. result is writable only alongside a post-state of 'completed' —
+    //      this covers both the running->completed transition AND the
+    //      completed->completed no-op rerun-after-exclusion case (PRD
+    //      acceptance: inspect/exclude an observation and rerun on a
+    //      completed experiment).
+    //   3. stopped is a hard stop: once resource.data.status == 'stopped',
+    //      an update may touch ONLY updatedAt. No further status change (the
+    //      transition matrix already forbids that), and — unlike completed —
+    //      no excludedObservations/result edits either, since PRD stop
+    //      finalizes the experiment rather than leaving it open to rerun.
+    function experimentUpdateAllowed(before, after) {
+      let diffKeys = after.diff(before).affectedKeys();
+      return diffKeys.hasOnly(['status', 'excludedObservations', 'result', 'updatedAt', 'startAt', 'endAt'])
+        && experimentTransitionAllowed(before.status, after.status)
+        && (!diffKeys.hasAny(['startAt', 'endAt']) || (before.status == 'draft' && after.status == 'running'))
+        && (!diffKeys.hasAny(['result']) || after.status == 'completed')
+        && (before.status != 'stopped' || diffKeys.hasOnly(['updatedAt']));
+    }
+
     // Artifacts collection (main app data)
     match /artifacts/{appId}/users/{userId} {
       // Allow user to read/write their own user document
@@ -136,6 +187,13 @@ service cloud.firestore {
         // settings/revisitPrefs (R2 Gentle Revisit) records whether the user
         // has opted in to resurfaced-content prompts; `enabled` must be a
         // bool when the doc is written.
+        //
+        // settings/experimentPrefs (R3 Personal Experiments) is the
+        // revisitPrefs twin: records whether the user has seen the one-time
+        // "associations, not proof" explainer before their first experiment
+        // create flow. Experiments themselves live in their own per-doc
+        // `experiments` collection below — this doc is only the explainer
+        // flag, so `enabled` must be a bool when the doc is written.
         allow write: if isOwner(userId)
           && settingId != 'subscription'
           && (
@@ -159,6 +217,12 @@ service cloud.firestore {
           )
           && (
             settingId != 'revisitPrefs' || (
+              request.resource.data.keys().hasOnly(['enabled', 'optInAt', 'updatedAt'])
+              && request.resource.data.enabled is bool
+            )
+          )
+          && (
+            settingId != 'experimentPrefs' || (
               request.resource.data.keys().hasOnly(['enabled', 'optInAt', 'updatedAt'])
               && request.resource.data.enabled is bool
             )
@@ -343,6 +407,30 @@ service cloud.firestore {
         allow update: if isOwner(userId)
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'updatedAt'])
           && request.resource.data.status in ['shown', 'dismissed'];
+      }
+
+      // NEW (R3): Personal Experiments (PRD "Learn Carefully" — flag
+      // `personalExperiments`, stays OFF until Michael signs off
+      // docs/quality/experiments-data-method.md). Owner has full CRUD.
+      // Create is shape- and draft-only validated (no `result` may be
+      // written at create time — an experiment cannot be born with a
+      // result). Update is governed entirely by experimentUpdateAllowed
+      // above: question/template/analysisPlan/scope/createdAt are NOT in
+      // its affectedKeys allow-list at all, so they are immutable for the
+      // life of the document once created — the PRD plan-freeze invariant.
+      // There is no client path to edit them post-create, running or not.
+      match /experiments/{experimentId} {
+        allow read, delete: if isOwner(userId);
+        allow create: if isOwner(userId)
+          && request.resource.data.keys().hasOnly(['question', 'template', 'analysisPlan', 'scope', 'status', 'startAt', 'endAt', 'durationDays', 'excludedObservations', 'result', 'createdAt', 'updatedAt'])
+          && request.resource.data.question is string && request.resource.data.question.size() <= 200
+          && request.resource.data.template is string
+          && request.resource.data.analysisPlan is map
+          && request.resource.data.status == 'draft'
+          && request.resource.data.durationDays in [14, 28]
+          && request.resource.data.excludedObservations is list
+          && !request.resource.data.keys().hasAny(['result']);
+        allow update: if isOwner(userId) && experimentUpdateAllowed(resource.data, request.resource.data);
       }
     }
 

@@ -1208,3 +1208,377 @@ describe('Revisit prefs settings rules', () => {
     await assertFails(setDoc(ref, { enabled: true, updatedAt: 'now' }));
   });
 });
+
+// --- Experiment prefs settings rules (settings/experimentPrefs shape, R3) --
+
+describe('Experiment prefs settings rules', () => {
+  it('allows owner to write a valid experimentPrefs shape', async () => {
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    const ref = doc(db, userPath(USER_ID), 'settings', 'experimentPrefs');
+    await assertSucceeds(setDoc(ref, { enabled: true, optInAt: 'now', updatedAt: 'now' }));
+  });
+
+  it('allows owner to write experimentPrefs with enabled false', async () => {
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    const ref = doc(db, userPath(USER_ID), 'settings', 'experimentPrefs');
+    await assertSucceeds(setDoc(ref, { enabled: false, updatedAt: 'now' }));
+  });
+
+  it('denies a non-bool enabled', async () => {
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    const ref = doc(db, userPath(USER_ID), 'settings', 'experimentPrefs');
+    await assertFails(setDoc(ref, { enabled: 'yes', updatedAt: 'now' }));
+  });
+
+  it('denies an unexpected extra key', async () => {
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    const ref = doc(db, userPath(USER_ID), 'settings', 'experimentPrefs');
+    await assertFails(setDoc(ref, { enabled: true, updatedAt: 'now', hacked: true }));
+  });
+
+  it('denies another user writing the experimentPrefs doc', async () => {
+    const db = testEnv.authenticatedContext(OTHER_USER_ID).firestore();
+    const ref = doc(db, userPath(USER_ID), 'settings', 'experimentPrefs');
+    await assertFails(setDoc(ref, { enabled: true, updatedAt: 'now' }));
+  });
+});
+
+// --- Experiments collection rules (R3 Personal Experiments) ----------------
+
+// Seed an experiment doc directly (bypassing rules, as the Admin SDK would
+// for a server-authored fixture) so update-contract tests can start from an
+// arbitrary status without going through the owner-create path each time.
+async function seedExperiment(id, status, extra = {}) {
+  await testEnv.withSecurityRulesDisabled(async (context) => {
+    const db = context.firestore();
+    await setDoc(doc(db, userPath(USER_ID), 'experiments', id), {
+      question: 'Does sleep affect my mood?',
+      template: 'sleep_mood_lag1',
+      analysisPlan: { exposure: 'sleep_hours', outcome: 'mood_score', lag: 1 },
+      scope: 'all',
+      status,
+      startAt: null,
+      endAt: null,
+      durationDays: 14,
+      excludedObservations: [],
+      createdAt: 'seed',
+      updatedAt: 'seed',
+      ...extra,
+    });
+  });
+}
+
+describe('Experiments collection rules (create shape)', () => {
+  const validExperiment = {
+    question: 'Does sleep affect my mood?',
+    template: 'sleep_mood_lag1',
+    analysisPlan: { exposure: 'sleep_hours', outcome: 'mood_score', lag: 1 },
+    scope: 'all',
+    status: 'draft',
+    startAt: null,
+    endAt: null,
+    durationDays: 14,
+    excludedObservations: [],
+    createdAt: 'now',
+    updatedAt: 'now',
+  };
+
+  it('allows the owner to create a well-formed draft experiment', async () => {
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    await assertSucceeds(setDoc(doc(db, userPath(USER_ID), 'experiments', 'e1'), validExperiment));
+  });
+
+  it('allows a question at exactly the 200-char boundary', async () => {
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    const ref = doc(db, userPath(USER_ID), 'experiments', 'e-boundary');
+    await assertSucceeds(setDoc(ref, { ...validExperiment, question: 'x'.repeat(200) }));
+  });
+
+  it('denies an unexpected extra key', async () => {
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    const ref = doc(db, userPath(USER_ID), 'experiments', 'e-junk');
+    await assertFails(setDoc(ref, { ...validExperiment, hacked: true }));
+  });
+
+  it('denies a non-draft create', async () => {
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    const ref = doc(db, userPath(USER_ID), 'experiments', 'e-nondraft');
+    await assertFails(setDoc(ref, { ...validExperiment, status: 'running' }));
+  });
+
+  it('denies a result field on create', async () => {
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    const ref = doc(db, userPath(USER_ID), 'experiments', 'e-resultoncreate');
+    await assertFails(setDoc(ref, { ...validExperiment, result: { status: 'ok' } }));
+  });
+
+  it('denies a 21-day duration', async () => {
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    const ref = doc(db, userPath(USER_ID), 'experiments', 'e-badduration');
+    await assertFails(setDoc(ref, { ...validExperiment, durationDays: 21 }));
+  });
+
+  it('denies a question over 200 characters', async () => {
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    const ref = doc(db, userPath(USER_ID), 'experiments', 'e-longquestion');
+    await assertFails(setDoc(ref, { ...validExperiment, question: 'x'.repeat(201) }));
+  });
+
+  it('denies a question that is a list (the .size()-on-composite type-hole regression class)', async () => {
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    const ref = doc(db, userPath(USER_ID), 'experiments', 'e-listquestion');
+    await assertFails(setDoc(ref, { ...validExperiment, question: ['not', 'a', 'string'] }));
+  });
+
+  it('denies an analysisPlan that is a string', async () => {
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    const ref = doc(db, userPath(USER_ID), 'experiments', 'e-badplan');
+    await assertFails(setDoc(ref, { ...validExperiment, analysisPlan: 'not-a-map' }));
+  });
+});
+
+describe('Experiments collection rules (plan-freeze after create)', () => {
+  it('denies changing question after create', async () => {
+    await seedExperiment('e-freeze-question', 'draft');
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    await assertFails(updateDoc(doc(db, userPath(USER_ID), 'experiments', 'e-freeze-question'), {
+      question: 'Does exercise affect my mood?',
+    }));
+  });
+
+  it('denies changing analysisPlan after create', async () => {
+    await seedExperiment('e-freeze-plan', 'draft');
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    await assertFails(updateDoc(doc(db, userPath(USER_ID), 'experiments', 'e-freeze-plan'), {
+      analysisPlan: { exposure: 'steps', outcome: 'mood_score', lag: 0 },
+    }));
+  });
+
+  it('denies changing template after create', async () => {
+    await seedExperiment('e-freeze-template', 'draft');
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    await assertFails(updateDoc(doc(db, userPath(USER_ID), 'experiments', 'e-freeze-template'), {
+      template: 'steps_mood',
+    }));
+  });
+
+  it('denies changing scope after create', async () => {
+    await seedExperiment('e-freeze-scope', 'draft');
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    await assertFails(updateDoc(doc(db, userPath(USER_ID), 'experiments', 'e-freeze-scope'), {
+      scope: 'space:work',
+    }));
+  });
+
+  it('denies changing createdAt after create', async () => {
+    await seedExperiment('e-freeze-created', 'draft');
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    await assertFails(updateDoc(doc(db, userPath(USER_ID), 'experiments', 'e-freeze-created'), {
+      createdAt: 'tampered',
+    }));
+  });
+
+  it('denies changing durationDays after create', async () => {
+    await seedExperiment('e-freeze-duration', 'draft');
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    await assertFails(updateDoc(doc(db, userPath(USER_ID), 'experiments', 'e-freeze-duration'), {
+      durationDays: 28,
+    }));
+  });
+});
+
+describe('Experiments collection rules (status transition matrix)', () => {
+  it('ALLOWS draft -> running', async () => {
+    await seedExperiment('e-t-draft-running', 'draft');
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    await assertSucceeds(updateDoc(doc(db, userPath(USER_ID), 'experiments', 'e-t-draft-running'), {
+      status: 'running', updatedAt: 'now',
+    }));
+  });
+
+  it('ALLOWS running -> paused', async () => {
+    await seedExperiment('e-t-running-paused', 'running');
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    await assertSucceeds(updateDoc(doc(db, userPath(USER_ID), 'experiments', 'e-t-running-paused'), {
+      status: 'paused', updatedAt: 'now',
+    }));
+  });
+
+  it('ALLOWS paused -> running', async () => {
+    await seedExperiment('e-t-paused-running', 'paused');
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    await assertSucceeds(updateDoc(doc(db, userPath(USER_ID), 'experiments', 'e-t-paused-running'), {
+      status: 'running', updatedAt: 'now',
+    }));
+  });
+
+  it('ALLOWS running -> stopped', async () => {
+    await seedExperiment('e-t-running-stopped', 'running');
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    await assertSucceeds(updateDoc(doc(db, userPath(USER_ID), 'experiments', 'e-t-running-stopped'), {
+      status: 'stopped', updatedAt: 'now',
+    }));
+  });
+
+  it('ALLOWS paused -> stopped', async () => {
+    await seedExperiment('e-t-paused-stopped', 'paused');
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    await assertSucceeds(updateDoc(doc(db, userPath(USER_ID), 'experiments', 'e-t-paused-stopped'), {
+      status: 'stopped', updatedAt: 'now',
+    }));
+  });
+
+  it('ALLOWS running -> completed', async () => {
+    await seedExperiment('e-t-running-completed', 'running');
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    await assertSucceeds(updateDoc(doc(db, userPath(USER_ID), 'experiments', 'e-t-running-completed'), {
+      status: 'completed', updatedAt: 'now',
+    }));
+  });
+
+  it('FORBIDS draft -> completed', async () => {
+    await seedExperiment('e-t-draft-completed', 'draft');
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    await assertFails(updateDoc(doc(db, userPath(USER_ID), 'experiments', 'e-t-draft-completed'), {
+      status: 'completed', updatedAt: 'now',
+    }));
+  });
+
+  it('FORBIDS draft -> stopped (a draft that should not run is deleted, not stopped)', async () => {
+    await seedExperiment('e-t-draft-stopped', 'draft');
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    await assertFails(updateDoc(doc(db, userPath(USER_ID), 'experiments', 'e-t-draft-stopped'), {
+      status: 'stopped', updatedAt: 'now',
+    }));
+  });
+
+  it('FORBIDS completed -> running (terminal state)', async () => {
+    await seedExperiment('e-t-completed-running', 'completed');
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    await assertFails(updateDoc(doc(db, userPath(USER_ID), 'experiments', 'e-t-completed-running'), {
+      status: 'running', updatedAt: 'now',
+    }));
+  });
+
+  it('FORBIDS stopped -> running (terminal state)', async () => {
+    await seedExperiment('e-t-stopped-running', 'stopped');
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    await assertFails(updateDoc(doc(db, userPath(USER_ID), 'experiments', 'e-t-stopped-running'), {
+      status: 'running', updatedAt: 'now',
+    }));
+  });
+});
+
+describe('Experiments collection rules (startAt/endAt freeze)', () => {
+  it('ALLOWS stamping startAt/endAt on the draft -> running transition', async () => {
+    await seedExperiment('e-start-freeze', 'draft');
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    await assertSucceeds(updateDoc(doc(db, userPath(USER_ID), 'experiments', 'e-start-freeze'), {
+      status: 'running',
+      startAt: '2026-07-22T00:00:00.000Z',
+      endAt: '2026-08-05T00:00:00.000Z',
+      updatedAt: 'now',
+    }));
+  });
+
+  it('FORBIDS touching startAt on a running -> paused transition (immutable after the freeze)', async () => {
+    await seedExperiment('e-start-immutable', 'running', {
+      startAt: '2026-07-22T00:00:00.000Z',
+      endAt: '2026-08-05T00:00:00.000Z',
+    });
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    await assertFails(updateDoc(doc(db, userPath(USER_ID), 'experiments', 'e-start-immutable'), {
+      status: 'paused',
+      startAt: '2026-07-23T00:00:00.000Z',
+      updatedAt: 'now',
+    }));
+  });
+});
+
+describe('Experiments collection rules (result writable only when completed)', () => {
+  it('FORBIDS writing result while status stays running', async () => {
+    await seedExperiment('e-result-running', 'running');
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    await assertFails(updateDoc(doc(db, userPath(USER_ID), 'experiments', 'e-result-running'), {
+      result: { status: 'ok', estimate: { delta: 5 } },
+      updatedAt: 'now',
+    }));
+  });
+
+  it('ALLOWS writing result alongside the running -> completed transition', async () => {
+    await seedExperiment('e-result-transition', 'running');
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    await assertSucceeds(updateDoc(doc(db, userPath(USER_ID), 'experiments', 'e-result-transition'), {
+      status: 'completed',
+      result: { status: 'ok', estimate: { delta: 5 } },
+      updatedAt: 'now',
+    }));
+  });
+
+  it('ALLOWS rewriting result on an already-completed experiment with status unchanged (rerun case)', async () => {
+    await seedExperiment('e-result-rerun', 'completed', {
+      result: { status: 'ok', estimate: { delta: 5 } },
+    });
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    await assertSucceeds(updateDoc(doc(db, userPath(USER_ID), 'experiments', 'e-result-rerun'), {
+      result: { status: 'ok', estimate: { delta: 3 } },
+      updatedAt: 'now',
+    }));
+  });
+
+  it('FORBIDS writing result on a stopped experiment', async () => {
+    await seedExperiment('e-result-stopped', 'stopped');
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    await assertFails(updateDoc(doc(db, userPath(USER_ID), 'experiments', 'e-result-stopped'), {
+      result: { status: 'ok', estimate: { delta: 5 } },
+      updatedAt: 'now',
+    }));
+  });
+});
+
+describe('Experiments collection rules (excludedObservations editability)', () => {
+  it('ALLOWS editing excludedObservations while running', async () => {
+    await seedExperiment('e-excl-running', 'running');
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    await assertSucceeds(updateDoc(doc(db, userPath(USER_ID), 'experiments', 'e-excl-running'), {
+      excludedObservations: ['2026-07-10'],
+      updatedAt: 'now',
+    }));
+  });
+
+  it('ALLOWS editing excludedObservations on a completed experiment (rerun case)', async () => {
+    await seedExperiment('e-excl-completed', 'completed', {
+      result: { status: 'ok', estimate: { delta: 5 } },
+    });
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    await assertSucceeds(updateDoc(doc(db, userPath(USER_ID), 'experiments', 'e-excl-completed'), {
+      excludedObservations: ['2026-07-10'],
+      updatedAt: 'now',
+    }));
+  });
+
+  it('FORBIDS editing excludedObservations on a stopped experiment', async () => {
+    await seedExperiment('e-excl-stopped', 'stopped');
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    await assertFails(updateDoc(doc(db, userPath(USER_ID), 'experiments', 'e-excl-stopped'), {
+      excludedObservations: ['2026-07-10'],
+      updatedAt: 'now',
+    }));
+  });
+});
+
+describe('Experiments collection rules (owner isolation)', () => {
+  it('denies another user reading, creating, updating, or deleting an experiment', async () => {
+    await seedExperiment('e-cross', 'draft');
+    const db = testEnv.authenticatedContext(OTHER_USER_ID).firestore();
+    const ref = doc(db, userPath(USER_ID), 'experiments', 'e-cross');
+    await assertFails(getDoc(ref));
+    await assertFails(setDoc(ref, {
+      question: 'Hacked?', template: 't', analysisPlan: {}, scope: 'all', status: 'draft',
+      startAt: null, endAt: null, durationDays: 14, excludedObservations: [],
+      createdAt: 'now', updatedAt: 'now',
+    }));
+    await assertFails(updateDoc(ref, { status: 'running', updatedAt: 'now' }));
+    await assertFails(deleteDoc(ref));
+  });
+});

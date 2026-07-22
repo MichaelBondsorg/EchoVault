@@ -53,6 +53,7 @@ describe('config/flags', () => {
         reflectionRecipes: false,
         sessionPrep: false,
         gentleRevisit: false,
+        personalExperiments: false,
       });
     });
 
