@@ -217,6 +217,15 @@ describe('ReflectionDraft — edit-in-place', () => {
     expect(updateBlock).not.toHaveBeenCalled();
     expect(screen.getByText('You mentioned work stress easing.')).toBeTruthy();
   });
+
+  it('the edit-block Save/Cancel buttons keep the shared Button 44px default (no min-h override)', () => {
+    renderDraft();
+    const block1 = screen.getByTestId('reflection-block-block-ai-1');
+    fireEvent.click(within(block1).getByLabelText('Edit'));
+
+    expect(within(block1).getByText('Save').className).not.toMatch(/min-h-\[36px\]/);
+    expect(within(block1).getByText('Cancel').className).not.toMatch(/min-h-\[36px\]/);
+  });
 });
 
 describe('ReflectionDraft — add a note', () => {
@@ -235,6 +244,11 @@ describe('ReflectionDraft — add a note', () => {
     );
     expect(await screen.findByText('A fresh note')).toBeTruthy();
     expect(screen.getAllByText('Your note')).toHaveLength(2);
+  });
+
+  it('the "Add note" button keeps the shared Button 44px default (no min-h override)', () => {
+    renderDraft();
+    expect(screen.getByText('Add note').className).not.toMatch(/min-h-\[36px\]/);
   });
 });
 

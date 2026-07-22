@@ -280,10 +280,10 @@ const ReflectionDraft = ({ uid, entries = [], reflection, recipeName, onClose })
                         rows={3}
                       />
                       <div className="flex gap-2">
-                        <Button onClick={saveEditBlock} disabled={busy} className="min-h-[36px] px-4 text-xs">
+                        <Button onClick={saveEditBlock} disabled={busy} className="px-4 text-xs">
                           {busy ? 'Saving…' : 'Save'}
                         </Button>
-                        <Button variant="ghost" onClick={cancelEditBlock} disabled={busy} className="min-h-[36px] px-4 text-xs">
+                        <Button variant="ghost" onClick={cancelEditBlock} disabled={busy} className="px-4 text-xs">
                           Cancel
                         </Button>
                       </div>
@@ -347,7 +347,7 @@ const ReflectionDraft = ({ uid, entries = [], reflection, recipeName, onClose })
               className="w-full rounded-lg border border-border bg-card p-2 text-sm"
               rows={2}
             />
-            <Button onClick={handleAddNote} disabled={addingNote || !noteText.trim()} className="min-h-[36px] px-4 text-xs">
+            <Button onClick={handleAddNote} disabled={addingNote || !noteText.trim()} className="px-4 text-xs">
               {addingNote ? 'Adding…' : 'Add note'}
             </Button>
           </section>

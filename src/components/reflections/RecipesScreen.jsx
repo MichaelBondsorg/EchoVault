@@ -1,8 +1,11 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Archive, Layers, Pencil, Play, X } from 'lucide-react';
 import { db } from '../../config/firebase';
-import { Button } from '../cloud';
+import { Button, Chip } from '../cloud';
+import SpacePicker from '../spaces/SpacePicker';
+import { useDismissablePopover } from '../../hooks/useDismissablePopover';
 import { subscribeRecipes, createRecipe, updateRecipe, archiveRecipe } from '../../services/reflections/recipeService';
+import { subscribeSpaces } from '../../services/spaces/spacesService';
 import { STARTER_RECIPES } from '../../services/reflections/starterRecipes';
 import { previewRecipe, runRecipe } from '../../services/reflections/runRecipe';
 import { getExcludedEntryIds } from '../../services/insights/sourceExclusions';
@@ -19,11 +22,11 @@ import ReflectionDraft from './ReflectionDraft';
  * Three flows:
  *  1. Starter-seed CTA (zero recipes only) — writes every
  *     `STARTER_RECIPES` template via `createRecipe`.
- *  2. List (name + cadence line) with inline edit (name + questions only —
- *     scope/timeRangeDays stay whatever they were created with; v1 has no
- *     scope-picker here) and archive (confirm-gated; recipes are archived,
- *     never deleted, and existing reflections are untouched — see
- *     `recipeService.js`).
+ *  2. List (name + cadence line) with inline edit (name, questions, Context
+ *     Space via the shared `SpacePicker`, and time range via a Chip-row
+ *     segmented control — PRD §5.6 requires a recipe to declare all three)
+ *     and archive (confirm-gated; recipes are archived, never deleted, and
+ *     existing reflections are untouched — see `recipeService.js`).
  *  3. Run: preview dialog (`previewRecipe` — PRD "preview exactly what
  *     will be used before first run") -> explicit "Run" confirm -> a
  *     progress state while per-question embeddings are generated (the
@@ -45,6 +48,7 @@ import ReflectionDraft from './ReflectionDraft';
 
 const MAX_QUESTIONS = 5;
 const MAX_QUESTION_LENGTH = 200;
+const TIME_RANGE_OPTIONS = [7, 30, 90, 365];
 
 function cadenceLine(recipe) {
   return `Manual · last ${recipe.timeRangeDays} days`;
@@ -60,19 +64,26 @@ function formatDateLabel(iso) {
 const RecipesScreen = ({ uid, entries = [], onClose }) => {
   const [recipes, setRecipes] = useState([]);
   const [recipesLoaded, setRecipesLoaded] = useState(false);
+  const [loadError, setLoadError] = useState(false);
   const [seeding, setSeeding] = useState(false);
   const [error, setError] = useState(null);
+  const [spaces, setSpaces] = useState([]);
 
   // Inline edit
   const [editingId, setEditingId] = useState(null);
   const [editName, setEditName] = useState('');
   const [editQuestions, setEditQuestions] = useState([]);
+  const [editScope, setEditScope] = useState(null);
+  const [editTimeRangeDays, setEditTimeRangeDays] = useState(30);
   const [editError, setEditError] = useState(null);
   const [savingEdit, setSavingEdit] = useState(false);
+  const [scopePickerOpen, setScopePickerOpen] = useState(false);
+  const scopePickerRef = useDismissablePopover(scopePickerOpen, () => setScopePickerOpen(false));
 
   // Archive confirm
   const [archiveTarget, setArchiveTarget] = useState(null);
   const [archiving, setArchiving] = useState(false);
+  const archiveTriggerRef = useRef(null);
 
   // Run flow
   const [previewTarget, setPreviewTarget] = useState(null);
@@ -92,9 +103,21 @@ const RecipesScreen = ({ uid, entries = [], onClose }) => {
       (next) => {
         setRecipes(next);
         setRecipesLoaded(true);
+        setLoadError(false);
       },
-      () => setRecipesLoaded(true),
+      () => {
+        // Surface the error instead of silently landing on an empty list —
+        // a transient Firestore error would otherwise show the starter-seed
+        // CTA to a user who already has recipes, inviting duplicate seeding.
+        setRecipesLoaded(true);
+        setLoadError(true);
+      },
     );
+  }, [uid]);
+
+  useEffect(() => {
+    if (!uid) return undefined;
+    return subscribeSpaces(db, uid, setSpaces);
   }, [uid]);
 
   const handleSeed = async () => {
@@ -121,6 +144,9 @@ const RecipesScreen = ({ uid, entries = [], onClose }) => {
     setEditingId(recipe.id);
     setEditName(recipe.name);
     setEditQuestions([...recipe.questions]);
+    setEditScope(recipe.scope ?? null);
+    setEditTimeRangeDays(recipe.timeRangeDays);
+    setScopePickerOpen(false);
   };
 
   const cancelEdit = () => {
@@ -128,6 +154,9 @@ const RecipesScreen = ({ uid, entries = [], onClose }) => {
     setEditName('');
     setEditQuestions([]);
     setEditError(null);
+    setEditScope(null);
+    setEditTimeRangeDays(30);
+    setScopePickerOpen(false);
   };
 
   const updateEditQuestion = (index, value) => {
@@ -166,7 +195,12 @@ const RecipesScreen = ({ uid, entries = [], onClose }) => {
 
     setSavingEdit(true);
     try {
-      await updateRecipe(db, uid, recipe, { name: trimmedName, questions: trimmedQuestions });
+      await updateRecipe(db, uid, recipe, {
+        name: trimmedName,
+        questions: trimmedQuestions,
+        scope: editScope,
+        timeRangeDays: editTimeRangeDays,
+      });
       cancelEdit();
     } catch (err) {
       setEditError(err?.message || 'Could not save your changes.');
@@ -175,11 +209,20 @@ const RecipesScreen = ({ uid, entries = [], onClose }) => {
     }
   };
 
-  const openArchiveConfirm = (recipe) => {
+  const openArchiveConfirm = (recipe, triggerEl) => {
     setError(null);
     setArchiveTarget(recipe);
+    archiveTriggerRef.current = triggerEl || null;
   };
-  const closeArchiveConfirm = () => setArchiveTarget(null);
+  // Focus returns to the trigger that opened the sheet (a11y: focus must
+  // never be dropped when a modal closes) — SpaceManager.jsx's
+  // `archiveTriggerRef` precedent. The trigger button stays mounted
+  // underneath the sheet the whole time, so `.focus()` here is synchronous.
+  const closeArchiveConfirm = () => {
+    setArchiveTarget(null);
+    archiveTriggerRef.current?.focus();
+    archiveTriggerRef.current = null;
+  };
 
   const confirmArchive = async () => {
     if (!archiveTarget) return;
@@ -201,7 +244,7 @@ const RecipesScreen = ({ uid, entries = [], onClose }) => {
     setPreviewLoading(true);
     try {
       const exclusions = await getExcludedEntryIds(db, uid);
-      setPreviewData(previewRecipe(recipe, entries, exclusions, []));
+      setPreviewData(previewRecipe(recipe, entries, exclusions, spaces));
     } catch (err) {
       setError(err?.message || 'Could not preview that recipe.');
       setPreviewTarget(null);
@@ -264,6 +307,9 @@ const RecipesScreen = ({ uid, entries = [], onClose }) => {
   }
 
   const nestedOverlayOpen = Boolean(archiveTarget) || Boolean(previewTarget) || running;
+  const selectedSpaceLabel = editScope?.spaceId
+    ? spaces.find((s) => s.id === editScope.spaceId)?.name ?? editScope.spaceId
+    : 'All spaces';
 
   return (
     <>
@@ -295,7 +341,13 @@ const RecipesScreen = ({ uid, entries = [], onClose }) => {
             </div>
           )}
 
-          {recipesLoaded && recipes.length === 0 && (
+          {loadError && (
+            <div role="alert" className="rounded-xl bg-[var(--destructive-wash)] p-3 text-sm text-destructive">
+              Could not load your recipes. Please try again.
+            </div>
+          )}
+
+          {!loadError && recipesLoaded && recipes.length === 0 && (
             <section className="cloud-sheet rounded-2xl border p-4 shadow-sm">
               <p className="font-semibold">Start with a few ready-made recipes</p>
               <p className="mt-1 text-sm text-[var(--muted-foreground)]">
@@ -355,6 +407,52 @@ const RecipesScreen = ({ uid, entries = [], onClose }) => {
                             + Add question
                           </button>
                         )}
+
+                        <div className="space-y-1 pt-1">
+                          <p className="text-xs font-medium text-[var(--muted-foreground)]">Space</p>
+                          <div className="relative inline-block" ref={scopePickerRef}>
+                            <Chip
+                              as="button"
+                              type="button"
+                              onClick={() => setScopePickerOpen((prev) => !prev)}
+                              aria-haspopup="listbox"
+                              aria-expanded={scopePickerOpen}
+                              aria-label={`Space for ${recipe.name}: ${selectedSpaceLabel}`}
+                            >
+                              {selectedSpaceLabel}
+                            </Chip>
+                            {scopePickerOpen && (
+                              <SpacePicker
+                                spaces={spaces}
+                                selectedSpaceId={editScope?.spaceId || null}
+                                onSelect={(spaceId) => {
+                                  setEditScope(spaceId ? { spaceId } : null);
+                                  setScopePickerOpen(false);
+                                }}
+                                defaultLabel="All spaces"
+                              />
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="space-y-1">
+                          <p className="text-xs font-medium text-[var(--muted-foreground)]">Look back</p>
+                          <div className="flex flex-wrap gap-2">
+                            {TIME_RANGE_OPTIONS.map((days) => (
+                              <Chip
+                                key={days}
+                                as="button"
+                                type="button"
+                                selected={editTimeRangeDays === days}
+                                aria-pressed={editTimeRangeDays === days}
+                                onClick={() => setEditTimeRangeDays(days)}
+                              >
+                                {days} days
+                              </Chip>
+                            ))}
+                          </div>
+                        </div>
+
                         {editError && (
                           <p role="alert" className="text-xs text-destructive">{editError}</p>
                         )}
@@ -362,7 +460,7 @@ const RecipesScreen = ({ uid, entries = [], onClose }) => {
                           <Button
                             onClick={() => saveEdit(recipe)}
                             disabled={savingEdit}
-                            className="min-h-[36px] px-4 text-xs"
+                            className="px-4 text-xs"
                           >
                             {savingEdit ? 'Saving…' : 'Save'}
                           </Button>
@@ -370,7 +468,7 @@ const RecipesScreen = ({ uid, entries = [], onClose }) => {
                             variant="ghost"
                             onClick={cancelEdit}
                             disabled={savingEdit}
-                            className="min-h-[36px] px-4 text-xs"
+                            className="px-4 text-xs"
                           >
                             Cancel
                           </Button>
@@ -401,7 +499,7 @@ const RecipesScreen = ({ uid, entries = [], onClose }) => {
                         <button
                           type="button"
                           aria-label={`Archive ${recipe.name}`}
-                          onClick={() => openArchiveConfirm(recipe)}
+                          onClick={(e) => openArchiveConfirm(recipe, e.currentTarget)}
                           className="cloud-icon-button"
                         >
                           <Archive size={16} />

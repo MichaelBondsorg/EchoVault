@@ -9,9 +9,10 @@
  * `ReflectionDraft` on completion.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, within, act } from '@testing-library/react';
 import RecipesScreen from '../RecipesScreen';
 import { subscribeRecipes, createRecipe, updateRecipe, archiveRecipe } from '../../../services/reflections/recipeService';
+import { subscribeSpaces } from '../../../services/spaces/spacesService';
 import { previewRecipe, runRecipe } from '../../../services/reflections/runRecipe';
 import { getExcludedEntryIds } from '../../../services/insights/sourceExclusions';
 import { generateEmbedding } from '../../../services/ai';
@@ -24,6 +25,10 @@ vi.mock('../../../services/reflections/recipeService', () => ({
   createRecipe: vi.fn().mockResolvedValue({ id: 'new-recipe' }),
   updateRecipe: vi.fn().mockResolvedValue({ id: 'recipe-1' }),
   archiveRecipe: vi.fn().mockResolvedValue(undefined),
+}));
+
+vi.mock('../../../services/spaces/spacesService', () => ({
+  subscribeSpaces: vi.fn(),
 }));
 
 vi.mock('../../../services/reflections/runRecipe', () => ({
@@ -57,6 +62,13 @@ const withRecipes = (recipes) => {
   });
 };
 
+const withSpaces = (spaces) => {
+  subscribeSpaces.mockImplementation((_db, _uid, cb) => {
+    cb(spaces);
+    return () => {};
+  });
+};
+
 function recipe(overrides = {}) {
   return {
     id: 'recipe-1',
@@ -74,6 +86,7 @@ function recipe(overrides = {}) {
 beforeEach(() => {
   vi.clearAllMocks();
   withRecipes([]);
+  withSpaces([]);
   previewRecipe.mockReturnValue({
     entryCount: 3,
     start: '2026-06-21T00:00:00.000Z',
@@ -120,6 +133,57 @@ describe('RecipesScreen — starter-seed CTA gating', () => {
       expect(createRecipe).toHaveBeenCalledWith({ __db: true }, UID, template);
     });
   });
+
+  it('a second rapid tap of the CTA while seeding is a no-op (double-tap guard)', async () => {
+    withRecipes([]);
+    render(<RecipesScreen uid={UID} entries={[]} onClose={vi.fn()} />);
+
+    const cta = await screen.findByText('Create starter recipes');
+    fireEvent.click(cta);
+    // The CTA re-renders as disabled + "Creating…" the moment `seeding`
+    // flips true (before any write resolves) — a disabled button does not
+    // dispatch click handlers, so these extra taps must be no-ops.
+    const stillSeeding = screen.getByText('Creating…');
+    expect(stillSeeding.closest('button')).toBeDisabled();
+    fireEvent.click(stillSeeding);
+    fireEvent.click(stillSeeding);
+
+    await waitFor(() => expect(createRecipe).toHaveBeenCalledTimes(STARTER_RECIPES.length));
+    STARTER_RECIPES.forEach((template) => {
+      expect(createRecipe).toHaveBeenCalledWith({ __db: true }, UID, template);
+    });
+  });
+});
+
+describe('RecipesScreen — load error (review fix)', () => {
+  it('surfaces an error instead of the starter-seed CTA when subscribeRecipes reports an error', async () => {
+    subscribeRecipes.mockImplementation((_db, _uid, _cb, onError) => {
+      onError(new Error('offline'));
+      return () => {};
+    });
+    render(<RecipesScreen uid={UID} entries={[]} onClose={vi.fn()} />);
+
+    expect(await screen.findByRole('alert')).toBeTruthy();
+    expect(screen.queryByText('Create starter recipes')).toBeNull();
+  });
+
+  it('a later successful subscription callback clears the error state', async () => {
+    let deliver;
+    subscribeRecipes.mockImplementation((_db, _uid, cb, onError) => {
+      deliver = { cb, onError };
+      onError(new Error('offline'));
+      return () => {};
+    });
+    render(<RecipesScreen uid={UID} entries={[]} onClose={vi.fn()} />);
+    await screen.findByRole('alert');
+
+    act(() => {
+      deliver.cb([]);
+    });
+
+    await waitFor(() => expect(screen.queryByRole('alert')).toBeNull());
+    expect(await screen.findByText('Create starter recipes')).toBeTruthy();
+  });
 });
 
 describe('RecipesScreen — list', () => {
@@ -141,7 +205,7 @@ describe('RecipesScreen — list', () => {
 });
 
 describe('RecipesScreen — inline edit (name + questions)', () => {
-  it('edits name and questions, saving via updateRecipe(db, uid, recipe, {name, questions})', async () => {
+  it('edits name and questions, saving via updateRecipe(db, uid, recipe, {name, questions, scope, timeRangeDays})', async () => {
     const existing = recipe({ questions: ['Q1?'] });
     withRecipes([existing]);
     render(<RecipesScreen uid={UID} entries={[]} onClose={vi.fn()} />);
@@ -158,7 +222,7 @@ describe('RecipesScreen — inline edit (name + questions)', () => {
         { __db: true },
         UID,
         existing,
-        { name: 'Monthly check-in', questions: ['What mattered this month?'] },
+        { name: 'Monthly check-in', questions: ['What mattered this month?'], scope: null, timeRangeDays: 30 },
       ),
     );
   });
@@ -207,6 +271,100 @@ describe('RecipesScreen — inline edit (name + questions)', () => {
     expect(updateRecipe).not.toHaveBeenCalled();
     expect(screen.getByText('Monthly review')).toBeTruthy();
   });
+
+  it('the Save/Cancel buttons keep the shared Button 44px default (no min-h override)', async () => {
+    withRecipes([recipe({ questions: ['Q1?'] })]);
+    render(<RecipesScreen uid={UID} entries={[]} onClose={vi.fn()} />);
+
+    fireEvent.click(await screen.findByLabelText('Edit Monthly review'));
+    expect(screen.getByText('Save').className).not.toMatch(/min-h-\[36px\]/);
+    expect(screen.getByText('Cancel').className).not.toMatch(/min-h-\[36px\]/);
+  });
+});
+
+describe('RecipesScreen — inline edit (scope + time range, PRD §5.6)', () => {
+  it('defaults the edit form to the recipe\'s current scope (All spaces) and timeRangeDays', async () => {
+    withSpaces([{ id: 'space-1', name: 'Work' }]);
+    withRecipes([recipe({ questions: ['Q1?'], scope: null, timeRangeDays: 30 })]);
+    render(<RecipesScreen uid={UID} entries={[]} onClose={vi.fn()} />);
+
+    fireEvent.click(await screen.findByLabelText('Edit Monthly review'));
+    expect(screen.getByLabelText('Space for Monthly review: All spaces')).toBeTruthy();
+    expect(screen.getByText('30 days').getAttribute('aria-pressed')).toBe('true');
+  });
+
+  it('picking a specific space via the shared SpacePicker writes scope: {spaceId} on save', async () => {
+    withSpaces([{ id: 'space-1', name: 'Work' }]);
+    const existing = recipe({ questions: ['Q1?'], scope: null, timeRangeDays: 30 });
+    withRecipes([existing]);
+    render(<RecipesScreen uid={UID} entries={[]} onClose={vi.fn()} />);
+
+    fireEvent.click(await screen.findByLabelText('Edit Monthly review'));
+    fireEvent.click(screen.getByLabelText('Space for Monthly review: All spaces'));
+    fireEvent.click(screen.getByRole('option', { name: 'Work' }));
+    fireEvent.click(screen.getByText('Save'));
+
+    await waitFor(() =>
+      expect(updateRecipe).toHaveBeenCalledWith(
+        { __db: true },
+        UID,
+        existing,
+        { name: 'Monthly review', questions: ['Q1?'], scope: { spaceId: 'space-1' }, timeRangeDays: 30 },
+      ),
+    );
+  });
+
+  it('picking "All spaces" from a previously-scoped recipe writes scope: null on save (never omitted, never undefined)', async () => {
+    withSpaces([{ id: 'space-1', name: 'Work' }]);
+    const existing = recipe({ questions: ['Q1?'], scope: { spaceId: 'space-1' }, timeRangeDays: 30 });
+    withRecipes([existing]);
+    render(<RecipesScreen uid={UID} entries={[]} onClose={vi.fn()} />);
+
+    fireEvent.click(await screen.findByLabelText('Edit Monthly review'));
+    expect(screen.getByLabelText('Space for Monthly review: Work')).toBeTruthy();
+    fireEvent.click(screen.getByLabelText('Space for Monthly review: Work'));
+    fireEvent.click(screen.getByRole('option', { name: 'All spaces' }));
+    fireEvent.click(screen.getByText('Save'));
+
+    await waitFor(() =>
+      expect(updateRecipe).toHaveBeenCalledWith(
+        { __db: true },
+        UID,
+        existing,
+        { name: 'Monthly review', questions: ['Q1?'], scope: null, timeRangeDays: 30 },
+      ),
+    );
+    expect(updateRecipe.mock.calls[0][3]).toHaveProperty('scope', null);
+  });
+
+  it('picking a time range option writes timeRangeDays on save', async () => {
+    const existing = recipe({ questions: ['Q1?'], timeRangeDays: 30 });
+    withRecipes([existing]);
+    render(<RecipesScreen uid={UID} entries={[]} onClose={vi.fn()} />);
+
+    fireEvent.click(await screen.findByLabelText('Edit Monthly review'));
+    fireEvent.click(screen.getByText('90 days'));
+    fireEvent.click(screen.getByText('Save'));
+
+    await waitFor(() =>
+      expect(updateRecipe).toHaveBeenCalledWith(
+        { __db: true },
+        UID,
+        existing,
+        { name: 'Monthly review', questions: ['Q1?'], scope: null, timeRangeDays: 90 },
+      ),
+    );
+  });
+
+  it('offers exactly the 7/30/90/365 day options', async () => {
+    withRecipes([recipe({ questions: ['Q1?'] })]);
+    render(<RecipesScreen uid={UID} entries={[]} onClose={vi.fn()} />);
+
+    fireEvent.click(await screen.findByLabelText('Edit Monthly review'));
+    ['7 days', '30 days', '90 days', '365 days'].forEach((label) => {
+      expect(screen.getByText(label)).toBeTruthy();
+    });
+  });
 });
 
 describe('RecipesScreen — archive', () => {
@@ -233,6 +391,31 @@ describe('RecipesScreen — archive', () => {
 
     expect(archiveRecipe).not.toHaveBeenCalled();
     expect(screen.queryByRole('dialog', { name: /Archive/i })).toBeNull();
+  });
+
+  it('restores focus to the trigger button when the archive dialog is cancelled (SpaceManager.jsx precedent)', async () => {
+    withRecipes([recipe()]);
+    render(<RecipesScreen uid={UID} entries={[]} onClose={vi.fn()} />);
+
+    const trigger = await screen.findByLabelText('Archive Monthly review');
+    fireEvent.click(trigger);
+    const dialog = screen.getByRole('dialog', { name: /Archive/i });
+    fireEvent.click(within(dialog).getByText('Cancel'));
+
+    expect(document.activeElement).toBe(trigger);
+  });
+
+  it('restores focus to the trigger button after a confirmed archive', async () => {
+    withRecipes([recipe()]);
+    render(<RecipesScreen uid={UID} entries={[]} onClose={vi.fn()} />);
+
+    const trigger = await screen.findByLabelText('Archive Monthly review');
+    fireEvent.click(trigger);
+    const dialog = screen.getByRole('dialog', { name: /Archive/i });
+    fireEvent.click(within(dialog).getByText('Archive'));
+
+    await waitFor(() => expect(archiveRecipe).toHaveBeenCalled());
+    expect(document.activeElement).toBe(trigger);
   });
 });
 
@@ -269,6 +452,45 @@ describe('RecipesScreen — run flow: preview gate before first run', () => {
 
     await waitFor(() => expect(previewRecipe).toHaveBeenCalled());
     expect(previewRecipe.mock.calls[0][2]).toBe(excluded);
+  });
+
+  it('passes the subscribed spaces list into previewRecipe so a scoped recipe resolves its real space name', async () => {
+    const spaces = [{ id: 'space-1', name: 'Work' }];
+    withSpaces(spaces);
+    withRecipes([recipe({ scope: { spaceId: 'space-1' } })]);
+    previewRecipe.mockReturnValue({
+      entryCount: 3,
+      start: '2026-06-21T00:00:00.000Z',
+      end: '2026-07-21T00:00:00.000Z',
+      spaceName: 'Work',
+    });
+    render(<RecipesScreen uid={UID} entries={[]} onClose={vi.fn()} />);
+
+    fireEvent.click(await screen.findByLabelText('Run Monthly review'));
+    const dialog = await screen.findByRole('dialog', { name: /Run "Monthly review"/i });
+
+    await waitFor(() => expect(previewRecipe).toHaveBeenCalled());
+    expect(previewRecipe.mock.calls[0][3]).toBe(spaces);
+    expect(within(dialog).getByText(/Work/)).toBeTruthy();
+  });
+
+  it('the preview dialog shows "Will use 0 entries" when previewRecipe reports an empty pool', async () => {
+    withRecipes([recipe()]);
+    previewRecipe.mockReturnValue({
+      entryCount: 0,
+      start: '2026-06-21T00:00:00.000Z',
+      end: '2026-07-21T00:00:00.000Z',
+      spaceName: 'All spaces',
+    });
+    render(<RecipesScreen uid={UID} entries={[]} onClose={vi.fn()} />);
+
+    fireEvent.click(await screen.findByLabelText('Run Monthly review'));
+    const dialog = await screen.findByRole('dialog', { name: /Run "Monthly review"/i });
+
+    expect(within(dialog).getByText(/Will use 0 entries/)).toBeTruthy();
+    // The Run confirm stays enabled even at zero entries — an empty result
+    // is a valid (if uninteresting) preview, not an error state.
+    expect(within(dialog).getByText('Run')).not.toBeDisabled();
   });
 
   it('Cancel on the preview dialog never calls runRecipe', async () => {
