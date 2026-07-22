@@ -113,6 +113,36 @@ function toMillis(ts) {
 }
 
 /**
+ * Normalize a single domain's coverage entry to { normalizedCoverage,
+ * lastMentionDate, entryCount }.
+ *
+ * R4 T2 (DR finding 14): the real writer of topic_coverage —
+ * functions/src/analytics/onEntryAnalyzed.js — writes `domains[domain]` as
+ * a bare 0-1 number (a weighted-mention ratio), not the richer
+ * `{normalizedCoverage, lastMentionDate, entryCount}` object this module
+ * originally assumed. Reading `.normalizedCoverage` off a bare number is
+ * `undefined`, which silently coerced every domain to 0% coverage — this
+ * normalizer reads both shapes correctly instead of guessing. It does NOT
+ * fabricate `lastMentionDate`/`entryCount` for the bare-number shape —
+ * those genuinely aren't written today, so they stay null (see
+ * detectGaps's recency handling below, which treats a null lastMentionDate
+ * as "unknown," never as "just now").
+ */
+function normalizeDomainCoverage(domainData) {
+  if (domainData == null) {
+    return { normalizedCoverage: 0, lastMentionDate: null, entryCount: null };
+  }
+  if (typeof domainData === 'number') {
+    return { normalizedCoverage: domainData, lastMentionDate: null, entryCount: null };
+  }
+  return {
+    normalizedCoverage: domainData.normalizedCoverage ?? 0,
+    lastMentionDate: domainData.lastMentionDate ?? null,
+    entryCount: domainData.entryCount ?? null,
+  };
+}
+
+/**
  * Detect life domain gaps for a user based on their journaling history.
  *
  * Reads pre-computed topic coverage from the analytics layer and checks
@@ -160,11 +190,7 @@ export async function detectGaps(userId, options = {}) {
   const gaps = [];
 
   for (const domain of LIFE_DOMAINS) {
-    const domainData = coverage.domains[domain] || {
-      normalizedCoverage: 0,
-      lastMentionDate: null,
-      entryCount: 0,
-    };
+    const domainData = normalizeDomainCoverage(coverage.domains[domain]);
 
     const normalizedCoverage = domainData.normalizedCoverage ?? 0;
 

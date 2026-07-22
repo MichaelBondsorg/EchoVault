@@ -216,6 +216,62 @@ describe('gapDetector', () => {
       const gaps = await detectGaps('user-123');
       expect(gaps.length).toBeGreaterThan(0);
     });
+
+    describe('real analytics-trigger output shape (R4 T2 — DR finding 14)', () => {
+      // functions/src/analytics/onEntryAnalyzed.js — the ONLY writer of
+      // topic_coverage today — actually writes:
+      //   { domains: { work: 0.35, ... } (bare numbers, not objects),
+      //     rawScores: {...}, processedEntryIds: [...], lastUpdated }
+      // It writes NO firstEntryDate and NO per-domain lastMentionDate. This
+      // fixture is that real shape, verbatim, not the richer shape the rest
+      // of this test file mocks for convenience.
+      const realShapeCoverage = () => ({
+        domains: {
+          work: 0.35,
+          relationships: 0.05,
+          health: 0.5,
+          creativity: 0.0,
+          spirituality: 0.0,
+          'personal-growth': 0.1,
+          family: 0.0,
+          finances: 0.0,
+        },
+        rawScores: {
+          work: { weightedCount: 3.5, entryIds: ['e1', 'e2'] },
+        },
+        processedEntryIds: ['e1', 'e2', 'e3'],
+        lastUpdated: daysAgo(0),
+        // no firstEntryDate
+      });
+
+      it('abstains cleanly (returns no gaps) against the real production shape — never fabricates', async () => {
+        analyticsRepository.getTopicCoverage.mockResolvedValue(realShapeCoverage());
+
+        const gaps = await detectGaps('user-123');
+
+        expect(gaps).toEqual([]);
+      });
+
+      it('reads bare-number domain coverage correctly if firstEntryDate is ever added (forward-compat, no silent zeroing)', async () => {
+        // If a future migration adds firstEntryDate to the real shape without
+        // also converting domains to objects, detectGaps must not silently
+        // treat every domain as 0% coverage (a `.normalizedCoverage` read on
+        // a bare number is undefined, not the number itself).
+        const coverage = { ...realShapeCoverage(), firstEntryDate: daysAgo(60) };
+        analyticsRepository.getTopicCoverage.mockResolvedValue(coverage);
+
+        const gaps = await detectGaps('user-123');
+
+        // health=0.5 should NOT be flagged as a zero-coverage gap; a truly
+        // zero-coverage domain (creativity/family/finances/spirituality)
+        // should still surface.
+        const health = gaps.find((g) => g.domain === 'health');
+        expect(health?.normalizedCoverage).not.toBe(0);
+        const finances = gaps.find((g) => g.domain === 'finances');
+        expect(finances).toBeDefined();
+        expect(finances.normalizedCoverage).toBe(0);
+      });
+    });
   });
 
   describe('computeGapScore', () => {

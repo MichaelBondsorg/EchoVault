@@ -8,6 +8,11 @@
 
 import { extractHealthSignals } from '../../health/healthFormatter';
 import { extractEnvironmentSignals } from '../../environment/environmentFormatter';
+import {
+  GENERIC_TRIGGERS,
+  hasMinimumContext,
+  matchesGenericTrigger,
+} from './genericTriggers';
 
 // ============================================================
 // PATTERN DEFINITIONS
@@ -179,117 +184,16 @@ export const COMBINED_PATTERNS = {
 
 /**
  * Core narrative patterns to detect
- * These patterns map narrative content to expected biometric signatures
+ * These patterns map narrative content to expected biometric signatures.
+ *
+ * R4 T2 (DR finding 5): trigger data lives ONLY in genericTriggers.js — a
+ * generic, non-personal vocabulary — and is imported here, never declared
+ * inline. This is enforced by a structural lint test
+ * (layer1/__tests__/patternDetector.test.js) so a future edit can't
+ * reintroduce personal literals by adding a new inline trigger list
+ * directly in this file.
  */
-export const NARRATIVE_PATTERNS = {
-  // Career & Work
-  CAREER_ANTICIPATION: {
-    id: 'career_anticipation',
-    triggers: ['interview', 'offer', 'application', 'recruiter', 'hiring'],
-    category: 'career',
-    biometricSignature: { rhr: 'elevated', hrv: 'depressed' }
-  },
-  CAREER_WAITING: {
-    id: 'career_waiting',
-    triggers: ['waiting', 'haven\'t heard', 'no response', 'following up'],
-    category: 'career',
-    biometricSignature: { rhr: 'elevated', hrv: 'depressed', strain: 'normal' }
-  },
-  CAREER_OUTCOME_POSITIVE: {
-    id: 'career_outcome_positive',
-    triggers: ['got the job', 'offer accepted', 'moving forward', 'next round'],
-    category: 'career',
-    biometricSignature: { mood: 'elevated', hrv: 'improved' }
-  },
-  CAREER_OUTCOME_NEGATIVE: {
-    id: 'career_outcome_negative',
-    triggers: ['rejected', 'didn\'t get', 'passed on', 'not moving forward'],
-    category: 'career',
-    biometricSignature: { mood: 'depressed', rhr: 'elevated', sleep: 'disrupted' }
-  },
-
-  // Relationships
-  RELATIONSHIP_CONNECTION: {
-    id: 'relationship_connection',
-    triggers: ['spencer', 'together', 'cuddled', 'talked', 'connected'],
-    category: 'relationship',
-    biometricSignature: { hrv: 'improved', mood: 'stabilized' }
-  },
-  RELATIONSHIP_STRAIN: {
-    id: 'relationship_strain',
-    triggers: ['argued', 'frustrated with', 'annoyed', 'tension between'],
-    category: 'relationship',
-    biometricSignature: { rhr: 'elevated', hrv: 'depressed', mood: 'volatile' }
-  },
-  CAREGIVING_STRESS: {
-    id: 'caregiving_stress',
-    triggers: ['kobe', 'psychosis', 'worried about', 'checking on'],
-    category: 'relationship',
-    biometricSignature: { rhr: 'elevated', mood: 'anxious' }
-  },
-
-  // Physical Activity
-  EXERCISE_COMPLETION: {
-    id: 'exercise_completion',
-    triggers: ['workout', 'barrys', 'yoga', 'pilates', 'gym', 'lifted'],
-    category: 'health',
-    biometricSignature: { strain: 'elevated', nextDayRecovery: 'variable' }
-  },
-  EXERCISE_AVOIDANCE: {
-    id: 'exercise_avoidance',
-    triggers: ['skipped', 'didn\'t go', 'too tired', 'took a rest'],
-    category: 'health',
-    biometricSignature: { strain: 'low', mood: 'variable' }
-  },
-
-  // Somatic Signals
-  PHYSICAL_DISCOMFORT: {
-    id: 'physical_discomfort',
-    triggers: ['pain', 'sore', 'hurt', 'ache', 'tight', 'injury'],
-    category: 'somatic',
-    biometricSignature: { strain: 'elevated', sleep: 'disrupted' }
-  },
-  FATIGUE: {
-    id: 'fatigue',
-    triggers: ['tired', 'exhausted', 'drained', 'no energy', 'groggy'],
-    category: 'somatic',
-    biometricSignature: { recovery: 'low', hrv: 'depressed' }
-  },
-
-  // Emotional States
-  ANXIETY_SIGNAL: {
-    id: 'anxiety_signal',
-    triggers: ['anxious', 'worried', 'nervous', 'stressed', 'overwhelmed'],
-    category: 'emotional',
-    biometricSignature: { rhr: 'elevated', hrv: 'depressed', sleep: 'disrupted' }
-  },
-  POSITIVE_MOMENTUM: {
-    id: 'positive_momentum',
-    triggers: ['happy', 'excited', 'great', 'amazing', 'fantastic', 'proud'],
-    category: 'emotional',
-    biometricSignature: { hrv: 'improved', recovery: 'elevated' }
-  },
-
-  // Stabilizers
-  PET_INTERACTION: {
-    id: 'pet_interaction',
-    triggers: ['sterling', 'luna', 'walked', 'dog', 'grooming'],
-    category: 'stabilizer',
-    biometricSignature: { hrv: 'recovery', mood: 'stabilized' }
-  },
-  CREATIVE_ACTIVITY: {
-    id: 'creative_activity',
-    triggers: ['painting', 'built', 'created', 'working on', 'engram'],
-    category: 'stabilizer',
-    biometricSignature: { mood: 'improved', hrv: 'stable' }
-  },
-  SOCIAL_CONNECTION: {
-    id: 'social_connection',
-    triggers: ['dinner with', 'hung out', 'met up', 'friends', 'called'],
-    category: 'stabilizer',
-    biometricSignature: { mood: 'improved', hrv: 'improved' }
-  }
-};
+export const NARRATIVE_PATTERNS = GENERIC_TRIGGERS;
 
 // ============================================================
 // DETECTION FUNCTIONS
@@ -309,30 +213,37 @@ export const detectPatternsInEntry = (entry, whoopData = null) => {
   const healthSignals = entry.healthContext ? extractHealthSignals(entry.healthContext) : null;
   const envSignals = entry.environmentContext ? extractEnvironmentSignals(entry.environmentContext) : null;
 
-  // Detect narrative patterns (text-based)
-  for (const [key, pattern] of Object.entries(NARRATIVE_PATTERNS)) {
-    const matches = pattern.triggers.filter(trigger =>
-      text.includes(trigger.toLowerCase())
-    );
+  // Detect narrative patterns (text-based).
+  // Minimum-context gate (R4 T2 / DR finding 5): a sparse entry ("Great!")
+  // carries no interpretable context for a keyword match, so narrative
+  // pattern detection is skipped entirely below MIN_ENTRY_WORDS. Combined
+  // with word-boundary matching (matchesGenericTrigger), this replaces the
+  // old bare-substring matching that fired on 918 detections/163 entries.
+  if (hasMinimumContext(text)) {
+    for (const [key, pattern] of Object.entries(NARRATIVE_PATTERNS)) {
+      const matches = pattern.triggers.filter(trigger =>
+        matchesGenericTrigger(text, trigger)
+      );
 
-    if (matches.length > 0) {
-      detectedPatterns.push({
-        patternId: pattern.id,
-        patternType: 'narrative',
-        category: pattern.category,
-        triggers: matches,
-        confidence: Math.min(0.5 + (matches.length * 0.15), 0.95),
-        entryId: entry.id,
-        entryDate: getEntryDate(entry),
-        mood: entry.analysis?.mood_score,
-        whoopData: whoopData ? {
-          rhr: whoopData.heartRate?.resting,
-          hrv: whoopData.hrv?.average,
-          strain: whoopData.strain?.score,
-          recovery: whoopData.recovery?.score,
-          sleep: whoopData.sleep?.totalHours
-        } : null
-      });
+      if (matches.length > 0) {
+        detectedPatterns.push({
+          patternId: pattern.id,
+          patternType: 'narrative',
+          category: pattern.category,
+          triggers: matches,
+          confidence: Math.min(0.5 + (matches.length * 0.15), 0.95),
+          entryId: entry.id,
+          entryDate: getEntryDate(entry),
+          mood: entry.analysis?.mood_score,
+          whoopData: whoopData ? {
+            rhr: whoopData.heartRate?.resting,
+            hrv: whoopData.hrv?.average,
+            strain: whoopData.strain?.score,
+            recovery: whoopData.recovery?.score,
+            sleep: whoopData.sleep?.totalHours
+          } : null
+        });
+      }
     }
   }
 

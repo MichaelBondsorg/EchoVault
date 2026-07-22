@@ -145,41 +145,24 @@ export const calculateContextualBaselines = async (whoopHistory, entries, thread
   }
 
   // === ENTITY-BASED BASELINES ===
-
-  const entityPatterns = {
-    'spencer': /spencer/i,
-    'sterling': /sterling|dog walk|walked.*dog/i,
-    'kobe': /kobe/i
-  };
-
-  for (const [entity, pattern] of Object.entries(entityPatterns)) {
-    const entityDays = new Set();
-    for (const entry of entries) {
-      const text = entry.text || '';
-      if (pattern.test(text)) {
-        const date = getEntryDate(entry);
-        if (date) entityDays.add(date);
-      }
-    }
-
-    if (entityDays.size >= 3) { // Lower threshold for entities
-      const metrics = extractMetricsForDays(whoopByDate, entries, entityDays);
-      contextual[`entity:${entity}`] = {
-        mood: calculateStats(metrics.mood),
-        hrv: calculateStats(metrics.hrv),
-        rhr: calculateStats(metrics.rhr),
-        sampleDays: entityDays.size
-      };
-    }
-  }
+  //
+  // R4 T2 (DR finding 5): per-user named-entity baselines (correlating a
+  // baseline against one specific named person or pet) require a personal
+  // literal by definition — there is no generic phrase that means "this
+  // particular individual." That's a per-user ontology feature, deferred to
+  // the Phase 1 extraction layer (see
+  // docs/superpowers/plans/2026-07-22-r4-insight-integrity.md). The
+  // previous hardcoded-name version of this block is removed outright
+  // rather than replaced; there is nothing generic to put in its place.
 
   // === ACTIVITY-BASED BASELINES ===
+  // Generic only — no gym/studio brand names, no pet names.
 
   const activityPatterns = {
-    'yoga': /yoga|flow|vinyasa|c3/i,
-    'barrys': /barry'?s|barrys/i,
-    'sterling_walk': /walked? sterling|sterling.*walk|walk.*sterling/i,
-    'gym': /gym|lift|workout|lifted/i
+    'yoga': /\byoga\b|\bvinyasa\b/i,
+    'boutique_fitness_class': /\bfitness class\b|\bbootcamp\b|\bspin class\b/i,
+    'dog_walk': /\bwalked the dog\b|\bdog walk\b|\bwalking the dog\b/i,
+    'gym': /\bgym\b|\blifted\b|\bworkout\b/i
   };
 
   for (const [activity, pattern] of Object.entries(activityPatterns)) {

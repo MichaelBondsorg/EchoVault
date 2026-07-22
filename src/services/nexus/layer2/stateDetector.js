@@ -8,6 +8,7 @@
 import { doc, getDoc, setDoc, Timestamp } from 'firebase/firestore';
 import { db } from '../../../config/firebase';
 import { APP_COLLECTION_ID } from '../../../config/constants';
+import { daysBetween, safeDate } from '../../../utils/date';
 
 // ============================================================
 // LIFE STATE DEFINITIONS
@@ -345,11 +346,21 @@ export const updateCurrentState = async (userId, stateData) => {
       }
     }
 
+    // Duration is derived from elapsed calendar days between when the state
+    // started and now — not from how many times analysis has regenerated
+    // (R4 T2 / DR finding 9). The old `+1`-per-call increment meant running
+    // analysis 5x in a minute made a state look 5 days old; re-running on
+    // the same day is now idempotent, and duration tracks real time.
+    const stateStartedAt = stateChanged ? now : (previousState?.startedAt || now);
+    const durationDays = stateChanged
+      ? 0
+      : Math.max(0, daysBetween(safeDate(stateStartedAt), safeDate(now)));
+
     await setDoc(stateRef, {
       currentState: {
         ...stateData,
-        startedAt: stateChanged ? now : (previousState?.startedAt || now),
-        durationDays: stateChanged ? 0 : ((previousState?.durationDays || 0) + 1)
+        startedAt: stateStartedAt,
+        durationDays
       },
       stateHistory: newHistory,
       updatedAt: now
