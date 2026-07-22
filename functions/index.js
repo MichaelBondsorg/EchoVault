@@ -716,7 +716,17 @@ export const generateEmbedding = onCall(
       }
       return { embedding, space: 'v1', cached: false };  // Caching handled internally
     } catch (error) {
-      console.error('generateEmbedding error:', error);
+      // The retired-v1 failure is already logged as a structured
+      // `embedding-v1-failed` line inside generateEmbeddingInternal — and
+      // since v1 is permanently dead upstream, EVERY legacy call lands
+      // here; re-logging at error level would double every line in prod
+      // (final hardening review, Minor). Log the expected case quietly and
+      // reserve console.error for anything else.
+      if (String(error?.message || '').includes('v1 is retired upstream')) {
+        console.warn('generateEmbedding: legacy v1 request declined (v1 retired upstream)');
+      } else {
+        console.error('generateEmbedding error:', error);
+      }
       throw new HttpsError('internal', 'Embedding generation failed');
     }
   }
