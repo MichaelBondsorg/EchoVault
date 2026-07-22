@@ -45,6 +45,46 @@ import { getExcludedEntryIds } from '../insights/sourceExclusions';
 import { markInsightsStale } from './staleness';
 
 // ============================================================
+// MOOD01 CONVENTION (R4 T3)
+// ============================================================
+// Runtime `mood`/`analysis.mood_score` is stored 0-1 (see
+// docs/superpowers/plans/2026-07-22-r4-insight-integrity.md). Every
+// internal comparison in this file operates on that native 0-1 scale.
+// `displayMood100` is the ONLY place a raw value becomes a "N%" display
+// number; mirrors `src/services/experiments/computeResult.js`'s
+// `normalizeMoodTo100` domain semantics (reject out-of-[0,1]-domain,
+// never clamp) without importing across the nexus/experiments boundary.
+const displayMood100 = (raw) => {
+  if (!Number.isFinite(raw) || raw < 0 || raw > 1) return null;
+  return Math.round(raw * 100);
+};
+
+// Below this Mood01 value, an entry counts as "low mood" for counterfactual
+// candidate selection (was `< 40`, comparing a 0-1 value against a
+// 0-100-scale threshold — always true, since 0-1 values are always < 40).
+const LOW_MOOD_THRESHOLD = 0.40;
+
+// ============================================================
+// RISKY CLAIM SUPPRESSION (R4 Task 3 / ratified decision 4)
+// ============================================================
+// Fixing the Mood01 scale bugs throughout layer3/layer4 would, as a side
+// effect, "wake up" four claim types that have effectively been dead code
+// since they compared native 0-1 mood values against 0-100-scale
+// thresholds: personal counterfactuals, belief-dissonance insights,
+// intervention "this worked" OUTCOME claims, and personalized
+// recommendation reasoning. Michael ratified (2026-07-22, R4 decision 4,
+// docs/superpowers/plans/2026-07-22-r4-insight-integrity.md) that the
+// scale fix must NOT reactivate them — they need Phase 1-2 evidence rails
+// (typed claim store, verified synthesis) before they're trustworthy
+// again. This flag is the single seam that keeps them suppressed/relabeled
+// while the corrected code ships underneath, gated. Production always
+// uses this constant (false); the `riskyClaimsEnabled` override on
+// `generateInsights`'s `options` exists ONLY so tests can exercise the
+// scale-corrected behavior end-to-end without touching production
+// defaults. Flip this constant to true only when Phase 1-2 lands.
+const RISKY_CLAIMS_ENABLED = false;
+
+// ============================================================
 // PATTERN DISPLAY HELPERS
 // ============================================================
 
@@ -352,6 +392,10 @@ export const generateInsights = async (userId, options = {}) => {
   // Context Spaces into Nexus itself) — this just makes that seam ready.
   const scope = options.scope || null;
   const timeWindow = computeTimeWindow(30);
+  // Risky-claim suppression (R4 T3): test-only override, see
+  // RISKY_CLAIMS_ENABLED's doc comment above. No production caller passes
+  // this.
+  const riskyClaimsEnabled = options.riskyClaimsEnabled ?? RISKY_CLAIMS_ENABLED;
 
   try {
     // Source Exclusions (R2 Task 10): read ONCE here and thread the
@@ -449,7 +493,15 @@ export const generateInsights = async (userId, options = {}) => {
       whoopToday,
       whoopHistory,
       beliefData: beliefs,
-      interventionData,
+      // Ratified decision 4 (R4 T3): interventionTracker's effectiveness
+      // stats double as "this specific activity boosted your mood/HRV by
+      // X" OUTCOME claims once they reach a rendered insight — and this is
+      // exactly what feeds `buildSynthesisPrompt`'s "Most effective
+      // interventions" section into the (currently ungated) causal
+      // synthesis insight. Withheld while the gate is off; causal
+      // synthesis itself stays active, it just can't cite
+      // intervention-outcome numbers Phase 1-2 hasn't verified yet.
+      interventionData: riskyClaimsEnabled ? interventionData : null,
       blindSpots: gapResults.map(g => ({
         domain: g.domain,
         severity: g.gapScore,
@@ -530,26 +582,33 @@ export const generateInsights = async (userId, options = {}) => {
           }
         }
 
-        // Validate existing beliefs and generate insights
-        const allBeliefs = await getBeliefs(userId);
-        const recentMood = entries[0]?.mood || entries[0]?.analysis?.mood_score;
+        // Validate existing beliefs and generate insights. Ratified
+        // decision 4 (R4 T3): belief-dissonance CLAIMS are suppressed
+        // until Phase 1-2 evidence rails exist — extraction/save above
+        // still runs (it builds the corpus Phase 1 will need), but
+        // validating beliefs against data and generating a dissonance
+        // INSIGHT is gated off.
+        if (riskyClaimsEnabled) {
+          const allBeliefs = await getBeliefs(userId);
+          const recentMood = entries[0]?.mood ?? entries[0]?.analysis?.mood_score;
 
-        for (const belief of allBeliefs.slice(0, 3)) {
-          const validation = await validateBeliefAgainstData(belief, { entries, baselines, threads });
+          for (const belief of allBeliefs.slice(0, 3)) {
+            const validation = await validateBeliefAgainstData(belief, { entries, baselines, threads });
 
-          if (validation.dissonanceScore > 0.5) {
-            const dissonanceInsight = await generateDissonanceInsight(
-              belief,
-              validation,
-              recentMood
-            );
+            if (validation.dissonanceScore > 0.5) {
+              const dissonanceInsight = await generateDissonanceInsight(
+                belief,
+                validation,
+                recentMood
+              );
 
-            if (dissonanceInsight && !dissonanceInsight.queued) {
-              insights.push({
-                ...dissonanceInsight,
-                priority: 3
-              });
-              break;  // Only one dissonance insight per generation
+              if (dissonanceInsight && !dissonanceInsight.queued) {
+                insights.push({
+                  ...dissonanceInsight,
+                  priority: 3
+                });
+                break;  // Only one dissonance insight per generation
+              }
             }
           }
         }
@@ -573,15 +632,21 @@ export const generateInsights = async (userId, options = {}) => {
         const recommendations = await generateRecommendations(userId, {
           currentState,
           whoopToday,
-          recentMood: entries[0]?.mood || 50,
-          timeOfDay: getTimeOfDay()
+          // Mood01: was `|| 50`, a 0-100-scale fallback mixed with a
+          // native 0-1 value, and never checked `.analysis?.mood_score`.
+          recentMood: entries[0]?.mood ?? entries[0]?.analysis?.mood_score ?? 0.5,
+          timeOfDay: getTimeOfDay(),
+          riskyClaimsEnabled
         });
 
         if (recommendations.length > 0) {
           insights.push({
             id: `recommendation_${Date.now()}`,
             type: 'intervention',
-            title: 'Recommended Action',
+            // Ratified decision 4: relabeled when personalized framing is
+            // suppressed, so the title doesn't imply a personalized
+            // recommendation the body no longer claims to be.
+            title: riskyClaimsEnabled ? 'Recommended Action' : 'An Idea to Try',
             ...recommendations[0],
             priority: 1
           });
@@ -591,12 +656,17 @@ export const generateInsights = async (userId, options = {}) => {
       }
     }
 
-    // Generate counterfactual insight for recent low mood days
-    if (settings.features.counterfactualInsights?.enabled !== false) {
+    // Generate counterfactual insight for recent low mood days. Ratified
+    // decision 4 (R4 T3): counterfactual claims are suppressed until Phase
+    // 1-2 evidence rails exist.
+    if (settings.features.counterfactualInsights?.enabled !== false && riskyClaimsEnabled) {
       try {
         const lowMoodEntry = entries.find(e => {
-          const mood = e.mood || e.analysis?.mood_score;
-          return mood && mood < 40;
+          // Mood01: was `mood < 40` against a native 0-1 value — always
+          // true, so this ran (and errored/no-opped downstream) on every
+          // entry rather than genuinely selecting a low-mood day.
+          const mood = e.mood ?? e.analysis?.mood_score;
+          return mood != null && mood < LOW_MOOD_THRESHOLD;
         });
 
         if (lowMoodEntry && interventionData) {
@@ -887,21 +957,28 @@ const computeEntityMoodCorrelations = (entries) => {
     }))
   ];
 
-  // Calculate baseline mood (average across all entries)
+  // Calculate baseline mood (average across all entries). Mood01: this
+  // used to `Math.round()` the raw 0-1 average directly, collapsing every
+  // baseline/entity average to 0 or 1 — the `>= 10` significance check
+  // below then compared two near-identical single-digit integers and could
+  // never clear 10. `displayMood100` rounds AFTER converting to the
+  // display (0-100) scale, and rejects (drops, never clamps) any mood
+  // value outside the declared [0,1] domain rather than silently including
+  // it as if it were valid.
   const allMoods = entries
-    .map(e => e.mood || e.analysis?.mood_score)
-    .filter(m => m !== null && m !== undefined);
+    .map(e => e.mood ?? e.analysis?.mood_score)
+    .filter(m => Number.isFinite(m) && m >= 0 && m <= 1);
 
   if (allMoods.length === 0) return [];
 
-  const baselineMood = Math.round(allMoods.reduce((a, b) => a + b, 0) / allMoods.length);
+  const baselineMood = displayMood100(allMoods.reduce((a, b) => a + b, 0) / allMoods.length);
 
   // Track entity mentions and associated moods
   const entityStats = new Map();
 
   for (const entry of entries) {
-    const mood = entry.mood || entry.analysis?.mood_score;
-    if (mood === null || mood === undefined) continue;
+    const mood = entry.mood ?? entry.analysis?.mood_score;
+    if (!Number.isFinite(mood) || mood < 0 || mood > 1) continue;
 
     const text = (entry.content || entry.text || '').toLowerCase();
 
@@ -947,7 +1024,7 @@ const computeEntityMoodCorrelations = (entries) => {
     // Need at least 3 mentions for statistical relevance
     if (stats.mentionCount < 3) continue;
 
-    const averageMood = Math.round(stats.moods.reduce((a, b) => a + b, 0) / stats.moods.length);
+    const averageMood = displayMood100(stats.moods.reduce((a, b) => a + b, 0) / stats.moods.length);
     const moodDelta = averageMood - baselineMood;
 
     correlations.push({

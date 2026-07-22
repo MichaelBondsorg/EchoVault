@@ -77,10 +77,15 @@ export const detectMetaPatterns = async (userId, threads, entries) => {
 
   const detectedPatterns = [];
 
-  // Combine all thread and entry text
+  // Combine all thread and entry text.
+  // Sort-order contract (R4 T3): `entries` is fetched DESCENDING by
+  // createdAt (most recent first) — see orchestrator.js's
+  // `fetchRecentEntries`. `.slice(0, 20)` takes the 20 MOST RECENT entries;
+  // the previous `.slice(-20)` took the 20 OLDEST entries in the window
+  // instead.
   const allText = [
     ...(threads || []).map(t => t.displayName),
-    ...(entries || []).slice(-20).map(e => e.content || e.text || '')
+    ...(entries || []).slice(0, 20).map(e => e.content || e.text || '')
   ].join(' ').toLowerCase();
 
   // Collect somatic signals across threads
@@ -147,7 +152,15 @@ export const detectMetaPatterns = async (userId, threads, entries) => {
 export const generateMetaPatternInsight = async (userId, metaPattern, context) => {
   console.log('[CrossThread] Generating meta-pattern insight...');
 
-  const { threads, entries, baselines } = context;
+  // Seam fix (R4 T3, DR finding 9): the orchestrator's real call site
+  // passes its shared `synthesisContext` shape, keyed `activeThreads` (this
+  // function doesn't read `entries`/`recentEntries`) — this function used
+  // to destructure `threads` directly, which doesn't exist on that object,
+  // so it was silently `undefined`, `affectedThreads` was always `[]`, and
+  // this function always returned `null` before ever calling the LLM.
+  // Accept BOTH key spellings so callers using either shape (e.g. direct
+  // unit tests) work correctly.
+  const threads = context.threads || context.activeThreads;
 
   try {
     const affectedThreads = (threads || []).filter(t =>

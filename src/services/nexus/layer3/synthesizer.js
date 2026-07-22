@@ -16,6 +16,43 @@ import { computeHealthMoodCorrelations } from '../../health/healthCorrelations';
 import { computeEnvironmentMoodCorrelations } from '../../environment/environmentCorrelations';
 
 // ============================================================
+// MOOD01 CONVENTION (R4 T3)
+// ============================================================
+// Runtime `mood`/`analysis.mood_score` is stored 0-1 (see
+// docs/superpowers/plans/2026-07-22-r4-insight-integrity.md). Per-entry
+// mood was previously interpolated straight into prompt text as "N%"
+// without converting, mislabeling a 0-1 score as a percentage.
+// `displayMood100` is the ONLY place that conversion happens; mirrors
+// `src/services/experiments/computeResult.js`'s `normalizeMoodTo100`
+// domain semantics (reject out-of-[0,1]-domain, never clamp) without
+// importing across the nexus/experiments boundary. (Baseline-derived mood
+// stats elsewhere in this file, e.g. `stateBaseline.mood.mean`, are
+// ALREADY stored 0-100 by layer2/baselineManager.js — do not re-convert
+// those.)
+const displayMood100 = (raw) => {
+  if (!Number.isFinite(raw) || raw < 0 || raw > 1) return null;
+  return Math.round(raw * 100);
+};
+
+/**
+ * Data-sufficiency confidence (R4 T3, DR finding 6): synthesis used to
+ * persist the MODEL's own self-reported "confidence" number verbatim —
+ * meaningless, since a model can write "0.9" regardless of how much data
+ * actually backs the claim. Confidence is computed here from how much data
+ * fed the synthesis instead. Bands intentionally mirror the UI's existing
+ * thresholds (`confidenceBand` in `src/components/insights/ReceiptSheet.jsx`:
+ * >=0.75 "strong", >=0.5 "moderate", else "tentative") so a persisted value
+ * bands identically wherever it's later read.
+ */
+const computeConfidenceFromSampleSize = (sampleSize) => {
+  const n = Number.isFinite(sampleSize) ? sampleSize : 0;
+  if (n >= 20) return 0.8;   // -> 'strong'
+  if (n >= 10) return 0.6;   // -> 'moderate'
+  if (n > 0) return 0.35;    // -> 'tentative'
+  return 0;                  // no data at all
+};
+
+// ============================================================
 // INSIGHT TYPES
 // ============================================================
 
@@ -47,17 +84,22 @@ const buildSynthesisPrompt = (context) => {
     todayEnvironment
   } = context;
 
-  // Format entries with health and environment context
-  const entrySummaries = (recentEntries || []).slice(-5).map(e => {
+  // Format entries with health and environment context.
+  // Sort-order contract (R4 T3): `recentEntries` is fetched DESCENDING by
+  // createdAt (most recent first) — see orchestrator.js's
+  // `fetchRecentEntries`. `.slice(0, 5)` takes the 5 MOST RECENT entries;
+  // the previous `.slice(-5)` took the 5 OLDEST entries in the window
+  // instead.
+  const entrySummaries = (recentEntries || []).slice(0, 5).map(e => {
     const date = e.date || e.createdAt?.toDate?.()?.toISOString?.().split('T')[0];
-    const mood = e.mood || e.analysis?.mood_score;
+    const mood = e.mood ?? e.analysis?.mood_score;
     const excerpt = (e.content || e.text || '').slice(0, 300);
 
     // Include health and environment signals if available
     const healthInfo = e.healthContext ? extractHealthSignals(e.healthContext) : null;
     const envInfo = e.environmentContext ? extractEnvironmentSignals(e.environmentContext) : null;
 
-    let contextLine = `[${date}] Mood: ${mood}%`;
+    let contextLine = `[${date}] Mood: ${displayMood100(mood) ?? 'unknown'}%`;
     if (healthInfo) {
       if (healthInfo.sleepHours) contextLine += ` | Sleep: ${healthInfo.sleepHours}h`;
       if (healthInfo.recoveryScore) contextLine += ` | Recovery: ${healthInfo.recoveryScore}%`;
@@ -204,7 +246,7 @@ Historical pattern for "${currentState.primary}" state:
     }
   }
 
-  return `You are an expert behavioral psychologist and health coach analyzing a user's journal, biometric, and environmental data. Your task is to generate a single, powerful insight that reveals a non-obvious pattern and its psychological mechanism.
+  return `You are analyzing a user's journal, biometric, and environmental data to explain one pattern that's actually present in it.
 
 ## USER CONTEXT
 
@@ -227,22 +269,33 @@ ${todayEnvInfo}
 
 ## YOUR TASK
 
-Generate ONE profound insight that:
-1. Identifies a HIDDEN PATTERN the user likely hasn't noticed
-2. Explains the PSYCHOLOGICAL MECHANISM behind it
-3. Connects NARRATIVE (what they're saying) with BIOMETRICS (what their body is doing)
-4. Provides a SPECIFIC, ACTIONABLE recommendation
-5. Predicts the likely OUTCOME if the recommendation is followed
+Look at the CONTEXT above and explain ONE pattern you can actually see in
+it — something connecting what the user wrote to their state, biometrics,
+or environment during this window.
 
-## QUALITY CRITERIA
+1. Describe the pattern plainly, in terms of what's ACTUALLY IN the
+   context above (entries, threads, baselines, correlations). Do not
+   invent details, quotes, or numbers that aren't given to you.
+2. Only offer a mechanism/explanation when there's a reasonable, ordinary
+   basis for it in the data provided — it's fine to say the mechanism is
+   unclear or leave it out.
+3. If you suggest an action, keep it modest and connect it directly to
+   what you observed. Do not promise a specific outcome, timeline, or
+   percentage improvement you can't support from the data given.
+4. If the context above is too thin to support a real pattern, say so
+   plainly instead of manufacturing one — a short, honest "not enough
+   data yet" response is valid and preferred over invention.
 
-- The insight should make the user think "holy shit, I didn't realize that"
-- Avoid generic advice like "get more sleep" - be specific to THIS user
-- Reference specific entities (people, pets, places) when relevant
-- Quantify when possible ("your HRV recovers 12ms faster when...", "mood is 18% higher on sunny days")
-- Consider environmental factors (weather, sunshine, light) and their interaction with health and mood
-- Look for compound effects (e.g., poor sleep + low sunshine = amplified impact on mood)
-- The mechanism should be psychologically sound (attachment theory, nervous system regulation, circadian rhythm, SAD, etc.)
+## GROUNDING RULES
+
+- Every number, quote, or biometric reading you write must come from the
+  CONTEXT above — never invent one.
+- Prefer plain, calm language over dramatic framing.
+- If health/environment data isn't in the context above, don't reference
+  it as if it were.
+- Do not include a "confidence" value designed to sound persuasive — the
+  app computes confidence itself from how much data actually supports this
+  insight, and ignores any confidence number you write.
 
 ## RESPONSE FORMAT (JSON only)
 
@@ -306,14 +359,40 @@ export const generateCausalSynthesis = async (userId, context) => {
 
     const parsed = JSON.parse(jsonStr);
 
+    // R4 T3 (DR finding 6): the model's own "evidence" (narrative quotes,
+    // biometric readings, a correlation number) and self-reported
+    // confidence are NOT trusted/persisted anymore — they're prose the
+    // model wrote, not something verified against real data. `sampleSize`
+    // is the one number here WE compute from the real entries fed into
+    // synthesis, so it survives; confidence is computed from it below.
+    // Phase 2's verifier is what re-earns narrative/biometric evidence
+    // display (see plan Phase 2).
+    const sampleSize = (context?.recentEntries || []).length;
+    const confidence = computeConfidenceFromSampleSize(sampleSize);
+
     return {
       success: true,
       insight: {
         id: `insight_${Date.now()}`,
         generatedAt: new Date().toISOString(),
         userId,
-        ...parsed.insight,
-        recommendation: parsed.recommendation,
+        title: parsed.insight?.title,
+        type: parsed.insight?.type || INSIGHT_TYPES.CAUSAL_SYNTHESIS,
+        summary: parsed.insight?.summary,
+        body: parsed.insight?.body,
+        mechanism: parsed.insight?.mechanism,
+        evidence: {
+          statistical: { sampleSize }
+        },
+        confidence,
+        recommendation: parsed.recommendation ? {
+          action: parsed.recommendation.action,
+          timing: parsed.recommendation.timing,
+          reasoning: parsed.recommendation.reasoning
+          // `expectedOutcome`/`confidence` intentionally dropped — a
+          // predicted OUTCOME is exactly the class of unverified claim DR
+          // finding 6 flags.
+        } : undefined,
         metadata: {
           ...parsed.metadata,
           layers: [1, 2, 3, 4],

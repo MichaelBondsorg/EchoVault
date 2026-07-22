@@ -142,12 +142,17 @@ function buildEntries({ spaceId } = {}) {
   const now = Date.parse('2026-07-21T12:00:00.000Z');
   const entries = [];
 
+  // Mood01 (R4 T3): runtime `mood_score` is stored 0-1, not 0-100 — these
+  // literals are the real 0-1 scale (previously written as 80/85/50, which
+  // only "worked" because `computeEntityMoodCorrelations` had a bug that
+  // happened to make bare 0-100-looking integers behave; now fixed, see
+  // orchestrator.js).
   for (let i = 0; i < 4; i++) {
     entries.push({
       id: `interview-${i}`,
       createdAt: new Date(now - i * DAY_MS).toISOString(),
       text: `Had another interview today, feeling good about it. Entry number ${i}.`,
-      analysis: { mood_score: 80 },
+      analysis: { mood_score: 0.80 },
       ...(spaceId ? { spaceId } : {}),
     });
   }
@@ -157,7 +162,7 @@ function buildEntries({ spaceId } = {}) {
       id: `yoga-${i}`,
       createdAt: new Date(now - (i + 4) * DAY_MS).toISOString(),
       text: `Did yoga this morning, feeling solid. Entry number ${i}.`,
-      analysis: { mood_score: 85 },
+      analysis: { mood_score: 0.85 },
       ...(spaceId ? { spaceId } : {}),
     });
   }
@@ -167,7 +172,7 @@ function buildEntries({ spaceId } = {}) {
       id: `neutral-${i}`,
       createdAt: new Date(now - (i + 8) * DAY_MS).toISOString(),
       text: `A regular day. Nothing special. Entry number ${i}.`,
-      analysis: { mood_score: 50 },
+      analysis: { mood_score: 0.50 },
       ...(spaceId ? { spaceId } : {}),
     });
   }

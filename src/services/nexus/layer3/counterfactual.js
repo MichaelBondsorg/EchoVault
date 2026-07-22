@@ -8,6 +8,30 @@
 import { callGemini } from '../../ai/gemini';
 
 // ============================================================
+// MOOD01 CONVENTION (R4 T3)
+// ============================================================
+// Runtime `mood`/`analysis.mood_score` is stored 0-1 (see
+// docs/superpowers/plans/2026-07-22-r4-insight-integrity.md). Every
+// comparison in this file operates on that native 0-1 scale — thresholds
+// below were previously written against a 0-100 assumption (e.g. `< 40`)
+// and, against real 0-1 data, either always or never fired. `displayMood100`
+// is the ONLY place a raw value becomes a "N%" string for prompt text;
+// mirrors `src/services/experiments/computeResult.js`'s `normalizeMoodTo100`
+// domain semantics (reject out-of-[0,1]-domain, never clamp) without
+// importing across the nexus/experiments boundary.
+const displayMood100 = (raw) => {
+  if (!Number.isFinite(raw) || raw < 0 || raw > 1) return null;
+  return Math.round(raw * 100);
+};
+
+// Note: per ratified decision 4, counterfactual insights are suppressed at
+// the orchestrator seam (RISKY_CLAIMS_ENABLED) regardless of the scale
+// fixes below — the corrected thresholds only matter once Phase 1-2
+// evidence rails let that gate flip back on.
+const LOW_MOOD_THRESHOLD = 0.40;
+const GOOD_DAY_MOOD_THRESHOLD = 0.60;
+
+// ============================================================
 // ACTIVITY PATTERNS
 // ============================================================
 
@@ -45,7 +69,11 @@ export const identifyMissingInterventions = (badDayEntry, interventionData, typi
       if (effectiveness?.score > 0.7) {
         missing.push({
           activity,
-          expectedMoodBoost: effectiveness.moodDelta?.mean || 10,
+          // R4 T3 / decision 4: no invented fallback (was `|| 10`) — a
+          // missing real moodDelta means we don't claim a boost at all.
+          expectedMoodBoost: Number.isFinite(effectiveness.moodDelta?.mean)
+            ? effectiveness.moodDelta.mean
+            : null,
           effectivenessScore: effectiveness.score,
           typicalFrequency: interventionData.interventions[activity].totalOccurrences
         });
@@ -88,7 +116,7 @@ export const findGoodDayActivities = (entries, minOccurrences = 3) => {
   for (const [activity, data] of Object.entries(activityMoodMap)) {
     if (data.count >= minOccurrences) {
       const avgMood = data.moods.reduce((a, b) => a + b, 0) / data.moods.length;
-      if (avgMood >= 60) {  // Above-average mood threshold
+      if (avgMood >= GOOD_DAY_MOOD_THRESHOLD) {  // Above-average mood threshold (Mood01)
         results.push({
           activity,
           averageMood: avgMood,
@@ -111,18 +139,20 @@ export const generateCounterfactualInsight = async (badDayEntry, missingInterven
 
   try {
     const entryDate = badDayEntry.date || badDayEntry.createdAt?.toDate?.()?.toISOString?.().split('T')[0] || 'recently';
+    const badDayMood100 = displayMood100(badDayEntry.mood ?? badDayEntry.analysis?.mood_score);
+    const moodBoost100 = displayMood100(topMissing.expectedMoodBoost);
 
     const prompt = `Generate a "what if" insight for a user who had a low mood day.
 
 BAD DAY CONTEXT:
 - Date: ${entryDate}
-- Mood: ${badDayEntry.mood || badDayEntry.analysis?.mood_score}%
+- Mood: ${badDayMood100 ?? 'unknown'}%
 - Brief summary: "${(badDayEntry.content || badDayEntry.text || '').slice(0, 200)}"
 
 MISSING INTERVENTION:
 - Activity: ${topMissing.activity.replace(/_/g, ' ')}
 - Historical effectiveness: ${Math.round(topMissing.effectivenessScore * 100)}%
-- Typical mood boost: +${Math.round(topMissing.expectedMoodBoost)} points
+- Typical mood boost: ${moodBoost100 != null ? `+${moodBoost100} points` : 'not enough data yet to quantify'}
 
 Generate a brief, non-judgmental counterfactual insight:
 1. Don't say "you should have" - that's not helpful
@@ -166,10 +196,10 @@ Response format (JSON):
 export const analyzeCounterfactualPatterns = async (entries, interventionData) => {
   if (!entries || entries.length < 5) return null;
 
-  // Find low mood days (below 40%)
+  // Find low mood days (below LOW_MOOD_THRESHOLD, Mood01 scale)
   const lowMoodDays = entries.filter(e => {
-    const mood = e.mood || e.analysis?.mood_score;
-    return mood && mood < 40;
+    const mood = e.mood ?? e.analysis?.mood_score;
+    return mood != null && mood < LOW_MOOD_THRESHOLD;
   });
 
   if (lowMoodDays.length < 3) return null;

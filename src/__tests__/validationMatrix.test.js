@@ -1051,6 +1051,8 @@ describe('R2 Matrix row (a): every generated Nexus insight carries a receipt', (
   // pattern_correlation via real detectPatternsInPeriod, entity_correlation
   // via the orchestrator's own real computeEntityMoodCorrelations) so the
   // invariant below can't pass vacuously off a single insight.
+  // Mood01 (R4 T3): literals are the real 0-1 scale, matching this file's
+  // own convention elsewhere (see e.g. line ~1320's `mood_score: 0.7`).
   function buildFixtureEntries() {
     const now = Date.parse('2026-07-21T12:00:00.000Z');
     const entries = [];
@@ -1059,7 +1061,7 @@ describe('R2 Matrix row (a): every generated Nexus insight carries a receipt', (
         id: `interview-${i}`,
         createdAt: new Date(now - i * DAY_MS).toISOString(),
         text: `Had another interview today, feeling good about it. Entry number ${i}.`,
-        analysis: { mood_score: 80 },
+        analysis: { mood_score: 0.80 },
       });
     }
     for (let i = 0; i < 4; i++) {
@@ -1067,7 +1069,7 @@ describe('R2 Matrix row (a): every generated Nexus insight carries a receipt', (
         id: `yoga-${i}`,
         createdAt: new Date(now - (i + 4) * DAY_MS).toISOString(),
         text: `Did yoga this morning, feeling solid. Entry number ${i}.`,
-        analysis: { mood_score: 85 },
+        analysis: { mood_score: 0.85 },
       });
     }
     for (let i = 0; i < 4; i++) {
@@ -1075,7 +1077,7 @@ describe('R2 Matrix row (a): every generated Nexus insight carries a receipt', (
         id: `neutral-${i}`,
         createdAt: new Date(now - (i + 8) * DAY_MS).toISOString(),
         text: `A regular day. Nothing special. Entry number ${i}.`,
-        analysis: { mood_score: 50 },
+        analysis: { mood_score: 0.50 },
       });
     }
     return entries;
@@ -1131,6 +1133,7 @@ describe('R2 Matrix row (b): excluded source never appears in regenerated insigh
   // fixture: a mis-tagged "yoga" entry that, once excluded, both disappears
   // from receipts AND flips the entity correlation's stats to reflect its
   // absence — proving exclusion isn't merely cosmetic.
+  // Mood01 (R4 T3): literals are the real 0-1 scale.
   function buildAdversarialEntries() {
     const now = Date.parse('2026-07-21T12:00:00.000Z');
     const entries = [
@@ -1138,7 +1141,7 @@ describe('R2 Matrix row (b): excluded source never appears in regenerated insigh
         id: 'yoga-excluded',
         createdAt: new Date(now).toISOString(),
         text: 'Mentioned yoga in passing, a totally average day otherwise.',
-        analysis: { mood_score: 50 },
+        analysis: { mood_score: 0.50 },
       },
     ];
     for (let i = 0; i < 3; i++) {
@@ -1146,7 +1149,7 @@ describe('R2 Matrix row (b): excluded source never appears in regenerated insigh
         id: `yoga-${i}`,
         createdAt: new Date(now - (i + 1) * DAY_MS).toISOString(),
         text: `Did yoga this morning, feeling solid and strong. Entry number ${i}.`,
-        analysis: { mood_score: 65 },
+        analysis: { mood_score: 0.65 },
       });
     }
     for (let i = 0; i < 8; i++) {
@@ -1154,7 +1157,7 @@ describe('R2 Matrix row (b): excluded source never appears in regenerated insigh
         id: `neutral-${i}`,
         createdAt: new Date(now - (i + 4) * DAY_MS).toISOString(),
         text: `A regular day. Nothing special. Entry number ${i}.`,
-        analysis: { mood_score: 50 },
+        analysis: { mood_score: 0.50 },
       });
     }
     return entries;

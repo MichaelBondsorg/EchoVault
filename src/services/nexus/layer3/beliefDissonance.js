@@ -13,6 +13,35 @@ import { APP_COLLECTION_ID } from '../../../config/constants';
 import { callGemini } from '../../ai/gemini';
 
 // ============================================================
+// MOOD01 CONVENTION (R4 T3)
+// ============================================================
+// Runtime `mood`/`analysis.mood_score` is stored 0-1 (see
+// docs/superpowers/plans/2026-07-22-r4-insight-integrity.md). Every
+// threshold below was previously written against a 0-100 assumption
+// (e.g. `moodRange > 50`) and, against real 0-1 data, never fired.
+// `displayMood100`/`displayMoodPoints` are the ONLY places a raw
+// value/delta becomes a "N points"/"N%" interpretation string; they mirror
+// `src/services/experiments/computeResult.js`'s `normalizeMoodTo100`
+// domain semantics (reject out-of-domain, never clamp) without importing
+// across the nexus/experiments boundary. `displayMood100` is for a single
+// Mood01 value (domain [0,1]); `displayMoodPoints` is for a DIFFERENCE of
+// two Mood01 values (domain [-1,1]).
+const displayMood100 = (raw) => {
+  if (!Number.isFinite(raw) || raw < 0 || raw > 1) return null;
+  return Math.round(raw * 100);
+};
+const displayMoodPoints = (delta) => {
+  if (!Number.isFinite(delta) || delta < -1 || delta > 1) return null;
+  return Math.round(delta * 100);
+};
+
+// Note: per ratified decision 4, belief-dissonance insights are suppressed
+// at the orchestrator seam (RISKY_CLAIMS_ENABLED) regardless of the scale
+// fixes below — corrected thresholds only matter once Phase 1-2 evidence
+// rails let that gate flip back on.
+const MOOD_GATE_THRESHOLD = 0.50;
+
+// ============================================================
 // BELIEF EXTRACTION
 // ============================================================
 
@@ -166,14 +195,16 @@ export const validateBeliefAgainstData = async (belief, userData) => {
       });
 
       if (careerEntries.length >= 5) {
-        const careerMoods = careerEntries.map(e => e.mood || e.analysis?.mood_score).filter(Boolean);
+        const careerMoods = careerEntries.map(e => e.mood ?? e.analysis?.mood_score).filter(m => m != null);
         const otherEntries = entries.filter(e => !careerEntries.includes(e));
-        const otherMoods = otherEntries.map(e => e.mood || e.analysis?.mood_score).filter(Boolean);
+        const otherMoods = otherEntries.map(e => e.mood ?? e.analysis?.mood_score).filter(m => m != null);
 
         const careerMoodVariance = calculateVariance(careerMoods);
         const otherMoodVariance = calculateVariance(otherMoods);
 
-        // High variance on career days suggests high sensitivity
+        // High variance on career days suggests high sensitivity. This is a
+        // ratio of two same-unit variances, so it's scale-invariant — no
+        // Mood01 conversion needed for the comparison itself.
         if (careerMoodVariance > otherMoodVariance * 1.5) {
           validation.contradictingData.push({
             metric: 'mood_variance_career_vs_other',
@@ -182,13 +213,14 @@ export const validateBeliefAgainstData = async (belief, userData) => {
           });
         }
 
-        // Check for extreme mood swings around career events
+        // Check for extreme mood swings around career events (Mood01: a
+        // >50-POINT range is a >0.5 range on the native 0-1 scale).
         const moodRange = Math.max(...careerMoods) - Math.min(...careerMoods);
-        if (moodRange > 50) {
+        if (moodRange > 0.50) {
           validation.contradictingData.push({
             metric: 'career_mood_range',
             value: moodRange,
-            interpretation: `Career events caused mood swings of ${moodRange} points`
+            interpretation: `Career events caused mood swings of ${displayMood100(moodRange)} points`
           });
         }
       }
@@ -208,16 +240,17 @@ export const validateBeliefAgainstData = async (belief, userData) => {
       });
 
       if (restDays.length >= 3 && workoutDays.length >= 5) {
-        const restMoodAvg = average(restDays.map(e => e.mood).filter(Boolean));
-        const workoutMoodAvg = average(workoutDays.map(e => e.mood).filter(Boolean));
+        const restMoodAvg = average(restDays.map(e => e.mood).filter(m => m != null));
+        const workoutMoodAvg = average(workoutDays.map(e => e.mood).filter(m => m != null));
 
         const moodDiff = workoutMoodAvg - restMoodAvg;
 
-        if (Math.abs(moodDiff) < 5) {
+        // Mood01: a <5-POINT difference is <0.05 on the native 0-1 scale.
+        if (Math.abs(moodDiff) < 0.05) {
           validation.contradictingData.push({
             metric: 'rest_vs_workout_mood',
             value: moodDiff,
-            interpretation: `Only ${Math.abs(Math.round(moodDiff))}-point mood difference between rest and workout days`
+            interpretation: `Only ${Math.abs(displayMoodPoints(moodDiff))}-point mood difference between rest and workout days`
           });
         }
       }
@@ -225,15 +258,16 @@ export const validateBeliefAgainstData = async (belief, userData) => {
     }
 
     case 'emotional_regulation': {
-      // Check mood volatility
-      const moods = entries.map(e => e.mood).filter(Boolean);
+      // Check mood volatility (Mood01: a >20% volatility reading is >0.20
+      // on the native 0-1 scale)
+      const moods = entries.map(e => e.mood).filter(m => m != null);
       const volatility = calculateVolatility(moods);
 
-      if (belief.statement.toLowerCase().includes('stable') && volatility > 20) {
+      if (belief.statement.toLowerCase().includes('stable') && volatility > 0.20) {
         validation.contradictingData.push({
           metric: 'mood_volatility',
           value: volatility,
-          interpretation: `Mood volatility of ${Math.round(volatility)}% suggests emotional variability`
+          interpretation: `Mood volatility of ${displayMood100(volatility)}% suggests emotional variability`
         });
       }
       break;
@@ -252,14 +286,15 @@ export const validateBeliefAgainstData = async (belief, userData) => {
       });
 
       if (socialEntries.length >= 3 && aloneEntries.length >= 3) {
-        const socialMoodAvg = average(socialEntries.map(e => e.mood).filter(Boolean));
-        const aloneMoodAvg = average(aloneEntries.map(e => e.mood).filter(Boolean));
+        const socialMoodAvg = average(socialEntries.map(e => e.mood).filter(m => m != null));
+        const aloneMoodAvg = average(aloneEntries.map(e => e.mood).filter(m => m != null));
 
-        if (Math.abs(socialMoodAvg - aloneMoodAvg) > 15) {
+        // Mood01: a >15-POINT difference is >0.15 on the native 0-1 scale.
+        if (Math.abs(socialMoodAvg - aloneMoodAvg) > 0.15) {
           validation.contradictingData.push({
             metric: 'social_vs_alone_mood',
             value: socialMoodAvg - aloneMoodAvg,
-            interpretation: `Social days average ${Math.round(socialMoodAvg - aloneMoodAvg)} points ${socialMoodAvg > aloneMoodAvg ? 'higher' : 'lower'} than alone days`
+            interpretation: `Social days average ${displayMoodPoints(socialMoodAvg - aloneMoodAvg)} points ${socialMoodAvg > aloneMoodAvg ? 'higher' : 'lower'} than alone days`
           });
         }
       }
@@ -283,9 +318,12 @@ export const validateBeliefAgainstData = async (belief, userData) => {
  * Generate gentle dissonance insight
  */
 export const generateDissonanceInsight = async (belief, validation, recentMood) => {
-  // Check mood gate - use most recent entry's mood
-  const currentMood = recentMood || 50;
-  const moodThreshold = 50;  // Default threshold
+  // Check mood gate - use most recent entry's mood (Mood01: was `|| 50` /
+  // `= 50`, comparing a native 0-1 value against a 0-100-scale threshold —
+  // `currentMood < 50` was ALWAYS true, so this gate always queued the
+  // insight and it never actually surfaced).
+  const currentMood = recentMood ?? 0.5;
+  const moodThreshold = MOOD_GATE_THRESHOLD;
 
   if (currentMood < moodThreshold) {
     console.log('[BeliefDissonance] Mood gate triggered, queuing insight for later');

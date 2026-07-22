@@ -113,20 +113,25 @@ function mockEntriesSnapshot(entries) {
 
 /**
  * Adversarial fixture: `yoga-excluded` is a mis-tagged/neutral entry
- * (mood=50, same as the neutral baseline) that happens to mention "yoga".
- * Verified by hand against `computeEntityMoodCorrelations`'s exact
- * arithmetic (baselineMood = round(mean of ALL entries), entity average =
- * round(mean of matching entries), moodDelta = averageMood - baselineMood,
- * only surfaced as an insight when `abs(moodDelta) >= 10`):
+ * (mood=0.50, same as the neutral baseline) that happens to mention "yoga".
+ * Mood01 (R4 T3): runtime `mood_score` is stored 0-1, not 0-100 — these
+ * literals are the real 0-1 scale (previously written as 50/65/90/5, which
+ * only "worked" because `computeEntityMoodCorrelations` had a bug that
+ * happened to make bare 0-100-looking integers behave; now fixed, see
+ * orchestrator.js's `displayMood100`). Verified by hand against
+ * `computeEntityMoodCorrelations`'s exact arithmetic (baselineMood =
+ * round(100 * mean of ALL entries), entity average = round(100 * mean of
+ * matching entries), moodDelta = averageMood - baselineMood, only
+ * surfaced as an insight when `abs(moodDelta) >= 10`):
  *
  *   WITH `yoga-excluded` (12 entries, moods
- *     [65,65,65,50, 50x8]):
- *       baseline = round(645/12) = 54
- *       yoga avg = round(245/4)  = 61        -> moodDelta = 7  (< 10: SUPPRESSED,
+ *     [0.65,0.65,0.65,0.50, 0.50x8]):
+ *       baseline = round(100 * 6.45/12) = 54
+ *       yoga avg = round(100 * 2.45/4)  = 61  -> moodDelta = 7  (< 10: SUPPRESSED,
  *                                                no entity_correlation insight at all)
- *   WITHOUT it (11 entries, moods [65,65,65, 50x8]):
- *       baseline = round(595/11) = 54
- *       yoga avg = round(195/3)  = 65        -> moodDelta = 11 (>= 10: insight appears,
+ *   WITHOUT it (11 entries, moods [0.65,0.65,0.65, 0.50x8]):
+ *       baseline = round(100 * 5.95/11) = 54
+ *       yoga avg = round(100 * 1.95/3)  = 65  -> moodDelta = 11 (>= 10: insight appears,
  *                                                "boosts", sampleSize 3)
  *
  * So the wrongly-tagged entry doesn't just skew the correlation — it masks
@@ -139,7 +144,7 @@ function buildSuppressionEntries() {
       id: 'yoga-excluded',
       createdAt: new Date(now).toISOString(),
       text: 'Mentioned yoga in passing, a totally average day otherwise.',
-      analysis: { mood_score: 50 },
+      analysis: { mood_score: 0.50 },
     },
   ];
   for (let i = 0; i < 3; i++) {
@@ -147,7 +152,7 @@ function buildSuppressionEntries() {
       id: `yoga-${i}`,
       createdAt: new Date(now - (i + 1) * DAY_MS).toISOString(),
       text: `Did yoga this morning, feeling solid and strong. Entry number ${i}.`,
-      analysis: { mood_score: 65 },
+      analysis: { mood_score: 0.65 },
     });
   }
   for (let i = 0; i < 8; i++) {
@@ -155,7 +160,7 @@ function buildSuppressionEntries() {
       id: `neutral-${i}`,
       createdAt: new Date(now - (i + 4) * DAY_MS).toISOString(),
       text: `A regular day. Nothing special. Entry number ${i}.`,
-      analysis: { mood_score: 50 },
+      analysis: { mood_score: 0.50 },
     });
   }
   return entries;
@@ -166,12 +171,14 @@ function buildSuppressionEntries() {
  * extreme-low mood among otherwise-high yoga entries. Both WITH and
  * WITHOUT the exclusion clear the significance gate (same direction,
  * different magnitude/sampleSize), so restoring is provable as "the entry
- * is back in the computation" without crossing a suppression boundary:
+ * is back in the computation" without crossing a suppression boundary.
+ * Mood01 (R4 T3): literals are the real 0-1 scale (see note above
+ * `buildSuppressionEntries`).
  *
- *   WITH  (12 entries): baseline = round(675/12) = 56, yoga avg =
- *     round(275/4) = 69 -> moodDelta 13, sampleSize 4.
- *   WITHOUT (11 entries): baseline = round(670/11) = 61, yoga avg =
- *     round(270/3) = 90 -> moodDelta 29, sampleSize 3.
+ *   WITH  (12 entries): baseline = round(100 * 6.75/12) = 56, yoga avg =
+ *     round(100 * 2.75/4) = 69 -> moodDelta 13, sampleSize 4.
+ *   WITHOUT (11 entries): baseline = round(100 * 6.70/11) = 61, yoga avg =
+ *     round(100 * 2.70/3) = 90 -> moodDelta 29, sampleSize 3.
  */
 function buildRestoreEntries() {
   const now = Date.parse('2026-07-21T12:00:00.000Z');
@@ -180,7 +187,7 @@ function buildRestoreEntries() {
       id: 'yoga-excluded',
       createdAt: new Date(now).toISOString(),
       text: 'Did yoga but felt awful and defeated the whole time.',
-      analysis: { mood_score: 5 },
+      analysis: { mood_score: 0.05 },
     },
   ];
   for (let i = 0; i < 3; i++) {
@@ -188,7 +195,7 @@ function buildRestoreEntries() {
       id: `yoga-${i}`,
       createdAt: new Date(now - (i + 1) * DAY_MS).toISOString(),
       text: `Did yoga this morning, feeling solid and strong. Entry number ${i}.`,
-      analysis: { mood_score: 90 },
+      analysis: { mood_score: 0.90 },
     });
   }
   for (let i = 0; i < 8; i++) {
@@ -196,7 +203,7 @@ function buildRestoreEntries() {
       id: `neutral-${i}`,
       createdAt: new Date(now - (i + 4) * DAY_MS).toISOString(),
       text: `A regular day. Nothing special. Entry number ${i}.`,
-      analysis: { mood_score: 50 },
+      analysis: { mood_score: 0.50 },
     });
   }
   return entries;

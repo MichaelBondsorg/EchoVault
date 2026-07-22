@@ -14,6 +14,24 @@ import { extractHealthSignals } from '../../health/healthFormatter';
 import { extractEnvironmentSignals } from '../../environment/environmentFormatter';
 
 // ============================================================
+// MOOD01 CONVENTION (R4 T3)
+// ============================================================
+// Runtime `mood`/`analysis.mood_score` is stored 0-1 (see
+// docs/superpowers/plans/2026-07-22-r4-insight-integrity.md). All
+// `moodDelta` values computed/stored by this file stay on that native 0-1
+// scale — consumers that render them as "N points" (recommendationEngine)
+// are responsible for the 0-1 -> 0-100 display conversion.
+//
+// This module's OUTCOME claims (an activity "worked" because a same-day
+// mood reading followed a text mention of it) are suppressed at the
+// orchestrator seam (RISKY_CLAIMS_ENABLED, ratified decision 4) — a text
+// mention is not verified completion, and same-entry mood is an
+// association, not a measured causal outcome. That's a structural
+// limitation Phase 1's typed extraction work addresses (DR finding 13,
+// shared with open-loops quality); this file just keeps the arithmetic
+// correct underneath the gate.
+
+// ============================================================
 // INTERVENTION DEFINITIONS
 // ============================================================
 
@@ -283,37 +301,55 @@ export const calculateInterventionEffectiveness = (interventionOccurrences, allE
     contextual: {}
   };
 
+  // Whoop shape fix (R4 T3): `whoopHistory` is `{available, days: [...]}` —
+  // an ARRAY of per-day summaries keyed by `requestedLocalDate` (see
+  // `src/services/health/whoop.js`'s `getWhoopHistory`/`whoopTransforms.js`)
+  // — not a plain object indexable by date string. The old
+  // `whoopHistory[date]` lookup always returned `undefined`, so no
+  // intervention ever accrued HRV/recovery evidence at all.
+  const whoopByDate = new Map(
+    (whoopHistory?.days || [])
+      .filter(d => d?.requestedLocalDate)
+      .map(d => [d.requestedLocalDate, d])
+  );
+
   for (const occurrence of interventionOccurrences) {
     const date = occurrence.entryDate;
     if (!date) continue;
 
     const nextDate = getNextDate(date);
 
-    // Find same-day mood
+    // Find same-day mood. `!= null` (not truthy) so a genuine mood of 0
+    // (Mood01: the lowest valid value) isn't silently dropped.
     const sameDayMood = occurrence.entryMood;
 
-    // Find baseline mood (last 7 days excluding this day)
+    // Find baseline mood: the 7 days STRICTLY BEFORE this occurrence.
+    // Previously `isWithinDays` compared absolute distance in either
+    // direction, so entries AFTER the intervention day could leak into its
+    // own "baseline" (look-ahead bias — a future day's mood can't be a
+    // baseline for a day that hasn't happened yet from that day's
+    // perspective).
     const baselineMoods = allEntries
       .filter(e => {
         const eDate = e.date || e.createdAt?.toDate?.()?.toISOString?.().split('T')[0];
-        return eDate !== date && isWithinDays(eDate, date, 7);
+        return isPriorWithinDays(eDate, date, 7);
       })
-      .map(e => e.mood || e.analysis?.mood_score)
-      .filter(Boolean);
+      .map(e => e.mood ?? e.analysis?.mood_score)
+      .filter(m => m != null);
 
     const baselineMood = baselineMoods.length > 0
       ? baselineMoods.reduce((a, b) => a + b, 0) / baselineMoods.length
-      : 50;
+      : 0.5; // Mood01 neutral default (was `50`, a 0-100-scale value)
 
-    if (sameDayMood) {
+    if (sameDayMood != null) {
       const moodDelta = sameDayMood - baselineMood;
       effectiveness.global.moodDelta.push(moodDelta);
     }
 
     // Whoop metrics
-    if (whoopHistory) {
-      const todayWhoop = whoopHistory[date];
-      const nextDayWhoop = whoopHistory[nextDate];
+    if (whoopByDate.size > 0) {
+      const todayWhoop = whoopByDate.get(date);
+      const nextDayWhoop = whoopByDate.get(nextDate);
 
       if (nextDayWhoop?.hrv?.average && todayWhoop?.hrv?.average) {
         effectiveness.global.hrvDelta.push(
@@ -354,10 +390,12 @@ export const calculateInterventionEffectiveness = (interventionOccurrences, allE
 const calculateEffectivenessScore = (metrics) => {
   let score = 0.5;  // Neutral baseline
 
-  // Mood impact
+  // Mood impact. Mood01: `moodDelta` is a native 0-1-scale delta, so a
+  // "30-point" swing is 0.30, not 30 (was dividing by 30 against a value
+  // that maxes out around 1, so mood essentially never contributed).
   if (metrics.moodDelta.length >= 3) {
     const avgMoodDelta = metrics.moodDelta.reduce((a, b) => a + b, 0) / metrics.moodDelta.length;
-    score += Math.min(avgMoodDelta / 30, 0.25);  // Max +0.25 from mood
+    score += Math.min(avgMoodDelta / 0.30, 0.25);  // Max +0.25 from mood
   }
 
   // HRV impact
@@ -473,10 +511,17 @@ const getNextDate = (dateStr) => {
   return date.toISOString().split('T')[0];
 };
 
-const isWithinDays = (date1, date2, days) => {
-  if (!date1 || !date2) return false;
-  const d1 = new Date(date1);
-  const d2 = new Date(date2);
-  const diffDays = Math.abs((d1 - d2) / (1000 * 60 * 60 * 24));
-  return diffDays <= days;
+/**
+ * Was `isWithinDays`: took `Math.abs` of the distance, so it accepted
+ * dates on EITHER side of the reference date — future entries could leak
+ * into a "baseline" for a day that hadn't happened yet from that day's
+ * perspective (R4 T3). Now requires `candidateDate` to be strictly BEFORE
+ * `referenceDate`, within `days`.
+ */
+const isPriorWithinDays = (candidateDate, referenceDate, days) => {
+  if (!candidateDate || !referenceDate) return false;
+  const c = new Date(candidateDate);
+  const r = new Date(referenceDate);
+  const diffDays = (r - c) / (1000 * 60 * 60 * 24);
+  return diffDays > 0 && diffDays <= days;
 };
