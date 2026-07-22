@@ -100,7 +100,7 @@ export const BASELINES_SCHEMA = {
       mood: { mean: 'number', delta: 'number' },
       sampleDays: 'number'
     },
-    // R4 T3 (privacy sweep): the prior example here, `entity:spencer`, was
+    // R4 T3 (privacy sweep): the prior example here used a personal name and was
     // both a personal literal AND stale — baselineManager.js never emits
     // `entity:*` keys (per-user entity baselines were removed; see R4 T2).
     // Real prefixes baselineManager.js actually emits: `state:`,
