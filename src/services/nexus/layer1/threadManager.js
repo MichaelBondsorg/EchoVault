@@ -575,8 +575,15 @@ JOURNAL ENTRY:
 TASK:
 1. Determine if this entry:
    a) Continues an existing active thread (same topic)
-   b) Represents a METAMORPHOSIS (new topic in same life domain - e.g., "Databricks" evolving to "Anthropic")
-   c) Starts a genuinely new thread (new life domain)
+   b) Represents a METAMORPHOSIS (new topic in same life domain - e.g., a
+      project thread evolving into a broader career-direction thread)
+   c) Starts a genuinely new, substantial thread worth tracking across
+      multiple entries (a new life domain)
+   d) "none" of the above — this is the DEFAULT choice. Most entries should
+      land here: routine, one-off, or too minor to need thread tracking, or
+      the entry doesn't clearly and specifically continue/evolve any listed
+      thread. Only choose continue/metamorphosis/new when the entry clearly
+      warrants it — do not force a match.
 2. Extract somatic (body) signals
 3. Estimate emotional sentiment (0-1)
 4. If metamorphosis: identify the predecessor thread and explain the evolution
@@ -587,7 +594,7 @@ SOMATIC SIGNALS (only use these):
 RESPONSE FORMAT (JSON only, no markdown):
 {
   "thread": {
-    "action": "continue" | "metamorphosis" | "new",
+    "action": "continue" | "metamorphosis" | "new" | "none",
     "existingThreadName": "exact name if continuing, null otherwise",
     "proposedName": "short descriptive name if new/metamorphosis",
     "category": "career" | "health" | "relationship" | "growth" | "somatic" | "housing" | "financial" | "creative" | "social",
@@ -676,7 +683,17 @@ export const identifyThreadAssociation = async (userId, entryId, entryText, sent
     const { thread, somaticSignals, sentiment: llmSentiment, confidence, arcEvent } = llmResult;
     const finalSentiment = sentiment ?? llmSentiment ?? null;
 
-    // Handle based on action
+    // Handle based on action.
+    //
+    // R4 T2b (DR finding 9): `none` is a first-class outcome — the honest
+    // "no thread / no meaningful change" result, offered to the LLM above
+    // as the DEFAULT choice, and also the code-level fallback for both an
+    // unmatched `continue` and any unrecognized/malformed action value.
+    // Previously an unmatched `continue` had no `break` and fell straight
+    // into `metamorphosis` (silently fabricating a new thread + predecessor
+    // search), and any unrecognized action silently fell into `new`'s
+    // create-or-dedupe logic via a shared `case 'new': default:` block.
+    // Neither path exists anymore — no Firestore write happens for `none`.
     switch (thread.action) {
       case 'continue': {
         const matchedThread = activeThreads.find(
@@ -700,7 +717,20 @@ export const identifyThreadAssociation = async (userId, entryId, entryText, sent
             confidence
           };
         }
-        // Fall through to new if match not found
+
+        // LLM claimed continuation of a thread that couldn't be matched.
+        // Honest outcome: nothing meaningful happened for thread tracking —
+        // do NOT fabricate a metamorphosis or a brand-new thread from a
+        // failed match.
+        return {
+          success: true,
+          action: 'none',
+          threadId: null,
+          threadName: null,
+          somaticSignals: somaticSignals || [],
+          confidence,
+          note: 'LLM claimed continuation of a thread that could not be matched'
+        };
       }
 
       case 'metamorphosis': {
@@ -737,8 +767,7 @@ export const identifyThreadAssociation = async (userId, entryId, entryText, sent
         };
       }
 
-      case 'new':
-      default: {
+      case 'new': {
         // Check for duplicates first
         const proposedName = thread.proposedName || 'Unnamed Thread';
         // v2, unconditionally (see file-level doc comment): matched against
@@ -785,6 +814,23 @@ export const identifyThreadAssociation = async (userId, entryId, entryText, sent
           action: 'created',
           threadId: newThread.id,
           threadName: newThread.displayName,
+          somaticSignals: somaticSignals || [],
+          confidence
+        };
+      }
+
+      case 'none':
+      default: {
+        // 'none' is the first-class, deliberate DEFAULT outcome (see the
+        // prompt above): nothing meaningfully changed for thread tracking.
+        // Also the safe fallback for any unrecognized/malformed action
+        // value — previously this branch was shared with 'new' and would
+        // silently create a thread. No Firestore write happens here.
+        return {
+          success: true,
+          action: 'none',
+          threadId: null,
+          threadName: null,
           somaticSignals: somaticSignals || [],
           confidence
         };

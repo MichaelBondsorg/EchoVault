@@ -235,6 +235,29 @@ describe('readEntries', () => {
       expect(entries[0].moodScore).toBeNull();
     });
 
+    // T4 review (Important): range validation mirrors normalizeMoodTo100 —
+    // out-of-range / non-finite values are INVALID → missing, never clamped
+    // or passed through to an out-of-range display value.
+    it.each([
+      [1.2, 'above range'],
+      [-0.1, 'below range'],
+      [Number.NaN, 'NaN'],
+      [Number.POSITIVE_INFINITY, 'Infinity'],
+    ])('rejects out-of-range mood_score %p to missing (%s), never clamped', async (bad) => {
+      const db = buildFakeDb({ entries: [rawEntryDoc('e1', { mood_score: bad })], exclusions: [] });
+      const entries = await readEntries(db, USER_BASE, PERIOD_START, PERIOD_END, 'weekly');
+      expect(entries[0].moodScore).toBeNull();
+    });
+
+    it('accepts the exact boundaries 0 and 1 as valid', async () => {
+      const db = buildFakeDb({
+        entries: [rawEntryDoc('e1', { mood_score: 0 }), rawEntryDoc('e2', { mood_score: 1 })],
+        exclusions: [],
+      });
+      const entries = await readEntries(db, USER_BASE, PERIOD_START, PERIOD_END, 'weekly');
+      expect(entries.map((e) => e.moodScore)).toEqual([0, 1]);
+    });
+
     it('treats a doc with no analysis object at all as missing', async () => {
       const db = buildFakeDb({ entries: [rawEntryDoc('e1', undefined)], exclusions: [] });
       const entries = await readEntries(db, USER_BASE, PERIOD_START, PERIOD_END, 'weekly');

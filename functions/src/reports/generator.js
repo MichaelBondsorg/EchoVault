@@ -377,7 +377,16 @@ export async function readEntries(db, userBase, periodStart, periodEnd, cadence)
       // NOT a display value) for compatibility with existing consumers;
       // conversion to the 0-100 display convention happens explicitly at
       // each display site (see generateReport's moodTrend prep above).
-      moodScore: typeof d.analysis?.mood_score === 'number' ? d.analysis.mood_score : null,
+      // Range-validated per the normalizeMoodTo100 precedent this file cites:
+      // out-of-range / non-finite values are INVALID → null (missing), never
+      // clamped or passed through to display (T4 review, Important).
+      moodScore:
+        typeof d.analysis?.mood_score === 'number' &&
+        Number.isFinite(d.analysis.mood_score) &&
+        d.analysis.mood_score >= 0 &&
+        d.analysis.mood_score <= 1
+          ? d.analysis.mood_score
+          : null,
       category: d.classification?.category || d.category || 'uncategorized',
       safety_flagged: d.safety_flagged || false,
       has_warning_indicators: d.has_warning_indicators || false,
