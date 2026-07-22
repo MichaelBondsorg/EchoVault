@@ -44,6 +44,8 @@ function buildAnalysisPlan(template, params = {}) {
     outcome: { ...template.outcome },
     minPairedObservations: MIN_PAIRED_OBSERVATIONS,
     coverageFloor: COVERAGE_FLOOR,
+    confounders: [...(template.confounders || [])],
+    whatThisDoesNotProve: [...(template.whatThisDoesNotProve || [])],
   };
 }
 
@@ -51,8 +53,16 @@ function buildAnalysisPlan(template, params = {}) {
 // Fixture helpers
 // ---------------------------------------------------------------------------
 
+const DAY_MS = 24 * 60 * 60 * 1000;
+
 function isoDay(y, m, d, hour = 12) {
   return new Date(Date.UTC(y, m - 1, d, hour)).toISOString();
+}
+
+/** ISO string `offsetDays` (+ optional `hour`) after `baseMs` (a UTC epoch ms). Avoids manual calendar-boundary arithmetic for multi-month fixtures. */
+function isoAtOffset(baseMs, offsetDays, hour = 12) {
+  const day = new Date(baseMs + offsetDays * DAY_MS);
+  return new Date(Date.UTC(day.getUTCFullYear(), day.getUTCMonth(), day.getUTCDate(), hour)).toISOString();
 }
 
 function dateKeyFor(y, m, d) {
@@ -187,6 +197,144 @@ describe('computeExperimentResult — golden fixture (end-to-end, hand-computed)
     expect(result.narrative.alternatives).toEqual(SLEEP_TEMPLATE.confounders);
     expect(result.narrative.whatThisDoesNotProve).toEqual(SLEEP_TEMPLATE.whatThisDoesNotProve);
     expect(result.narrative).not.toHaveProperty('insufficiency');
+    // `reasons` is an insufficient-only field (absence, not undefined).
+    expect(result).not.toHaveProperty('reasons');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// CRITICAL review fix: coverage floor (data-method spec default #2) — every
+// TEST below reproduces/guards the reviewer's finding that
+// `computeExperimentResult` was accepting a sparse-but-lucky sample as `ok`
+// because `estimator.runAnalysisPlan` deliberately delegates this check to
+// its caller (see its own docblock) and nothing was calling it. RED/GREEN
+// evidence for the reproduction case is in task-5-report.md (verified by
+// running this exact test against the pre-fix commit before adding the fix).
+// ---------------------------------------------------------------------------
+
+describe('computeExperimentResult — coverage floor (spec default #2) enforcement', () => {
+  const SPARSE_BASE_MS = Date.UTC(2027, 0, 1); // 2027-01-01T00:00:00.000Z
+  const SPARSE_START = new Date(SPARSE_BASE_MS).toISOString();
+  const SPARSE_END = new Date(SPARSE_BASE_MS + 60 * DAY_MS).toISOString(); // 60-day window
+  const SPARSE_NOW = new Date(SPARSE_BASE_MS + 90 * DAY_MS); // well after end
+
+  /** 60 days; sleep data (exposure) present on only the first `exposureDays` of them; mood (outcome) present every day. */
+  function buildSparseExposureEntries(exposureDays) {
+    const entries = [];
+    for (let i = 0; i < 60; i++) {
+      entries.push({
+        id: `sparse60-${i + 1}`,
+        createdAt: isoAtOffset(SPARSE_BASE_MS, i),
+        healthContext: i < exposureDays ? { sleep: { totalHours: 6 + (i % 3) } } : undefined,
+        analysis: { mood_score: 50 + (i % 10) }, // present every day -> outcome coverage 60/60
+      });
+    }
+    return entries;
+  }
+
+  it('CRITICAL regression: 12 of 60 exposure days (20%), all 12 paired -> insufficient, not a full estimate', () => {
+    const entries = buildSparseExposureEntries(12);
+    const experiment = baseExperiment({
+      template: SLEEP_TEMPLATE,
+      startAt: SPARSE_START,
+      endAt: SPARSE_END,
+      durationDays: 60,
+    });
+    const result = computeExperimentResult({ experiment, entries, now: SPARSE_NOW });
+
+    // The biased-sample scenario the spec's default #2 rationale names: 12
+    // pairs clears MIN_PAIRED_OBSERVATIONS (10) on raw count alone, but 12
+    // of 60 days (20%) is well under the 50% coverage floor.
+    expect(result.coverage.exposure).toEqual({ covered: 12, total: 60, label: '12 of 60 days' });
+    expect(result.coverage.outcome).toEqual({ covered: 60, total: 60, label: '60 of 60 days' });
+    expect(result.status).toBe('insufficient');
+    expect(result).not.toHaveProperty('estimate');
+    expect(result.narrative).not.toHaveProperty('summary');
+    expect(result.narrative.insufficiency).toBe(INSUFFICIENCY_COPY);
+    expect(result.reasons).toEqual(['exposure_coverage_below_floor']);
+    // Receipt invariant still holds even here.
+    expect(result.receipt.versions.generator).toBe('experiment_v1');
+  });
+
+  it('exactly 50% coverage passes the floor (operator is >=, matching the spec doc)', () => {
+    // 24-day window, 12 of 24 exposure days (exactly 50%), all paired -> 12
+    // pairs (>= MIN_PAIRED_OBSERVATIONS), isolating the floor check alone.
+    const entries = buildSparseExposureEntries(12).slice(0, 24).map((e, i) => ({
+      ...e,
+      healthContext: i < 12 ? { sleep: { totalHours: 6 + (i % 3) } } : undefined,
+    }));
+    const experiment = baseExperiment({
+      template: SLEEP_TEMPLATE,
+      startAt: SPARSE_START,
+      endAt: new Date(SPARSE_BASE_MS + 24 * DAY_MS).toISOString(),
+      durationDays: 24,
+    });
+    const result = computeExperimentResult({ experiment, entries, now: new Date(SPARSE_BASE_MS + 40 * DAY_MS) });
+
+    expect(result.coverage.exposure).toEqual({ covered: 12, total: 24, label: '12 of 24 days' });
+    expect(result.status).toBe('ok');
+    expect(result.estimate.n).toBe(12);
+  });
+
+  it('one day under 50% coverage fails the floor (11 of 24 days)', () => {
+    const entries = buildSparseExposureEntries(12).slice(0, 24).map((e, i) => ({
+      ...e,
+      healthContext: i < 11 ? { sleep: { totalHours: 6 + (i % 3) } } : undefined,
+    }));
+    const experiment = baseExperiment({
+      template: SLEEP_TEMPLATE,
+      startAt: SPARSE_START,
+      endAt: new Date(SPARSE_BASE_MS + 24 * DAY_MS).toISOString(),
+      durationDays: 24,
+    });
+    const result = computeExperimentResult({ experiment, entries, now: new Date(SPARSE_BASE_MS + 40 * DAY_MS) });
+
+    expect(result.coverage.exposure).toEqual({ covered: 11, total: 24, label: '11 of 24 days' });
+    expect(result.status).toBe('insufficient');
+    expect(result.reasons).toEqual(['exposure_coverage_below_floor']);
+    // Isolation check: 11 pairs would have cleared MIN_PAIRED_OBSERVATIONS
+    // (10) on raw count alone — the failure is purely the coverage floor.
+    expect(result.reasons).not.toContain('insufficient_paired_observations');
+  });
+
+  it('outcome coverage below floor fails independently of full exposure coverage', () => {
+    const entries = [];
+    for (let i = 0; i < 24; i++) {
+      entries.push({
+        id: `outcome-floor-${i + 1}`,
+        createdAt: isoAtOffset(SPARSE_BASE_MS, i),
+        healthContext: { sleep: { totalHours: 6 + (i % 3) } }, // full exposure coverage
+        analysis: i < 11 ? { mood_score: 50 + (i % 10) } : undefined, // 11 of 24 outcome days (below floor)
+      });
+    }
+    const experiment = baseExperiment({
+      template: SLEEP_TEMPLATE,
+      startAt: SPARSE_START,
+      endAt: new Date(SPARSE_BASE_MS + 24 * DAY_MS).toISOString(),
+      durationDays: 24,
+    });
+    const result = computeExperimentResult({ experiment, entries, now: new Date(SPARSE_BASE_MS + 40 * DAY_MS) });
+
+    expect(result.coverage.exposure).toEqual({ covered: 24, total: 24, label: '24 of 24 days' });
+    expect(result.coverage.outcome).toEqual({ covered: 11, total: 24, label: '11 of 24 days' });
+    expect(result.status).toBe('insufficient');
+    expect(result.reasons).toEqual(['outcome_coverage_below_floor']);
+  });
+
+  it('coverage-floor and pair-count reasons accumulate together when both are true', () => {
+    // 5 of 60 exposure days -> both below the 50% floor AND below
+    // MIN_PAIRED_OBSERVATIONS (10) on raw pair count.
+    const entries = buildSparseExposureEntries(5);
+    const experiment = baseExperiment({
+      template: SLEEP_TEMPLATE,
+      startAt: SPARSE_START,
+      endAt: SPARSE_END,
+      durationDays: 60,
+    });
+    const result = computeExperimentResult({ experiment, entries, now: SPARSE_NOW });
+
+    expect(result.status).toBe('insufficient');
+    expect(result.reasons).toEqual(['exposure_coverage_below_floor', 'insufficient_paired_observations']);
   });
 });
 
@@ -220,12 +368,88 @@ describe('computeExperimentResult — insufficiency payload-exactness', () => {
     expect(result.narrative.insufficiency).toBe(INSUFFICIENCY_COPY);
     expect(result.narrative.alternatives).toEqual([]);
     expect(result.narrative.whatThisDoesNotProve).toEqual([]);
+    // 5 of 28 days (~18%) is also below the coverage floor, so both a
+    // coverage reason and the pair-count reason accumulate.
+    expect(result.reasons).toEqual([
+      'exposure_coverage_below_floor',
+      'outcome_coverage_below_floor',
+      'insufficient_paired_observations',
+    ]);
 
     // Receipt invariant: every result, ok AND insufficient, carries a receipt.
     expect(result.receipt).toBeTruthy();
     expect(result.receipt.versions.generator).toBe('experiment_v1');
     expect(result.receipt.sampleSize).toBe(5);
     expect(result.coverage.exposure.covered).toBe(5);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// IMPORTANT review fix: narrative caveats are read from the FROZEN plan
+// snapshot (experiment.analysisPlan.confounders/whatThisDoesNotProve), not
+// re-looked-up from the (mutable) template catalog by templateId at result
+// time — a post-freeze catalog edit or template removal must never change
+// or blank out an already-`completed` result's safety-caveat text.
+// ---------------------------------------------------------------------------
+
+describe('computeExperimentResult — narrative caveats come from the frozen plan snapshot, not a live catalog lookup', () => {
+  it('a plan whose snapshotted confounders/whatThisDoesNotProve differ from the CURRENT catalog text still shows the frozen (plan) text', () => {
+    const entries = buildGoldenEntries();
+    const experiment = baseExperiment({ template: SLEEP_TEMPLATE, startAt: GOLDEN_START, endAt: GOLDEN_END, durationDays: 28 });
+    // Simulate "the catalog was edited after this plan was frozen" by
+    // hand-diverging the plan's snapshot from what SLEEP_TEMPLATE currently
+    // says, WITHOUT touching the (frozen, Object.freeze'd) real catalog.
+    const frozenConfounders = ['OLD confounder text, frozen at create time.'];
+    const frozenWhatThisDoesNotProve = ['OLD what-this-does-not-prove text, frozen at create time.'];
+    experiment.analysisPlan = {
+      ...experiment.analysisPlan,
+      confounders: frozenConfounders,
+      whatThisDoesNotProve: frozenWhatThisDoesNotProve,
+    };
+
+    const result = computeExperimentResult({ experiment, entries, now: GOLDEN_NOW });
+
+    expect(result.narrative.alternatives).toEqual(frozenConfounders);
+    expect(result.narrative.whatThisDoesNotProve).toEqual(frozenWhatThisDoesNotProve);
+    // Proves it's NOT reading the live catalog: the current SLEEP_TEMPLATE
+    // text is different and must NOT appear.
+    expect(result.narrative.alternatives).not.toEqual(SLEEP_TEMPLATE.confounders);
+  });
+
+  it('a plan whose templateId no longer resolves in the catalog (template removed) still shows its frozen text — no [] collapse', () => {
+    const entries = buildGoldenEntries();
+    const experiment = baseExperiment({ template: SLEEP_TEMPLATE, startAt: GOLDEN_START, endAt: GOLDEN_END, durationDays: 28 });
+    const frozenConfounders = ['Frozen confounder, survives template removal.'];
+    const frozenWhatThisDoesNotProve = ['Frozen caveat, survives template removal.'];
+    experiment.analysisPlan = {
+      ...experiment.analysisPlan,
+      templateId: 'removed-template-id', // getTemplateById(...) would return undefined
+      confounders: frozenConfounders,
+      whatThisDoesNotProve: frozenWhatThisDoesNotProve,
+    };
+
+    const result = computeExperimentResult({ experiment, entries, now: GOLDEN_NOW });
+
+    expect(result.narrative.alternatives).toEqual(frozenConfounders);
+    expect(result.narrative.whatThisDoesNotProve).toEqual(frozenWhatThisDoesNotProve);
+    // The bug this guards against: falling back to a catalog lookup that
+    // resolves to `undefined` would silently collapse these to `[]`.
+    expect(result.narrative.alternatives).not.toEqual([]);
+    expect(result.narrative.whatThisDoesNotProve).not.toEqual([]);
+  });
+
+  it('a LEGACY plan with no snapshotted confounders/whatThisDoesNotProve falls back to the current catalog lookup by templateId', () => {
+    const entries = buildGoldenEntries();
+    const experiment = baseExperiment({ template: SLEEP_TEMPLATE, startAt: GOLDEN_START, endAt: GOLDEN_END, durationDays: 28 });
+    // Simulate a pre-fix plan (written before this snapshot existed) by
+    // deleting the two keys entirely.
+    const { confounders, whatThisDoesNotProve, ...legacyPlan } = experiment.analysisPlan;
+    experiment.analysisPlan = legacyPlan;
+
+    const result = computeExperimentResult({ experiment, entries, now: GOLDEN_NOW });
+
+    expect(result.narrative.alternatives).toEqual(SLEEP_TEMPLATE.confounders);
+    expect(result.narrative.whatThisDoesNotProve).toEqual(SLEEP_TEMPLATE.whatThisDoesNotProve);
   });
 });
 
@@ -568,6 +792,22 @@ describe('exposureValueForEntry — shared series-builder helper', () => {
 
   it('tags: tag present -> 1', () => {
     expect(exposureValueForEntry({ tags: ['@person:spencer'] }, { source: 'tags', field: 'tags' }, '@person:spencer')).toBe(1);
+  });
+
+  // MINOR review fix: known-zero precision is on the RAW field, not just
+  // "an activity object exists". A partially-populated activity object
+  // (one field present, the other never recorded) must not make the
+  // ABSENT field look like a known zero.
+  it('partially-populated activity: steps present (even at 0) but the exercise key is entirely absent -> exercise missing, steps kept', () => {
+    const entry = { healthContext: { activity: { stepsToday: 0 } } }; // no totalExerciseMinutes key at all
+    expect(exposureValueForEntry(entry, { source: 'health', field: 'exerciseMinutes' })).toBeNull();
+    expect(exposureValueForEntry(entry, { source: 'health', field: 'steps' })).toBe(0);
+  });
+
+  it('partially-populated activity, other direction: exercise present (even at 0) but the steps key is entirely absent -> steps missing, exercise kept', () => {
+    const entry = { healthContext: { activity: { totalExerciseMinutes: 0 } } }; // no stepsToday key at all
+    expect(exposureValueForEntry(entry, { source: 'health', field: 'exerciseMinutes' })).toBe(0);
+    expect(exposureValueForEntry(entry, { source: 'health', field: 'steps' })).toBeNull();
   });
 });
 

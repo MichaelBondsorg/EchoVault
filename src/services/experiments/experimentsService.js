@@ -87,11 +87,24 @@ function toValidDate(now) {
  * value never changes for the life of the experiment even if the estimator
  * module's constants are revised later.
  *
- * @param {{id:string, exposure:object, outcome:object, lag:number}} template
+ * Also snapshots the template's fixed narrative caveat strings
+ * (`confounders`, `whatThisDoesNotProve`) onto the plan (R3 Task 5 review
+ * fix). Without this, `computeResult.js` would have to re-look-up these
+ * strings from the mutable template catalog by `templateId` at RESULT time
+ * — a later catalog edit (wording tweak) or template removal would then
+ * silently change or blank out (`undefined` -> `[]`) the safety-caveat text
+ * on an already-`completed` result. Snapshotting them here, alongside the
+ * plan's other frozen fields, means a result's caveats are exactly what was
+ * true when the experiment was created, for its whole lifetime — the same
+ * plan-freeze guarantee already applied to `exposure`/`outcome`/`lag`.
+ *
+ * @param {{id:string, exposure:object, outcome:object, lag:number,
+ *   confounders?:string[], whatThisDoesNotProve?:string[]}} template
  * @param {{tag?: string}} [params] - required `params.tag` for the
  *   tag-presence template; ignored for every other template.
  * @returns {{templateId:string, lag:number, exposure:object, outcome:object,
- *   minPairedObservations:number, coverageFloor:number}}
+ *   minPairedObservations:number, coverageFloor:number, confounders:string[],
+ *   whatThisDoesNotProve:string[]}}
  */
 export function buildAnalysisPlan(template, params = {}) {
   if (!template || typeof template.id !== 'string' || !template.exposure || !template.outcome) {
@@ -112,6 +125,8 @@ export function buildAnalysisPlan(template, params = {}) {
     outcome: { ...template.outcome },
     minPairedObservations: MIN_PAIRED_OBSERVATIONS,
     coverageFloor: COVERAGE_FLOOR,
+    confounders: [...(template.confounders || [])],
+    whatThisDoesNotProve: [...(template.whatThisDoesNotProve || [])],
   };
 }
 

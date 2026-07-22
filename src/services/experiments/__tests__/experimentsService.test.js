@@ -57,6 +57,8 @@ function validTemplate(overrides = {}) {
     exposure: { source: 'health', field: 'sleepHours', label: 'sleep hours' },
     outcome: { field: 'analysis.mood_score', label: 'mood' },
     lag: 0,
+    confounders: ['Confounder one.', 'Confounder two.'],
+    whatThisDoesNotProve: ['Does not prove one.', 'Does not prove two.'],
     ...overrides,
   };
 }
@@ -79,7 +81,7 @@ beforeEach(() => {
 });
 
 describe('buildAnalysisPlan', () => {
-  it('snapshots template id, lag, exposure, outcome, and the estimator constants', () => {
+  it('snapshots template id, lag, exposure, outcome, the estimator constants, and the narrative caveat strings', () => {
     const plan = buildAnalysisPlan(validTemplate());
     expect(plan).toEqual({
       templateId: 'sleep-hours-mood-same-day',
@@ -88,7 +90,23 @@ describe('buildAnalysisPlan', () => {
       outcome: { field: 'analysis.mood_score', label: 'mood' },
       minPairedObservations: MIN_PAIRED_OBSERVATIONS,
       coverageFloor: COVERAGE_FLOOR,
+      confounders: ['Confounder one.', 'Confounder two.'],
+      whatThisDoesNotProve: ['Does not prove one.', 'Does not prove two.'],
     });
+  });
+
+  it('snapshotted confounders/whatThisDoesNotProve are copies, not the same array reference (defensive — the template catalog is frozen but callers must not assume it)', () => {
+    const template = validTemplate();
+    const plan = buildAnalysisPlan(template);
+    expect(plan.confounders).not.toBe(template.confounders);
+    expect(plan.whatThisDoesNotProve).not.toBe(template.whatThisDoesNotProve);
+  });
+
+  it('defaults confounders/whatThisDoesNotProve to empty arrays when the template carries neither (defensive, not expected from the real catalog)', () => {
+    const template = validTemplate({ confounders: undefined, whatThisDoesNotProve: undefined });
+    const plan = buildAnalysisPlan(template);
+    expect(plan.confounders).toEqual([]);
+    expect(plan.whatThisDoesNotProve).toEqual([]);
   });
 
   it('embeds the chosen tag for a tag-presence template', () => {

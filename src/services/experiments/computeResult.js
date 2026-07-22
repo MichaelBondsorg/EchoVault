@@ -35,13 +35,19 @@
  * `exposureValueForEntry` below (the shared series-builder helper,
  * re-exported and reused by `preflight.js`) fixes this WITHOUT editing
  * `extractHealthSignals` itself (other consumers depend on its current
- * `|| null` semantics): for `exerciseMinutes`/`steps` specifically, a day
- * with a `healthContext.activity` object present but a null/non-finite
- * extractor value is treated as a KNOWN ZERO (value 0, kept in the series);
- * a day with no `healthContext.activity` at all is a genuinely MISSING
- * observation (dropped). Every other field (sleep, recovery, HRV, sunshine,
- * ...) keeps drop-on-null semantics unchanged — a null there really does
- * mean "unmeasured", not "measured and zero".
+ * `|| null` semantics): for `exerciseMinutes`/`steps` specifically, the RAW
+ * field on `healthContext.activity` (`totalExerciseMinutes`/`stepsToday`) is
+ * checked directly — precise on the raw key, not just "an activity object
+ * exists": if that raw key is present and `=== 0`, the day is a KNOWN ZERO
+ * (value 0, kept in the series); if the raw key is entirely absent (no
+ * activity data for that specific field, even if `healthContext.activity`
+ * has OTHER fields populated — e.g. steps present but exercise minutes
+ * never recorded that day), the day is a genuinely MISSING observation for
+ * THAT field (dropped) — a partially-populated `activity` object no longer
+ * makes every activity field "known" just because one of them is. Every
+ * other field (sleep, recovery, HRV, sunshine, ...) keeps drop-on-null
+ * semantics unchanged — a null there really does mean "unmeasured", not
+ * "measured and zero".
  *
  * MULTIPLE ENTRIES PER CALENDAR DAY: the day-series builder
  * (`buildDaySeries`) groups entries by calendar day and, when more than one
@@ -75,6 +81,48 @@
  * (coverage answers "how much data exists", independent of which paired
  * days the user has chosen to fold into the estimate).
  *
+ * COVERAGE FLOOR ENFORCEMENT (data-method spec default #2, review fix):
+ * `estimator.runAnalysisPlan` deliberately does NOT enforce the ≥50%
+ * per-variable coverage floor itself — its own docblock says so explicitly
+ * ("missingness/coverage thresholds are checked by the caller... BEFORE
+ * calling this function"). This module is that caller: EACH of
+ * `exposureCoverage`/`outcomeCoverage` (over the experiment window, not a
+ * lookback window) is compared against `COVERAGE_FLOOR` (imported from
+ * `estimator.js`, never re-hardcoded) BEFORE trusting an otherwise-`ok`
+ * analysis. Without this check, a sparse-but-lucky sample (e.g. sleep data
+ * on only 12 of 60 elapsed days, all 12 of which happen to pair with mood)
+ * can clear `MIN_PAIRED_OBSERVATIONS` on raw pair count alone while still
+ * being a biased, non-representative slice of the window — exactly the
+ * failure mode default #2 exists to catch. When either variable's coverage
+ * ratio is `< COVERAGE_FLOOR`, the result is `insufficient` regardless of
+ * what `runAnalysisPlan` would have said, with machine-readable
+ * `reasons: string[]` (`'exposure_coverage_below_floor'` /
+ * `'outcome_coverage_below_floor'`, snake_case matching `preflight.js`'s
+ * token style so Task 6 can render both uniformly) at the top level of the
+ * result — present only when `status: 'insufficient'`, mirroring the
+ * absence-not-undefined pattern already used for `estimate`/`summary`. When
+ * coverage already fails, this module still cheaply checks `pairs.length <
+ * MIN_PAIRED_OBSERVATIONS` (no bootstrap — that check is O(1) and doesn't
+ * invoke `runAnalysisPlan`'s expensive resampling) so
+ * `'insufficient_paired_observations'` can appear alongside a coverage
+ * reason when both are true; it does NOT additionally invoke the full
+ * `runAnalysisPlan` in that branch (which would spend 2,000 bootstrap
+ * resamples computing an estimate that's going to be discarded anyway) —
+ * so `'degenerate_exposure_split'`/`'lag_mismatch'` are only surfaced when
+ * coverage passes and `runAnalysisPlan` itself is the one that fails.
+ *
+ * NARRATIVE SNAPSHOT (review fix): `alternatives`/`whatThisDoesNotProve`
+ * are read from `experiment.analysisPlan.confounders`/`.whatThisDoesNotProve`
+ * FIRST — snapshotted onto the plan at create time by
+ * `experimentsService.buildAnalysisPlan`, exactly like the plan's
+ * statistical fields — so a later edit (or removal) of the template catalog
+ * entry can never silently change or blank out the safety-caveat text an
+ * already-`completed` result shows. `getTemplateById(plan.templateId)` is
+ * used ONLY as a fallback for legacy plans written before this snapshot
+ * existed (none in prod today — `personalExperiments` is flag-gated OFF —
+ * but kept for robustness/forward-compat rather than assuming every plan
+ * in Firestore was written by the current code).
+ *
  * RECEIPT `versions.generatedAt` NOTE: `buildReceipt`
  * (`src/services/insights/receipts.js`) stamps `versions.generatedAt` with
  * `new Date().toISOString()` unconditionally — it has no injectable clock.
@@ -85,8 +133,7 @@
  * now)`. Tests that assert rerun determinism compare results with that one
  * field normalized out.
  */
-import { pairObservations, runAnalysisPlan } from './estimator';
-import { computeCoverage } from './estimator';
+import { pairObservations, runAnalysisPlan, computeCoverage, MIN_PAIRED_OBSERVATIONS, COVERAGE_FLOOR } from './estimator';
 import { getTemplateById } from './templates';
 import { filterEntriesByScope } from '../spaces/scopeFilter';
 import { buildReceipt, sourceFromEntry } from '../insights/receipts';
@@ -113,8 +160,6 @@ export const INSUFFICIENCY_COPY =
 export const CI_SPANS_ZERO_COPY =
   "The difference could be real or could be chance — this data doesn't show a clear association either way.";
 
-const DAY_MS = 24 * 60 * 60 * 1000;
-
 // ---------------------------------------------------------------------------
 // Shared series-builder helper (the carry-forward fix from Task 3's review).
 // `preflight.js` imports `exposureValueForEntry` from here instead of
@@ -123,23 +168,30 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 
 /**
  * Health-signal fields where a null/non-finite value from
- * `extractHealthSignals` is ambiguous between "no health data at all" and
- * "activity data present, true zero coerced to null by `healthContext
- * .activity?.X || null`" (see module doc comment). Only these two fields
- * carry that ambiguity today — every other health field's `|| null` is a
- * genuine "unmeasured" signal (sleep/recovery/HRV never legitimately read
- * as a meaningful zero the way exercise minutes or steps can).
+ * `extractHealthSignals` is ambiguous between "no data for this field at
+ * all" and "true zero coerced to null by `healthContext.activity?.X ||
+ * null`" (see module doc comment). Only these two fields carry that
+ * ambiguity today — every other health field's `|| null` is a genuine
+ * "unmeasured" signal (sleep/recovery/HRV never legitimately read as a
+ * meaningful zero the way exercise minutes or steps can). Maps the
+ * extractor's output key to the RAW key on `healthContext.activity` so the
+ * known-zero check can be precise about which specific field is present,
+ * not just whether the `activity` object exists at all.
  */
 const ACTIVITY_ZERO_FIELDS = new Set(['exerciseMinutes', 'steps']);
+const ACTIVITY_RAW_KEY = { exerciseMinutes: 'totalExerciseMinutes', steps: 'stepsToday' };
 
 /**
  * The exposure value for one entry given a FROZEN plan/template `exposure`
  * descriptor (`{source, field}` — health/environment/tags), or `null` when
  * this entry carries no usable value for that variable (dropped from the
  * series entirely — never coerced to 0), EXCEPT:
- *   - `source: 'health'`, `field` in `ACTIVITY_ZERO_FIELDS`: a
- *     `healthContext.activity` object present but a null/non-finite
- *     extractor value is a KNOWN ZERO (see module doc comment) -> `0`.
+ *   - `source: 'health'`, `field` in `ACTIVITY_ZERO_FIELDS`: the RAW field
+ *     on `healthContext.activity` (`totalExerciseMinutes`/`stepsToday`) is
+ *     checked directly. Present AND `=== 0` -> KNOWN ZERO (`0`, kept).
+ *     Absent entirely (even if `healthContext.activity` has OTHER fields
+ *     populated — e.g. steps present but exercise minutes never recorded)
+ *     -> MISSING for that field (`null`, dropped). See module doc comment.
  *   - `source: 'tags'`: "no tag present that day" is itself a real, known
  *     observation (`0`), not a missing one, as long as the day was
  *     journaled at all (an entry exists) — see the tags branch below.
@@ -157,16 +209,21 @@ export function exposureValueForEntry(entry, exposure, tag) {
     if (!signals) return null; // no health data at all -> missing
     const raw = signals[field];
     if (Number.isFinite(raw)) return raw;
-    if (
-      ACTIVITY_ZERO_FIELDS.has(field) &&
-      healthContext?.activity &&
-      typeof healthContext.activity === 'object'
-    ) {
-      // Activity data IS present for this day; the extractor coerced a true
-      // zero to null. This is a known-zero day, not a missing observation.
-      return 0;
+    if (ACTIVITY_ZERO_FIELDS.has(field)) {
+      const rawKey = ACTIVITY_RAW_KEY[field];
+      const activity = healthContext?.activity;
+      if (
+        activity &&
+        typeof activity === 'object' &&
+        Object.prototype.hasOwnProperty.call(activity, rawKey) &&
+        activity[rawKey] === 0
+      ) {
+        // The raw field IS present for this day and is an explicit zero;
+        // the extractor coerced it to null. Known-zero, not missing.
+        return 0;
+      }
     }
-    return null; // genuinely unmeasured (e.g. sleep/recovery with no signal)
+    return null; // genuinely unmeasured (raw field absent, or a non-activity field with no signal)
   }
   if (source === 'environment') {
     const signals = extractEnvironmentSignals(entry?.environmentContext);
@@ -277,6 +334,11 @@ function formatMissingness(exposureCoverage, outcomeCoverage) {
   return `Exposure: ${exposureCoverage.label}. Outcome: ${outcomeCoverage.label}.`;
 }
 
+/** `covered/total` as a ratio in [0,1]; `computeCoverage` always returns `total >= 1`, so no div-by-zero guard needed. */
+function coverageRatio(coverage) {
+  return coverage.total > 0 ? coverage.covered / coverage.total : 0;
+}
+
 /**
  * Build the `narrative.summary` sentence for an `ok` result. The sentence
  * SCAFFOLD (which numbers get slotted where) is this module's own — the
@@ -302,6 +364,72 @@ function buildSummary({ exposureLabel, outcomeLabel, estimate, ciSpansZero }) {
   );
 }
 
+/**
+ * Build the receipt for a result — the union of entries dated on each
+ * pair's `dateKey` AND `outcomeDateKey` (handles lag templates, where a day
+ * can contribute as an outcome for one pair and an exposure for another),
+ * deduped by entry id, safety-filtered (see SAFETY comment below), then
+ * mapped via `sourceFromEntry`. Shared by both the `ok` and `insufficient`
+ * paths — every result carries a receipt (receipt invariant).
+ */
+function buildExperimentReceipt({ windowed, pairs, experiment, effectiveEndMs, exposureCoverage, outcomeCoverage }) {
+  const entriesByDateKey = groupEntriesByDateKey(windowed);
+  const contributing = [];
+  const seenIds = new Set();
+  for (const pair of pairs) {
+    const dayEntries = [
+      ...(entriesByDateKey.get(pair.dateKey) || []),
+      ...(entriesByDateKey.get(pair.outcomeDateKey) || []),
+    ];
+    for (const entry of dayEntries) {
+      const id = entry?.id || entry?.entryId;
+      if (!id || seenIds.has(id)) continue;
+      seenIds.add(id);
+      contributing.push(entry);
+    }
+  }
+  // SAFETY (binding): flagged entries are INCLUDED in the statistics above
+  // (they're the user's own data; excluding them would bias the mood
+  // estimate) but NEVER appear in receipt source excerpts — id and excerpt
+  // both, matching Session Prep export's posture
+  // (`src/services/reflections/sessionPrep.js`'s `safeDates` filter).
+  const safeContributing = contributing.filter(
+    (entry) => entry && !entry.safety_flagged && !entry.has_warning_indicators,
+  );
+  const receiptSources = safeContributing.map(sourceFromEntry).filter(Boolean);
+
+  return buildReceipt({
+    sources: receiptSources,
+    scope: experiment.scope ?? null,
+    timeWindow: { start: experiment.startAt, end: new Date(effectiveEndMs).toISOString() },
+    sampleSize: pairs.length,
+    missingness: formatMissingness(exposureCoverage, outcomeCoverage),
+    generator: 'experiment_v1',
+  });
+}
+
+/**
+ * Build the `status: 'insufficient'` result shape. `reasons` are the
+ * machine-readable tokens (coverage-floor and/or estimator reasons) — see
+ * the module doc comment's "COVERAGE FLOOR ENFORCEMENT" section. `estimate`
+ * and `narrative.summary` are never assigned (true key absence, not
+ * `undefined`), matching the payload-exactness contract.
+ */
+function buildInsufficientResult({ coverage, reasons, windowed, pairs, experiment, effectiveEndMs, exposureCoverage, outcomeCoverage }) {
+  const receipt = buildExperimentReceipt({ windowed, pairs, experiment, effectiveEndMs, exposureCoverage, outcomeCoverage });
+  return {
+    status: 'insufficient',
+    coverage,
+    receipt,
+    reasons,
+    narrative: {
+      alternatives: [],
+      whatThisDoesNotProve: [],
+      insufficiency: INSUFFICIENCY_COPY,
+    },
+  };
+}
+
 // ---------------------------------------------------------------------------
 // computeExperimentResult
 // ---------------------------------------------------------------------------
@@ -316,8 +444,10 @@ function buildSummary({ exposureLabel, outcomeLabel, estimate, ciSpansZero }) {
  *   default (mirrors `preflight.js`/`estimator.js`'s purity posture).
  * @returns {{status:'ok'|'insufficient', estimate?:object,
  *   coverage:{exposure:object, outcome:object}, receipt:object,
- *   narrative:{summary?:string, alternatives:string[],
- *     whatThisDoesNotProve:string[], insufficiency?:string}}}
+ *   reasons?:string[], narrative:{summary?:string, alternatives:string[],
+ *     whatThisDoesNotProve:string[], insufficiency?:string}}} `reasons` is
+ *   present only when `status: 'insufficient'` (coverage-floor and/or
+ *   estimator reasons — see the module doc comment).
  */
 export function computeExperimentResult({ experiment, entries = [], now } = {}) {
   if (!experiment || typeof experiment !== 'object') {
@@ -361,61 +491,65 @@ export function computeExperimentResult({ experiment, entries = [], now } = {}) 
   const excludedSet = new Set(Array.isArray(experiment.excludedObservations) ? experiment.excludedObservations : []);
   const pairs = allPairs.filter((p) => !excludedSet.has(p.dateKey));
 
-  // --- estimator: the FROZEN plan is the authority ------------------------
-  const analysis = runAnalysisPlan({ pairs, plan });
+  // --- coverage floor (spec default #2 — see module doc comment) ---------
+  // estimator.runAnalysisPlan deliberately does NOT enforce this itself;
+  // this module is the caller its docblock says must check coverage BEFORE
+  // trusting an otherwise-`ok` analysis.
+  const coverageReasons = [];
+  if (coverageRatio(exposureCoverage) < COVERAGE_FLOOR) coverageReasons.push('exposure_coverage_below_floor');
+  if (coverageRatio(outcomeCoverage) < COVERAGE_FLOOR) coverageReasons.push('outcome_coverage_below_floor');
 
-  // --- receipt: contributing PAIRED entries, safety-filtered -------------
-  const entriesByDateKey = groupEntriesByDateKey(windowed);
-  const contributing = [];
-  const seenIds = new Set();
-  for (const pair of pairs) {
-    const dayEntries = [
-      ...(entriesByDateKey.get(pair.dateKey) || []),
-      ...(entriesByDateKey.get(pair.outcomeDateKey) || []),
-    ];
-    for (const entry of dayEntries) {
-      const id = entry?.id || entry?.entryId;
-      if (!id || seenIds.has(id)) continue;
-      seenIds.add(id);
-      contributing.push(entry);
-    }
-  }
-  // SAFETY (binding): flagged entries are INCLUDED in the statistics above
-  // (they're the user's own data; excluding them would bias the mood
-  // estimate) but NEVER appear in receipt source excerpts — id and excerpt
-  // both, matching Session Prep export's posture
-  // (`src/services/reflections/sessionPrep.js`'s `safeDates` filter).
-  const safeContributing = contributing.filter(
-    (entry) => entry && !entry.safety_flagged && !entry.has_warning_indicators,
-  );
-  const receiptSources = safeContributing.map(sourceFromEntry).filter(Boolean);
-
-  const receipt = buildReceipt({
-    sources: receiptSources,
-    scope: experiment.scope ?? null,
-    timeWindow: { start: experiment.startAt, end: new Date(effectiveEndMs).toISOString() },
-    sampleSize: pairs.length,
-    missingness: formatMissingness(exposureCoverage, outcomeCoverage),
-    generator: 'experiment_v1',
-  });
-
-  // --- narrative: template fixed strings + this module's fixed strings ---
+  // --- narrative fixed strings: FROZEN plan snapshot first, catalog fallback
   const template = getTemplateById(plan.templateId);
   const exposureLabel = plan.exposure?.label || template?.exposure?.label || 'this variable';
   const outcomeLabel = plan.outcome?.label || template?.outcome?.label || 'mood';
+  const alternatives = Array.isArray(plan.confounders)
+    ? [...plan.confounders]
+    : [...(template?.confounders || [])];
+  const whatThisDoesNotProve = Array.isArray(plan.whatThisDoesNotProve)
+    ? [...plan.whatThisDoesNotProve]
+    : [...(template?.whatThisDoesNotProve || [])];
+
+  if (coverageReasons.length > 0) {
+    // Coverage floor already fails for at least one variable — disqualifying
+    // on its own. Cheaply check pair count too (no bootstrap: runAnalysisPlan
+    // only pays for its 2,000-resample bootstrap once every OTHER check has
+    // already passed) so the reasons list isn't artificially truncated to
+    // "whichever check happened to run first."
+    const reasons = [...coverageReasons];
+    if (pairs.length < MIN_PAIRED_OBSERVATIONS) {
+      reasons.push('insufficient_paired_observations');
+    }
+    return buildInsufficientResult({
+      coverage,
+      reasons,
+      windowed,
+      pairs,
+      experiment,
+      effectiveEndMs,
+      exposureCoverage,
+      outcomeCoverage,
+    });
+  }
+
+  // --- estimator: the FROZEN plan is the authority ------------------------
+  const analysis = runAnalysisPlan({ pairs, plan });
 
   if (analysis.status !== 'ok') {
-    return {
-      status: 'insufficient',
+    return buildInsufficientResult({
       coverage,
-      receipt,
-      narrative: {
-        alternatives: [],
-        whatThisDoesNotProve: [],
-        insufficiency: INSUFFICIENCY_COPY,
-      },
-    };
+      reasons: analysis.reasons,
+      windowed,
+      pairs,
+      experiment,
+      effectiveEndMs,
+      exposureCoverage,
+      outcomeCoverage,
+    });
   }
+
+  // --- receipt: contributing PAIRED entries, safety-filtered -------------
+  const receipt = buildExperimentReceipt({ windowed, pairs, experiment, effectiveEndMs, exposureCoverage, outcomeCoverage });
 
   const { estimate } = analysis;
   const ciSpansZero = estimate.ci[0] <= 0 && 0 <= estimate.ci[1];
@@ -428,8 +562,8 @@ export function computeExperimentResult({ experiment, entries = [], now } = {}) 
     receipt,
     narrative: {
       summary,
-      alternatives: [...(template?.confounders || [])],
-      whatThisDoesNotProve: [...(template?.whatThisDoesNotProve || [])],
+      alternatives,
+      whatThisDoesNotProve,
     },
   };
 }
