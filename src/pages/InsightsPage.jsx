@@ -248,14 +248,15 @@ const InsightsPage = ({
     }
     // Fire-and-forget engagement instrumentation (best-effort, never blocks UI).
     recordInsightEngagement(userId, insight, 'dismissed');
-    // R4 Task 5 (DR finding 10): write-through so this dismissal survives
-    // reload, not just this tab's `dismissedInsights` local state. Only
-    // Nexus insights carry a stable `id` this can key on (basic-insight
-    // dismissal isn't part of this fix — QuickInsightsSection has no
-    // dismiss action); best-effort, same as the engagement call above.
-    if (insight.id) {
-      recordInsightDismissal(userId, insight.id);
-    }
+    // R4 Task 5 (+ T5b fix, DR finding 10): write-through so this dismissal
+    // survives reload AND regeneration — best-effort, same as the
+    // engagement call above. `recordInsightDismissal` takes the full
+    // insight (not just `.id`) because it derives a content-stable
+    // dismissal key internally (see insightDismissal.js); it already no-ops
+    // when no key can be derived, so no `insight.id` guard is needed here.
+    // Basic-insight dismissal isn't part of this fix — QuickInsightsSection
+    // has no dismiss action.
+    recordInsightDismissal(userId, insight);
   };
 
   const handleReportInsight = async (insight, e) => {
@@ -268,9 +269,7 @@ const InsightsPage = ({
     }
     // R4 Task 5: a reported insight is dismissed too — persist it the same
     // way, so it doesn't resurface after reload either.
-    if (insight.id) {
-      recordInsightDismissal(userId, insight.id);
-    }
+    recordInsightDismissal(userId, insight);
   };
 
   const handleToggleExpand = (insightId) => {

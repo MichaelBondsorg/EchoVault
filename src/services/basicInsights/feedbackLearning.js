@@ -371,6 +371,93 @@ export const filterFalsePositiveCandidates = async (userId, insights, entriesByI
 };
 
 /**
+ * Best-effort, fire-and-forget stamp-back for a suppressed pattern whose
+ * `entriesAtLastEvaluation` baseline is unstamped (R4 T5b — IMPORTANT:
+ * "suppression must fail toward holding"). Two paths land here with an
+ * unstamped (0/absent) baseline: a `recordFeedbackAndLearn` caller that
+ * omitted `currentEntryCount`, and every suppressed doc written before
+ * that fix shipped (self-heals with zero migration needed). Never awaited
+ * by callers — a failed write just means the doc stays unstamped and gets
+ * the same lazy-stamp treatment again next evaluation; it never changes
+ * what's returned to the caller THIS evaluation (that's decided
+ * synchronously by `evaluateShowDecision`'s in-memory fallback below).
+ *
+ * @param {string} userId
+ * @param {string} patternType
+ * @param {number} currentEntryCount
+ */
+const stampEvaluationBaseline = (userId, patternType, currentEntryCount) => {
+  const ref = getLearningRef(userId, patternType);
+  setDoc(ref, { entriesAtLastEvaluation: currentEntryCount }, { merge: true }).catch((error) => {
+    console.error('[FeedbackLearning] Failed to lazily stamp entriesAtLastEvaluation:', error);
+  });
+};
+
+/**
+ * Shared suppression/confidence decision for a single (learning, insight)
+ * pair — used by both `shouldShowInsight` and `filterInsightsByLearning` so
+ * they can't drift (they previously carried two independently-hand-copied
+ * implementations; this consolidation is also what closes the R4 T5b
+ * resurfacing-baseline bug in exactly one place instead of two).
+ *
+ * @param {string} userId
+ * @param {string} patternType
+ * @param {Object|undefined} learning
+ * @param {Object} insight
+ * @param {number} currentEntryCount
+ * @returns {{show: boolean, adjustedConfidence: number, reason: string}}
+ */
+const evaluateShowDecision = (userId, patternType, learning, insight, currentEntryCount) => {
+  // No learning data yet - show with full confidence
+  if (!learning || learning.totalFeedback === 0) {
+    return { show: true, adjustedConfidence: 1.0, reason: 'no_feedback' };
+  }
+
+  if (learning.suppressed) {
+    // Check if suppression has expired
+    const suppressedAt = learning.suppressedAt?.toMillis?.() || learning.suppressedAt;
+    const expiryMs = CONFIG.SUPPRESSION_EXPIRY_DAYS * 24 * 60 * 60 * 1000;
+    const isExpired = Date.now() - suppressedAt > expiryMs;
+    if (isExpired) {
+      return { show: true, adjustedConfidence: learning.confidenceMultiplier, reason: 'suppression_expired' };
+    }
+
+    // Check if signal is strong enough to resurface
+    if (learning.requiredMoodDeltaToResurface &&
+        Math.abs(insight.moodDelta) >= learning.requiredMoodDeltaToResurface) {
+      return { show: true, adjustedConfidence: learning.confidenceMultiplier, reason: 'strong_signal_override' };
+    }
+
+    // R4 T5b: fail toward holding. An unstamped baseline (0/absent) must
+    // NEVER be read as "since the corpus was empty" — that's exactly the
+    // bug (a legacy/unstamped doc would show `newEntries = currentEntryCount
+    // - 0`, clearing the re-evaluation threshold on literally the next
+    // read regardless of whether anything new was added). Treat THIS
+    // evaluation's currentEntryCount as the baseline instead (newEntries
+    // computes to 0 -> suppression holds) and opportunistically self-heal
+    // the doc so future reads get a real baseline.
+    const hasStampedBaseline = !!learning.entriesAtLastEvaluation;
+    if (!hasStampedBaseline) {
+      stampEvaluationBaseline(userId, patternType, currentEntryCount);
+    }
+    const baseline = hasStampedBaseline ? learning.entriesAtLastEvaluation : currentEntryCount;
+    const newEntries = currentEntryCount - baseline;
+    if (newEntries >= CONFIG.MIN_NEW_ENTRIES_FOR_REEVALUATION) {
+      return { show: true, adjustedConfidence: learning.confidenceMultiplier * 0.8, reason: 'new_data_reevaluation' };
+    }
+
+    return { show: false, adjustedConfidence: 0, reason: 'suppressed' };
+  }
+
+  // Not suppressed - apply confidence multiplier
+  return {
+    show: true,
+    adjustedConfidence: learning.confidenceMultiplier,
+    reason: learning.accuracyRate >= 0.7 ? 'high_accuracy' : 'adjusted_confidence'
+  };
+};
+
+/**
  * Check if an insight should be shown based on learning
  * @param {string} userId
  * @param {Object} insight - The insight to check
@@ -378,64 +465,11 @@ export const filterFalsePositiveCandidates = async (userId, insights, entriesByI
  * @returns {Object} { show: boolean, adjustedConfidence: number, reason: string }
  */
 export const shouldShowInsight = async (userId, insight, currentEntryCount = 0) => {
-  const patternType = insight.activityKey ? `activity_${insight.activityKey}` :
-                      insight.themeKey ? `theme_${insight.themeKey}` :
-                      insight.peopleKey ? `people_${insight.peopleKey}` :
-                      insight.id;
+  const patternType = resolvePatternType(insight);
 
   try {
     const learning = await getPatternLearning(userId, patternType);
-
-    // No learning data yet - show with full confidence
-    if (!learning || learning.totalFeedback === 0) {
-      return { show: true, adjustedConfidence: 1.0, reason: 'no_feedback' };
-    }
-
-    // Check suppression
-    if (learning.suppressed) {
-      // Check if suppression has expired
-      const suppressedAt = learning.suppressedAt?.toMillis?.() || learning.suppressedAt;
-      const expiryMs = CONFIG.SUPPRESSION_EXPIRY_DAYS * 24 * 60 * 60 * 1000;
-      const isExpired = Date.now() - suppressedAt > expiryMs;
-
-      if (isExpired) {
-        return {
-          show: true,
-          adjustedConfidence: learning.confidenceMultiplier,
-          reason: 'suppression_expired'
-        };
-      }
-
-      // Check if signal is strong enough to resurface
-      if (learning.requiredMoodDeltaToResurface &&
-          Math.abs(insight.moodDelta) >= learning.requiredMoodDeltaToResurface) {
-        return {
-          show: true,
-          adjustedConfidence: learning.confidenceMultiplier,
-          reason: 'strong_signal_override'
-        };
-      }
-
-      // Check if enough new entries warrant re-evaluation
-      const newEntries = currentEntryCount - (learning.entriesAtLastEvaluation || 0);
-      if (newEntries >= CONFIG.MIN_NEW_ENTRIES_FOR_REEVALUATION) {
-        return {
-          show: true,
-          adjustedConfidence: learning.confidenceMultiplier * 0.8, // Extra penalty for re-eval
-          reason: 'new_data_reevaluation'
-        };
-      }
-
-      // Still suppressed
-      return { show: false, adjustedConfidence: 0, reason: 'suppressed' };
-    }
-
-    // Not suppressed - apply confidence multiplier
-    return {
-      show: true,
-      adjustedConfidence: learning.confidenceMultiplier,
-      reason: learning.accuracyRate >= 0.7 ? 'high_accuracy' : 'adjusted_confidence'
-    };
+    return evaluateShowDecision(userId, patternType, learning, insight, currentEntryCount);
   } catch (error) {
     console.error('[FeedbackLearning] Failed to check insight:', error);
     return { show: true, adjustedConfidence: 1.0, reason: 'error_fallback' };
@@ -457,43 +491,9 @@ export const filterInsightsByLearning = async (userId, insights, currentEntryCou
     const allLearning = await getAllPatternLearning(userId);
 
     return insights.map(insight => {
-      const patternType = insight.activityKey ? `activity_${insight.activityKey}` :
-                          insight.themeKey ? `theme_${insight.themeKey}` :
-                          insight.peopleKey ? `people_${insight.peopleKey}` :
-                          insight.id;
-
+      const patternType = resolvePatternType(insight);
       const learning = allLearning.get(patternType);
-
-      // No learning data - include with full confidence
-      if (!learning || learning.totalFeedback === 0) {
-        return { ...insight, _showDecision: { show: true, adjustedConfidence: 1.0, reason: 'no_feedback' } };
-      }
-
-      // Check suppression
-      if (learning.suppressed) {
-        const suppressedAt = learning.suppressedAt?.toMillis?.() || learning.suppressedAt;
-        const expiryMs = CONFIG.SUPPRESSION_EXPIRY_DAYS * 24 * 60 * 60 * 1000;
-        const isExpired = Date.now() - suppressedAt > expiryMs;
-
-        if (isExpired) {
-          return { ...insight, _showDecision: { show: true, adjustedConfidence: learning.confidenceMultiplier, reason: 'suppression_expired' } };
-        }
-
-        if (learning.requiredMoodDeltaToResurface &&
-            Math.abs(insight.moodDelta) >= learning.requiredMoodDeltaToResurface) {
-          return { ...insight, _showDecision: { show: true, adjustedConfidence: learning.confidenceMultiplier, reason: 'strong_signal_override' } };
-        }
-
-        const newEntries = currentEntryCount - (learning.entriesAtLastEvaluation || 0);
-        if (newEntries >= CONFIG.MIN_NEW_ENTRIES_FOR_REEVALUATION) {
-          return { ...insight, _showDecision: { show: true, adjustedConfidence: learning.confidenceMultiplier * 0.8, reason: 'new_data_reevaluation' } };
-        }
-
-        return { ...insight, _showDecision: { show: false, adjustedConfidence: 0, reason: 'suppressed' } };
-      }
-
-      // Not suppressed
-      return { ...insight, _showDecision: { show: true, adjustedConfidence: learning.confidenceMultiplier, reason: 'ok' } };
+      return { ...insight, _showDecision: evaluateShowDecision(userId, patternType, learning, insight, currentEntryCount) };
     });
   } catch (error) {
     console.error('[FeedbackLearning] Failed to filter insights:', error);

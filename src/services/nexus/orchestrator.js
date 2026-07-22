@@ -46,7 +46,7 @@ import { markInsightsStale } from './staleness';
 
 // Insight Dismissal Persistence (R4 Task 5, DR finding 10 — see that
 // module's own doc comment for the full "why a separate file" rationale)
-import { recordInsightDismissal, getDismissedInsightIds } from './insightDismissal';
+import { recordInsightDismissal, getDismissedKeys, dismissalKeyFor } from './insightDismissal';
 
 // ============================================================
 // MOOD01 CONVENTION (R4 T3)
@@ -264,7 +264,7 @@ const getPatternDisplayInfo = (patternId, moodMean) => {
 // the orchestrator (the module that owns `nexus/insights`, the doc these
 // live under) keep working; `insightDismissal.js` is the source of truth —
 // see that module's doc comment for the full seam rationale.
-export { recordInsightDismissal, getDismissedInsightIds };
+export { recordInsightDismissal, getDismissedKeys, dismissalKeyFor };
 
 /**
  * Get cached insights (for immediate display)
@@ -281,15 +281,18 @@ export const getCachedInsights = async (userId) => {
     if (!insightDoc.exists()) return null;
 
     const data = insightDoc.data();
-    // R4 Task 5: dismissed-stays-dismissed across reloads. Read-time filter
-    // (see the module comment above for why) — active/history are both
-    // filtered so a dismissed insight can't resurface via either list.
-    const dismissedIds = await getDismissedInsightIds(userId);
+    // R4 Task 5 (+ T5b fix): dismissed-stays-dismissed across reloads AND
+    // regeneration, even for insight types whose `id` churns every
+    // generation (see insightDismissal.js's doc comment). Read-time filter
+    // — active/history are both matched by `dismissalKeyFor`, not raw
+    // `.id`, so a churned-id insight with the same content still filters.
+    const dismissedKeys = await getDismissedKeys(userId);
     const active = data.active || [];
     const history = data.history || [];
+    const notDismissed = (i) => !dismissedKeys.has(dismissalKeyFor(i));
     return {
-      insights: dismissedIds.size === 0 ? active : active.filter((i) => !dismissedIds.has(i.id)),
-      history: dismissedIds.size === 0 ? history : history.filter((i) => !dismissedIds.has(i.id)),
+      insights: dismissedKeys.size === 0 ? active : active.filter(notDismissed),
+      history: dismissedKeys.size === 0 ? history : history.filter(notDismissed),
       generatedAt: data.generatedAt,
       stale: data.stale || false,
       expiresAt: data.expiresAt

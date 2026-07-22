@@ -1,14 +1,17 @@
 /**
- * InsightsPage — Nexus dismissal write-through (R4 Task 5, DR finding 10).
+ * InsightsPage — Nexus dismissal write-through (R4 Task 5 + T5b fix, DR
+ * finding 10).
  *
  * Before this fix, `handleDismissInsight` only ever touched
- * `dismissedInsights`, a local `useState(new Set())` that reset on reload.
+ * `dismissedInsights`, a local React-state `Set` that reset on reload.
  * This proves the click wires through to the durable write
- * (`recordInsightDismissal`) with the insight's real id, for both the
- * quick-dismiss (X) and report-then-dismiss paths — and that dismissing
- * still removes the card from view instantly (unchanged local-state
- * behavior), so users get both durability AND the existing instant
- * feedback.
+ * (`recordInsightDismissal`), passing the FULL insight object (not just its
+ * id — `recordInsightDismissal` derives a content-stable dismissal key
+ * internally as of T5b; see `insightDismissal.test.js` for that unit-level
+ * coverage, including the no-stable-key no-op), for both the quick-dismiss
+ * (X) and report-then-dismiss paths — and that dismissing still removes the
+ * card from view instantly (unchanged local-state behavior), so users get
+ * both durability AND the existing instant feedback.
  *
  * Mocking scaffold mirrors InsightsPage.receiptTrigger.test.jsx (same file
  * mocks every hook/service InsightsPage touches).
@@ -121,13 +124,13 @@ beforeEach(() => {
 });
 
 describe('InsightsPage — Nexus insight dismissal write-through', () => {
-  it('clicking "Dismiss insight" persists via recordInsightDismissal(userId, insight.id) and removes the card', () => {
+  it('clicking "Dismiss insight" persists via recordInsightDismissal(userId, insight) — the full object, not just its id — and removes the card', () => {
     render(<InsightsPage entries={ENTRIES} userId="user-1" user={{ uid: 'user-1' }} />);
 
     expect(screen.getByText('Evening walks lift your mood')).toBeTruthy();
     fireEvent.click(screen.getByLabelText('Dismiss insight'));
 
-    expect(recordInsightDismissal).toHaveBeenCalledWith('user-1', 'nexus-1');
+    expect(recordInsightDismissal).toHaveBeenCalledWith('user-1', NEXUS_INSIGHT);
     expect(screen.queryByText('Evening walks lift your mood')).toBeNull();
   });
 
@@ -137,16 +140,15 @@ describe('InsightsPage — Nexus insight dismissal write-through', () => {
     fireEvent.click(screen.getByLabelText('Report this insight as inappropriate'));
 
     await vi.waitFor(() => expect(reportInsight).toHaveBeenCalledWith('user-1', NEXUS_INSIGHT));
-    expect(recordInsightDismissal).toHaveBeenCalledWith('user-1', 'nexus-1');
+    expect(recordInsightDismissal).toHaveBeenCalledWith('user-1', NEXUS_INSIGHT);
   });
 
-  it('an insight without an id is dismissed locally but never persisted (nothing stable to key on)', () => {
-    useNexusInsights.mockReturnValue(baseNexusReturn({
-      insights: [{ ...NEXUS_INSIGHT, id: undefined, message: 'Untitled pattern' }],
-    }));
+  it('an insight without a stable id still calls through to recordInsightDismissal — the no-op-when-no-key decision lives inside that module now (see insightDismissal.test.js), not in InsightsPage', () => {
+    const idLessInsight = { ...NEXUS_INSIGHT, id: undefined, message: 'Untitled pattern' };
+    useNexusInsights.mockReturnValue(baseNexusReturn({ insights: [idLessInsight] }));
     render(<InsightsPage entries={ENTRIES} userId="user-1" user={{ uid: 'user-1' }} />);
 
     fireEvent.click(screen.getByLabelText('Dismiss insight'));
-    expect(recordInsightDismissal).not.toHaveBeenCalled();
+    expect(recordInsightDismissal).toHaveBeenCalledWith('user-1', idLessInsight);
   });
 });

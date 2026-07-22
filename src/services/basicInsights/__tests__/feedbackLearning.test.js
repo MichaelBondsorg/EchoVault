@@ -37,8 +37,12 @@ vi.mock('firebase/firestore', () => ({
     const data = store.get(ref.__patternType);
     return { exists: () => data !== undefined, data: () => data };
   }),
-  setDoc: vi.fn(async (ref, data) => {
-    store.set(ref.__patternType, { ...data });
+  setDoc: vi.fn(async (ref, data, opts) => {
+    if (opts?.merge) {
+      store.set(ref.__patternType, { ...(store.get(ref.__patternType) || {}), ...data });
+    } else {
+      store.set(ref.__patternType, { ...data });
+    }
   }),
   getDocs: vi.fn(async () => ({
     forEach: (cb) => {
@@ -55,6 +59,7 @@ vi.mock('firebase/firestore', () => ({
 
 const {
   recordFeedbackAndLearn,
+  shouldShowInsight,
   filterInsightsByLearning,
   filterFalsePositiveCandidates,
 } = await import('../feedbackLearning');
@@ -101,7 +106,7 @@ describe('resurfacing bug fix (DR finding 10)', () => {
     expect(moreEntries[0]._showDecision.reason).toBe('new_data_reevaluation');
   });
 
-  it('omitting currentEntryCount leaves entriesAtLastEvaluation at its default (backward-compatible, unchanged pre-fix behavior for callers that opt out)', async () => {
+  it('omitting currentEntryCount leaves entriesAtLastEvaluation unstamped at suppression time (the doc alone does not self-heal until it is next evaluated)', async () => {
     for (let i = 0; i < 3; i++) {
       await recordFeedbackAndLearn(
         'user-2',
@@ -112,6 +117,94 @@ describe('resurfacing bug fix (DR finding 10)', () => {
     const stored = store.get('no_count_pattern');
     expect(stored.suppressed).toBe(true);
     expect(stored.entriesAtLastEvaluation).toBe(0);
+  });
+});
+
+describe('R4 T5b — suppression fails toward holding (lazy stamping)', () => {
+  it("the reviewer's exact reproduction: omitting currentEntryCount at suppression time, then the very next filter call, still holds (does NOT resurface immediately)", async () => {
+    for (let i = 0; i < 3; i++) {
+      await recordFeedbackAndLearn(
+        'user-5',
+        { insightId: 'unstamped_pattern', feedback: 'inaccurate', moodDelta: 10 },
+        []
+        // currentEntryCount omitted -> entriesAtLastEvaluation left at 0
+      );
+    }
+    expect(store.get('unstamped_pattern').entriesAtLastEvaluation).toBe(0);
+
+    // Before the T5b fix: newEntries = 20 - 0 = 20 >= 5 -> would have shown
+    // immediately on this very next call, with zero genuinely new entries.
+    const result = await filterInsightsByLearning('user-5', [{ id: 'unstamped_pattern', moodDelta: 10 }], 20);
+    expect(result[0]._showDecision).toEqual({ show: false, adjustedConfidence: 0, reason: 'suppressed' });
+
+    // Self-heal: the doc now carries a real baseline for future reads.
+    expect(store.get('unstamped_pattern').entriesAtLastEvaluation).toBe(20);
+  });
+
+  it('a pre-T5b legacy suppressed doc (entriesAtLastEvaluation absent entirely, not just 0) also holds and self-heals — zero migration needed', async () => {
+    // Simulates a doc written before entriesAtLastEvaluation existed on the
+    // schema at all (field absent, not defaulted to 0) — the `!!` check
+    // must treat both the same way.
+    store.set('legacy_pattern', {
+      patternType: 'legacy_pattern',
+      totalFeedback: 5,
+      accurateFeedback: 0,
+      inaccurateFeedback: 5,
+      accuracyRate: 0,
+      confidenceMultiplier: 0.3,
+      suppressed: true,
+      suppressedAt: { toMillis: () => Date.now() },
+      suppressReason: 'low_accuracy',
+      requiredMoodDeltaToResurface: 15,
+      falsePositiveEntryIds: [],
+      falsePositivePatterns: [],
+      // entriesAtLastEvaluation intentionally omitted
+    });
+
+    const result = await filterInsightsByLearning('user-6', [{ id: 'legacy_pattern', moodDelta: 10 }], 500);
+    expect(result[0]._showDecision.show).toBe(false);
+    expect(store.get('legacy_pattern').entriesAtLastEvaluation).toBe(500);
+  });
+
+  it('a properly-stamped suppressed doc still re-evaluates normally once genuinely new entries exist (no regression from the lazy-stamp path)', async () => {
+    store.set('stamped_pattern', {
+      patternType: 'stamped_pattern',
+      totalFeedback: 3,
+      accurateFeedback: 0,
+      accuracyRate: 0,
+      confidenceMultiplier: 0.3,
+      suppressed: true,
+      suppressedAt: { toMillis: () => Date.now() },
+      requiredMoodDeltaToResurface: 15,
+      entriesAtLastEvaluation: 100,
+    });
+
+    const stillHolds = await filterInsightsByLearning('user-7', [{ id: 'stamped_pattern', moodDelta: 10 }], 102);
+    expect(stillHolds[0]._showDecision.show).toBe(false);
+    // No lazy-stamp side effect fires for an already-stamped doc — baseline
+    // stays exactly as it was.
+    expect(store.get('stamped_pattern').entriesAtLastEvaluation).toBe(100);
+
+    const reevaluates = await filterInsightsByLearning('user-7', [{ id: 'stamped_pattern', moodDelta: 10 }], 106);
+    expect(reevaluates[0]._showDecision.show).toBe(true);
+    expect(reevaluates[0]._showDecision.reason).toBe('new_data_reevaluation');
+  });
+
+  it('shouldShowInsight (single-insight path) gets the same lazy-stamp fix as filterInsightsByLearning (shared logic, cannot drift)', async () => {
+    store.set('single_path_pattern', {
+      patternType: 'single_path_pattern',
+      totalFeedback: 3,
+      accuracyRate: 0,
+      confidenceMultiplier: 0.3,
+      suppressed: true,
+      suppressedAt: { toMillis: () => Date.now() },
+      requiredMoodDeltaToResurface: 15,
+      // entriesAtLastEvaluation absent
+    });
+
+    const decision = await shouldShowInsight('user-8', { id: 'single_path_pattern', moodDelta: 10 }, 40);
+    expect(decision).toEqual({ show: false, adjustedConfidence: 0, reason: 'suppressed' });
+    expect(store.get('single_path_pattern').entriesAtLastEvaluation).toBe(40);
   });
 });
 
