@@ -4,6 +4,7 @@ import {
   ChevronRight, Loader2, AlertTriangle, Download, LogOut, FileJson, Heart,
 } from 'lucide-react';
 import BackfillPanel from '../components/settings/BackfillPanel';
+import RevisitControls from '../components/revisit/RevisitControls';
 import { exportDiagnosticJSON, migrateEntriesForHealthEnrichment } from '../utils/diagnosticExport';
 import { db, deleteAccountFn } from '../config/firebase';
 import { getFlag } from '../config/flags';
@@ -73,6 +74,12 @@ const SettingsPage = ({
   const [loadingItem, setLoadingItem] = useState(null);
   const [diagnosticResult, setDiagnosticResult] = useState(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  // Gentle Revisit (flag: gentleRevisit, R2 Task 20) — unlike
+  // recipesItem/sessionPrepItem below, no AppLayout wiring exists yet for
+  // this surface (out of this task's file scope — see Task 20 report), so
+  // SettingsPage owns showing `RevisitControls` directly rather than
+  // delegating to a passed-in onClick handler.
+  const [showRevisitControls, setShowRevisitControls] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState(null);
   const [accentName, setAccentName] = useState('blue');
@@ -314,10 +321,21 @@ const SettingsPage = ({
     onClick: onOpenSessionPrep,
   };
 
+  // Gentle Revisit (flag: gentleRevisit, R2 Task 20) — opt-in toggle +
+  // hidden-dimension/exclusion management live inside RevisitControls
+  // itself; this row just opens it. Flag-gated: filtered out entirely when
+  // off, same convention as `contextSpacesItem`/`recipesItem` above.
+  const revisitItem = {
+    label: 'Gentle Revisit',
+    description: 'Opt in to occasionally resurface a calm memory',
+    onClick: () => setShowRevisitControls(true),
+  };
+
   const appNavRows = [
     getFlag('contextSpaces') && contextSpacesItem,
     getFlag('reflectionRecipes') && recipesItem,
     getFlag('sessionPrep') && sessionPrepItem,
+    getFlag('gentleRevisit') && revisitItem,
     notificationsItem,
   ].filter(Boolean);
 
@@ -652,6 +670,17 @@ const SettingsPage = ({
       <p className="text-center text-xs text-faint">
         Engram v2.0
       </p>
+
+      {/* Gentle Revisit (flag: gentleRevisit, R2 Task 20) — double-gated on
+          the flag (not just the nav row that's the only way to flip
+          showRevisitControls true), mirroring Insight Control Center's own
+          mount site pattern in AppLayout.jsx. */}
+      {getFlag('gentleRevisit') && showRevisitControls && (
+        <RevisitControls
+          uid={user?.uid}
+          onClose={() => setShowRevisitControls(false)}
+        />
+      )}
 
       {/* Delete Account confirmation */}
       {showDeleteConfirm && (

@@ -90,6 +90,15 @@ export const WIDGET_DEFINITIONS = {
     defaultSize: '2x1',
     icon: 'Clock',
   },
+  revisit: {
+    id: 'revisit',
+    type: 'revisit',
+    name: 'Gentle Revisit',
+    description: 'Occasionally resurface a calm memory from your journal',
+    defaultSize: '2x1',
+    icon: 'History',
+    flags: ['gentleRevisit'],
+  },
 };
 
 /**
