@@ -26,8 +26,8 @@ import { buildGeminiRequestBody, parseFusedResponse } from './src/transcription/
 import { transcribeWithWhisper } from './src/shared/openai.js';
 import { assertAiConsent, isAiAllowed, grantConsent, revokeConsent } from './src/consent/consentGate.js';
 import { logStage } from './src/telemetry/stageLog.js';
-import { getCachedEmbedding, setCachedEmbedding, getCachedEmbeddingV2, setCachedEmbeddingV2 } from './src/ai/embeddingCache.js';
-import { generateEmbeddingV2, buildEmbeddingMeta, EMBEDDING_V2_TASK_TYPE } from './src/ai/embeddingV2.js';
+import { getCachedEmbedding, setCachedEmbedding, getCachedEmbeddingV2, setCachedEmbeddingV2, getCachedEmbeddingV2Query, setCachedEmbeddingV2Query } from './src/ai/embeddingCache.js';
+import { generateEmbeddingV2, buildEmbeddingMeta, EMBEDDING_V2_TASK_TYPE, EMBEDDING_V2_QUERY_TASK_TYPE } from './src/ai/embeddingV2.js';
 import { claimProcessingMarker, acquireEntryLease, LEASE_MS } from './src/triggers/idempotency.js';
 import { maybeReanalyzeOnEntryUpdate } from './src/triggers/entryUpdateAnalysis.js';
 import { shouldWatchdogSkipEditedEntry } from './src/triggers/watchdogGuards.js';
@@ -532,7 +532,77 @@ async function generateEmbeddingInternal(text, apiKey, uid) {
 }
 
 /**
+ * Helper: Generate a v2 QUERY embedding (internal use, `generateEmbedding`
+ * callable only — embeddings migration task M1).
+ *
+ * gemini-embedding-2 is an ASYMMETRIC retrieval model: entries are embedded
+ * with taskType RETRIEVAL_DOCUMENT (see `generateEmbeddingInternal`'s
+ * dual-write above), so a query vector meant to be compared against them
+ * must be embedded with taskType RETRIEVAL_QUERY for the pairing to be
+ * meaningful — reusing RETRIEVAL_DOCUMENT for a query still yields a
+ * same-shape vector but silently degrades retrieval, with no error to signal
+ * the mistake. The resulting vector is cached in its own keyspace
+ * (`embeddingV2QueryCacheKey`, via getCachedEmbeddingV2Query/
+ * setCachedEmbeddingV2Query), distinct from both the v1 cache and the v2
+ * DOCUMENT cache — a query vector can never be served for a document lookup
+ * or vice versa.
+ *
+ * Fails LOUD, unlike the v1/document dual-write above (which is fail-open):
+ * a v2 query request that can't produce a v2 vector must never silently fall
+ * back to a v1 vector, because that would mislabel the vector's space and
+ * corrupt same-space retrieval (a mislabeled vector is worse than no
+ * vector). Callers must let this throw propagate as a hard failure.
+ *
+ * @returns {Promise<{embedding:number[], model:string, dim:number, cached:boolean}>}
+ */
+async function generateQueryEmbeddingV2Internal(text, apiKey, uid) {
+  if (!text || typeof text !== 'string' || text.trim().length === 0) {
+    throw new Error('Valid text is required');
+  }
+
+  const cached = await getCachedEmbeddingV2Query(db, uid, text);
+  if (cached) {
+    return {
+      embedding: cached.embedding,
+      model: cached.embeddingMeta?.model || null,
+      dim: cached.embeddingMeta?.dim ?? cached.embedding.length,
+      cached: true,
+    };
+  }
+
+  const v2Model = await getModel(db, 'embeddingV2');
+  const v2 = await generateEmbeddingV2(text, apiKey, {
+    model: v2Model,
+    taskType: EMBEDDING_V2_QUERY_TASK_TYPE,
+    timeoutMs: LLM_TIMEOUT_MS,
+  });
+
+  if (!v2) {
+    // Loud failure by design — see doc comment above. Never fall back to v1.
+    throw new Error('v2 query embedding generation failed');
+  }
+
+  const embeddingMeta = buildEmbeddingMeta({
+    model: v2Model,
+    dim: v2.dim,
+    taskType: EMBEDDING_V2_QUERY_TASK_TYPE,
+  });
+  await setCachedEmbeddingV2Query(db, uid, text, v2.embedding, embeddingMeta);
+
+  return { embedding: v2.embedding, model: v2Model, dim: v2.dim, cached: false };
+}
+
+/**
  * Cloud Function: Generate text embedding (callable)
+ *
+ * Accepts optional `version: 'v1' | 'v2'` (default `'v1'`; any value other
+ * than the literal `'v2'` — including omission — resolves to `'v1'`).
+ *  - `'v1'` (default): BYTE-IDENTICAL to pre-migration behavior for existing
+ *    callers, plus an additive `space: 'v1'` key that old clients ignore.
+ *  - `'v2'`: returns a RETRIEVAL_QUERY gemini-embedding-2 vector for
+ *    asymmetric retrieval against entries' RETRIEVAL_DOCUMENT vectors (see
+ *    `generateQueryEmbeddingV2Internal`). Never silently degrades to v1 on
+ *    failure — throws instead (space integrity).
  */
 export const generateEmbedding = onCall(
   {
@@ -548,19 +618,30 @@ export const generateEmbedding = onCall(
     const userId = request.auth.uid;
     await assertAiConsent(db, userId);
 
-    const { text } = request.data;
+    const { text, version } = request.data;
 
     if (!text || typeof text !== 'string' || text.trim().length === 0) {
       throw new HttpsError('invalid-argument', 'Valid text is required');
     }
 
     const apiKey = geminiApiKey.value();
+    const requestedVersion = version === 'v2' ? 'v2' : 'v1';
+
+    if (requestedVersion === 'v2') {
+      try {
+        const { embedding, model, dim, cached } = await generateQueryEmbeddingV2Internal(text, apiKey, userId);
+        return { embedding, space: 'v2', model, dim, cached };
+      } catch (error) {
+        console.error('generateEmbedding (v2) error:', error);
+        throw new HttpsError('internal', 'Embedding generation failed');
+      }
+    }
 
     try {
       // The callable returns the legacy v1 vector (client retrieval space); the
       // v2 dual-write, if enabled, is persisted server-side via the cache.
       const { embedding } = await generateEmbeddingInternal(text, apiKey, userId);
-      return { embedding, cached: false };  // Caching handled internally
+      return { embedding, space: 'v1', cached: false };  // Caching handled internally
     } catch (error) {
       console.error('generateEmbedding error:', error);
       throw new HttpsError('internal', 'Embedding generation failed');

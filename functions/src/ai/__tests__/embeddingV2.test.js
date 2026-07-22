@@ -12,6 +12,7 @@ vi.mock('firebase-admin/firestore', () => ({
 import {
   EMBEDDING_SPACES,
   EMBEDDING_V2_TASK_TYPE,
+  EMBEDDING_V2_QUERY_TASK_TYPE,
   buildEmbeddingMeta,
   generateEmbeddingV2,
   cosineSimilarity,
@@ -97,6 +98,28 @@ describe('generateEmbeddingV2', () => {
     expect(await generateEmbeddingV2('hi', '', { model: 'gemini-embedding-2', fetchImpl })).toBeNull();
     expect(await generateEmbeddingV2('hi', 'key', { model: '', fetchImpl })).toBeNull();
     expect(fetchImpl).not.toHaveBeenCalled();
+  });
+});
+
+describe('EMBEDDING_V2_QUERY_TASK_TYPE — asymmetric retrieval pairing (task M1)', () => {
+  it('is RETRIEVAL_QUERY, distinct from the RETRIEVAL_DOCUMENT task type', () => {
+    expect(EMBEDDING_V2_QUERY_TASK_TYPE).toBe('RETRIEVAL_QUERY');
+    expect(EMBEDDING_V2_TASK_TYPE).toBe('RETRIEVAL_DOCUMENT');
+    expect(EMBEDDING_V2_QUERY_TASK_TYPE).not.toBe(EMBEDDING_V2_TASK_TYPE);
+  });
+
+  it('generateEmbeddingV2 sends RETRIEVAL_QUERY when passed the query task type', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(okResponse([0.5, 0.6, 0.7]));
+    const out = await generateEmbeddingV2('what did I say about work?', 'key', {
+      model: 'gemini-embedding-2',
+      taskType: EMBEDDING_V2_QUERY_TASK_TYPE,
+      fetchImpl,
+    });
+    expect(out).toEqual({ embedding: [0.5, 0.6, 0.7], dim: 3 });
+    const [, init] = fetchImpl.mock.calls[0];
+    const body = JSON.parse(init.body);
+    expect(body.taskType).toBe('RETRIEVAL_QUERY');
+    expect(body.taskType).not.toBe(EMBEDDING_V2_TASK_TYPE);
   });
 });
 

@@ -17,6 +17,16 @@ export const EMBEDDING_SPACES = Object.freeze({ v1: 'v1', v2: 'v2' });
 // are embedded with the RETRIEVAL_DOCUMENT task type.
 export const EMBEDDING_V2_TASK_TYPE = 'RETRIEVAL_DOCUMENT';
 
+// gemini-embedding-2 is an ASYMMETRIC retrieval model: the query side of a
+// retrieval pair must be embedded with RETRIEVAL_QUERY, not
+// RETRIEVAL_DOCUMENT. The two task types produce vectors tuned for their side
+// of the pairing (query <-> document) — embedding a search query with the
+// document task type (or vice versa) still produces a same-shape vector but
+// silently degrades retrieval quality, with no error to signal the mistake.
+// Server query embeddings (plan task M1) MUST use this constant; document/
+// entry embeddings (dual-write, above) MUST keep using EMBEDDING_V2_TASK_TYPE.
+export const EMBEDDING_V2_QUERY_TASK_TYPE = 'RETRIEVAL_QUERY';
+
 const V2_TIMEOUT_MS = 15000;
 
 /** Build the embeddingMeta provenance stamp written alongside a v2 vector. */
@@ -114,6 +124,7 @@ export function scoreSameSpace(query, doc) {
 export default {
   EMBEDDING_SPACES,
   EMBEDDING_V2_TASK_TYPE,
+  EMBEDDING_V2_QUERY_TASK_TYPE,
   buildEmbeddingMeta,
   generateEmbeddingV2,
   cosineSimilarity,
