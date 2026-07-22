@@ -301,7 +301,7 @@ or environment during this window.
 
 {
   "insight": {
-    "title": "Short memorable title (e.g., 'The Sterling Stabilization Loop')",
+    "title": "Short memorable title (e.g., 'The Evening Walk Effect')",
     "type": "causal_synthesis",
     "summary": "One sentence hook",
     "body": "2-3 paragraph insight with the full explanation, mechanism, and evidence",

@@ -19,8 +19,8 @@
  */
 export const THREAD_SCHEMA = {
   // Identity
-  id: 'string', // e.g., "anthropic-opportunity-1704067200"
-  displayName: 'string', // e.g., "Anthropic Opportunity"
+  id: 'string', // e.g., "career-opportunity-1704067200"
+  displayName: 'string', // e.g., "Career Opportunity"
   category: 'string', // career | health | relationship | growth | somatic | financial | housing | creative | social
   status: 'string', // active | resolved | archived | evolved
 
@@ -29,7 +29,7 @@ export const THREAD_SCHEMA = {
   predecessorId: 'string|null', // Immediate parent thread
   successorId: 'string|null', // Set when this thread evolves
   evolutionType: 'string|null', // continuation | pivot | resolution
-  evolutionContext: 'string|null', // "Databricks rejection led to Anthropic application"
+  evolutionContext: 'string|null', // "A setback in one path led to pursuing a new one"
 
   // Sentiment Tracking
   sentimentBaseline: 'number', // 0-1
@@ -100,9 +100,14 @@ export const BASELINES_SCHEMA = {
       mood: { mean: 'number', delta: 'number' },
       sampleDays: 'number'
     },
-    'entity:spencer': {
+    // R4 T3 (privacy sweep): the prior example here, `entity:spencer`, was
+    // both a personal literal AND stale — baselineManager.js never emits
+    // `entity:*` keys (per-user entity baselines were removed; see R4 T2).
+    // Real prefixes baselineManager.js actually emits: `state:`,
+    // `activity:`, `temporal:`, `environment:`, `health:`.
+    'health:good_sleep': {
       mood: { mean: 'number', delta: 'number' },
-      effect: 'string' // "stabilizing"
+      sampleDays: 'number'
     },
     'activity:yoga': {
       sameDayMood: '...stats...',

@@ -97,11 +97,11 @@ describe('generateRecommendations — ratified decision 4: riskyClaimsEnabled ga
 
 describe('generateRecommendations — no fabricated fallback numbers (decision 4: deleted outright)', () => {
   it('never writes a hardcoded HRV/mood number when the real data is absent, even for a templated state/intervention pair', async () => {
-    // sterling_walk in career_waiting has a hardcoded template that used to
+    // pet_walk in career_waiting has a hardcoded template that used to
     // fall back to `|| 12`ms when hrvDelta was missing.
     getInterventionData.mockResolvedValueOnce({
       interventions: {
-        sterling_walk: { category: 'relational', totalOccurrences: 10, effectiveness: { global: { score: 0.9 /* no hrvDelta */ } } },
+        pet_walk: { category: 'relational', totalOccurrences: 10, effectiveness: { global: { score: 0.9 /* no hrvDelta */ } } },
       },
     });
 
@@ -110,7 +110,7 @@ describe('generateRecommendations — no fabricated fallback numbers (decision 4
       riskyClaimsEnabled: true,
     }));
 
-    const rec = recs.find((r) => r.intervention === 'sterling_walk');
+    const rec = recs.find((r) => r.intervention === 'pet_walk');
     expect(rec).toBeTruthy();
     expect(rec.reasoning).not.toContain('12ms');
     expect(rec.reasoning).not.toMatch(/recovered your HRV by \d/);

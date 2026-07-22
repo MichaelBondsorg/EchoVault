@@ -35,11 +35,16 @@ const GOOD_DAY_MOOD_THRESHOLD = 0.60;
 // ACTIVITY PATTERNS
 // ============================================================
 
+// R4 T3 (DR finding 5, privacy sweep): generic category patterns only — no
+// proper nouns (pet names, partner names, gym brands). Keys are shared with
+// `layer4/interventionTracker.js`'s `INTERVENTION_PATTERNS` (matched by
+// name in `identifyMissingInterventions` below), so a rename here must be
+// mirrored there.
 const ACTIVITY_PATTERNS = {
   yoga: /yoga|flow|vinyasa/i,
-  sterling_walk: /sterling|walked.*dog|dog.*walk/i,
-  workout: /workout|gym|barrys|lift/i,
-  spencer: /spencer/i,
+  pet_walk: /walked.*dog|dog.*walk|walked.*pet|pet.*walk/i,
+  workout: /workout|gym|lift/i,
+  partner_time: /\b(partner|boyfriend|girlfriend|spouse)\b/i,
   social: /dinner with|hung out|met up/i,
   meditation: /meditat|mindful|breathing/i,
   creative: /paint|built|created|coded/i,

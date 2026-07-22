@@ -115,13 +115,13 @@ const capitalize = (s) => s.charAt(0).toUpperCase() + s.slice(1);
  */
 const getInterventionsForState = (state, interventionData) => {
   const stateInterventionMap = {
-    'career_waiting': ['sterling_walk', 'yoga', 'creative', 'social'],
-    'career_rejection': ['spencer_time', 'acts_of_service', 'yoga', 'social'],
-    'low_mood': ['yoga', 'sterling_walk', 'spencer_time', 'acts_of_service'],
+    'career_waiting': ['pet_walk', 'yoga', 'creative', 'social'],
+    'career_rejection': ['partner_time', 'acts_of_service', 'yoga', 'social'],
+    'low_mood': ['yoga', 'pet_walk', 'partner_time', 'acts_of_service'],
     'high_strain': ['rest_day', 'yoga', 'sleep_focus'],
     'recovery_mode': ['rest_day', 'walk', 'sleep_focus'],
     'burnout_risk': ['rest_day', 'sleep_focus', 'social'],
-    'stable': ['gym', 'barrys', 'creative', 'social']
+    'stable': ['gym', 'fitness_class', 'creative', 'social']
   };
 
   const relevantInterventions = stateInterventionMap[state] || stateInterventionMap['stable'];
@@ -187,8 +187,8 @@ const scoreRecommendation = (intervention, context) => {
 const getTimeBoost = (intervention, timeOfDay) => {
   const optimalTimes = {
     yoga: ['morning', 'afternoon'],
-    barrys: ['morning'],
-    sterling_walk: ['morning', 'evening'],
+    fitness_class: ['morning'],
+    pet_walk: ['morning', 'evening'],
     gym: ['morning', 'afternoon'],
     rest_day: ['any'],
     social: ['evening'],
@@ -216,10 +216,10 @@ const getTimeBoost = (intervention, timeOfDay) => {
  */
 const STATE_INTERVENTION_REASONING = {
   career_waiting: {
-    sterling_walk: (intervention) => {
+    pet_walk: (intervention) => {
       const hrvDelta = intervention.effectiveness?.global?.hrvDelta?.mean;
       if (!Number.isFinite(hrvDelta)) return null;
-      return `You're in a waiting period with elevated stress markers. Sterling walks have historically recovered your HRV by ${Math.round(hrvDelta)}ms within 24 hours.`;
+      return `You're in a waiting period with elevated stress markers. Walks with your pet have historically recovered your HRV by ${Math.round(hrvDelta)}ms within 24 hours.`;
     },
     yoga: () => `During career uncertainty, yoga has been your most effective physical reset. On days you do yoga, your mood tends to improve.`,
     creative: () => `Working on creative projects provides a sense of agency when career outcomes feel out of your control.`
@@ -230,7 +230,7 @@ const STATE_INTERVENTION_REASONING = {
       if (!Number.isFinite(moodDeltaPoints)) return null;
       return `When your mood is low, doing something for someone else has historically boosted your mood by ${moodDeltaPoints} points.`;
     },
-    spencer_time: () => `Spencer's presence has a stabilizing effect on your mood.`
+    partner_time: () => `Time with your partner has a stabilizing effect on your mood.`
   }
 };
 
@@ -281,15 +281,15 @@ const generateReasoning = (intervention, currentState, context) => {
 const suggestTiming = (intervention, currentTimeOfDay) => {
   const optimalTiming = {
     yoga: 'This morning if possible, or early afternoon',
-    sterling_walk: 'Before 7pm for optimal HRV recovery',
-    barrys: 'Morning classes tend to set a better tone for your day',
+    pet_walk: 'Before 7pm for optimal HRV recovery',
+    fitness_class: 'Morning classes tend to set a better tone for your day',
     rest_day: 'Today and tomorrow if needed',
     social: 'This evening',
     creative: 'When you have 30+ uninterrupted minutes',
     gym: currentTimeOfDay === 'morning' ? 'This morning' : 'Before the end of the day',
     pilates: 'Morning or early afternoon',
     walk: 'Anytime - even a short walk helps',
-    spencer_time: 'This evening when you both have downtime',
+    partner_time: 'This evening when you both have downtime',
     acts_of_service: 'When you notice an opportunity'
   };
 

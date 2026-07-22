@@ -19,6 +19,7 @@ import { calculateAndSaveBaselines, getBaselines } from './layer2/baselineManage
 import { generateCausalSynthesis } from './layer3/synthesizer';
 import { updateInterventionData, getInterventionData } from './layer4/interventionTracker';
 import { getWhoopHistory } from '../health/whoop';
+import { RISKY_CLAIMS_ENABLED } from './orchestrator';
 
 /**
  * Generate comprehensive insights for a user
@@ -376,13 +377,27 @@ export const getTodayRecommendations = async (userId, entries, todayHealth, toda
     });
   }
 
-  // Workout effectiveness for mood
-  if (interventions?.interventions?.sterling_walk?.effectiveness?.global?.moodDelta?.mean > 5) {
+  // Pet-walk effectiveness for mood.
+  // R4 T3 (DR finding 5, privacy sweep — an orphaned second recommendation
+  // pipeline the sweep found, not routed through orchestrator.js's own
+  // gate): was `sterling_walk` (a pet's name) with a personalized-evidence
+  // claim ("Sterling walks improve your mood by X%") built from a
+  // Mood01-scale `moodDelta.mean` (native 0-1) compared/rendered as if it
+  // were already a 0-100 percentage — the exact scale bug class fixed
+  // elsewhere in R4 T3, here compounded with a personal literal. Key
+  // renamed to match `layer4/interventionTracker.js`'s generic `pet_walk`;
+  // the personalized number is gated behind the SAME `RISKY_CLAIMS_ENABLED`
+  // seam orchestrator.js uses for this exact claim class (ratified decision
+  // 4) rather than duplicating a second gate.
+  const petWalkMoodDelta = interventions?.interventions?.pet_walk?.effectiveness?.global?.moodDelta?.mean;
+  if (Number.isFinite(petWalkMoodDelta) && petWalkMoodDelta > 0.05) {
     recommendations.push({
       type: 'activity',
       priority: 'low',
-      action: 'A walk with Sterling could boost your mood',
-      reasoning: `Sterling walks improve your mood by ${Math.round(interventions.interventions.sterling_walk.effectiveness.global.moodDelta.mean)}% on average`
+      action: 'A walk with your pet could boost your mood',
+      reasoning: RISKY_CLAIMS_ENABLED
+        ? `Pet walks have historically improved your mood by ${Math.round(petWalkMoodDelta * 100)} points on average`
+        : 'Worth trying — you might find it helps.'
     });
   }
 

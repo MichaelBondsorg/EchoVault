@@ -82,7 +82,11 @@ const LOW_MOOD_THRESHOLD = 0.40;
 // `generateInsights`'s `options` exists ONLY so tests can exercise the
 // scale-corrected behavior end-to-end without touching production
 // defaults. Flip this constant to true only when Phase 1-2 lands.
-const RISKY_CLAIMS_ENABLED = false;
+// Exported so other Nexus surfaces with their own risky-claim-shaped
+// content (e.g. insightIntegration.js's `getTodayRecommendations`, found by
+// the T3 privacy sweep as an orphaned second recommendation pipeline) reuse
+// this single seam instead of duplicating a second gate constant.
+export const RISKY_CLAIMS_ENABLED = false;
 
 // ============================================================
 // PATTERN DISPLAY HELPERS
@@ -899,13 +903,17 @@ export const updateInsightsForNewEntry = async (userId, entryId, entryText, entr
 const computeEntityMoodCorrelations = (entries) => {
   if (!entries || entries.length < 5) return [];
 
-  // Common entities to look for (can be expanded with memory graph data)
-  // These are extracted from entry text via simple keyword matching
+  // Common entities to look for (can be expanded with memory graph data).
+  // These are extracted from entry text via simple keyword matching.
+  // R4 T3 (DR finding 5, privacy sweep): generic role/category words only —
+  // no proper nouns (names, pets). Per-user entity ontology is deferred to
+  // the Phase 1 extraction layer (see genericTriggers.js's same posture in
+  // layer1/patternDetector.js).
   const entityPatterns = [
-    // People names - common ones, will also look at extracted entities
-    { pattern: /\b(spencer|mom|dad|sarah|partner|wife|husband)\b/gi, type: 'person' },
-    // Pets
-    { pattern: /\b(luna|sterling|dog|cat|pet)\b/gi, type: 'pet' },
+    // People - relationship-role words, not names
+    { pattern: /\b(mom|dad|partner|wife|husband)\b/gi, type: 'person' },
+    // Pets - category words, not pet names
+    { pattern: /\b(dog|cat|pet)\b/gi, type: 'pet' },
     // Activities
     { pattern: /\b(yoga|meditation|workout|exercise|gym|running|walking|hiking|swimming)\b/gi, type: 'activity' },
     { pattern: /\b(therapy|therapist|counseling)\b/gi, type: 'activity' },

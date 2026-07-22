@@ -6,6 +6,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { callGemini } from '../../../ai/gemini';
 import { generateCausalSynthesis } from '../synthesizer';
+import { PERSONAL_TOKEN_DENYLIST } from '../../layer1/genericTriggers';
 
 // synthesizer.js statically imports layer2/baselineManager and
 // layer1/threadManager, which in turn import config/firebase — mock it so
@@ -148,5 +149,40 @@ describe('generateCausalSynthesis — de-escalated prompt (no invention demands)
     const prompt = callGemini.mock.calls.at(-1)[0];
     expect(prompt.toLowerCase()).toContain('never invent');
     expect(prompt.toLowerCase()).toContain('ignores any confidence');
+  });
+});
+
+/**
+ * R4 T3 privacy sweep (DR finding 5, prompt-text variant — same class T2b
+ * fixed in threadManager.js's METAMORPHOSIS example). The static template
+ * text is only part of what ships to Gemini; captures the ACTUAL prompt
+ * string `buildSynthesisPrompt` builds (with a full synthesis context —
+ * threads, baselines, interventions, health/environment) and denylist-scans
+ * it, the same technique `threadManager.classification.test.js` uses.
+ */
+describe('generateCausalSynthesis — no personal/brand literals in the shipped prompt', () => {
+  it('the built prompt never contains a PERSONAL_TOKEN_DENYLIST token, across a fully-populated context', async () => {
+    callGemini.mockClear();
+    const context = {
+      recentEntries: buildEntries(10),
+      activeThreads: [
+        { displayName: 'Job Search', category: 'career', entryCount: 5, sentimentTrajectory: 'improving', sentimentBaseline: 0.6 },
+      ],
+      currentState: { primary: 'career_waiting', confidence: 0.7, secondary: [], durationDays: 5 },
+      baselines: { global: { rhr: { mean: 58 } }, contextual: { 'state:career_waiting': { mood: { mean: 55 }, sampleDays: 10 } } },
+      whoopToday: { heartRate: { resting: 60 }, hrv: { average: 45 }, recovery: { score: 50 } },
+      interventionData: {
+        interventions: {
+          pet_walk: { effectiveness: { global: { score: 0.8 } } },
+        },
+      },
+    };
+
+    await generateCausalSynthesis('user-1', context);
+    const prompt = callGemini.mock.calls.at(-1)[0].toLowerCase();
+
+    for (const token of PERSONAL_TOKEN_DENYLIST) {
+      expect(prompt).not.toContain(token.toLowerCase());
+    }
   });
 });

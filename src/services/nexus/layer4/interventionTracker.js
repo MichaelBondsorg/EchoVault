@@ -35,6 +35,8 @@ import { extractEnvironmentSignals } from '../../environment/environmentFormatte
 // INTERVENTION DEFINITIONS
 // ============================================================
 
+// R4 T3 (DR finding 5, privacy sweep): generic category patterns only — no
+// proper nouns (pet names, partner names, gym brands, app self-reference).
 export const INTERVENTION_PATTERNS = {
   // Physical
   yoga: {
@@ -42,9 +44,9 @@ export const INTERVENTION_PATTERNS = {
     patterns: [/yoga/i, /flow/i, /vinyasa/i, /c3/i, /pilates/i],
     measureWindow: { same_day: true, next_day: true }
   },
-  barrys: {
+  fitness_class: {
     category: 'physical',
-    patterns: [/barry'?s/i, /barrys/i],
+    patterns: [/hiit/i, /boutique fitness/i, /fitness class/i, /spin class/i],
     measureWindow: { same_day: true, next_day: true }
   },
   gym: {
@@ -64,14 +66,14 @@ export const INTERVENTION_PATTERNS = {
   },
 
   // Relational
-  sterling_walk: {
+  pet_walk: {
     category: 'relational',
-    patterns: [/sterling/i, /walked.*dog/i, /dog.*walk/i],
+    patterns: [/walked.*dog/i, /dog.*walk/i, /walked.*pet/i, /pet.*walk/i],
     measureWindow: { same_day: true, next_day: true }
   },
-  spencer_time: {
+  partner_time: {
     category: 'relational',
-    patterns: [/spencer/i, /boyfriend/i],
+    patterns: [/\bpartner\b/i, /boyfriend/i, /girlfriend/i, /\bspouse\b/i],
     measureWindow: { same_day: true }
   },
   social: {
@@ -88,7 +90,7 @@ export const INTERVENTION_PATTERNS = {
   },
   creative: {
     category: 'behavioral',
-    patterns: [/paint/i, /built/i, /created/i, /engram/i, /app/i],
+    patterns: [/paint/i, /built/i, /created/i, /app/i],
     measureWindow: { same_day: true }
   },
 
