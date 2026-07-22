@@ -10,7 +10,12 @@ import { initializeApp, applicationDefault } from 'firebase-admin/app';
 import { getFirestore } from 'firebase-admin/firestore';
 
 const [name, value] = process.argv.slice(2);
-const ALLOWED = ['model.embeddingWriteV2', 'model.embeddingV2Read'];
+const ALLOWED = [
+  'intentExtraction', 'openLoops', 'contextSpaces', 'insightBudget',
+  'insightReceipts', 'voiceChapters', 'reflectionRecipes', 'sessionPrep',
+  'gentleRevisit', 'personalExperiments',
+  'model.embeddingWriteV2', 'model.embeddingV2Read',
+];
 if (!ALLOWED.includes(name) || !['true', 'false'].includes(value)) {
   console.error(`Usage: node flip-flag.mjs <${ALLOWED.join('|')}> <true|false>`);
   process.exit(1);

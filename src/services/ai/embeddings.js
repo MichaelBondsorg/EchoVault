@@ -140,10 +140,11 @@ export const generateEmbeddingV2 = async (text, retryCount = 0) => {
  * Generate QUERY-side embedding vector(s) for retrieval (embeddings v2
  * migration plan task M2). This is the space-aware sibling of
  * `generateEmbedding` above — use this for retrieval query text (chat
- * questions, semantic search); use plain `generateEmbedding` for anything
- * that isn't a retrieval query (e.g. threadManager.js's thread-name
- * vectors, which are explicitly PINNED to v1 and must NOT route through
- * this flag-aware helper — see threadManager.js's doc comment).
+ * questions, semantic search). threadManager.js's thread-name vectors do
+ * NOT route through this flag-aware helper either — since plan task M5
+ * they use the unconditional `generateEmbeddingV2` below (v2-pinned;
+ * v1 is retired upstream and can never serve them again) — see
+ * threadManager.js's doc comment.
  *
  * Flag `model.embeddingV2Read` gates the behavior:
  *  - OFF (default): returns `{v1}` via the EXACT SAME single callable
