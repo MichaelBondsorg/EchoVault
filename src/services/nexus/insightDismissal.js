@@ -42,6 +42,14 @@
  * eventually need to answer properly — this is a pragmatic, content-derived
  * approximation, not a semantic dedup.
  *
+ * `dismissalKeyFor` below MUST stay in sync with the server-side mirror at
+ * `functions/src/reports/dismissalKey.js` (R4 P0-closure Important 3 —
+ * weekly/monthly/etc. reports filter dismissed insights out of their inputs
+ * server-side, and need the SAME key derivation this client uses, or a
+ * dismissed insight could still recur in a report even though it never
+ * resurfaces in-app). Same duplicated-on-purpose precedent as
+ * `functions/src/safety/crisisKeywords.js` <-> this repo's CRISIS_KEYWORDS.
+ *
  * Split into its own module (rather than living directly in orchestrator.js
  * alongside `getCachedInsights`) so `InsightsPage.jsx` can import
  * `recordInsightDismissal`/`dismissalKeyFor` without pulling in

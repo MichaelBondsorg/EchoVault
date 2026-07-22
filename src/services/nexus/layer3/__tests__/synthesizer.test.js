@@ -3,10 +3,11 @@
  * de-escalated prompt, and confidence computed from data sufficiency
  * instead of trusted model output (DR finding 6).
  */
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { callGemini } from '../../../ai/gemini';
-import { generateCausalSynthesis } from '../synthesizer';
+import { generateCausalSynthesis, generateNarrativeArcInsight } from '../synthesizer';
 import { PERSONAL_TOKEN_DENYLIST } from '../../layer1/genericTriggers';
+import { getThreadLineage } from '../../layer1/threadManager';
 
 // synthesizer.js statically imports layer2/baselineManager and
 // layer1/threadManager, which in turn import config/firebase — mock it so
@@ -17,6 +18,14 @@ vi.mock('firebase/firestore', () => ({
   getDoc: vi.fn(async () => ({ exists: () => false, data: () => ({}) })),
   setDoc: vi.fn(async () => {}),
   Timestamp: { now: vi.fn(() => ({})) },
+}));
+
+// generateNarrativeArcInsight's only real dependency beyond callGemini —
+// mocked directly (rather than relying on the firebase/firestore mock
+// above) so lineage fixtures can be controlled per-test.
+vi.mock('../../layer1/threadManager', () => ({
+  getActiveThreads: vi.fn(),
+  getThreadLineage: vi.fn(),
 }));
 
 vi.mock('../../../ai/gemini', () => ({
@@ -184,5 +193,80 @@ describe('generateCausalSynthesis — no personal/brand literals in the shipped 
     for (const token of PERSONAL_TOKEN_DENYLIST) {
       expect(prompt).not.toContain(token.toLowerCase());
     }
+  });
+
+  it('the built narrative-arc prompt never contains a PERSONAL_TOKEN_DENYLIST token either', async () => {
+    callGemini.mockClear();
+    getThreadLineage.mockResolvedValue([
+      { displayName: 'Job Search', sentimentBaseline: 0.3, entryCount: 4, evolutionType: 'active' },
+      { displayName: 'Job Search', sentimentBaseline: 0.7, entryCount: 6, evolutionType: 'resolved' },
+    ]);
+
+    await generateNarrativeArcInsight('user-1', 'thread-1');
+    const prompt = callGemini.mock.calls.at(-1)[0].toLowerCase();
+
+    for (const token of PERSONAL_TOKEN_DENYLIST) {
+      expect(prompt).not.toContain(token.toLowerCase());
+    }
+  });
+});
+
+/**
+ * R4 P0-closure Important 2 — `generateNarrativeArcInsight` no longer asks
+ * for a fabricated `growth_metric`, AND stops trusting `...parsed` verbatim
+ * even if a model includes one anyway (defense in depth, same trust
+ * boundary as `generateCausalSynthesis`'s evidence/confidence stripping
+ * above).
+ */
+describe('generateNarrativeArcInsight — de-escalated prompt + parse allowlist (R4 P0-closure Important 2)', () => {
+  beforeEach(() => {
+    getThreadLineage.mockReset();
+  });
+
+  it('the prompt no longer asks for a quantified growth_metric', async () => {
+    callGemini.mockClear();
+    getThreadLineage.mockResolvedValue([
+      { displayName: 'Job Search', sentimentBaseline: 0.3, entryCount: 4, evolutionType: 'active' },
+      { displayName: 'Job Search', sentimentBaseline: 0.7, entryCount: 6, evolutionType: 'resolved' },
+    ]);
+
+    await generateNarrativeArcInsight('user-1', 'thread-1');
+    const prompt = callGemini.mock.calls.at(-1)[0].toLowerCase();
+
+    expect(prompt).not.toContain('growth_metric');
+    expect(prompt).not.toContain('recovery time shortened');
+  });
+
+  it('drops a fabricated growth_metric from the parsed response — never persisted even if the model writes one', async () => {
+    getThreadLineage.mockResolvedValue([
+      { displayName: 'Job Search', sentimentBaseline: 0.3, entryCount: 4, evolutionType: 'active' },
+      { displayName: 'Job Search', sentimentBaseline: 0.7, entryCount: 6, evolutionType: 'resolved' },
+    ]);
+    callGemini.mockResolvedValueOnce(JSON.stringify({
+      title: 'The Job Search Resilience Arc',
+      summary: 'Sentiment improved across the sequence.',
+      body: 'Body text analyzing the arc.',
+      growth_metric: 'recovery time shortened from 3 weeks to 3 days (invented)',
+      strength_identified: 'Consistent follow-through',
+    }));
+
+    const result = await generateNarrativeArcInsight('user-1', 'thread-1');
+
+    expect(result).toBeTruthy();
+    expect(result.title).toBe('The Job Search Resilience Arc');
+    expect(result.strength_identified).toBe('Consistent follow-through');
+    expect(result.growth_metric).toBeUndefined();
+    // sampleSize is computed by us from the real lineage, not model-authored.
+    expect(result.evidence.statistical.sampleSize).toBe(2);
+  });
+
+  it('returns null (insufficiency-preferred) when lineage has fewer than 2 threads, without calling the LLM', async () => {
+    callGemini.mockClear();
+    getThreadLineage.mockResolvedValue([{ displayName: 'Job Search', sentimentBaseline: 0.3, entryCount: 4 }]);
+
+    const result = await generateNarrativeArcInsight('user-1', 'thread-1');
+
+    expect(result).toBeNull();
+    expect(callGemini).not.toHaveBeenCalled();
   });
 });

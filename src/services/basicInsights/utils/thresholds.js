@@ -9,9 +9,19 @@ export const THRESHOLDS = {
   // Minimum entries required to generate any insights
   MIN_ENTRIES: 5,
 
-  // Minimum data points per specific metric/factor
-  // Lowered from 5 to 3 to surface more insights while fine-tuning patterns
-  MIN_DATA_POINTS: 3,
+  // Minimum data points per specific metric/factor.
+  // R4 P0-closure Minor 5: raised back 3 -> 5, the plan's explicit floor
+  // (docs/superpowers/plans/2026-07-22-r4-insight-integrity.md) — 3 was a
+  // pre-R4 "surface more insights while fine-tuning" relaxation that
+  // undercut the day-level grounding work done elsewhere in R4 (a
+  // per-factor comparison this thin is exactly the kind of thing R4's
+  // unique-day gating was meant to guard against). Every current usage
+  // site gates a per-factor group comparison (activityCorrelations,
+  // categoryCorrelations, healthExtendedCorrelations, timeCorrelations) —
+  // none gates "any insights at all" (that's MIN_ENTRIES, above, untouched)
+  // — so a single shared constant is correct here; no MIN_FACTOR_ENTRIES
+  // split was needed.
+  MIN_DATA_POINTS: 5,
 
   // Minimum mentions for people/entity correlations
   MIN_MENTIONS: 3,

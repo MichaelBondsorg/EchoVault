@@ -12,6 +12,7 @@ import { generateWeeklyTemplate, generatePremiumNarrative } from './narrative.js
 import { prepareMoodTrend, prepareCategoryBreakdown, prepareEntryFrequency } from './charts.js';
 import { filterForShareableContent } from './privacy.js';
 import { getModel } from '../models/registry.js';
+import { dismissalKeyFor } from './dismissalKey.js';
 
 /**
  * Generate a report for a single user and period.
@@ -239,6 +240,29 @@ async function readAnalytics(db, userBase) {
  * `patterns` is the same array as `insights`: the real active-item shape
  * doesn't distinguish "pattern" vs "insight" docs (that split was an
  * artifact of the phantom by-type collection query this replaces).
+ *
+ * ## Dismissal filtering (R4 P0-closure Important 3)
+ *
+ * Before R4 P0-closure, this function read `active` straight off the doc —
+ * a user's "Dismiss" action (`src/services/nexus/insightDismissal.js`,
+ * `recordInsightDismissal`) durably filters that insight out of the
+ * in-app view (`orchestrator.js`'s `getCachedInsights`), but this report
+ * consumer never checked it, so a dismissed insight could recur in every
+ * weekly report forever. This now reads the same
+ * `nexus/insights/insight_engagement` subcollection T5 writes and filters
+ * `active` by the SAME stable content-derived key
+ * (`functions/src/reports/dismissalKey.js`'s `dismissalKeyFor`, a mirror of
+ * the client's — see that module's doc comment for the sync-pair
+ * rationale) rather than raw `.id`, so a churned-id resurfacing insight
+ * with the SAME underlying content still filters correctly.
+ *
+ * Judgment call: a failure reading the dismissal subcollection does NOT
+ * fail this function closed the way `readEntries`'s `source_exclusions`
+ * read does. A dismissed insight resurfacing in one report is a UX wart
+ * (mildly annoying, not a privacy leak — it's still the user's own data,
+ * already shown to them once) whereas failing the whole report closed here
+ * would silently blank every Nexus-derived section for that run. So this
+ * degrades to UNFILTERED with a loud `console.warn` instead.
  */
 export async function readNexusData(db, userBase) {
   try {
@@ -255,7 +279,27 @@ export async function readNexusData(db, userBase) {
       );
     }
 
-    return { insights: active, patterns: active };
+    let dismissedKeys = new Set();
+    try {
+      const engagementSnap = await db.collection(`${userBase}/nexus/insights/insight_engagement`).get();
+      engagementSnap.forEach((doc) => {
+        const d = doc.data() || {};
+        if (d.dismissed) dismissedKeys.add(d.dismissalKey || doc.id);
+      });
+    } catch (dismissalError) {
+      console.warn(
+        '[report] Failed to read insight dismissals — proceeding UNFILTERED ' +
+        '(a dismissed insight resurfacing in a report is a UX wart, not a ' +
+        'privacy breach; see readNexusData\'s doc comment):',
+        dismissalError.message
+      );
+    }
+
+    const filteredActive = dismissedKeys.size === 0
+      ? active
+      : active.filter((i) => !dismissedKeys.has(dismissalKeyFor(i)));
+
+    return { insights: filteredActive, patterns: filteredActive };
   } catch (e) {
     console.warn('[report] Failed to read nexus data:', e.message);
     return { insights: [], patterns: [] };

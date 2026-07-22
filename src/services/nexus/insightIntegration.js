@@ -20,6 +20,15 @@ import { generateCausalSynthesis } from './layer3/synthesizer';
 import { updateInterventionData, getInterventionData } from './layer4/interventionTracker';
 import { getWhoopHistory } from '../health/whoop';
 import { RISKY_CLAIMS_ENABLED } from './orchestrator';
+// R4 T-p0closure (Important 1): these were previously loaded via require()
+// inside getTodayRecommendations — an ESM module using CommonJS require()
+// is exactly the class of bug that caused the documented prod white-screen
+// (esbuild misses undefined globals; see CLAUDE.md gotchas). Neither module
+// imports anything from this file or from `./orchestrator` (verified: both
+// are leaf formatter modules with zero local imports), so there is no
+// circular-import risk in hoisting these to static top-level imports.
+import { extractHealthSignals } from '../health/healthFormatter';
+import { extractEnvironmentSignals } from '../environment/environmentFormatter';
 
 /**
  * Generate comprehensive insights for a user
@@ -41,7 +50,16 @@ export const generateComprehensiveInsights = async (userId, entries, options = {
     includeSynthesis = true,
     includeInterventions = true,
     todayHealth = null,
-    todayEnvironment = null
+    todayEnvironment = null,
+    // R4 P0-closure Minor 6: this function is an orphan (no live call site
+    // today — exported via barrels only, `src/services/nexus/index.js`),
+    // but it feeds intervention-effectiveness data ungated into the same
+    // causal-synthesis prompt orchestrator.js gates behind
+    // RISKY_CLAIMS_ENABLED (ratified decision 4 — intervention-outcome
+    // claims stay suppressed until Phase 1-2 evidence rails land). Thread
+    // the same gate parameter here, default OFF, so the first future
+    // caller can't accidentally trip a risky claim through this seam.
+    riskyClaimsEnabled = false
   } = options;
 
   const insights = {
@@ -167,7 +185,9 @@ export const generateComprehensiveInsights = async (userId, entries, options = {
       currentState: null, // Could integrate with stateDetector
       baselines: insights.baselines,
       whoopToday: whoopHistory?.days?.[0] || null,
-      interventionData: insights.interventions,
+      // Gated per Minor 6 above / ratified decision 4 — mirrors
+      // orchestrator.js's `riskyClaimsEnabled ? interventionData : null`.
+      interventionData: riskyClaimsEnabled ? insights.interventions : null,
       healthCorrelations: insights.correlations?.health,
       environmentCorrelations: insights.correlations?.environment,
       todayHealth,
@@ -329,8 +349,8 @@ export const getTodayRecommendations = async (userId, entries, todayHealth, toda
   const interventions = await getInterventionData(userId);
 
   // Check current conditions
-  const health = todayHealth ? require('../health/healthFormatter').extractHealthSignals(todayHealth) : null;
-  const env = todayEnvironment ? require('../environment/environmentFormatter').extractEnvironmentSignals(todayEnvironment) : null;
+  const health = todayHealth ? extractHealthSignals(todayHealth) : null;
+  const env = todayEnvironment ? extractEnvironmentSignals(todayEnvironment) : null;
 
   // Recovery-based recommendations
   if (health?.recoveryScore < 34) {
@@ -341,14 +361,21 @@ export const getTodayRecommendations = async (userId, entries, todayHealth, toda
       reasoning: 'Low recovery days benefit from lighter activity and extra rest'
     });
   } else if (health?.recoveryScore >= 67) {
-    // Check if exercise is effective for this user
+    // Check if exercise is effective for this user.
+    // R4 T-p0closure (Important 1): this personalized intervention-outcome
+    // claim reached InsightsPage's RecommendationsSection with the
+    // RISKY_CLAIMS_ENABLED gate OFF (ratified decision 4) — gated here the
+    // SAME way the pet_walk claim below is gated (same seam, same posture:
+    // gate-off -> generic idea copy, no personal-evidence number).
     const workoutEffectiveness = interventions?.interventions?.workout_day?.effectiveness?.global?.score;
     if (workoutEffectiveness > 0.6) {
       recommendations.push({
         type: 'activity',
         priority: 'medium',
         action: 'Good day for a workout - your recovery is in the green zone',
-        reasoning: `Exercise has been effective for you (${Math.round(workoutEffectiveness * 100)}% effectiveness)`
+        reasoning: RISKY_CLAIMS_ENABLED
+          ? `Exercise has been effective for you (${Math.round(workoutEffectiveness * 100)}% effectiveness)`
+          : 'Worth trying — exercise can be a good use of a high-recovery day.'
       });
     }
   }

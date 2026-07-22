@@ -78,8 +78,13 @@ let mockDb;
  *   {exists: false} (mirrors "user has no Nexus doc yet").
  * @param {Error} [opts.nexusError] - if set, the `nexus/insights` doc's
  *   get() rejects with this error instead of resolving.
+ * @param {Array<{id: string, data: object}>} [opts.engagement] - docs in the
+ *   `nexus/insights/insight_engagement` subcollection (R4 P0-closure
+ *   Important 3 — dismissal records); defaults to empty (no dismissals).
+ * @param {Error} [opts.engagementError] - if set, the insight_engagement
+ *   collection's get() rejects with this error instead of resolving.
  */
-function buildFakeDb({ entries = [], exclusions = [], entriesError = null, exclusionsError = null, nexusDoc = undefined, nexusError = null } = {}) {
+function buildFakeDb({ entries = [], exclusions = [], entriesError = null, exclusionsError = null, nexusDoc = undefined, nexusError = null, engagement = [], engagementError = null } = {}) {
   const collectionRoutes = {};
   const docRoutes = {};
 
@@ -115,6 +120,9 @@ function buildFakeDb({ entries = [], exclusions = [], entriesError = null, exclu
         return exclusionsError ? makeRejectingQuery(exclusionsError) : makeQuery(fakeSnap(exclusions));
       }
       if (path.endsWith('/signal_states')) return makeQuery(fakeSnap([]));
+      if (path.endsWith('/insight_engagement')) {
+        return engagementError ? makeRejectingQuery(engagementError) : makeQuery(fakeSnap(engagement));
+      }
       collectionRoutes[path] = collectionRoutes[path] || makeQuery(fakeSnap([]));
       return collectionRoutes[path];
     }),
@@ -162,6 +170,12 @@ function rawEntryDoc(id, analysis, { createdAt = new Date('2026-01-10T12:00:00Z'
 
 function exclusionDoc(id, { entryId, appliesTo = 'all' } = {}) {
   return { id, data: { entryId, appliesTo, reason: 'test', permanent: true } };
+}
+
+// R4 P0-closure Important 3 — a dismissal doc as written by the CLIENT's
+// `recordInsightDismissal` (src/services/nexus/insightDismissal.js).
+function engagementDoc(id, { dismissalKey, dismissed = true } = {}) {
+  return { id, data: { dismissed, dismissalKey: dismissalKey ?? id, dismissedAt: { toDate: () => new Date('2026-01-01') }, insightId: null } };
 }
 
 import { readEntries, readNexusData, generateReport } from '../generator.js';
@@ -332,6 +346,81 @@ describe('readNexusData — singleton doc (R4 Task 4)', () => {
     expect(result.insights[0].id).toBe('no_receipt_insight');
     expect(errorSpy).toHaveBeenCalled();
     errorSpy.mockRestore();
+  });
+});
+
+describe('readNexusData — dismissal filtering (R4 P0-closure Important 3)', () => {
+  it('a dismissed-by-key insight (stable id, e.g. pattern_*) is absent from the report inputs', async () => {
+    const nexusDoc = {
+      active: [
+        { id: 'pattern_exercise_completion', type: 'pattern_correlation', title: 'Exercise Pattern', summary: 'x', body: 'y' },
+        { id: 'pattern_fatigue', type: 'pattern_correlation', title: 'Energy Pattern', summary: 'x', body: 'y' },
+      ],
+      history: [],
+    };
+    const db = buildFakeDb({
+      nexusDoc,
+      engagement: [engagementDoc('pattern_exercise_completion', { dismissalKey: 'pattern_exercise_completion' })],
+    });
+
+    const result = await readNexusData(db, USER_BASE);
+
+    expect(result.insights.map((i) => i.id)).toEqual(['pattern_fatigue']);
+    expect(result.patterns).toEqual(result.insights);
+  });
+
+  it('a same-content insight with a churned id (e.g. causal synthesis, insight_<timestamp>) is still filtered via the content-derived key', async () => {
+    const nexusDoc = {
+      active: [
+        { id: 'insight_1737400000000', type: 'causal_synthesis', title: 'The Evening Walk Effect', summary: 'A walk helps' },
+        { id: 'insight_1737400000000_other', type: 'causal_synthesis', title: 'A Totally Different Insight', summary: 'unrelated' },
+      ],
+      history: [],
+    };
+    const db = buildFakeDb({
+      nexusDoc,
+      // Dismissal was recorded against an EARLIER generation with a
+      // DIFFERENT numeric id but the SAME title -> same dismissalKeyFor
+      // output (`synthesis:the evening walk effect`).
+      engagement: [engagementDoc('synthesis-key-doc', { dismissalKey: 'synthesis:the evening walk effect' })],
+    });
+
+    const result = await readNexusData(db, USER_BASE);
+
+    expect(result.insights.map((i) => i.title)).toEqual(['A Totally Different Insight']);
+  });
+
+  it('a dismissal-read failure proceeds UNFILTERED (all active insights included) and logs a warning, without failing the whole read', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const nexusDoc = {
+      active: [{ id: 'pattern_fatigue', type: 'pattern_correlation', title: 'Energy Pattern', summary: 'x', body: 'y' }],
+      history: [],
+    };
+    const db = buildFakeDb({ nexusDoc, engagementError: new Error('engagement read boom') });
+
+    const result = await readNexusData(db, USER_BASE);
+
+    expect(result.insights.map((i) => i.id)).toEqual(['pattern_fatigue']);
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('Failed to read insight dismissals'),
+      'engagement read boom'
+    );
+    warnSpy.mockRestore();
+  });
+
+  it('a dismissed doc with dismissed:false (or missing) does not filter anything', async () => {
+    const nexusDoc = {
+      active: [{ id: 'pattern_fatigue', type: 'pattern_correlation', title: 'Energy Pattern', summary: 'x', body: 'y' }],
+      history: [],
+    };
+    const db = buildFakeDb({
+      nexusDoc,
+      engagement: [engagementDoc('pattern_fatigue', { dismissed: false })],
+    });
+
+    const result = await readNexusData(db, USER_BASE);
+
+    expect(result.insights.map((i) => i.id)).toEqual(['pattern_fatigue']);
   });
 });
 

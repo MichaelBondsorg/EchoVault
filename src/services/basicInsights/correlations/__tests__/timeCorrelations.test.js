@@ -29,9 +29,12 @@ const localDate = (day, hour = 10) => new Date(2026, 6, day, hour, 0, 0);
 describe('computeTimeCorrelations', () => {
   it('consumes adapter-normalized entries (mood01/timestampMs), not raw analysis.mood_score/createdAt', () => {
     const entries = [];
-    for (const day of [4, 11, 18]) { // 3 Saturdays
+    for (const day of [4, 11, 18, 25]) { // 4 Saturdays in July
       entries.push(n({ id: `sat-${day}`, createdAt: localDate(day), analysis: { mood_score: 0.9 } }));
     }
+    // 5th Saturday (R4 P0-closure Minor 5: MIN_DATA_POINTS floor raised to
+    // 5 — each group now needs 5, not 3).
+    entries.push(n({ id: 'sat-aug1', createdAt: new Date(2026, 7, 1, 10), analysis: { mood_score: 0.9 } }));
     for (const day of [6, 7, 8, 9, 13]) { // 5 weekdays
       entries.push(n({ id: `wd-${day}`, createdAt: localDate(day), analysis: { mood_score: 0.5 } }));
     }
@@ -78,9 +81,12 @@ describe('computeTimeCorrelations', () => {
 
   it('weekend/weekday complement baseline was already correct (each entry is exactly one or the other) — verified via adapter, wording is association-only', () => {
     const entries = [];
-    for (const day of [4, 11, 18]) { // 3 Saturdays
+    for (const day of [4, 11, 18, 25]) { // 4 Saturdays in July
       entries.push(n({ id: `sat-${day}`, createdAt: localDate(day), analysis: { mood_score: 0.9 } }));
     }
+    // 5th Saturday (R4 P0-closure Minor 5: MIN_DATA_POINTS floor raised to
+    // 5 — each group now needs 5, not 3).
+    entries.push(n({ id: 'sat-aug1', createdAt: new Date(2026, 7, 1, 10), analysis: { mood_score: 0.9 } }));
     for (const day of [6, 7, 8, 9, 13]) { // 5 weekdays
       entries.push(n({ id: `wd-${day}`, createdAt: localDate(day), analysis: { mood_score: 0.5 } }));
     }

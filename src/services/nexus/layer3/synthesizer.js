@@ -471,23 +471,51 @@ export const generateNarrativeArcInsight = async (userId, threadId) => {
       evolution: t.evolutionType
     }));
 
-    const prompt = `Analyze this narrative arc from a user's life:
+    // R4 P0-closure Important 2: de-escalated the same way
+    // `buildSynthesisPrompt` above was in R4 T3 — explain-only, grounded
+    // strictly in the THREAD EVOLUTION data given, insufficiency preferred
+    // over invention. Previously demanded a `growth_metric` — "Specific
+    // quantified growth (e.g. 'recovery time shortened from 3 weeks to 3
+    // days')" — nothing in `arcData` measures a recovery time or any other
+    // duration-to-duration comparison, so that field could only ever be
+    // fabricated. Removed entirely; not replaced with anything, since there
+    // is no real quantified-growth signal in this data to ask for instead.
+    const prompt = `You are analyzing how a user's experience of a recurring life thread has evolved over time, based ONLY on the thread summaries below.
 
-THREAD EVOLUTION:
+THREAD EVOLUTION (oldest first):
 ${arcData.map((t, i) => `${i + 1}. "${t.name}" - Sentiment: ${Number.isFinite(t.sentiment) ? `${Math.round(t.sentiment * 100)}%` : 'unknown'}, Entries: ${t.duration}`).join('\n')}
 
-Generate a "Resilience Arc" insight that:
-1. Identifies how the user has grown through this sequence
-2. Compares their emotional trajectory now vs the beginning
-3. Highlights a specific strength or pattern that emerged
+## YOUR TASK
 
-Response format (JSON):
+Explain how the user's relationship to this thread has evolved across the
+sequence above — comparing where they are now to where they started —
+described plainly in terms of what's ACTUALLY in the data above (sentiment
+values, entry counts).
+
+1. Describe the shift you can actually see in the numbers above, not what
+   you'd expect or hope to see.
+2. Only name a specific strength or recurring pattern if it's actually
+   reflected in the data (e.g. an improving sentiment trajectory across the
+   sequence) — it's fine to say the picture is mixed or unclear.
+3. Do not invent a quantified growth metric (a recovery time, a
+   days-to-resolution figure, or similar) — nothing in the data above
+   measures that.
+4. If the sequence above is too thin or doesn't show a clear pattern, say
+   so plainly instead of manufacturing an arc.
+
+## GROUNDING RULES
+
+- Every number or comparison you write must come from the THREAD EVOLUTION
+  data above — never invent one.
+- Prefer plain, calm language over dramatic framing.
+
+## RESPONSE FORMAT (JSON only)
+
 {
   "title": "The [Topic] Resilience Arc",
-  "summary": "One sentence describing the growth",
-  "body": "2-3 paragraphs analyzing the arc",
-  "growth_metric": "Specific quantified growth (e.g., 'recovery time shortened from 3 weeks to 3 days')",
-  "strength_identified": "The resilience factor that emerged"
+  "summary": "One sentence describing the growth (or the honest absence of one)",
+  "body": "2-3 paragraphs analyzing the arc, grounded only in the data above",
+  "strength_identified": "The resilience factor that emerged, if one is actually visible in the data above — otherwise say so plainly"
 }`;
 
     const response = await callGemini(prompt, '');
@@ -498,10 +526,24 @@ Response format (JSON):
 
     const parsed = JSON.parse(response.replace(/```json?\n?|```/g, '').trim());
 
+    // R4 P0-closure Important 2: stop spreading `...parsed` verbatim — the
+    // same trust boundary as `generateCausalSynthesis` above (DR finding
+    // 6). Prose fields the model wrote are kept; any quantified/evidence
+    // field (a `growth_metric` the model invents despite the prompt no
+    // longer asking, a self-reported `confidence`, etc.) is dropped by
+    // allowlisting exactly what's kept rather than blocklisting what's
+    // rejected. `sampleSize` is the one number here WE compute, from the
+    // real thread lineage fed into this function — never model-authored.
     return {
       type: INSIGHT_TYPES.NARRATIVE_ARC,
       threadId,
-      ...parsed,
+      title: parsed.title,
+      summary: parsed.summary,
+      body: parsed.body,
+      strength_identified: parsed.strength_identified,
+      evidence: {
+        statistical: { sampleSize: lineage.length }
+      },
       generatedAt: new Date().toISOString()
     };
   } catch (error) {

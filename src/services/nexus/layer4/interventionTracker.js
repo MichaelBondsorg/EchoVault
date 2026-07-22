@@ -490,8 +490,9 @@ export const updateInterventionData = async (userId, entries, whoopHistory) => {
  * {...interventionData, lastUpdated}, {merge: false-by-default})`, keyed
  * fresh from `INTERVENTION_PATTERNS`' current (post-privacy-sweep) key
  * names every time it runs. A user whose Firestore doc still has entries
- * under the pre-rename keys (`sterling_walk`/`spencer_time`/`barrys`) will
- * have those keys silently absent from `getInterventionData`'s result
+ * under the pre-rename keys (the personal-name-keyed variants the privacy
+ * sweep replaced with generic category keys) will have those keys silently
+ * absent from `getInterventionData`'s result
  * until the next full `updateInterventionData` run overwrites the doc
  * entirely under the new generic keys — no migration script needed, this
  * is expected interim silence (a stale key going unread for one cycle),
