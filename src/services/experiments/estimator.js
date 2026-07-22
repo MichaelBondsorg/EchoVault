@@ -43,6 +43,54 @@ export const BOOTSTRAP_RESAMPLES = 2000;
 /** Default #3: confidence level for the bootstrap CI. */
 export const CI_LEVEL = 0.95;
 
+// ---------------------------------------------------------------------------
+// Michael's statistical-review hardening (2026-07-22, Task EX1). These four
+// constants are new gates/thresholds layered on top of the original 4
+// spec defaults above — see docs/quality/experiments-data-method.md's
+// "Michael review hardening" section for the full rationale on each.
+// ---------------------------------------------------------------------------
+
+/**
+ * Group-size guard: each split group (high/low) must have at least this many
+ * paired observations, or the result is insufficient (`group_too_small`).
+ * Applies to BOTH split modes (median and binary). A group below this size
+ * produces a mean that is itself dominated by a handful of points, even
+ * though the OVERALL pair count cleared `MIN_PAIRED_OBSERVATIONS`.
+ */
+export const MIN_GROUP_SIZE = 5;
+
+/**
+ * Group-size guard: the smaller of the two split groups must be at least
+ * this fraction of the total paired observations, or the result is
+ * insufficient (`groups_too_imbalanced`). Applies to BOTH split modes. This
+ * catches lopsided splits (e.g. 27 vs 3) that could individually clear
+ * `MIN_GROUP_SIZE` on a larger sample while still being wildly imbalanced.
+ */
+export const MIN_GROUP_FRACTION = 0.25;
+
+/**
+ * Per-resample-split stability guard (item 3): if more than this fraction of
+ * the bootstrap's resamples had to fall back to the original-split
+ * resampling method (because the resample's OWN recomputed split was
+ * degenerate — see `bootstrapDeltaCIPerResampleSplit`'s docblock), the split
+ * itself is judged too unstable to trust and the result is insufficient
+ * (`split_unstable`), even though every other gate passed. Comparison is
+ * strict `>` (a fallback rate of exactly 10% does NOT trigger this).
+ */
+export const RESAMPLE_FALLBACK_LIMIT = 0.1;
+
+/**
+ * Practical-significance threshold (item 5) — DISPLAY-SCALE (0-100), i.e.
+ * "points" on the 0-100 mood/outcome scale EX2 introduces at the series
+ * boundary. This module itself stays unit-agnostic (it never compares
+ * `delta` to this constant internally) — it is exported here purely so
+ * there is exactly ONE source of truth for the number, and EX2's
+ * classification/UI layer imports it rather than re-hardcoding `5`
+ * somewhere else. See docs/quality/experiments-data-method.md for the
+ * exact wording shown to users when a result falls under this threshold.
+ */
+export const SMALL_EFFECT_DELTA = 5;
+
 const DAY_MS = 24 * 60 * 60 * 1000;
 const DATE_KEY_RE = /^(\d{4})-(\d{2})-(\d{2})$/;
 
@@ -254,6 +302,11 @@ function median(values) {
  * Tie-breaking rule (data-method spec, documented choice): values EQUAL to
  * the median go to the LOW group. The specific direction is arbitrary; what
  * matters is that it is fixed and deterministic so reruns are stable.
+ *
+ * @returns {{highGroup: object[], lowGroup: object[], splitThreshold: number}}
+ *   `splitThreshold` is the computed median value used as the cut point —
+ *   surfaced on the estimate (item 6, Michael review hardening) so a caller
+ *   can show/receipt exactly where the high/low line was drawn.
  */
 function medianSplit(pairs) {
   const med = median(pairs.map((p) => p.exposure));
@@ -267,7 +320,41 @@ function medianSplit(pairs) {
       lowGroup.push(p);
     }
   }
-  return { highGroup, lowGroup, median: med };
+  return { highGroup, lowGroup, splitThreshold: med };
+}
+
+/**
+ * Binary present-vs-absent split (Michael review hardening, item 2):
+ * HIGH = exposure present (> 0), LOW = exposure absent (=== 0). Unlike
+ * `medianSplit`, there is no data-derived cut point — the boundary is fixed
+ * by definition, not computed from the sample — so `splitThreshold` is
+ * PINNED to `null` rather than reporting a fabricated statistic (e.g. `0` or
+ * `0.5`) that would misleadingly look like a computed median. This is a
+ * deliberate, documented choice (see docs/quality/experiments-data-method.md)
+ * over the alternative of reporting a "0.5 boundary" number, because
+ * exposure values in binary mode are not necessarily 0/1-coded (e.g.
+ * "exercise minutes present" could be any positive number) — a `0.5`
+ * threshold would only be meaningful for strictly-binary-coded inputs and
+ * would be actively misleading for others.
+ *
+ * @returns {{highGroup: object[], lowGroup: object[], splitThreshold: null}}
+ */
+function binarySplit(pairs) {
+  const highGroup = [];
+  const lowGroup = [];
+  for (const p of pairs) {
+    if (p.exposure > 0) {
+      highGroup.push(p);
+    } else {
+      lowGroup.push(p); // exposure === 0 (non-finite already dropped by pairObservations)
+    }
+  }
+  return { highGroup, lowGroup, splitThreshold: null };
+}
+
+/** Dispatch to the split function named by `plan.splitMode` ('median' | 'binary'), defaulting to 'median' for back-compat. */
+function computeSplit(pairs, splitMode) {
+  return splitMode === 'binary' ? binarySplit(pairs) : medianSplit(pairs);
 }
 
 /**
@@ -300,30 +387,96 @@ function computePearsonR(pairs) {
 }
 
 /**
- * Nonparametric bootstrap CI for the difference in group means (meanHigh -
- * meanLow). The high/low group assignment (the median split) is treated as
- * fixed for the whole bootstrap; each resample draws WITH replacement,
- * independently, from each group's outcome values — the standard two-sample
- * bootstrap for a mean difference. `BOOTSTRAP_RESAMPLES` resamples are
- * drawn; the CI is the [alpha/2, 1-alpha/2] percentile of the resulting
- * delta distribution using the nearest-rank method (deterministic, no
- * interpolation ambiguity).
+ * Draw one delta by resampling INDEPENDENTLY from each of the two supplied
+ * (fixed) outcome arrays — nHigh draws with replacement from `highValues`,
+ * nLow from `lowValues` — and returning meanHigh - meanLow for that draw.
+ * This is the pre-Task-EX1 bootstrap algorithm (the split was held fixed for
+ * the whole bootstrap). It is preserved, unchanged, as the FALLBACK strategy
+ * `bootstrapDeltaCIPerResampleSplit` uses when a per-resample split
+ * degenerates — see that function's docblock for why this specific fallback
+ * was chosen.
  */
-function bootstrapDeltaCI(highValues, lowValues, rng) {
+function fallbackDelta(highValues, lowValues, rng) {
   const nHigh = highValues.length;
   const nLow = lowValues.length;
+  let sumHigh = 0;
+  for (let j = 0; j < nHigh; j++) {
+    sumHigh += highValues[Math.floor(rng() * nHigh)];
+  }
+  let sumLow = 0;
+  for (let j = 0; j < nLow; j++) {
+    sumLow += lowValues[Math.floor(rng() * nLow)];
+  }
+  return sumHigh / nHigh - sumLow / nLow;
+}
+
+/**
+ * Nonparametric bootstrap CI for the difference in group means (meanHigh -
+ * meanLow), with the split RECOMPUTED WITHIN EACH RESAMPLE (Michael review
+ * hardening, item 3) rather than held fixed for the whole bootstrap (the
+ * pre-Task-EX1 behavior, preserved below as the fallback path).
+ *
+ * Each of `BOOTSTRAP_RESAMPLES` iterations:
+ *   1. Draws `n` pairs WITH replacement from the full canonicalized pool
+ *      (a standard whole-sample bootstrap resample, size n).
+ *   2. Re-splits that resample the SAME way the real estimate was split
+ *      (median-of-the-resample with ties->LOW, or binary present/absent) —
+ *      this is what makes the split itself, not just the outcome values,
+ *      part of what the CI's resampling variance captures.
+ *   3. If that re-split produces an empty high OR low group, FALLS BACK
+ *      (see below) rather than computing a mean over zero values.
+ *
+ * FALLBACK POLICY (judgment call — flagged for Michael's sign-off, see
+ * docs/quality/experiments-data-method.md): the rejected alternative was
+ * "record the resample's delta as the ORIGINAL (unresampled) overall
+ * delta" — that would freeze every degenerate resample at one fixed number,
+ * artificially narrowing the CI (dishonest — it hides exactly the
+ * resampling variance a CI exists to show). The rejected alternative
+ * "skip and redraw a different resample" would bias the CI toward whatever
+ * resamples happen to split cleanly, silently discarding the signal that
+ * the split is fragile. The policy actually used: fall back to
+ * `fallbackDelta` — resample nHigh/nLow values independently from the
+ * ORIGINAL split's two (already-known-non-degenerate, guard-checked)
+ * groups, using the SAME rng stream, so the fallback resample still
+ * contributes fresh random variance to the CI, it just does so via the old
+ * fixed-group algorithm instead of a fresh per-resample split. Every
+ * fallback is counted; the count is returned as `fallbackCount` so the
+ * caller can expose `resampleFallbackCount` and gate `split_unstable` when
+ * fallbacks exceed `RESAMPLE_FALLBACK_LIMIT`.
+ *
+ * Determinism is preserved: the SAME seed always produces the SAME sequence
+ * of resample draws, the SAME sequence of degenerate/non-degenerate
+ * decisions, and therefore the SAME CI and the SAME `fallbackCount` — even
+ * though the two branches consume different numbers of rng() calls per
+ * iteration (a non-degenerate resample consumes n draws; a fallback
+ * resample consumes n + nHigh + nLow draws), the whole sequence is still a
+ * pure deterministic function of (canonicalPairs, splitMode, seed).
+ *
+ * The CI itself is the [alpha/2, 1-alpha/2] percentile of the resulting
+ * delta distribution using the nearest-rank method (deterministic, no
+ * interpolation ambiguity) — unchanged from the pre-Task-EX1 algorithm.
+ */
+function bootstrapDeltaCIPerResampleSplit({ pairs, splitMode, originalSplit, rng }) {
+  const n = pairs.length;
+  const origHighOutcomes = originalSplit.highGroup.map((p) => p.outcome);
+  const origLowOutcomes = originalSplit.lowGroup.map((p) => p.outcome);
   const deltas = new Array(BOOTSTRAP_RESAMPLES);
+  let fallbackCount = 0;
 
   for (let i = 0; i < BOOTSTRAP_RESAMPLES; i++) {
-    let sumHigh = 0;
-    for (let j = 0; j < nHigh; j++) {
-      sumHigh += highValues[Math.floor(rng() * nHigh)];
+    const resample = new Array(n);
+    for (let j = 0; j < n; j++) {
+      resample[j] = pairs[Math.floor(rng() * n)];
     }
-    let sumLow = 0;
-    for (let j = 0; j < nLow; j++) {
-      sumLow += lowValues[Math.floor(rng() * nLow)];
+    const resplit = computeSplit(resample, splitMode);
+    if (resplit.highGroup.length === 0 || resplit.lowGroup.length === 0) {
+      fallbackCount++;
+      deltas[i] = fallbackDelta(origHighOutcomes, origLowOutcomes, rng);
+    } else {
+      const meanHighResample = mean(resplit.highGroup.map((p) => p.outcome));
+      const meanLowResample = mean(resplit.lowGroup.map((p) => p.outcome));
+      deltas[i] = meanHighResample - meanLowResample;
     }
-    deltas[i] = sumHigh / nHigh - sumLow / nLow;
   }
 
   deltas.sort((a, b) => a - b);
@@ -331,7 +484,63 @@ function bootstrapDeltaCI(highValues, lowValues, rng) {
   const lastIdx = BOOTSTRAP_RESAMPLES - 1;
   const lowerIdx = Math.max(0, Math.floor(alpha * lastIdx));
   const upperIdx = Math.min(lastIdx, Math.ceil((1 - alpha) * lastIdx));
-  return [deltas[lowerIdx], deltas[upperIdx]];
+  return { ci: [deltas[lowerIdx], deltas[upperIdx]], fallbackCount };
+}
+
+/**
+ * Leave-one-day-out stability check (Michael review hardening, item 4). For
+ * each paired observation, recompute the mean-difference delta with that ONE
+ * pair excluded from whichever group it belongs to in the ORIGINAL split —
+ * "n cheap re-computations of means, NOT n bootstraps": this does NOT
+ * re-derive the split per exclusion (that would be a materially more
+ * expensive O(n log n) operation per pair); it only recomputes the affected
+ * group's mean via a running-sum adjustment, O(1) per pair after the O(n)
+ * setup. Safe from divide-by-zero: `MIN_GROUP_SIZE` (>=5) is enforced before
+ * this function is ever called, so excluding one pair always leaves >=4 in
+ * the affected group.
+ *
+ * `signConsistent` is true only when EVERY leave-one-out delta shares the
+ * same strict sign as every other (all positive, or all negative). A LOO
+ * delta of exactly 0 counts as an inconsistency (conservative: excluding one
+ * day erasing the entire directional signal is exactly the kind of fragility
+ * this check exists to surface, not something to wave through as "still
+ * technically the same sign").
+ *
+ * @returns {{deltaMin: number, deltaMax: number, signConsistent: boolean}}
+ */
+function computeStability(canonicalPairs, split) {
+  const { highGroup, lowGroup } = split;
+  const nHigh = highGroup.length;
+  const nLow = lowGroup.length;
+  const sumHigh = highGroup.reduce((a, p) => a + p.outcome, 0);
+  const sumLow = lowGroup.reduce((a, p) => a + p.outcome, 0);
+  const highSet = new Set(highGroup);
+
+  let deltaMin = Infinity;
+  let deltaMax = -Infinity;
+  let sawPositive = false;
+  let sawNegative = false;
+  let sawZero = false;
+
+  for (const p of canonicalPairs) {
+    let mHigh = sumHigh / nHigh;
+    let mLow = sumLow / nLow;
+    if (highSet.has(p)) {
+      mHigh = (sumHigh - p.outcome) / (nHigh - 1);
+    } else {
+      mLow = (sumLow - p.outcome) / (nLow - 1);
+    }
+    const d = mHigh - mLow;
+    if (d < deltaMin) deltaMin = d;
+    if (d > deltaMax) deltaMax = d;
+    if (d > 0) sawPositive = true;
+    else if (d < 0) sawNegative = true;
+    else sawZero = true; // exact 0 -> treated as a sign break, see docblock
+  }
+
+  // Consistent only if EVERY LOO delta landed strictly on one side of zero.
+  const signConsistent = !sawZero && sawPositive !== sawNegative;
+  return { deltaMin, deltaMax, signConsistent };
 }
 
 // ---------------------------------------------------------------------------
@@ -366,27 +575,66 @@ function bootstrapDeltaCI(highValues, lowValues, rng) {
  *   Accepted for forward-compatibility with callers (e.g. logging/receipt
  *   context) and NEVER used to override the spec thresholds — those are
  *   fixed constants, not configurable per-experiment (spec default #7: one
- *   pre-declared estimate, not a knob to be tuned after the fact). The one
- *   exception is `plan.lag`: when present, it is used only to VALIDATE that
- *   every pair's actual (outcomeDateKey - dateKey) gap matches the
- *   pre-declared lag (spec default #6) — never to change how the estimate
- *   is computed. A mismatch fails closed (`lag_mismatch`) rather than
- *   silently computing a methodologically-wrong estimate that would still
- *   look plausible. Omit `plan.lag` to skip this check (e.g. callers that
- *   already trust `pairObservations` produced the pairs).
+ *   pre-declared estimate, not a knob to be tuned after the fact). Two
+ *   exceptions:
+ *     - `plan.lag`: when present, it is used only to VALIDATE that every
+ *       pair's actual (outcomeDateKey - dateKey) gap matches the
+ *       pre-declared lag (spec default #6) — never to change how the
+ *       estimate is computed. A mismatch fails closed (`lag_mismatch`)
+ *       rather than silently computing a methodologically-wrong estimate
+ *       that would still look plausible. Omit `plan.lag` to skip this check
+ *       (e.g. callers that already trust `pairObservations` produced the
+ *       pairs).
+ *     - `plan.splitMode`: `'median'` (default) or `'binary'` (Michael
+ *       review hardening, item 2) — selects which split function partitions
+ *       the pairs into high/low groups. This is a MODE selection, not a
+ *       threshold override: unlike a tunable knob, the choice must be made
+ *       at template-declaration time (mirrors the lag pre-declaration
+ *       rationale in spec default #6) and is frozen into the plan, not
+ *       chosen post-hoc. Any value other than the string `'binary'`
+ *       (including omission) resolves to `'median'`.
  * @param {number} [args.seed] - seed for the deterministic bootstrap RNG.
  *   If omitted, a seed is derived deterministically from the canonicalized
  *   `pairs` (never from Math.random()/Date.now()) so "no seed passed" is
  *   still reproducible — and, per the canonicalization above, reproducible
  *   regardless of the input pairs' array order.
- * @returns {{status:'ok', estimate:{meanHigh:number, meanLow:number,
- *   delta:number, ci:[number,number], n:number, pearsonR:number|null}} |
+ * @returns {{status:'ok', estimate:{
+ *   meanHigh:number, meanLow:number, delta:number, ci:[number,number],
+ *   n:number, pearsonR:number|null,
+ *   nHigh:number, nLow:number, splitThreshold:number|null,
+ *   exposureContrast:number, resampleFallbackCount:number,
+ *   stability:{deltaMin:number, deltaMax:number, signConsistent:boolean}}} |
  *   {status:'insufficient', reasons: string[]}}
+ *
+ * New machine-readable insufficiency reasons (Michael review hardening,
+ * items 1 and 3 — see docs/quality/experiments-data-method.md):
+ *   - `group_too_small`: the smaller split group has fewer than
+ *     `MIN_GROUP_SIZE` (5) paired observations.
+ *   - `groups_too_imbalanced`: the smaller split group is under
+ *     `MIN_GROUP_FRACTION` (25%) of the total paired observations.
+ *   - `exposure_contrast_too_small`: high-group mean exposure minus
+ *     low-group mean exposure is not strictly > 0. Structurally
+ *     unreachable via `medianSplit`/`binarySplit` as currently defined
+ *     (both always produce a strictly positive contrast whenever the split
+ *     is non-degenerate) — kept as defense-in-depth and to guarantee
+ *     `exposureContrast` is always a meaningful, guarded number on every
+ *     `ok` estimate. See the constants block above for why a relative
+ *     (rather than absolute-zero) margin was deliberately NOT invented here.
+ *   - `split_unstable`: more than `RESAMPLE_FALLBACK_LIMIT` (10%) of the
+ *     bootstrap's resamples had a degenerate per-resample split and had to
+ *     fall back (see `bootstrapDeltaCIPerResampleSplit`'s docblock).
+ * The three group/contrast checks are evaluated together, immediately after
+ * a NON-degenerate split (i.e. they never run when
+ * `degenerate_exposure_split` already applies — that case already means
+ * one whole side is empty, which the group-size checks would only restate).
+ * Like every other reason in this function, they ACCUMULATE with whatever
+ * else already failed (existing convention — see `reasons` below).
  */
 export function runAnalysisPlan({ pairs = [], plan = {}, seed } = {}) {
   const canonicalPairs = canonicalizePairs(pairs);
   const n = canonicalPairs.length;
   const reasons = [];
+  const splitMode = plan?.splitMode === 'binary' ? 'binary' : 'median';
 
   if (n < MIN_PAIRED_OBSERVATIONS) {
     reasons.push('insufficient_paired_observations');
@@ -401,9 +649,23 @@ export function runAnalysisPlan({ pairs = [], plan = {}, seed } = {}) {
 
   let split = null;
   if (n > 0) {
-    split = medianSplit(canonicalPairs);
+    split = computeSplit(canonicalPairs, splitMode);
     if (split.highGroup.length === 0 || split.lowGroup.length === 0) {
       reasons.push('degenerate_exposure_split');
+    } else {
+      const nHighCheck = split.highGroup.length;
+      const nLowCheck = split.lowGroup.length;
+      const contrastCheck =
+        mean(split.highGroup.map((p) => p.exposure)) - mean(split.lowGroup.map((p) => p.exposure));
+      if (Math.min(nHighCheck, nLowCheck) < MIN_GROUP_SIZE) {
+        reasons.push('group_too_small');
+      }
+      if (Math.min(nHighCheck, nLowCheck) / n < MIN_GROUP_FRACTION) {
+        reasons.push('groups_too_imbalanced');
+      }
+      if (!(contrastCheck > 0)) {
+        reasons.push('exposure_contrast_too_small');
+      }
     }
   }
 
@@ -411,23 +673,47 @@ export function runAnalysisPlan({ pairs = [], plan = {}, seed } = {}) {
     return { status: 'insufficient', reasons };
   }
 
-  const { highGroup, lowGroup } = split;
+  const { highGroup, lowGroup, splitThreshold } = split;
+  const nHigh = highGroup.length;
+  const nLow = lowGroup.length;
   const meanHigh = mean(highGroup.map((p) => p.outcome));
   const meanLow = mean(lowGroup.map((p) => p.outcome));
   const delta = meanHigh - meanLow;
+  const exposureContrast =
+    mean(highGroup.map((p) => p.exposure)) - mean(lowGroup.map((p) => p.exposure));
   const pearsonR = computePearsonR(canonicalPairs);
 
   const resolvedSeed = Number.isFinite(seed) ? seed >>> 0 : deriveSeedFromPairs(canonicalPairs);
   const rng = mulberry32(resolvedSeed);
-  const ci = bootstrapDeltaCI(
-    highGroup.map((p) => p.outcome),
-    lowGroup.map((p) => p.outcome),
-    rng
-  );
+  const { ci, fallbackCount } = bootstrapDeltaCIPerResampleSplit({
+    pairs: canonicalPairs,
+    splitMode,
+    originalSplit: split,
+    rng,
+  });
+
+  if (fallbackCount / BOOTSTRAP_RESAMPLES > RESAMPLE_FALLBACK_LIMIT) {
+    return { status: 'insufficient', reasons: ['split_unstable'] };
+  }
+
+  const stability = computeStability(canonicalPairs, split);
 
   return {
     status: 'ok',
-    estimate: { meanHigh, meanLow, delta, ci, n, pearsonR },
+    estimate: {
+      meanHigh,
+      meanLow,
+      delta,
+      ci,
+      n,
+      pearsonR,
+      nHigh,
+      nLow,
+      splitThreshold,
+      exposureContrast,
+      resampleFallbackCount: fallbackCount,
+      stability,
+    },
   };
 }
 
@@ -436,6 +722,10 @@ export default {
   COVERAGE_FLOOR,
   BOOTSTRAP_RESAMPLES,
   CI_LEVEL,
+  MIN_GROUP_SIZE,
+  MIN_GROUP_FRACTION,
+  RESAMPLE_FALLBACK_LIMIT,
+  SMALL_EFFECT_DELTA,
   pairObservations,
   computeCoverage,
   runAnalysisPlan,
