@@ -32,6 +32,10 @@ export const findRelevantMemories = (targetVector, allEntries, category, topK = 
   const queryVectors = toQueryVectors(targetVector);
   if (!queryVectors) return [];
   const contextEntries = allEntries.filter(e => e.category === category);
+  // Threshold (0.35) applied to whichever space scored — unchanged per
+  // space, a documented M2 assumption (different embedding models can have
+  // different similarity distributions; revisit with real data, see M3
+  // runbook note).
   const scored = contextEntries.map(e => {
     const result = scoreEntryInBestSpace(queryVectors, e);
     return { ...e, score: result ? result.score : -1, _scoreSpace: result?.space };

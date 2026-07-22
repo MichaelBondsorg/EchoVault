@@ -104,7 +104,7 @@ function withMissingness(text, missingness) {
  *
  * @param {object} db
  * @param {string} uid
- * @param {{sinceDate: Date|string, scope?: {spaceId:string}|null, topics?: string, entries?: Array, embeddings?: Record<string, number[]>}} options
+ * @param {{sinceDate: Date|string, scope?: {spaceId:string}|null, topics?: string, entries?: Array, embeddings?: Record<string, {v1?:number[], v2?:number[]}|number[]|null>}} options
  *   `sinceDate` is REQUIRED and stored AS-IS (never inferred/recomputed) —
  *   see module doc. `embeddings` — pre-computed `{[questionText]:
  *   embeddingVector}` map, same contract as `runRecipe`/`runQuestions`
@@ -190,7 +190,7 @@ export async function buildSessionBrief(db, uid, options = {}) {
  * @param {string} uid
  * @param {string} briefId
  * @param {string} blockId
- * @param {{entries?: Array, embeddings?: Record<string, number[]>, confirm?: boolean}} [ctx]
+ * @param {{entries?: Array, embeddings?: Record<string, {v1?:number[], v2?:number[]}|number[]|null>, confirm?: boolean}} [ctx]
  *   `confirm` must be `true` to overwrite a block the user has already
  *   edited (`editedByUser:true`) — otherwise this throws without writing.
  * @returns {Promise<object>} the updated reflection

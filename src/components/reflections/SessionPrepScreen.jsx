@@ -17,7 +17,7 @@ import {
   DEFAULT_SINCE_DAYS_BACK,
   SESSION_PREP_QUESTIONS,
 } from '../../services/reflections/sessionPrep';
-import { generateEmbedding } from '../../services/ai';
+import { generateQueryEmbeddings } from '../../services/ai';
 
 /**
  * SessionPrepScreen — full-screen Session Prep overlay (R2 Task 18),
@@ -195,7 +195,11 @@ const SessionPrepScreen = ({ uid, entries = [], onClose }) => {
         // eslint-disable-next-line no-await-in-loop -- sequential so the
         // progress counter reflects real completion; question counts are
         // small and bounded (4 fixed + at most 1 topics question).
-        const embedding = await generateEmbedding(question);
+        // Space-aware (embeddings v2 migration plan task M2): the
+        // `{[question]: queryVectors|null}` map ultimately flows through
+        // runRecipe's shared `runQuestions` core into `askJournalAI` ->
+        // `getSmartChatContext`, same as RecipesScreen.jsx.
+        const embedding = await generateQueryEmbeddings(question);
         embeddings[question] = embedding;
         setGenProgress((prev) => ({ ...prev, current: prev.current + 1 }));
       }
@@ -267,7 +271,9 @@ const SessionPrepScreen = ({ uid, entries = [], onClose }) => {
       const targetBlock = (current.blocks || []).find((b) => b.id === blockId);
       const embeddings = {};
       if (targetBlock?.question) {
-        embeddings[targetBlock.question] = await generateEmbedding(targetBlock.question);
+        // Space-aware (embeddings v2 migration plan task M2) — see the
+        // generation loop above for the shape this map carries downstream.
+        embeddings[targetBlock.question] = await generateQueryEmbeddings(targetBlock.question);
       }
       const updated = await regenerateSection(db, uid, current.id, blockId, { entries, embeddings, confirm });
       applyUpdate(updated);

@@ -15,7 +15,7 @@ import { subscribeRecipes, createRecipe, updateRecipe, archiveRecipe } from '../
 import { subscribeSpaces } from '../../../services/spaces/spacesService';
 import { previewRecipe, runRecipe } from '../../../services/reflections/runRecipe';
 import { getExcludedEntryIds } from '../../../services/insights/sourceExclusions';
-import { generateEmbedding } from '../../../services/ai';
+import { generateQueryEmbeddings } from '../../../services/ai';
 import { getFlag } from '../../../config/flags';
 import { STARTER_RECIPES } from '../../../services/reflections/starterRecipes';
 
@@ -47,7 +47,7 @@ vi.mock('../../../services/insights/sourceExclusions', () => ({
 }));
 
 vi.mock('../../../services/ai', () => ({
-  generateEmbedding: vi.fn(),
+  generateQueryEmbeddings: vi.fn(),
 }));
 
 vi.mock('../ReflectionDraft', () => ({
@@ -101,7 +101,7 @@ beforeEach(() => {
     spaceName: 'All spaces',
   });
   getExcludedEntryIds.mockResolvedValue(new Set());
-  generateEmbedding.mockImplementation(async (text) => [text.length, 0, 0]);
+  generateQueryEmbeddings.mockImplementation(async (text) => [text.length, 0, 0]);
   runRecipe.mockResolvedValue({
     id: 'reflection-1',
     title: 'Monthly review — July 2026',
@@ -489,7 +489,7 @@ describe('RecipesScreen — run flow: preview gate before first run', () => {
 
     await screen.findByRole('dialog', { name: /Run "Monthly review"/i });
     expect(runRecipe).not.toHaveBeenCalled();
-    expect(generateEmbedding).not.toHaveBeenCalled();
+    expect(generateQueryEmbeddings).not.toHaveBeenCalled();
   });
 
   it('the preview dialog shows entry count, space, and date range from previewRecipe', async () => {
@@ -579,9 +579,9 @@ describe('RecipesScreen — run flow: embeddings + completion', () => {
     fireEvent.click(within(dialog).getByText('Run'));
 
     await waitFor(() => expect(runRecipe).toHaveBeenCalledTimes(1));
-    expect(generateEmbedding).toHaveBeenCalledWith('Q1?');
-    expect(generateEmbedding).toHaveBeenCalledWith('Q2?');
-    expect(generateEmbedding).toHaveBeenCalledTimes(2);
+    expect(generateQueryEmbeddings).toHaveBeenCalledWith('Q1?');
+    expect(generateQueryEmbeddings).toHaveBeenCalledWith('Q2?');
+    expect(generateQueryEmbeddings).toHaveBeenCalledTimes(2);
 
     const [passedDb, passedUid, passedRecipe, options] = runRecipe.mock.calls[0];
     expect(passedDb).toEqual({ __db: true });
@@ -595,7 +595,7 @@ describe('RecipesScreen — run flow: embeddings + completion', () => {
   });
 
   it('a null embedding (generation failure) still proceeds to runRecipe with null for that question', async () => {
-    generateEmbedding.mockResolvedValueOnce(null);
+    generateQueryEmbeddings.mockResolvedValueOnce(null);
     withRecipes([recipe({ questions: ['Q1?'] })]);
     render(<RecipesScreen uid={UID} entries={[]} onClose={vi.fn()} />);
 
@@ -621,7 +621,7 @@ describe('RecipesScreen — run flow: embeddings + completion', () => {
 
   it('shows a progress state while embeddings are being generated (before completion)', async () => {
     let resolveEmbedding;
-    generateEmbedding.mockImplementation(() => new Promise((res) => { resolveEmbedding = res; }));
+    generateQueryEmbeddings.mockImplementation(() => new Promise((res) => { resolveEmbedding = res; }));
     withRecipes([recipe({ questions: ['Q1?'] })]);
     render(<RecipesScreen uid={UID} entries={[]} onClose={vi.fn()} />);
 

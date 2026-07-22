@@ -28,7 +28,7 @@ vi.mock('../../../hooks/useVoiceRelay', () => ({
 
 vi.mock('../../../services/ai', () => ({
   callOpenAI: vi.fn().mockResolvedValue('A reply.'),
-  generateEmbedding: vi.fn().mockResolvedValue([0.1, 0.2]),
+  generateQueryEmbeddings: vi.fn().mockResolvedValue({ v1: [0.1, 0.2] }),
   transcribeAudio: vi.fn().mockResolvedValue(''),
 }));
 

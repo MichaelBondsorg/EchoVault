@@ -14,7 +14,7 @@ import SessionPrepScreen from '../SessionPrepScreen';
 import { subscribeSpaces } from '../../../services/spaces/spacesService';
 import { updateBlock, addUserBlock, removeBlock } from '../../../services/reflections/runRecipe';
 import { buildSessionBrief, regenerateSection, composeSessionPrepPdf, SESSION_PREP_QUESTIONS } from '../../../services/reflections/sessionPrep';
-import { generateEmbedding } from '../../../services/ai';
+import { generateQueryEmbeddings } from '../../../services/ai';
 import { getFlag } from '../../../config/flags';
 
 const mockFirebase = vi.hoisted(() => ({
@@ -52,7 +52,7 @@ vi.mock('../../../services/reflections/sessionPrep', () => ({
 }));
 
 vi.mock('../../../services/ai', () => ({
-  generateEmbedding: vi.fn(),
+  generateQueryEmbeddings: vi.fn(),
 }));
 
 const UID = 'user-a';
@@ -92,7 +92,7 @@ beforeEach(() => {
   getFlag.mockReturnValue(true);
   withSpaces([]);
   withPastBriefs([]);
-  generateEmbedding.mockImplementation(async (text) => [text.length, 0, 0]);
+  generateQueryEmbeddings.mockImplementation(async (text) => [text.length, 0, 0]);
   buildSessionBrief.mockResolvedValue(brief());
   regenerateSection.mockResolvedValue(brief());
   composeSessionPrepPdf.mockResolvedValue({ save: vi.fn() });
@@ -150,7 +150,7 @@ describe('SessionPrepScreen — generate: embeddings + payload', () => {
     fireEvent.click(screen.getByText('Generate session prep'));
 
     await waitFor(() => expect(buildSessionBrief).toHaveBeenCalledTimes(1));
-    expect(generateEmbedding).toHaveBeenCalledTimes(SESSION_PREP_QUESTIONS.length);
+    expect(generateQueryEmbeddings).toHaveBeenCalledTimes(SESSION_PREP_QUESTIONS.length);
     const options = buildSessionBrief.mock.calls[0][2];
     expect(Object.keys(options.embeddings)).toEqual(SESSION_PREP_QUESTIONS);
   });
@@ -161,8 +161,8 @@ describe('SessionPrepScreen — generate: embeddings + payload', () => {
     fireEvent.click(screen.getByText('Generate session prep'));
 
     await waitFor(() => expect(buildSessionBrief).toHaveBeenCalledTimes(1));
-    expect(generateEmbedding).toHaveBeenCalledTimes(SESSION_PREP_QUESTIONS.length + 1);
-    expect(generateEmbedding).toHaveBeenCalledWith('my promotion');
+    expect(generateQueryEmbeddings).toHaveBeenCalledTimes(SESSION_PREP_QUESTIONS.length + 1);
+    expect(generateQueryEmbeddings).toHaveBeenCalledWith('my promotion');
     const options = buildSessionBrief.mock.calls[0][2];
     expect(options.topics).toBe('my promotion');
   });
@@ -173,7 +173,7 @@ describe('SessionPrepScreen — generate: embeddings + payload', () => {
     fireEvent.click(screen.getByText('Generate session prep'));
 
     await waitFor(() => expect(buildSessionBrief).toHaveBeenCalledTimes(1));
-    expect(generateEmbedding).toHaveBeenCalledTimes(SESSION_PREP_QUESTIONS.length);
+    expect(generateQueryEmbeddings).toHaveBeenCalledTimes(SESSION_PREP_QUESTIONS.length);
   });
 
   it('passes the chosen since-date (as a Date) and scope through to buildSessionBrief', async () => {

@@ -10,7 +10,7 @@ import { subscribeSpaces } from '../../services/spaces/spacesService';
 import { STARTER_RECIPES } from '../../services/reflections/starterRecipes';
 import { previewRecipe, runRecipe } from '../../services/reflections/runRecipe';
 import { getExcludedEntryIds } from '../../services/insights/sourceExclusions';
-import { generateEmbedding } from '../../services/ai';
+import { generateQueryEmbeddings } from '../../services/ai';
 import ReflectionDraft from './ReflectionDraft';
 
 /**
@@ -295,7 +295,12 @@ const RecipesScreen = ({ uid, entries = [], onClose }) => {
         // eslint-disable-next-line no-await-in-loop -- sequential so the
         // progress counter reflects real completion, not fan-out; question
         // counts are small (rules cap recipes at 5).
-        const embedding = await generateEmbedding(question);
+        // Space-aware (embeddings v2 migration plan task M2): the
+        // `{[question]: queryVectors|null}` map runRecipe consumes now
+        // carries either a `{v1, v2?}` object or `null` (v1 failure) per
+        // question — runRecipe's `qEmbedding == null` degrade-warning still
+        // fires exactly when it did before (only on total failure).
+        const embedding = await generateQueryEmbeddings(question);
         embeddings[question] = embedding;
         setRunProgress((prev) => ({ ...prev, current: prev.current + 1 }));
       }

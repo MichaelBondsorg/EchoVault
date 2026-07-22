@@ -119,7 +119,12 @@ export const hybridRetrieve = ({
 
   // Score each entry
   const scored = candidates.map(entry => {
-    // Vector similarity (space-aware, plan M2 seam)
+    // Vector similarity (space-aware, plan M2 seam). No threshold is
+    // applied to the raw vector score directly here (it feeds the weighted
+    // `total` below, filtered at `> 0.1`) — unchanged per space, a
+    // documented M2 assumption (different embedding models can have
+    // different similarity distributions; revisit with real data, see M3
+    // runbook note).
     const vectorResult = queryVectors ? scoreEntryInBestSpace(queryVectors, entry) : null;
     const vectorScore = vectorResult ? vectorResult.score : 0;
 

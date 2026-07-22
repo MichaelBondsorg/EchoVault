@@ -40,7 +40,7 @@ import { useVoiceRelay } from '../../hooks/useVoiceRelay';
 import { useDismissablePopover } from '../../hooks/useDismissablePopover';
 
 // Services
-import { callOpenAI, generateEmbedding, transcribeAudio } from '../../services/ai';
+import { callOpenAI, generateQueryEmbeddings, transcribeAudio } from '../../services/ai';
 import {
   getCompanionContext,
   formatContextForChat,
@@ -387,8 +387,15 @@ const UnifiedConversation = ({
     setIsLoading(true);
 
     try {
-      // Generate embedding for semantic search
-      const queryEmbedding = await generateEmbedding(text);
+      // Generate query embedding(s) for semantic search. `generateQueryEmbeddings`
+      // is the space-aware sibling of the legacy `generateEmbedding`
+      // (embeddings v2 migration plan task M2): behind `model.embeddingV2Read`
+      // OFF it's byte-identical to the old single-call path (returns `{v1}`
+      // or `null`); ON, it also requests a v2 vector. `getCompanionContext`
+      // accepts either shape for its `queryEmbedding` param (normalized via
+      // `toQueryVectors`), and a `null` result (v1 failure) preserves the
+      // current no-embedding/no-semantic-match behavior — Tier 4 just no-ops.
+      const queryEmbedding = await generateQueryEmbeddings(text);
 
       // Get session buffer for recent entry context
       const sessionBuffer = getSessionBuffer();

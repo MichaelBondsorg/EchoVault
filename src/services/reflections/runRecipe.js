@@ -31,13 +31,19 @@
  * the existing gate `askJournalAI`/`askJournalAIFn` already enforce.
  *
  * Embeddings: `runRecipe` does NOT generate embeddings itself. Callers pass
- * a pre-computed `{[question]: number[]}` map (mirroring the
- * `generateEmbedding(text)` call UnifiedConversation.jsx makes before its
- * own Ask Journal call) — this keeps `runRecipe` free of a direct Cloud
- * Function dependency for embedding generation and makes it straightforward
- * to unit test without mocking that seam too. A missing/omitted embedding
- * for a question just means that question's `askJournalAI` call skips
- * semantic matching (tag/recency matching still applies) — never an error.
+ * a pre-computed `{[question]: {v1?:number[], v2?:number[]}|null}` map
+ * (embeddings v2 migration plan task M2 — mirroring the
+ * `generateQueryEmbeddings(text)` call UnifiedConversation.jsx makes before
+ * its own Ask Journal call; a legacy raw `number[]` per question also still
+ * works, normalized downstream by `getSmartChatContext`'s `toQueryVectors`)
+ * — this keeps `runRecipe` free of a direct Cloud Function dependency for
+ * embedding generation and makes it straightforward to unit test without
+ * mocking that seam too. A missing/omitted (`null`) embedding for a
+ * question just means that question's `askJournalAI` call skips semantic
+ * matching (tag/recency matching still applies) — never an error; see
+ * `runQuestions`'s `qEmbedding == null` check below, which only fires when
+ * the WHOLE map value is null (i.e. every space failed) — a v1-only
+ * `{v1}` result from a v2-degrade is NOT treated as missing.
  *
  * `runQuestions` (exported) is the scope -> date-range -> exclusions ->
  * per-question `askJournalAI` core extracted so Session Prep
@@ -160,7 +166,7 @@ export function previewRecipe(recipe, entries, exclusions = new Set(), spaces = 
  *
  * @param {object} db
  * @param {string} uid
- * @param {{questions:string[], scope?:{spaceId:string}|null, entries?:Array, embeddings?:Record<string, number[]>, start:Date, end:Date}} params
+ * @param {{questions:string[], scope?:{spaceId:string}|null, entries?:Array, embeddings?:Record<string, {v1?:number[], v2?:number[]}|number[]|null>, start:Date, end:Date}} params
  * @returns {Promise<{blocks:Array, filteredEntries:Array}>} one `{id, type:'ai', question, text, sources, editedByUser:false}`
  *   block per question (in order), plus the exact filtered entry pool that
  *   was fed to `askJournalAI` (callers can derive sample-size/missingness
@@ -206,7 +212,7 @@ export async function runQuestions(db, uid, { questions, scope = null, entries =
  * @param {object} db
  * @param {string} uid
  * @param {{id:string, name:string, questions:string[], scope:{spaceId:string}|null, timeRangeDays:number, definitionVersion:number}} recipe
- * @param {{entries?:Array, embeddings?:Record<string, number[]>}} [options]
+ * @param {{entries?:Array, embeddings?:Record<string, {v1?:number[], v2?:number[]}|number[]|null>}} [options]
  *   `entries` — the full candidate pool (pre-scope-filter). `embeddings` —
  *   pre-computed `{[questionText]: embeddingVector}` map, see module doc.
  * @returns {Promise<object>} the created reflection, `{id, ...payload}`
