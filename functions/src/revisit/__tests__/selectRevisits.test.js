@@ -1,10 +1,14 @@
 /**
- * Gentle Revisit selection tests (R2 Task 19).
+ * Gentle Revisit selection tests (R2 Task 19; hardened in Michael's direct
+ * safety review, Task GR1 —
+ * `docs/superpowers/plans/2026-07-22-michael-review-hardening.md`).
  *
- * `selectRevisitCandidate` is covered as a pure function with plain-object
- * fixtures (no Firestore). `runGentleRevisitDaily` is covered against a fake
- * Firestore double mirroring the codebase's established fake-transactional-db
- * pattern (see `functions/src/__tests__/triggerIdempotency.test.js` and
+ * `selectRevisitCandidate` (and the new GR1 pure helpers
+ * `currentStateGateTripped`/`sustainedLowMoodTripped`/`weeklyCadenceTripped`)
+ * are covered as pure functions with plain-object fixtures (no Firestore).
+ * `runGentleRevisitDaily` is covered against a fake Firestore double
+ * mirroring the codebase's established fake-transactional-db pattern (see
+ * `functions/src/__tests__/triggerIdempotency.test.js` and
  * `functions/src/reports/__tests__/generator.test.js`).
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -23,10 +27,19 @@ const {
   monthYearLabel,
   matchesExclusion,
   isExclusionActive,
+  currentStateGateTripped,
+  sustainedLowMoodTripped,
+  weeklyCadenceTripped,
   MIN_AGE_DAYS,
   MAX_AGE_DAYS,
   ADJACENCY_DAYS,
   DEDUP_WINDOW_DAYS,
+  MOOD_FLOOR,
+  RECENT_WINDOW_DAYS,
+  LOW_MOOD_LOOKBACK,
+  LOW_MOOD_MIN_SCORED,
+  LOW_MOOD_THRESHOLD,
+  WEEKLY_CADENCE_DAYS,
 } = await import('../selectRevisits.js');
 const { _clearFlagCacheForTest } = await import('../../shared/flags.js');
 
@@ -44,7 +57,7 @@ function baseEntry(overrides = {}) {
     spaceId: null,
     safety_flagged: false,
     has_warning_indicators: false,
-    analysis: { mood_score: 0.6 },
+    analysis: { mood_score: 0.7 },
     tags: [],
     entities: [],
     ...overrides,
@@ -71,7 +84,29 @@ describe('selectRevisitCandidate — rule 2: has_warning_indicators', () => {
   });
 });
 
-describe('selectRevisitCandidate — rule 3: crisis-window adjacency', () => {
+describe('selectRevisitCandidate — rule 0 (GR1): legacy fail-closed', () => {
+  it('never selects an entry with a non-boolean (e.g. undefined/legacy) safety_flagged', () => {
+    const legacy = baseEntry({ id: 'legacy-1', safety_flagged: undefined });
+    expect(selectRevisitCandidate({ entries: [legacy], now: NOW })).toBeNull();
+  });
+
+  it('never selects an entry with a non-boolean (e.g. undefined/legacy) has_warning_indicators', () => {
+    const legacy = baseEntry({ id: 'legacy-2', has_warning_indicators: undefined });
+    expect(selectRevisitCandidate({ entries: [legacy], now: NOW })).toBeNull();
+  });
+
+  it('never selects an entry where both safety fields are missing entirely (real legacy-doc shape)', () => {
+    const legacy = { id: 'legacy-3', createdAt: daysAgo(100), analysis: { mood_score: 0.8 }, tags: [], entities: [] };
+    expect(selectRevisitCandidate({ entries: [legacy], now: NOW })).toBeNull();
+  });
+
+  it('selects normally once both fields are explicit booleans (baseline sanity check)', () => {
+    const clean = baseEntry({ id: 'clean-1' });
+    expect(selectRevisitCandidate({ entries: [clean], now: NOW })?.id).toBe('clean-1');
+  });
+});
+
+describe('selectRevisitCandidate — rule 3: crisis-window adjacency (flagged anchor)', () => {
   it('excludes a candidate exactly ADJACENCY_DAYS away from a flagged entry (boundary inclusive)', () => {
     const flaggedAt = daysAgo(100);
     const flagged = baseEntry({ id: 'flagged', createdAt: flaggedAt, safety_flagged: true });
@@ -96,9 +131,35 @@ describe('selectRevisitCandidate — rule 3: crisis-window adjacency', () => {
   });
 });
 
-describe('selectRevisitCandidate — rule 4: mood floor', () => {
-  it('excludes an entry with mood_score below 0.4', () => {
-    const low = baseEntry({ id: 'low-mood', analysis: { mood_score: 0.39 } });
+describe('selectRevisitCandidate — rule 3 (GR1: widened): crisis-window adjacency to warning-indicator anchors too', () => {
+  it('excludes a candidate exactly ADJACENCY_DAYS away from a has_warning_indicators-only entry (not safety_flagged)', () => {
+    const warnedAt = daysAgo(100);
+    const warned = baseEntry({ id: 'warned', createdAt: warnedAt, has_warning_indicators: true });
+    const candidate = baseEntry({ id: 'edge-in', createdAt: warnedAt - ADJACENCY_DAYS * DAY_MS });
+    const result = selectRevisitCandidate({ entries: [warned, candidate], now: NOW });
+    expect(result).toBeNull();
+  });
+
+  it('includes a candidate one millisecond beyond ADJACENCY_DAYS from a warning-indicator anchor', () => {
+    const warnedAt = daysAgo(100);
+    const warned = baseEntry({ id: 'warned', createdAt: warnedAt, has_warning_indicators: true });
+    const candidate = baseEntry({ id: 'edge-out', createdAt: warnedAt - ADJACENCY_DAYS * DAY_MS - 1 });
+    const result = selectRevisitCandidate({ entries: [warned, candidate], now: NOW });
+    expect(result?.id).toBe('edge-out');
+  });
+
+  it('an entry that is BOTH flagged and warned anchors adjacency only once (no double-counting bug)', () => {
+    const anchorAt = daysAgo(100);
+    const anchor = baseEntry({ id: 'anchor', createdAt: anchorAt, safety_flagged: true, has_warning_indicators: true });
+    const nearby = baseEntry({ id: 'nearby', createdAt: anchorAt - 1 * DAY_MS });
+    const result = selectRevisitCandidate({ entries: [anchor, nearby], now: NOW });
+    expect(result).toBeNull();
+  });
+});
+
+describe('selectRevisitCandidate — rule 4 (GR1: retuned to 0.6): mood floor', () => {
+  it(`excludes an entry with mood_score below MOOD_FLOOR (${MOOD_FLOOR})`, () => {
+    const low = baseEntry({ id: 'low-mood', analysis: { mood_score: MOOD_FLOOR - 0.01 } });
     const result = selectRevisitCandidate({ entries: [low], now: NOW });
     expect(result).toBeNull();
   });
@@ -115,10 +176,15 @@ describe('selectRevisitCandidate — rule 4: mood floor', () => {
     expect(result).toBeNull();
   });
 
-  it('includes an entry with mood_score exactly at the 0.4 floor', () => {
-    const atFloor = baseEntry({ id: 'at-floor', analysis: { mood_score: 0.4 } });
+  it(`includes an entry with mood_score exactly at the ${MOOD_FLOOR} floor`, () => {
+    const atFloor = baseEntry({ id: 'at-floor', analysis: { mood_score: MOOD_FLOOR } });
     const result = selectRevisitCandidate({ entries: [atFloor], now: NOW });
     expect(result?.id).toBe('at-floor');
+  });
+
+  it('GR1 regression guard: a mood_score of 0.5 (eligible under the OLD 0.4 floor) is now excluded under the retuned 0.6 floor', () => {
+    const wasEligible = baseEntry({ id: 'old-floor-only', analysis: { mood_score: 0.5 } });
+    expect(selectRevisitCandidate({ entries: [wasEligible], now: NOW })).toBeNull();
   });
 });
 
@@ -345,7 +411,7 @@ describe('matchesExclusion — family dimension reads top-level tags/entities on
   });
 
   it('does NOT match against entry.analysis.themes or entry.analysis.entities (never populated in production)', () => {
-    const entry = baseEntry({ tags: [], entities: [], analysis: { mood_score: 0.6, themes: ['grief'], entities: [{ name: 'grief' }] } });
+    const entry = baseEntry({ tags: [], entities: [], analysis: { mood_score: 0.7, themes: ['grief'], entities: [{ name: 'grief' }] } });
     expect(matchesExclusion(entry, { dimension: 'family', value: 'grief' }, NOW)).toBe(false);
   });
 });
@@ -415,10 +481,10 @@ describe('selectRevisitCandidate — null when nothing qualifies', () => {
   });
 });
 
-describe('selectRevisitCandidate — 100% safety-fixture exclusion gate', () => {
+describe('selectRevisitCandidate — 100% coverage of the stated exclusion rules', () => {
   it('never selects ANY entry from an adversarial fixture set covering every exclusion rule — including "bait" entries with maximally attractive scoring attributes', () => {
     // Every unsafe entry below is deliberately given rich entities/tags AND
-    // mood >= 0.5 — the exact attributes the preference-scoring step favors
+    // high mood — the exact attributes the preference-scoring step favors
     // most — to prove exclusion is a hard gate that runs BEFORE scoring ever
     // sees these entries, not a soft penalty scoring could outweigh.
     const bait = { tags: ['reunion', 'good-news'], entities: [{ id: 'p1', name: 'Sam', category: 'person' }], analysis: { mood_score: 0.95 } };
@@ -434,6 +500,9 @@ describe('selectRevisitCandidate — 100% safety-fixture exclusion gate', () => 
       baseEntry({ id: 'unsafe-excluded-entry', createdAt: daysAgo(130), ...bait }),
       baseEntry({ id: 'unsafe-too-young', createdAt: daysAgo(5), ...bait }),
       baseEntry({ id: 'unsafe-too-old', createdAt: daysAgo(500), ...bait }),
+      // GR1 addition: a legacy entry (non-boolean safety fields) with
+      // otherwise-ideal bait attributes must also never be selected.
+      { id: 'unsafe-legacy', createdAt: daysAgo(140), ...bait },
     ];
     const exclusions = [{ dimension: 'entry', value: 'unsafe-excluded-entry' }];
 
@@ -443,9 +512,10 @@ describe('selectRevisitCandidate — 100% safety-fixture exclusion gate', () => 
 
     // Adding exactly one genuinely safe entry — deliberately LESS
     // "attractive" than the bait (no tags/entities, mood right at the
-    // preferred-but-not-maximal 0.5 threshold) — proves the adversarial
-    // ones really were structurally filtered, not merely outscored.
-    const safeControl = baseEntry({ id: 'the-only-safe-one', createdAt: daysAgo(180), analysis: { mood_score: 0.5 } });
+    // eligible-but-not-preferred MOOD_FLOOR, not PREFERRED_MOOD) — proves
+    // the adversarial ones really were structurally filtered, not merely
+    // outscored.
+    const safeControl = baseEntry({ id: 'the-only-safe-one', createdAt: daysAgo(180), analysis: { mood_score: MOOD_FLOOR } });
     const withControl = selectRevisitCandidate({
       entries: [...adversarial, safeControl],
       exclusions,
@@ -463,9 +533,9 @@ describe('selectRevisitCandidate — preference ordering', () => {
     expect(result?.id).toBe('rich');
   });
 
-  it('prefers mood >= 0.5 over a lower-but-still-passing mood, all else equal', () => {
-    const lower = baseEntry({ id: 'lower', analysis: { mood_score: 0.45 }, createdAt: daysAgo(100) });
-    const higher = baseEntry({ id: 'higher', analysis: { mood_score: 0.55 }, createdAt: daysAgo(100) });
+  it('prefers a PREFERRED_MOOD-and-above entry over one that only clears the (lower) MOOD_FLOOR, all else equal', () => {
+    const lower = baseEntry({ id: 'lower', analysis: { mood_score: 0.65 }, createdAt: daysAgo(100) });
+    const higher = baseEntry({ id: 'higher', analysis: { mood_score: 0.75 }, createdAt: daysAgo(100) });
     const result = selectRevisitCandidate({ entries: [lower, higher], now: NOW });
     expect(result?.id).toBe('higher');
   });
@@ -485,6 +555,118 @@ describe('selectRevisitCandidate — preference ordering', () => {
 describe('monthYearLabel', () => {
   it('formats as "{Month} {Year}" in UTC', () => {
     expect(monthYearLabel(Date.parse('2026-03-10T00:00:00.000Z'))).toBe('March 2026');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// GR1 pure helpers: currentStateGateTripped / sustainedLowMoodTripped
+// (rule 7) and weeklyCadenceTripped (rule 9) — fixtures for each sub-rule,
+// independent of the scheduled-job integration tests further below.
+// ---------------------------------------------------------------------------
+
+function scoredRecent(id, mood, daysBack) {
+  return baseEntry({ id, createdAt: daysAgo(daysBack), analysis: { mood_score: mood } });
+}
+
+describe('currentStateGateTripped (rule 7)', () => {
+  it('trips when ANY passed entry has safety_flagged true', () => {
+    expect(currentStateGateTripped([baseEntry({ safety_flagged: true })])).toBe(true);
+  });
+
+  it('trips when ANY passed entry has has_warning_indicators true', () => {
+    expect(currentStateGateTripped([baseEntry({ has_warning_indicators: true })])).toBe(true);
+  });
+
+  it('does not trip when entries are all clean and mood is unremarkable', () => {
+    expect(currentStateGateTripped([baseEntry(), baseEntry({ analysis: { mood_score: 0.6 } })])).toBe(false);
+  });
+
+  it('does not trip on an empty/undefined entries list', () => {
+    expect(currentStateGateTripped([])).toBe(false);
+    expect(currentStateGateTripped(undefined)).toBe(false);
+  });
+
+  it('delegates the sustained-low-mood check (integration smoke test — full coverage below)', () => {
+    const entries = [
+      scoredRecent('m1', 0.1, 1), scoredRecent('m2', 0.1, 2), scoredRecent('m3', 0.1, 3),
+    ];
+    expect(currentStateGateTripped(entries)).toBe(true);
+  });
+});
+
+describe(`sustainedLowMoodTripped (rule 7 sub-rule): last ${LOW_MOOD_LOOKBACK} mood-scored, >=${LOW_MOOD_MIN_SCORED} below ${LOW_MOOD_THRESHOLD}`, () => {
+  it(`trips when exactly ${LOW_MOOD_MIN_SCORED} of the last ${LOW_MOOD_LOOKBACK} mood-scored entries are below the threshold (boundary)`, () => {
+    const entries = [
+      scoredRecent('a', 0.1, 1), scoredRecent('b', 0.1, 2), scoredRecent('c', 0.1, 3),
+      scoredRecent('d', 0.8, 4), scoredRecent('e', 0.8, 5),
+    ];
+    expect(sustainedLowMoodTripped(entries)).toBe(true);
+  });
+
+  it(`does NOT trip with only ${LOW_MOOD_MIN_SCORED - 1} low-mood scored entries (one below the boundary)`, () => {
+    const entries = [
+      scoredRecent('a', 0.1, 1), scoredRecent('b', 0.1, 2),
+      scoredRecent('c', 0.8, 3), scoredRecent('d', 0.8, 4), scoredRecent('e', 0.8, 5),
+    ];
+    expect(sustainedLowMoodTripped(entries)).toBe(false);
+  });
+
+  it(`fails OPEN with fewer than ${LOW_MOOD_MIN_SCORED} mood-scored entries at all, even if ALL of them are low (insufficient signal is not treated as vulnerable)`, () => {
+    const entries = [scoredRecent('a', 0.05, 1), scoredRecent('b', 0.05, 2)];
+    expect(sustainedLowMoodTripped(entries)).toBe(false);
+  });
+
+  it(`mood_score exactly at ${LOW_MOOD_THRESHOLD} does NOT count as low (boundary exclusive)`, () => {
+    const entries = [
+      scoredRecent('a', LOW_MOOD_THRESHOLD, 1), scoredRecent('b', LOW_MOOD_THRESHOLD, 2), scoredRecent('c', LOW_MOOD_THRESHOLD, 3),
+    ];
+    expect(sustainedLowMoodTripped(entries)).toBe(false);
+  });
+
+  it(`only considers the FIRST ${LOW_MOOD_LOOKBACK} mood-scored entries (newest-first input order), ignoring older scored entries beyond the lookback`, () => {
+    // 7 healthy entries (newest-first) followed by 3 very old low-mood ones
+    // that fall outside the lookback window entirely.
+    const healthy = Array.from({ length: LOW_MOOD_LOOKBACK }, (_, i) => scoredRecent(`h${i}`, 0.9, i + 1));
+    const oldLow = [scoredRecent('old1', 0.05, 20), scoredRecent('old2', 0.05, 21), scoredRecent('old3', 0.05, 22)];
+    expect(sustainedLowMoodTripped([...healthy, ...oldLow])).toBe(false);
+  });
+
+  it('entries without a numeric mood_score are excluded from the mood-scored count entirely (neither help nor hurt)', () => {
+    const entries = [
+      scoredRecent('a', 0.1, 1), scoredRecent('b', 0.1, 2), scoredRecent('c', 0.1, 3),
+      baseEntry({ id: 'unscored', createdAt: daysAgo(1), analysis: {} }),
+    ];
+    expect(sustainedLowMoodTripped(entries)).toBe(true); // the 3 scored low entries alone already trip it
+  });
+});
+
+describe(`weeklyCadenceTripped (rule 9): live selection within ${WEEKLY_CADENCE_DAYS} days`, () => {
+  it('trips for a "queued" item within the cadence window', () => {
+    expect(weeklyCadenceTripped([{ status: 'queued', selectedAt: daysAgo(2) }], NOW)).toBe(true);
+  });
+
+  it('trips for a "shown" item within the cadence window', () => {
+    expect(weeklyCadenceTripped([{ status: 'shown', selectedAt: daysAgo(2) }], NOW)).toBe(true);
+  });
+
+  it('does NOT trip for a "dismissed" item within the cadence window', () => {
+    expect(weeklyCadenceTripped([{ status: 'dismissed', selectedAt: daysAgo(2) }], NOW)).toBe(false);
+  });
+
+  it('does NOT trip for a queued item older than the cadence window', () => {
+    expect(weeklyCadenceTripped([{ status: 'queued', selectedAt: daysAgo(WEEKLY_CADENCE_DAYS + 1) }], NOW)).toBe(false);
+  });
+
+  it(`trips at exactly ${WEEKLY_CADENCE_DAYS} days (boundary inclusive)`, () => {
+    expect(weeklyCadenceTripped([{ status: 'queued', selectedAt: daysAgo(WEEKLY_CADENCE_DAYS) }], NOW)).toBe(true);
+  });
+
+  it('does not trip on an empty list', () => {
+    expect(weeklyCadenceTripped([], NOW)).toBe(false);
+  });
+
+  it('ignores an item with an uncoercible selectedAt rather than throwing', () => {
+    expect(weeklyCadenceTripped([{ status: 'queued', selectedAt: 'not-a-date' }], NOW)).toBe(false);
   });
 });
 
@@ -650,7 +832,7 @@ function eligibleEntryDoc(id, overrides = {}) {
       createdAt: new Date(RUN_NOW.getTime() - 100 * DAY_MS),
       safety_flagged: false,
       has_warning_indicators: false,
-      analysis: { mood_score: 0.7 },
+      analysis: { mood_score: 0.8 },
       tags: ['calm'],
       ...overrides,
     },
@@ -725,17 +907,23 @@ describe('runGentleRevisitDaily — selection + write', () => {
     });
   });
 
-  it('caps the main candidate-entries read at 200, and the separate flagged-anchor backfill query at 50', async () => {
+  it('caps every entries-collection read: recent-window at 50, main candidate query at 200, flagged-anchor and warning-anchor backfills at 50 each', async () => {
     const { db, entriesQueryCalls } = buildFakeDb({
       userIds: ['u1'],
       prefsByUser: { u1: { enabled: true } },
       entriesByUser: { u1: [eligibleEntryDoc('entry-1')] },
     });
     await runGentleRevisitDaily(db, { now: RUN_NOW });
-    expect(entriesQueryCalls).toHaveLength(2); // main candidate query + flagged-anchor backfill query
-    expect(entriesQueryCalls[0].limit).toHaveBeenCalledWith(200);
-    expect(entriesQueryCalls[1].where).toHaveBeenCalledWith('safety_flagged', '==', true);
-    expect(entriesQueryCalls[1].limit).toHaveBeenCalledWith(50);
+    // Order: [0] GR1 current-state recent-window read, [1] main candidate
+    // query, [2] flagged-anchor backfill, [3] warning-anchor backfill.
+    expect(entriesQueryCalls).toHaveLength(4);
+    expect(entriesQueryCalls[0].limit).toHaveBeenCalledWith(50);
+    expect(entriesQueryCalls[0].where).not.toHaveBeenCalledWith('safety_flagged', '==', true);
+    expect(entriesQueryCalls[1].limit).toHaveBeenCalledWith(200);
+    expect(entriesQueryCalls[2].where).toHaveBeenCalledWith('safety_flagged', '==', true);
+    expect(entriesQueryCalls[2].limit).toHaveBeenCalledWith(50);
+    expect(entriesQueryCalls[3].where).toHaveBeenCalledWith('has_warning_indicators', '==', true);
+    expect(entriesQueryCalls[3].limit).toHaveBeenCalledWith(50);
   });
 
   it('writes spaceId when the selected entry has one', async () => {
@@ -777,7 +965,7 @@ describe('runGentleRevisitDaily — idempotency marker', () => {
     expect(second.processed).toBe(0);
     expect(second.skipped).toBe(1);
     expect(shared.queueWrites).toHaveLength(1); // still just the one write
-    expect(shared.entriesQueryCalls).toHaveLength(2); // main + anchor query, only from the first (successful) run
+    expect(shared.entriesQueryCalls).toHaveLength(4); // recent-window + main + flagged + warning, only from the first (successful) run
   });
 
   it('claims the marker on a dedicated revisit_job_state doc, never on settings/revisitPrefs', async () => {
@@ -852,8 +1040,9 @@ describe('runGentleRevisitDaily — flagged-anchor backfill (200-cap edge case)'
     // whose where/orderBy/limit chain is unchanged by re-invoking `.get()`):
     // the main (capped) query alone must NOT contain the flagged entry, but
     // MUST contain the candidate — otherwise this test isn't actually
-    // exercising the 200-cap edge case.
-    const mainQuerySnap = await entriesQueryCalls[0].get();
+    // exercising the 200-cap edge case. entriesQueryCalls[1] is the main
+    // candidate query (index [0] is the GR1 current-state recent-window read).
+    const mainQuerySnap = await entriesQueryCalls[1].get();
     const mainIds = [];
     mainQuerySnap.forEach((d) => mainIds.push(d.id));
     expect(mainIds).toContain('the-candidate');
@@ -864,6 +1053,248 @@ describe('runGentleRevisitDaily — flagged-anchor backfill (200-cap edge case)'
     // the flagged entry is recovered via the anchor query and vetoes it.
     expect(result.selected).toBe(0);
     expect(queueWrites).toHaveLength(0);
+  });
+});
+
+describe('runGentleRevisitDaily — warning-indicator anchor backfill (GR1 rule 3b, 200-cap edge case)', () => {
+  it('a far-edge warning-indicator entry sliced out of the 200-most-recent main query still vetoes its adjacent in-cap candidate', async () => {
+    const fillers = Array.from({ length: 199 }, (_, i) => eligibleEntryDoc(`filler-${i}`, {
+      createdAt: new Date(RUN_NOW.getTime() - (30 + i) * DAY_MS),
+      analysis: { mood_score: 0.1 },
+    }));
+    const candidate = eligibleEntryDoc('the-candidate', {
+      createdAt: new Date(RUN_NOW.getTime() - 240 * DAY_MS),
+      analysis: { mood_score: 0.8 },
+      tags: ['calm'],
+    });
+    const warnedFarEdge = eligibleEntryDoc('warned-far-edge', {
+      createdAt: new Date(RUN_NOW.getTime() - 242 * DAY_MS),
+      has_warning_indicators: true,
+    });
+
+    const { db, queueWrites, entriesQueryCalls } = buildFakeDb({
+      userIds: ['u1'],
+      prefsByUser: { u1: { enabled: true } },
+      entriesByUser: { u1: [...fillers, candidate, warnedFarEdge] },
+    });
+
+    const result = await runGentleRevisitDaily(db, { now: RUN_NOW });
+
+    const mainQuerySnap = await entriesQueryCalls[1].get();
+    const mainIds = [];
+    mainQuerySnap.forEach((d) => mainIds.push(d.id));
+    expect(mainIds).toContain('the-candidate');
+    expect(mainIds).not.toContain('warned-far-edge');
+
+    expect(result.selected).toBe(0);
+    expect(queueWrites).toHaveLength(0);
+  });
+});
+
+describe('runGentleRevisitDaily — legacy entries fail closed (GR1 rule 0/8)', () => {
+  it('a legacy entry (no explicit safety fields) with crisis-keyword text is re-screened and never selected', async () => {
+    const { db, queueWrites } = buildFakeDb({
+      userIds: ['u1'],
+      prefsByUser: { u1: { enabled: true } },
+      entriesByUser: {
+        u1: [eligibleEntryDoc('legacy-crisis', {
+          safety_flagged: undefined,
+          has_warning_indicators: undefined,
+          text: 'I want to end my life and there is no reason to live anymore.',
+        })],
+      },
+    });
+    const result = await runGentleRevisitDaily(db, { now: RUN_NOW });
+    expect(result.selected).toBe(0);
+    expect(queueWrites).toHaveLength(0);
+  });
+
+  it('a legacy entry with clean text and no explicit fields IS selectable (re-screen is not "never select anything legacy")', async () => {
+    const { db, queueWrites } = buildFakeDb({
+      userIds: ['u1'],
+      prefsByUser: { u1: { enabled: true } },
+      entriesByUser: {
+        u1: [eligibleEntryDoc('legacy-clean', {
+          safety_flagged: undefined,
+          has_warning_indicators: undefined,
+          text: 'A quiet, uneventful afternoon at the park.',
+        })],
+      },
+    });
+    const result = await runGentleRevisitDaily(db, { now: RUN_NOW });
+    expect(result.selected).toBe(1);
+    expect(queueWrites[0].data.entryId).toBe('legacy-clean');
+  });
+
+  it('a legacy entry with missing/empty text is excluded — no re-screen possible, fails closed', async () => {
+    const { db, queueWrites } = buildFakeDb({
+      userIds: ['u1'],
+      prefsByUser: { u1: { enabled: true } },
+      entriesByUser: {
+        u1: [eligibleEntryDoc('legacy-no-text', {
+          safety_flagged: undefined,
+          has_warning_indicators: undefined,
+          text: undefined,
+        })],
+      },
+    });
+    const result = await runGentleRevisitDaily(db, { now: RUN_NOW });
+    expect(result.selected).toBe(0);
+    expect(queueWrites).toHaveLength(0);
+  });
+
+  it('regression guard: an already-explicit-true safety_flagged is NEVER cleared by re-screening the other (legacy) field against clean text', async () => {
+    // safety_flagged is explicitly true (e.g. set by something other than
+    // plain keyword matching); has_warning_indicators is legacy/missing;
+    // the entry's OWN text is clean. A "both-or-neither" re-screen bug would
+    // re-derive BOTH fields from the clean text and incorrectly clear the
+    // known-true safety_flagged, making this entry wrongly selectable.
+    const { db, queueWrites } = buildFakeDb({
+      userIds: ['u1'],
+      prefsByUser: { u1: { enabled: true } },
+      entriesByUser: {
+        u1: [eligibleEntryDoc('partial-legacy', {
+          safety_flagged: true,
+          has_warning_indicators: undefined,
+          text: 'A perfectly calm and uneventful day.',
+        })],
+      },
+    });
+    const result = await runGentleRevisitDaily(db, { now: RUN_NOW });
+    expect(result.selected).toBe(0);
+    expect(queueWrites).toHaveLength(0);
+  });
+});
+
+describe('runGentleRevisitDaily — current-state gate (GR1 rule 7)', () => {
+  it('skips selection entirely today when a recent (within 14 days) entry has safety_flagged true, even though an old candidate would otherwise qualify', async () => {
+    const { db, queueWrites, entriesQueryCalls } = buildFakeDb({
+      userIds: ['u1'],
+      prefsByUser: { u1: { enabled: true } },
+      entriesByUser: {
+        u1: [
+          eligibleEntryDoc('old-candidate'),
+          eligibleEntryDoc('recent-flagged', { createdAt: new Date(RUN_NOW.getTime() - 2 * DAY_MS), safety_flagged: true }),
+        ],
+      },
+    });
+    const result = await runGentleRevisitDaily(db, { now: RUN_NOW });
+    expect(result.processed).toBe(1);
+    expect(result.selected).toBe(0);
+    expect(queueWrites).toHaveLength(0);
+    // Gated before the padded/anchor reads: only the recent-window query ran.
+    expect(entriesQueryCalls).toHaveLength(1);
+  });
+
+  it('skips selection entirely today when a recent entry has has_warning_indicators true', async () => {
+    const { db, queueWrites } = buildFakeDb({
+      userIds: ['u1'],
+      prefsByUser: { u1: { enabled: true } },
+      entriesByUser: {
+        u1: [
+          eligibleEntryDoc('old-candidate'),
+          eligibleEntryDoc('recent-warned', { createdAt: new Date(RUN_NOW.getTime() - 2 * DAY_MS), has_warning_indicators: true }),
+        ],
+      },
+    });
+    const result = await runGentleRevisitDaily(db, { now: RUN_NOW });
+    expect(result.selected).toBe(0);
+    expect(queueWrites).toHaveLength(0);
+  });
+
+  it('skips selection entirely today on sustained low mood among the last 7 mood-scored recent entries', async () => {
+    const recentLow = Array.from({ length: 3 }, (_, i) => eligibleEntryDoc(`recent-low-${i}`, {
+      createdAt: new Date(RUN_NOW.getTime() - (1 + i) * DAY_MS),
+      analysis: { mood_score: 0.1 },
+    }));
+    const { db, queueWrites } = buildFakeDb({
+      userIds: ['u1'],
+      prefsByUser: { u1: { enabled: true } },
+      entriesByUser: { u1: [eligibleEntryDoc('old-candidate'), ...recentLow] },
+    });
+    const result = await runGentleRevisitDaily(db, { now: RUN_NOW });
+    expect(result.selected).toBe(0);
+    expect(queueWrites).toHaveLength(0);
+  });
+
+  it('does NOT skip when fewer than 3 recent entries are mood-scored (fail-open) — the old candidate still gets selected', async () => {
+    const recentLow = Array.from({ length: 2 }, (_, i) => eligibleEntryDoc(`recent-low-${i}`, {
+      createdAt: new Date(RUN_NOW.getTime() - (1 + i) * DAY_MS),
+      analysis: { mood_score: 0.1 },
+    }));
+    const { db, queueWrites } = buildFakeDb({
+      userIds: ['u1'],
+      prefsByUser: { u1: { enabled: true } },
+      entriesByUser: { u1: [eligibleEntryDoc('old-candidate'), ...recentLow] },
+    });
+    const result = await runGentleRevisitDaily(db, { now: RUN_NOW });
+    expect(result.selected).toBe(1);
+    expect(queueWrites[0].data.entryId).toBe('old-candidate');
+  });
+
+  it('a low-mood entry older than the 14-day recent window does not trip the gate', async () => {
+    const oldLow = Array.from({ length: 3 }, (_, i) => eligibleEntryDoc(`old-low-${i}`, {
+      createdAt: new Date(RUN_NOW.getTime() - (RECENT_WINDOW_DAYS + 1 + i) * DAY_MS),
+      analysis: { mood_score: 0.1 },
+    }));
+    const { db, queueWrites } = buildFakeDb({
+      userIds: ['u1'],
+      prefsByUser: { u1: { enabled: true } },
+      entriesByUser: { u1: [eligibleEntryDoc('old-candidate'), ...oldLow] },
+    });
+    const result = await runGentleRevisitDaily(db, { now: RUN_NOW });
+    expect(result.selected).toBe(1);
+  });
+});
+
+describe('runGentleRevisitDaily — weekly cadence (GR1 rule 9)', () => {
+  it('skips selection when a "queued" revisit_queue doc exists with selectedAt within the last 7 days, without reading any entries', async () => {
+    const { db, queueWrites, entriesQueryCalls } = buildFakeDb({
+      userIds: ['u1'],
+      prefsByUser: { u1: { enabled: true } },
+      entriesByUser: { u1: [eligibleEntryDoc('entry-1')] },
+      queueByUser: { u1: [{ id: 'q1', data: { status: 'queued', selectedAt: new Date(RUN_NOW.getTime() - 2 * DAY_MS) } }] },
+    });
+    const result = await runGentleRevisitDaily(db, { now: RUN_NOW });
+    expect(result.processed).toBe(1);
+    expect(result.selected).toBe(0);
+    expect(queueWrites).toHaveLength(0);
+    expect(entriesQueryCalls).toHaveLength(0); // gated before ANY entries read
+  });
+
+  it('skips selection when a "shown" revisit_queue doc exists within the last 7 days', async () => {
+    const { db, queueWrites } = buildFakeDb({
+      userIds: ['u1'],
+      prefsByUser: { u1: { enabled: true } },
+      entriesByUser: { u1: [eligibleEntryDoc('entry-1')] },
+      queueByUser: { u1: [{ id: 'q1', data: { status: 'shown', selectedAt: new Date(RUN_NOW.getTime() - 5 * DAY_MS) } }] },
+    });
+    const result = await runGentleRevisitDaily(db, { now: RUN_NOW });
+    expect(result.selected).toBe(0);
+    expect(queueWrites).toHaveLength(0);
+  });
+
+  it('does NOT skip when the only recent revisit_queue doc is "dismissed"', async () => {
+    const { db, queueWrites } = buildFakeDb({
+      userIds: ['u1'],
+      prefsByUser: { u1: { enabled: true } },
+      entriesByUser: { u1: [eligibleEntryDoc('entry-1')] },
+      queueByUser: { u1: [{ id: 'q1', data: { status: 'dismissed', selectedAt: new Date(RUN_NOW.getTime() - 2 * DAY_MS) } }] },
+    });
+    const result = await runGentleRevisitDaily(db, { now: RUN_NOW });
+    expect(result.selected).toBe(1);
+    expect(queueWrites[0].data.entryId).toBe('entry-1');
+  });
+
+  it('does NOT skip when the queued doc is older than 7 days', async () => {
+    const { db, queueWrites } = buildFakeDb({
+      userIds: ['u1'],
+      prefsByUser: { u1: { enabled: true } },
+      entriesByUser: { u1: [eligibleEntryDoc('entry-1')] },
+      queueByUser: { u1: [{ id: 'q1', data: { status: 'queued', selectedAt: new Date(RUN_NOW.getTime() - 8 * DAY_MS) } }] },
+    });
+    const result = await runGentleRevisitDaily(db, { now: RUN_NOW });
+    expect(result.selected).toBe(1);
   });
 });
 

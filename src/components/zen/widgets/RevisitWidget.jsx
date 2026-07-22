@@ -16,6 +16,18 @@ import { subscribeSpaces } from '../../../services/spaces/spacesService';
 import RevisitControls from '../../revisit/RevisitControls';
 
 const NINETY_DAYS_MS = 90 * 24 * 60 * 60 * 1000;
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+// GR1 (Michael's direct safety review) current-state gate, client mirror.
+// Kept in exact lockstep BY HAND with
+// `functions/src/revisit/selectRevisits.js`'s `currentStateGateTripped`/
+// `sustainedLowMoodTripped` — duplicated, not imported, because this is a
+// separate deployable package (client bundle vs. Cloud Functions), same
+// rationale as the existing `crisisKeywords.js` client/server duplication.
+const RECENT_WINDOW_DAYS = 14;
+const LOW_MOOD_LOOKBACK = 7;
+const LOW_MOOD_MIN_SCORED = 3;
+const LOW_MOOD_THRESHOLD = 0.4;
 
 // Compact 44px-hit-area text action, same technique as
 // InsightControlCenter.jsx's `smallActionButtonClass` — a transparent
@@ -67,6 +79,60 @@ export function deriveTopThemeOrEntity(entry) {
   const tag = entry?.tags?.[0];
   if (typeof tag === 'string' && tag.trim()) return tag.trim();
   return null;
+}
+
+/** Same `effectiveDate || createdAt` convention as `monthYearLabel` above. Coerces to epoch ms, NaN if uncoercible. */
+function entryTimeMs(entry) {
+  const iso = entry?.effectiveDate || entry?.createdAt;
+  if (!iso) return NaN;
+  if (iso instanceof Date) return iso.getTime();
+  if (typeof iso === 'string') return Date.parse(iso);
+  if (typeof iso?.toMillis === 'function') return iso.toMillis();
+  return NaN;
+}
+
+/**
+ * GR1 (Michael's direct safety review, Task GR1) current-state gate, client
+ * mirror of the server's `functions/src/revisit/selectRevisits.js`
+ * `currentStateGateTripped`/`sustainedLowMoodTripped`. Defense in depth over
+ * whatever `entries` this widget already has loaded — suppresses the card
+ * even if a `revisit_queue` doc was already selected by the server before
+ * today's signal appeared (e.g. the user journaled something concerning
+ * later the same day, after the sweep ran). THE SERVER IS AUTHORITATIVE for
+ * selection itself; this can only ever additionally suppress a card that
+ * already made it through server-side, never cause one the server declined
+ * to select.
+ *
+ * Same rule as the server: any RECENT_WINDOW_DAYS-day-old entry flagged
+ * `safety_flagged`/`has_warning_indicators` trips it; otherwise, among the
+ * last LOW_MOOD_LOOKBACK mood-scored recent entries, LOW_MOOD_MIN_SCORED or
+ * more below LOW_MOOD_THRESHOLD trips it. Fewer than LOW_MOOD_MIN_SCORED
+ * mood-scored recent entries fails OPEN (does not suppress) — insufficient
+ * signal is not treated as equivalent to vulnerable, matching the server.
+ *
+ * @param {Array<object>} entries - whatever entries this widget received.
+ * @param {number} [nowMs]
+ * @returns {boolean} true → suppress the card.
+ */
+export function currentStateGateTripped(entries, nowMs = Date.now()) {
+  const recent = (entries || [])
+    .filter((e) => {
+      if (!e) return false;
+      const ms = entryTimeMs(e);
+      if (!Number.isFinite(ms)) return false;
+      const ageMs = nowMs - ms;
+      return ageMs >= 0 && ageMs <= RECENT_WINDOW_DAYS * DAY_MS;
+    })
+    .sort((a, b) => entryTimeMs(b) - entryTimeMs(a));
+
+  if (recent.some((e) => e.safety_flagged === true || e.has_warning_indicators === true)) return true;
+
+  const moodScored = recent
+    .filter((e) => typeof e.analysis?.mood_score === 'number' && !Number.isNaN(e.analysis.mood_score))
+    .slice(0, LOW_MOOD_LOOKBACK);
+  if (moodScored.length < LOW_MOOD_MIN_SCORED) return false; // fail-open: insufficient signal
+  const lowCount = moodScored.filter((e) => e.analysis.mood_score < LOW_MOOD_THRESHOLD).length;
+  return lowCount >= LOW_MOOD_MIN_SCORED;
 }
 
 /**
@@ -203,9 +269,15 @@ const RevisitWidget = ({ size = '2x1', isEditing = false, onDelete, entries = []
   // in PROJECT_STATUS.md at Task 21. `'dismissed'`/anything else is already
   // excluded by this being an allow-list of exactly the two live statuses
   // (no separate `!== 'dismissed'` clause needed).
+  //
+  // GR1 (Michael's review): `!currentStateGateTripped(entries)` is the
+  // client-side defense-in-depth half of the current-state gate — see that
+  // function's doc comment. Placed last so it only runs once every cheaper
+  // check already passed.
   const cardVisible = Boolean(
     flagOn && prefsLoaded && prefsEnabled && item
-    && (item.status === 'queued' || item.status === 'shown'),
+    && (item.status === 'queued' || item.status === 'shown')
+    && !currentStateGateTripped(entries),
   );
 
   const entry = cardVisible ? entries.find((e) => e.id === item.entryId) : null;

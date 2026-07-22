@@ -1294,7 +1294,11 @@ describe('R2 Matrix row (e): revisit safety fixtures excluded 100%, including ad
         spaceId: null,
         safety_flagged: false,
         has_warning_indicators: false,
-        analysis: { mood_score: 0.6 },
+        // GR1 (Michael's direct safety review): MOOD_FLOOR retuned 0.4 -> 0.6
+        // (`functions/src/revisit/selectRevisits.js`) — default bumped to
+        // stay above the new floor so this fixture's baseline entry is still
+        // eligible by default.
+        analysis: { mood_score: 0.7 },
         tags: [],
         entities: [],
         ...overrides,
@@ -1325,9 +1329,10 @@ describe('R2 Matrix row (e): revisit safety fixtures excluded 100%, including ad
 
     // Mutation-check control: a genuinely safe entry, deliberately LESS
     // "attractive" than the bait (no tags/entities, mood right at the
-    // preferred-but-not-maximal 0.5 threshold), proves the adversarial
-    // entries were structurally filtered — not merely outscored.
-    const safeControl = baseEntry({ id: 'the-only-safe-one', createdAt: daysAgo(180), analysis: { mood_score: 0.5 } });
+    // eligible-but-not-preferred MOOD_FLOOR, not PREFERRED_MOOD — GR1
+    // retuned the floor to 0.6), proves the adversarial entries were
+    // structurally filtered — not merely outscored.
+    const safeControl = baseEntry({ id: 'the-only-safe-one', createdAt: daysAgo(180), analysis: { mood_score: 0.6 } });
     const withControl = selectRevisitCandidate({ entries: [...adversarial, safeControl], exclusions, now: NOW });
     expect(withControl?.id).toBe('the-only-safe-one');
   });

@@ -61,7 +61,7 @@ vi.mock('../../../revisit/RevisitControls', () => ({
   ),
 }));
 
-const { default: RevisitWidget, deriveTopThemeOrEntity } = await import('../RevisitWidget');
+const { default: RevisitWidget, deriveTopThemeOrEntity, currentStateGateTripped } = await import('../RevisitWidget');
 
 const UID = 'user-1';
 const QUEUE_PATH = 'artifacts/echo-vault-v5-fresh/users/user-1/revisit_queue';
@@ -488,5 +488,105 @@ describe('RevisitWidget — copy', () => {
     expect(text).not.toMatch(/you (missed|forgot|failed|didn'?t)/i);
     expect(text).not.toMatch(/don'?t break/i);
     expect(text).not.toMatch(/\bday[s]? in a row\b/i);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// GR1 (Michael's direct safety review) current-state gate — client mirror of
+// `functions/src/revisit/selectRevisits.js`'s `currentStateGateTripped`/
+// `sustainedLowMoodTripped`. Covered both as a direct pure-function fixture
+// set (mirroring the server test file's structure) and end-to-end through
+// the widget's render gate.
+// ---------------------------------------------------------------------------
+
+function recentEntry(id, { daysAgo = 1, mood, safety_flagged, has_warning_indicators } = {}) {
+  return {
+    id,
+    text: 'text',
+    effectiveDate: new Date(Date.now() - daysAgo * 24 * 60 * 60 * 1000).toISOString(),
+    analysis: mood != null ? { mood_score: mood } : {},
+    ...(safety_flagged !== undefined ? { safety_flagged } : {}),
+    ...(has_warning_indicators !== undefined ? { has_warning_indicators } : {}),
+  };
+}
+
+describe('currentStateGateTripped (client mirror, direct fixtures)', () => {
+  it('trips when a recent entry has safety_flagged true', () => {
+    expect(currentStateGateTripped([recentEntry('a', { safety_flagged: true })])).toBe(true);
+  });
+
+  it('trips when a recent entry has has_warning_indicators true', () => {
+    expect(currentStateGateTripped([recentEntry('a', { has_warning_indicators: true })])).toBe(true);
+  });
+
+  it('does not trip on clean, unremarkable recent entries', () => {
+    expect(currentStateGateTripped([recentEntry('a', { mood: 0.6 })])).toBe(false);
+  });
+
+  it('trips on sustained low mood: >=3 of the last 7 mood-scored recent entries below 0.4', () => {
+    const entries = [
+      recentEntry('a', { daysAgo: 1, mood: 0.1 }),
+      recentEntry('b', { daysAgo: 2, mood: 0.1 }),
+      recentEntry('c', { daysAgo: 3, mood: 0.1 }),
+    ];
+    expect(currentStateGateTripped(entries)).toBe(true);
+  });
+
+  it('fails open with fewer than 3 mood-scored recent entries, even if all are low', () => {
+    const entries = [recentEntry('a', { daysAgo: 1, mood: 0.05 }), recentEntry('b', { daysAgo: 2, mood: 0.05 })];
+    expect(currentStateGateTripped(entries)).toBe(false);
+  });
+
+  it('ignores low-mood entries older than the 14-day recent window', () => {
+    const entries = [
+      recentEntry('a', { daysAgo: 20, mood: 0.05 }),
+      recentEntry('b', { daysAgo: 21, mood: 0.05 }),
+      recentEntry('c', { daysAgo: 22, mood: 0.05 }),
+    ];
+    expect(currentStateGateTripped(entries)).toBe(false);
+  });
+
+  it('handles an empty/undefined entries list without throwing', () => {
+    expect(currentStateGateTripped([])).toBe(false);
+    expect(currentStateGateTripped(undefined)).toBe(false);
+  });
+});
+
+describe('RevisitWidget — current-state gate (GR1 rule 7, client mirror, end-to-end)', () => {
+  it('suppresses the card when a recent entry has safety_flagged true, even with a queued doc present', async () => {
+    pushQueueItem(queueItem());
+    const { container } = await renderWidget({ entries: [makeEntry(), recentEntry('recent-1', { safety_flagged: true })] });
+    expect(container.firstChild).toBeNull();
+  });
+
+  it('suppresses the card when a recent entry has has_warning_indicators true, even with a queued doc present', async () => {
+    pushQueueItem(queueItem());
+    const { container } = await renderWidget({ entries: [makeEntry(), recentEntry('recent-1', { has_warning_indicators: true })] });
+    expect(container.firstChild).toBeNull();
+  });
+
+  it('suppresses the card on sustained low mood among recent entries, even with a queued doc present', async () => {
+    pushQueueItem(queueItem());
+    const lowMoodRecent = [
+      recentEntry('r1', { daysAgo: 1, mood: 0.1 }),
+      recentEntry('r2', { daysAgo: 2, mood: 0.1 }),
+      recentEntry('r3', { daysAgo: 3, mood: 0.1 }),
+    ];
+    const { container } = await renderWidget({ entries: [makeEntry(), ...lowMoodRecent] });
+    expect(container.firstChild).toBeNull();
+  });
+
+  it('does NOT suppress the card when there are fewer than 3 recent mood-scored entries (fail-open)', async () => {
+    pushQueueItem(queueItem());
+    const lowMoodRecent = [recentEntry('r1', { daysAgo: 1, mood: 0.1 }), recentEntry('r2', { daysAgo: 2, mood: 0.1 })];
+    await renderWidget({ entries: [makeEntry(), ...lowMoodRecent] });
+    expect(screen.getByText('A calm moment from March 2026')).toBeTruthy();
+  });
+
+  it('does NOT suppress the card when the flagged entry is well outside the 14-day recent window', async () => {
+    pushQueueItem(queueItem());
+    const oldFlagged = recentEntry('old-flagged', { daysAgo: 100, safety_flagged: true });
+    await renderWidget({ entries: [makeEntry(), oldFlagged] });
+    expect(screen.getByText('A calm moment from March 2026')).toBeTruthy();
   });
 });
