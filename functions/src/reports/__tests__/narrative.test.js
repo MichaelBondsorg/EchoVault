@@ -13,7 +13,7 @@ vi.mock('../../models/registry.js', () => ({
   getModel: vi.fn(),
 }));
 
-import { generateWeeklyTemplate, generatePremiumNarrative, callGeminiWithRetry } from '../narrative.js';
+import { generateWeeklyTemplate, generatePremiumNarrative, callGeminiWithRetry, selectRepresentativeEntries } from '../narrative.js';
 import { callGemini } from '../../shared/gemini.js';
 import { getModel } from '../../models/registry.js';
 
@@ -46,6 +46,23 @@ describe('generateWeeklyTemplate', () => {
   it('uses fallback text when no insights available', () => {
     const sections = generateWeeklyTemplate({ entryCount: 2 }, { insights: [] });
     expect(sections[1].narrative).toContain('Keep journaling');
+  });
+
+  it('reads the real Nexus active-item shape (summary/body/title), not just legacy content/description (R4 Task 4)', () => {
+    const receipt = { sources: [], scope: null, timeWindow: { start: null, end: null }, sampleSize: 0, missingness: null, versions: { generator: 'entity_correlation', computationVersion: 1, generatedAt: '2026-01-01T00:00:00.000Z', model: null, promptVersion: null } };
+
+    const withSummary = generateWeeklyTemplate(
+      { entryCount: 2 },
+      { insights: [{ id: 'entity_luna', type: 'entity_correlation', title: 'Luna Effect', summary: 'Luna boosts your mood by ~15%', body: 'longer body text', receipt }] }
+    );
+    expect(withSummary[1].narrative).toBe('Luna boosts your mood by ~15%');
+
+    // Falls back to body when summary is absent.
+    const withBodyOnly = generateWeeklyTemplate(
+      { entryCount: 2 },
+      { insights: [{ id: 'calibration', type: 'calibration', title: 'Learning Your Baseline', body: 'Keep logging to unlock deeper insights.' }] }
+    );
+    expect(withBodyOnly[1].narrative).toBe('Keep logging to unlock deeper insights.');
   });
 
   it('labels mood correctly', () => {
@@ -95,6 +112,48 @@ describe('generateWeeklyTemplate', () => {
       const moodSection = sections.find(s => s.id === 'mood_trend');
       expect(moodSection.entryRefs).toEqual([]);
     });
+  });
+});
+
+describe('selectRepresentativeEntries (R4 Task 4)', () => {
+  it('returns all entries unchanged when entries.length <= windowCount (sparse fixture)', () => {
+    const entries = [{ id: 'a' }, { id: 'b' }, { id: 'c' }];
+    expect(selectRepresentativeEntries(entries, 8)).toEqual(entries);
+  });
+
+  it('returns [] for an empty array', () => {
+    expect(selectRepresentativeEntries([], 8)).toEqual([]);
+  });
+
+  it('picks exactly one entry per window for a fixture spanning 8 evenly-sized windows', () => {
+    // 8 weeks, 7 entries each, chronologically ordered (mirrors
+    // generator.js's readEntries() ascending order guarantee).
+    const entries = Array.from({ length: 56 }, (_, i) => ({ id: `e${i + 1}`, week: Math.floor(i / 7) }));
+    const selected = selectRepresentativeEntries(entries, 8);
+
+    expect(selected).toHaveLength(8);
+    // One entry from each of the 8 weeks, in chronological (week) order.
+    expect(selected.map(e => e.week)).toEqual([0, 1, 2, 3, 4, 5, 6, 7]);
+  });
+
+  it('is deterministic — same input always produces the same output (no randomness)', () => {
+    const entries = Array.from({ length: 23 }, (_, i) => ({ id: `e${i + 1}` }));
+    const first = selectRepresentativeEntries(entries, 8).map(e => e.id);
+    const second = selectRepresentativeEntries(entries, 8).map(e => e.id);
+    expect(second).toEqual(first);
+  });
+
+  it('never fabricates entries — every selected item is a reference from the input array', () => {
+    const entries = Array.from({ length: 30 }, (_, i) => ({ id: `e${i + 1}` }));
+    const selected = selectRepresentativeEntries(entries, 8);
+    for (const item of selected) {
+      expect(entries).toContain(item);
+    }
+  });
+
+  it('returns entries.length items unchanged when entries.length === windowCount', () => {
+    const entries = Array.from({ length: 8 }, (_, i) => ({ id: `e${i + 1}` }));
+    expect(selectRepresentativeEntries(entries, 8)).toEqual(entries);
   });
 });
 
@@ -167,10 +226,10 @@ describe('generatePremiumNarrative', () => {
     }
   });
 
-  it('every section entryRefs equals the first 8 source entry ids (uniform builder input)', async () => {
+  it('every section entryRefs equals the representative-sampled entry ids (uniform builder input, R4 Task 4)', async () => {
     callGemini.mockResolvedValue('Generated narrative text.');
     const entries = Array.from({ length: 12 }, (_, i) => ({ id: `e${i + 1}`, date: '2026-01-01', text: 'x' }));
-    const expectedIds = entries.slice(0, 8).map(e => e.id);
+    const expectedIds = selectRepresentativeEntries(entries, 8).map(e => e.id);
 
     const contextData = {
       entries, analytics: {}, signals: { activeGoals: [], achievedGoals: [] },
@@ -182,9 +241,11 @@ describe('generatePremiumNarrative', () => {
     for (const section of sections) {
       expect(section.entryRefs).toEqual(expectedIds);
     }
+    // Proves this is genuinely NOT the old first-8-chronological slice.
+    expect(expectedIds).not.toEqual(entries.slice(0, 8).map(e => e.id));
   });
 
-  describe('entryRefs — quarterly/annual union with month-sampled ids (finding 1)', () => {
+  describe('entryRefs — quarterly/annual union with month-sampled ids (finding 1, R4 Task 4)', () => {
     beforeEach(() => {
       vi.clearAllMocks();
       getModel.mockResolvedValue('registry-insight-model-x');
@@ -193,17 +254,14 @@ describe('generatePremiumNarrative', () => {
 
     // 5 entries in January (all sampled by preSummarizeByMonth's per-month
     // cap of 10), 12 entries in February (only the first 10 are sampled —
-    // over the cap). slice(0,8) (array order, not date order) covers only
-    // id1..id8 (5 Jan + first 3 Feb) — id9..id15 can ONLY be attributed via
-    // the month-sample ids, and id16/id17 are never sampled by either
-    // mechanism so they must be absent from entryRefs entirely.
+    // over the cap).
     function buildEntries() {
       const jan = Array.from({ length: 5 }, (_, i) => ({ id: `id${i + 1}`, date: '2026-01-10', text: 'jan' }));
       const feb = Array.from({ length: 12 }, (_, i) => ({ id: `id${i + 6}`, date: '2026-02-10', text: 'feb' }));
       return [...jan, ...feb];
     }
 
-    it.each(['quarterly', 'annual'])('%s entryRefs = union(slice(0,8), all month-sampled ids)', async (cadence) => {
+    it.each(['quarterly', 'annual'])('%s entryRefs = union(representative-sampled ids, all month-sampled ids)', async (cadence) => {
       const entries = buildEntries();
       const contextData = {
         entries, analytics: {}, signals: { activeGoals: [], achievedGoals: [] },
@@ -213,17 +271,33 @@ describe('generatePremiumNarrative', () => {
       const sections = await generatePremiumNarrative(cadence, contextData, 'test-key', fakeDb);
       expect(sections.length).toBeGreaterThan(0);
 
-      const expectedIds = Array.from({ length: 15 }, (_, i) => `id${i + 1}`); // id1..id15
+      const representativeIds = selectRepresentativeEntries(entries, 8).map(e => e.id);
+      // Month sampling: Jan (5 entries) is entirely within the per-month
+      // cap of 10; Feb (12) is capped to its first 10.
+      const monthSampleIds = [
+        ...entries.filter(e => e.date.startsWith('2026-01')).map(e => e.id),
+        ...entries.filter(e => e.date.startsWith('2026-02')).slice(0, 10).map(e => e.id),
+      ];
+      const expectedIds = new Set([...representativeIds, ...monthSampleIds]);
+
       for (const section of sections) {
-        expect(new Set(section.entryRefs)).toEqual(new Set(expectedIds));
-        expect(section.entryRefs).not.toContain('id16');
-        expect(section.entryRefs).not.toContain('id17');
+        expect(new Set(section.entryRefs)).toEqual(expectedIds);
         // Proves this isn't just slice(0,8): more than 8 ids cited.
         expect(section.entryRefs.length).toBeGreaterThan(8);
       }
+      // The 2 entries never sampled by either mechanism must stay absent —
+      // no fabricated/over-claimed provenance.
+      const allIds = new Set(entries.map(e => e.id));
+      const neverSampled = [...allIds].filter(id => !expectedIds.has(id));
+      expect(neverSampled.length).toBeGreaterThan(0);
+      for (const section of sections) {
+        for (const id of neverSampled) {
+          expect(section.entryRefs).not.toContain(id);
+        }
+      }
     });
 
-    it('monthly does NOT pre-summarize by month, so entryRefs stays plain slice(0,8) (no month-sample union)', async () => {
+    it('monthly does NOT pre-summarize by month, so entryRefs stays the plain representative sample (no month-sample union)', async () => {
       const entries = buildEntries();
       const contextData = {
         entries, analytics: {}, signals: { activeGoals: [], achievedGoals: [] },
@@ -231,7 +305,7 @@ describe('generatePremiumNarrative', () => {
       };
 
       const sections = await generatePremiumNarrative('monthly', contextData, 'test-key', fakeDb);
-      const expectedIds = entries.slice(0, 8).map(e => e.id);
+      const expectedIds = selectRepresentativeEntries(entries, 8).map(e => e.id);
       for (const section of sections) {
         expect(section.entryRefs).toEqual(expectedIds);
       }

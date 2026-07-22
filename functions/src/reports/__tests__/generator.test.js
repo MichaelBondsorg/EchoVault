@@ -73,8 +73,13 @@ let mockDb;
  *   rejects with this error instead of resolving (finding 3).
  * @param {Error} [opts.exclusionsError] - if set, the /source_exclusions
  *   query's get() rejects with this error instead of resolving (finding 3).
+ * @param {object} [opts.nexusDoc] - if set, the `nexus/insights` singleton
+ *   doc's get() resolves to {exists: true, data: () => nexusDoc}; if unset,
+ *   {exists: false} (mirrors "user has no Nexus doc yet").
+ * @param {Error} [opts.nexusError] - if set, the `nexus/insights` doc's
+ *   get() rejects with this error instead of resolving.
  */
-function buildFakeDb({ entries = [], exclusions = [], entriesError = null, exclusionsError = null } = {}) {
+function buildFakeDb({ entries = [], exclusions = [], entriesError = null, exclusionsError = null, nexusDoc = undefined, nexusError = null } = {}) {
   const collectionRoutes = {};
   const docRoutes = {};
 
@@ -83,6 +88,17 @@ function buildFakeDb({ entries = [], exclusions = [], entriesError = null, exclu
       if (docRoutes[path]) return docRoutes[path];
       if (/\/reports\//.test(path)) {
         const ref = { update: mockReportRefUpdate, get: vi.fn() };
+        docRoutes[path] = ref;
+        return ref;
+      }
+      if (path.endsWith('/nexus/insights')) {
+        const ref = {
+          get: nexusError
+            ? vi.fn().mockRejectedValue(nexusError)
+            : vi.fn().mockResolvedValue(
+                nexusDoc !== undefined ? { exists: true, data: () => nexusDoc } : { exists: false }
+              ),
+        };
         docRoutes[path] = ref;
         return ref;
       }
@@ -98,7 +114,6 @@ function buildFakeDb({ entries = [], exclusions = [], entriesError = null, exclu
       if (path.endsWith('/source_exclusions')) {
         return exclusionsError ? makeRejectingQuery(exclusionsError) : makeQuery(fakeSnap(exclusions));
       }
-      if (path.endsWith('/nexus')) return makeQuery(fakeSnap([]));
       if (path.endsWith('/signal_states')) return makeQuery(fakeSnap([]));
       collectionRoutes[path] = collectionRoutes[path] || makeQuery(fakeSnap([]));
       return collectionRoutes[path];
@@ -115,14 +130,32 @@ function buildFakeDb({ entries = [], exclusions = [], entriesError = null, exclu
   return db;
 }
 
+// `moodScore` here is the REAL 0-1 internal scale (analysis.mood_score) —
+// the field name of this helper's parameter is kept for readability, but
+// it now writes to the actual field the app writes (mood_score), not the
+// camelCase field the app never writes.
 function entryDoc(id, { createdAt = new Date('2026-01-10T12:00:00Z'), moodScore = null, text = 'entry text', safety_flagged = false } = {}) {
   return {
     id,
     data: {
       createdAt: { toDate: () => createdAt },
       text,
-      analysis: { moodScore },
+      analysis: { mood_score: moodScore },
       safety_flagged,
+    },
+  };
+}
+
+// Builds a raw entry doc with a caller-supplied `analysis` object, for
+// testing field-name edge cases directly (legacy camelCase-only docs, etc.)
+// without entryDoc()'s mood_score-only shape.
+function rawEntryDoc(id, analysis, { createdAt = new Date('2026-01-10T12:00:00Z'), text = 'entry text' } = {}) {
+  return {
+    id,
+    data: {
+      createdAt: { toDate: () => createdAt },
+      text,
+      analysis,
     },
   };
 }
@@ -131,7 +164,7 @@ function exclusionDoc(id, { entryId, appliesTo = 'all' } = {}) {
   return { id, data: { entryId, appliesTo, reason: 'test', permanent: true } };
 }
 
-import { readEntries, generateReport } from '../generator.js';
+import { readEntries, readNexusData, generateReport } from '../generator.js';
 import { getModel } from '../../models/registry.js';
 import { callGemini } from '../../shared/gemini.js';
 
@@ -187,6 +220,95 @@ describe('readEntries', () => {
 
     const exclusionCalls = db.collection.mock.calls.filter(([path]) => path.endsWith('/source_exclusions'));
     expect(exclusionCalls).toHaveLength(1);
+  });
+
+  describe('mood_score field (R4 Task 4)', () => {
+    it('reads the real analysis.mood_score field (0-1 scale)', async () => {
+      const db = buildFakeDb({ entries: [rawEntryDoc('e1', { mood_score: 0.62 })], exclusions: [] });
+      const entries = await readEntries(db, USER_BASE, PERIOD_START, PERIOD_END, 'weekly');
+      expect(entries[0].moodScore).toBe(0.62);
+    });
+
+    it('treats a legacy camelCase-only doc (analysis.moodScore, no mood_score) as missing, not misread', async () => {
+      const db = buildFakeDb({ entries: [rawEntryDoc('e1', { moodScore: 0.62 })], exclusions: [] });
+      const entries = await readEntries(db, USER_BASE, PERIOD_START, PERIOD_END, 'weekly');
+      expect(entries[0].moodScore).toBeNull();
+    });
+
+    it('treats a doc with no analysis object at all as missing', async () => {
+      const db = buildFakeDb({ entries: [rawEntryDoc('e1', undefined)], exclusions: [] });
+      const entries = await readEntries(db, USER_BASE, PERIOD_START, PERIOD_END, 'weekly');
+      expect(entries[0].moodScore).toBeNull();
+    });
+
+    it('treats mood_score: 0 as a real value, not falsy-missing', async () => {
+      const db = buildFakeDb({ entries: [rawEntryDoc('e1', { mood_score: 0 })], exclusions: [] });
+      const entries = await readEntries(db, USER_BASE, PERIOD_START, PERIOD_END, 'weekly');
+      expect(entries[0].moodScore).toBe(0);
+    });
+  });
+});
+
+describe('readNexusData — singleton doc (R4 Task 4)', () => {
+  it('reads active[] from the nexus/insights singleton doc, not a by-type collection query', async () => {
+    const receipt = {
+      sources: [{ entryId: 'e1', date: '2026-01-05T00:00:00.000Z', excerpt: 'text' }],
+      scope: null,
+      timeWindow: { start: '2025-12-06T00:00:00.000Z', end: '2026-01-05T00:00:00.000Z' },
+      sampleSize: 3,
+      missingness: null,
+      versions: { generator: 'pattern_correlation', computationVersion: 1, generatedAt: '2026-01-05T00:00:00.000Z', model: null, promptVersion: null },
+    };
+    const nexusDoc = {
+      active: [
+        { id: 'pattern_x', type: 'pattern_correlation', title: 'X Effect', summary: 'X boosts mood', body: 'longer body', receipt },
+      ],
+      history: [],
+      generatedAt: { toDate: () => new Date('2026-01-05') },
+      expiresAt: { toDate: () => new Date('2026-01-06') },
+      stale: false,
+    };
+    const db = buildFakeDb({ nexusDoc });
+
+    const result = await readNexusData(db, USER_BASE);
+
+    expect(result.insights).toHaveLength(1);
+    expect(result.insights[0].id).toBe('pattern_x');
+    expect(result.insights[0].receipt).toBe(receipt);
+    expect(result.patterns).toEqual(result.insights);
+
+    // The old by-type collection query must never be issued.
+    const nexusCollectionCalls = db.collection.mock.calls.filter(([path]) => path.endsWith('/nexus'));
+    expect(nexusCollectionCalls).toHaveLength(0);
+    expect(db.doc).toHaveBeenCalledWith(`${USER_BASE}/nexus/insights`);
+  });
+
+  it('returns empty insights/patterns when the singleton doc does not exist', async () => {
+    const db = buildFakeDb({});
+    const result = await readNexusData(db, USER_BASE);
+    expect(result).toEqual({ insights: [], patterns: [] });
+  });
+
+  it('degrades to empty insights/patterns (does not throw) when the read fails', async () => {
+    const db = buildFakeDb({ nexusError: new Error('nexus boom') });
+    const result = await readNexusData(db, USER_BASE);
+    expect(result).toEqual({ insights: [], patterns: [] });
+  });
+
+  it('includes active insights that are missing a receipt unfiltered, but logs loudly (assert, do not silently drop)', async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const nexusDoc = {
+      active: [{ id: 'no_receipt_insight', type: 'calibration', title: 'Learning your baseline' }],
+      history: [],
+    };
+    const db = buildFakeDb({ nexusDoc });
+
+    const result = await readNexusData(db, USER_BASE);
+
+    expect(result.insights).toHaveLength(1);
+    expect(result.insights[0].id).toBe('no_receipt_insight');
+    expect(errorSpy).toHaveBeenCalled();
+    errorSpy.mockRestore();
   });
 });
 
@@ -249,6 +371,26 @@ describe('generateReport — entryRefs receipts + metadata (weekly, real narrati
       expect(section.entryRefs).toEqual([]);
     }
     expect(metadata.sourceEntryCount).toBe(0);
+  });
+
+  it('converts 0-1 internal mood_score to the 0-100 display scale in mood_trend chartData (R4 Task 4)', async () => {
+    const entries = [
+      entryDoc('e1', { moodScore: 0.62 }),
+      entryDoc('e2', { moodScore: null }), // missing — must NOT become a displayed 0
+      entryDoc('e3', { moodScore: 0.5 }),
+    ];
+    const db = buildFakeDb({ entries, exclusions: [] });
+
+    await generateReport('user1', 'weekly', PERIOD_START, PERIOD_END, null);
+
+    const readyCall = mockReportRefUpdate.mock.calls.find((args) => args[0]?.status === 'ready');
+    const { sections } = readyCall[0];
+    const moodSection = sections.find((s) => s.id === 'mood_trend');
+
+    expect(moodSection.chartData.data.map((p) => p.value)).toEqual([62, 50]);
+    // The null-mood entry never appears in the chart data at all — not as a
+    // displayed 0 (guards the "filter before multiply" ordering).
+    expect(moodSection.chartData.data.map((p) => p.value)).not.toContain(0);
   });
 });
 

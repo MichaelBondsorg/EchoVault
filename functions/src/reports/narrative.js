@@ -10,9 +10,75 @@ import { callGemini } from '../shared/gemini.js';
 import { getModel } from '../models/registry.js';
 
 /**
+ * How many entries buildSectionPrompt()/generatePremiumNarrative() sample
+ * per report section for narrative context + entryRefs receipts. Shared
+ * here so the excerpt sample fed to the LLM and its entryRefs citation can
+ * never drift apart (see selectRepresentativeEntries below).
+ */
+const NARRATIVE_SAMPLE_SIZE = 8;
+
+/**
+ * Deterministic, representative sample of (chronologically pre-sorted)
+ * `entries` for narrative context — replaces "first N chronological",
+ * which biased every prompt/entryRefs receipt toward the START of the
+ * report period regardless of how long the period was (DR finding 8 / R4
+ * Task 4).
+ *
+ * `entries` is assumed pre-sorted ascending by date — generator.js's
+ * `readEntries()` guarantees this via Firestore's
+ * `.orderBy('createdAt', 'asc')`. Stratifying by INDEX position over an
+ * already date-ordered array is equivalent, for "spread across the
+ * period" purposes, to stratifying by date directly, without needing to
+ * parse/trust each entry's own `date` string (which can be missing or
+ * malformed) — pinned as the simple, deterministic choice per the R4 plan.
+ * No randomness: the same input always produces the same output.
+ *
+ * The array is split into up to `windowCount` contiguous, near-equal index
+ * windows; the entry at the MIDDLE of each non-empty window is selected
+ * (integer division rounds down, so ties break toward the lower index —
+ * still fully deterministic). If `entries.length <= windowCount` there's
+ * nothing to downsample, so every entry is returned as-is (sparse-period
+ * fallback: no fabricated/duplicated entries to pad up to `windowCount`).
+ *
+ * @param {Array} entries
+ * @param {number} [windowCount=NARRATIVE_SAMPLE_SIZE]
+ * @returns {Array} the selected entries, in original (chronological) order
+ */
+export function selectRepresentativeEntries(entries, windowCount = NARRATIVE_SAMPLE_SIZE) {
+  if (!Array.isArray(entries) || entries.length === 0) return [];
+  const safeWindowCount = Math.max(1, Math.floor(windowCount) || 1);
+  if (entries.length <= safeWindowCount) return entries.slice();
+
+  const selected = [];
+  for (let w = 0; w < safeWindowCount; w++) {
+    const start = Math.floor((w * entries.length) / safeWindowCount);
+    const end = Math.floor(((w + 1) * entries.length) / safeWindowCount);
+    if (end <= start) continue; // empty window — skip rather than fabricate
+    const mid = start + Math.floor((end - start - 1) / 2);
+    selected.push(entries[mid]);
+  }
+  return selected;
+}
+
+/**
+ * Best-effort human-readable label for a Nexus active-insight item. Real
+ * items (see src/services/nexus/orchestrator.js's `saveInsights`/insight
+ * builders) carry `summary`/`body`/`title`; `description`/`content` are
+ * kept as trailing fallbacks for older/alternate shapes. Returns '' (never
+ * null/undefined) so callers can safely `||`/`.filter(Boolean)` it.
+ */
+function nexusInsightLabel(insight) {
+  return insight?.summary || insight?.body || insight?.title || insight?.description || insight?.content || '';
+}
+
+/**
  * Generate a weekly digest using templates (no LLM).
  * @param {object} analyticsData - Pre-computed analytics
- * @param {object} nexusData - Nexus insights
+ * @param {object} nexusData - `{insights, patterns}` read from the Nexus
+ *   `nexus/insights` singleton doc (generator.js's readNexusData) — every
+ *   item carries a `.receipt` per the R2 100%-receipts invariant, and the
+ *   `entries`-derived `moodScore` referenced below is the 0-1 internal
+ *   scale (see src/types/entries.d.ts), not a display value.
  * @param {Array<{id: string, moodScore: (number|null)}>} [entries] - Period's
  *   entries (post source-exclusion filtering), used to populate entryRefs
  *   receipts. Optional/defaults to [] for backward compatibility with
@@ -36,7 +102,7 @@ export function generateWeeklyTemplate(analyticsData, nexusData, entries = []) {
   // Pick one insight
   const insight = nexusData?.insights?.[0] || null;
   const insightText = insight
-    ? insight.content || insight.description || 'No additional insights this week.'
+    ? (nexusInsightLabel(insight) || 'No additional insights this week.')
     : 'Keep journaling to unlock insights about your patterns.';
 
   // Receipts (entryRefs): which entries actually fed each section's builder.
@@ -138,23 +204,24 @@ export async function generatePremiumNarrative(cadence, contextData, apiKey, db)
   }
 
   // Receipts (entryRefs): buildSectionPrompt() feeds every section the same
-  // excerpt sample (`entries.slice(0, 8)`, see below) — there's no
-  // per-section entry subset in this builder, so entryRefs is that same id
-  // list for every section, whether generation succeeded or fell back to
-  // the "could not be generated" placeholder (the prompt was still built
-  // and sent with these entries either way).
+  // representative excerpt sample (selectRepresentativeEntries(), see its
+  // doc above — R4 Task 4 replaces the old first-8-chronological slice)
+  // — there's no per-section entry subset in this builder, so entryRefs is
+  // that same id list for every section, whether generation succeeded or
+  // fell back to the "could not be generated" placeholder (the prompt was
+  // still built and sent with these entries either way).
   //
   // For quarterly/annual, buildSectionPrompt ALSO injects `monthSummaries`
   // into every section's prompt — built by preSummarizeByMonth from up to
   // 10 excerpts PER MONTH, sampled from ALL of contextData.entries, not
-  // just the first 8. Citing only the slice(0,8) ids would under-claim what
-  // actually fed the narrative (provenance dishonesty), so for these two
-  // cadences entryRefs is the deduped union of the slice(0,8) ids and every
-  // month-sampled entry id. Monthly never gets monthSummaries, so its
+  // just the representative sample. Citing only the representative-sample
+  // ids would under-claim what actually fed the narrative (provenance
+  // dishonesty), so for these two cadences entryRefs is the deduped union
+  // of the representative-sample ids and every month-sampled entry id.
+  // Monthly never gets monthSummaries, so its
   // synthesisContext.monthSampleEntryIds is undefined and this union
-  // degrades to the plain slice(0,8), unchanged from before.
-  const sliceIds = (synthesisContext.entries || [])
-    .slice(0, 8)
+  // degrades to the plain representative sample, unchanged from before.
+  const sliceIds = selectRepresentativeEntries(synthesisContext.entries || [], NARRATIVE_SAMPLE_SIZE)
     .map(e => e.id)
     .filter(Boolean);
   const monthSampleIds = synthesisContext.monthSampleEntryIds || [];
@@ -217,12 +284,18 @@ function buildSectionPrompt(config, cadence, contextData) {
   if (analytics?.topThemes?.length) context.push(`Top themes: ${analytics.topThemes.join(', ')}`);
   if (signals?.activeGoals?.length) context.push(`Active goals: ${signals.activeGoals.map(g => g.title || g.description).join(', ')}`);
   if (signals?.achievedGoals?.length) context.push(`Achieved goals: ${signals.achievedGoals.map(g => g.title || g.description).join(', ')}`);
-  if (nexus?.patterns?.length) context.push(`Detected patterns: ${nexus.patterns.map(p => p.description).join('; ')}`);
+  if (nexus?.patterns?.length) {
+    const patternLabels = nexus.patterns.map(nexusInsightLabel).filter(Boolean);
+    if (patternLabels.length) context.push(`Detected patterns: ${patternLabels.join('; ')}`);
+  }
   if (health?.summary) context.push(`Health summary: ${health.summary}`);
 
-  // Include entry excerpts (truncated)
+  // Include entry excerpts (truncated) — representative sample, not just
+  // the earliest entries in the period (R4 Task 4; see
+  // selectRepresentativeEntries's doc above).
   if (entries?.length) {
-    const excerpts = entries.slice(0, 8).map(e =>
+    const sampled = selectRepresentativeEntries(entries, NARRATIVE_SAMPLE_SIZE);
+    const excerpts = sampled.map(e =>
       `[${e.date}] ${(e.text || '').slice(0, 200)}`
     );
     context.push(`Entry excerpts:\n${excerpts.join('\n')}`);

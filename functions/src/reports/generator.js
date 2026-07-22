@@ -67,16 +67,26 @@ export async function generateReport(userId, cadence, periodStart, periodEnd, ge
     const isWeekly = cadence === 'weekly';
     const [analyticsData, nexusData, signalData, entriesData, healthData, model] = await Promise.all([
       readAnalytics(db, userBase),
-      readNexusData(db, userBase, periodStart, periodEnd),
+      readNexusData(db, userBase),
       readSignalData(db, userBase, periodStart, periodEnd),
       readEntries(db, userBase, periodStart, periodEnd, cadence),
       readHealthData(db, userBase),
       isWeekly ? Promise.resolve(null) : getModel(db, 'insight'),
     ]);
 
-    // Prepare chart data
+    // Prepare chart data. Entry-level mood (`e.moodScore` from readEntries,
+    // below) is the 0-1 INTERNAL scale (analysis.mood_score — see
+    // src/types/entries.d.ts). Sparkline/report display uses the 0-100
+    // DISPLAY convention (mirrors src/services/experiments/computeResult.js's
+    // normalizeMoodTo100 precedent) — that conversion happens explicitly
+    // right here, the single boundary between "internal value" and
+    // "displayed value" for this chart, never inferred from magnitude.
+    // Nulls are filtered out BEFORE multiplying so a missing score can
+    // never silently become a displayed 0.
     const moodTrend = prepareMoodTrend(
-      entriesData.map(e => ({ date: e.date, moodScore: e.moodScore })).filter(e => e.moodScore != null),
+      entriesData
+        .filter(e => e.moodScore != null)
+        .map(e => ({ date: e.date, moodScore: e.moodScore * 100 })),
       cadence
     );
     const categoryBreakdown = prepareCategoryBreakdown(analyticsData.categoryStats || {});
@@ -198,23 +208,54 @@ async function readAnalytics(db, userBase) {
   }
 }
 
-async function readNexusData(db, userBase, periodStart, periodEnd) {
+/**
+ * Read the user's Nexus insights singleton doc.
+ *
+ * Nexus persists exactly one document per user — `nexus/insights` —
+ * shaped `{active: [...], history: [...], generatedAt, expiresAt, stale}`
+ * (see src/services/nexus/orchestrator.js's `saveInsights`). The previous
+ * implementation queried `${userBase}/nexus` as a BY-TYPE COLLECTION
+ * (docs with `d.type === 'insight'|'pattern'`) — nothing is ever written
+ * there, so that collection is phantom and this report's nexus inputs
+ * were silently empty at HEAD (DR finding 8 / R4 Task 4). This reads the
+ * real doc instead.
+ *
+ * Every item in `active` is guaranteed a `.receipt` by the orchestrator
+ * (`applyReceiptDefaults`'s 100%-receipts invariant, R2 Task 8) before it
+ * ever reaches `active`. This function does NOT re-filter on that — if the
+ * invariant is ever violated upstream, that's a bug to surface loudly (see
+ * the console.error below), not paper over by silently dropping insights
+ * the report would otherwise show.
+ *
+ * No additional type-based filtering happens here beyond what the report
+ * templates already do (generateWeeklyTemplate picks `insights[0]`;
+ * buildSectionPrompt in narrative.js reads `.patterns`) — a PARALLEL R4
+ * task is adding a risky-claims suppression gate at the orchestrator seam
+ * (counterfactual / beliefDissonance / intervention-outcome /
+ * personalized-recommendation claims), so by the time this doc is read,
+ * `active` already reflects that gate. This function consumes `active`
+ * exactly as written, with no hardcoded risky-type list of its own.
+ *
+ * `patterns` is the same array as `insights`: the real active-item shape
+ * doesn't distinguish "pattern" vs "insight" docs (that split was an
+ * artifact of the phantom by-type collection query this replaces).
+ */
+export async function readNexusData(db, userBase) {
   try {
-    let query = db.collection(`${userBase}/nexus`);
-    // Period-scope if timestamps available
-    if (periodStart && periodEnd) {
-      query = query.where('createdAt', '>=', periodStart)
-                   .where('createdAt', '<=', periodEnd);
+    const snap = await db.doc(`${userBase}/nexus/insights`).get();
+    if (!snap.exists) return { insights: [], patterns: [] };
+    const data = snap.data() || {};
+    const active = Array.isArray(data.active) ? data.active : [];
+
+    const missingReceipt = active.filter(i => !i?.receipt);
+    if (missingReceipt.length > 0) {
+      console.error(
+        `[report] ${missingReceipt.length}/${active.length} active nexus insights are missing a receipt ` +
+        `(the 100%-receipts invariant should guarantee every active insight has one) — including them unfiltered.`
+      );
     }
-    const snap = await query.limit(30).get();
-    const insights = [];
-    const patterns = [];
-    snap.forEach(doc => {
-      const d = doc.data();
-      if (d.type === 'insight') insights.push({ id: doc.id, ...d });
-      else if (d.type === 'pattern') patterns.push({ id: doc.id, ...d });
-    });
-    return { insights, patterns };
+
+    return { insights: active, patterns: active };
   } catch (e) {
     console.warn('[report] Failed to read nexus data:', e.message);
     return { insights: [], patterns: [] };
@@ -325,7 +366,18 @@ export async function readEntries(db, userBase, periodStart, periodEnd, cadence)
       id: doc.id,
       date: d.createdAt?.toDate?.()?.toISOString?.()?.slice(0, 10) || '',
       text: d.text || d.rawText || '',
-      moodScore: d.analysis?.moodScore ?? d.moodScore ?? null,
+      // mood_score lives at analysis.mood_score, 0-1 internal scale (see
+      // src/types/entries.d.ts). This previously read camelCase
+      // `moodScore` (analysis.moodScore / top-level moodScore) — a field
+      // the app never writes — so report mood data was silently null at
+      // HEAD (DR finding 8 / R4 Task 4). A doc that only has the legacy
+      // camelCase field (no mood_score) is therefore treated as missing
+      // here, not misread as a value: there is no camelCase fallback by
+      // design. Kept as `moodScore` on this internal object (0-1 scale,
+      // NOT a display value) for compatibility with existing consumers;
+      // conversion to the 0-100 display convention happens explicitly at
+      // each display site (see generateReport's moodTrend prep above).
+      moodScore: typeof d.analysis?.mood_score === 'number' ? d.analysis.mood_score : null,
       category: d.classification?.category || d.category || 'uncategorized',
       safety_flagged: d.safety_flagged || false,
       has_warning_indicators: d.has_warning_indicators || false,
