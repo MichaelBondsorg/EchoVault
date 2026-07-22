@@ -42,18 +42,30 @@ function monthYearLabel(entry) {
 
 /**
  * The theme/entity "Less like this" suppresses (PRD: no explanation asked —
- * just infer a family to mute for 90 days). Mirrors the same two sources
- * `themesCorrelations.js`/`peopleCorrelations.js` already read off an entry:
- * `analysis.themes[0]` (AI-extracted theme strings) first, falling back to
- * `analysis.entities[0].name` (AI-extracted named entity). Returns null when
- * neither exists — the caller must hide the action rather than write a junk
- * exclusion (brief requirement).
+ * just infer a family to mute for 90 days), written as a `family` exclusion
+ * value. MUST read exactly the fields `matchesExclusion`'s `family` case
+ * reads server-side (`functions/src/revisit/selectRevisits.js`) — writer and
+ * reader share one key space, or the exclusion is a silent no-op (R2 review
+ * finding: this used to read `entry.analysis.themes`/`entry.analysis.entities`,
+ * which NO real analysis write path populates — `orchestrator.js`'s
+ * `buildSuccessPayload` only ever writes `analysis.{mood_score, framework,
+ * cbt_breakdown, act_analysis, vent_support, celebration,
+ * task_acknowledgment}` and top-level `tags`; there is no write path for
+ * `analysis.themes`/`analysis.entities` anywhere in `functions/src`). The
+ * selector's `family` match is `entityValues(entry)` (top-level
+ * `entry.entities`, id preferred over name per entity — currently always
+ * empty in production, since nothing writes top-level `entities` either, but
+ * read here anyway for exact parity with the reader) OR top-level
+ * `entry.tags` (the one production analysis writes actually populate).
+ * Returns null when neither exists — the caller must hide the action rather
+ * than write a junk exclusion (brief requirement).
  */
 export function deriveTopThemeOrEntity(entry) {
-  const theme = entry?.analysis?.themes?.[0];
-  if (typeof theme === 'string' && theme.trim()) return theme.trim();
-  const entityName = entry?.analysis?.entities?.[0]?.name;
-  if (typeof entityName === 'string' && entityName.trim()) return entityName.trim();
+  const topEntity = entry?.entities?.[0];
+  const entityValue = topEntity?.id || topEntity?.name;
+  if (typeof entityValue === 'string' && entityValue.trim()) return entityValue.trim();
+  const tag = entry?.tags?.[0];
+  if (typeof tag === 'string' && tag.trim()) return tag.trim();
   return null;
 }
 
@@ -94,7 +106,20 @@ const RevisitWidget = ({ size = '2x1', isEditing = false, onDelete, entries = []
   const [showManage, setShowManage] = useState(false);
   const [neverShowOpen, setNeverShowOpen] = useState(false);
   const [neverShowBusy, setNeverShowBusy] = useState(false);
+  const [neverShowError, setNeverShowError] = useState(null);
   const [spaces, setSpaces] = useState([]);
+
+  // Per-action pending flags (disable + guard against double-submit while a
+  // service call is in flight) and a shared inline error line for the
+  // card-level actions (Show/Not now/Less like this) — matches
+  // RevisitControls' inline-error idiom (role="alert",
+  // bg-[var(--destructive-wash)]). "Never show this entry" gets its own
+  // `neverShowError` since it surfaces inside the confirm dialog, not the
+  // card.
+  const [showBusy, setShowBusy] = useState(false);
+  const [notNowBusy, setNotNowBusy] = useState(false);
+  const [lessLikeBusy, setLessLikeBusy] = useState(false);
+  const [cardError, setCardError] = useState(null);
 
   const contextSpacesOn = getFlag('contextSpaces');
 
@@ -151,10 +176,12 @@ const RevisitWidget = ({ size = '2x1', isEditing = false, onDelete, entries = []
   };
   const openNeverShow = (e) => {
     neverShowTriggerRef.current = e?.currentTarget || null;
+    setNeverShowError(null);
     setNeverShowOpen(true);
   };
   const closeNeverShow = () => {
     setNeverShowOpen(false);
+    setNeverShowError(null);
     neverShowTriggerRef.current?.focus();
     neverShowTriggerRef.current = null;
   };
@@ -168,9 +195,16 @@ const RevisitWidget = ({ size = '2x1', isEditing = false, onDelete, entries = []
   // inside it flips `prefsEnabled` false mid-session (an early return would
   // otherwise yank RevisitControls out from under the user the instant they
   // toggle off, before they've had a chance to close it themselves).
+  // `status === 'shown'` is included deliberately (not just 'queued') — a
+  // remount after the user already tapped Show should show revealed content
+  // directly rather than re-hiding it. This is a deliberate product
+  // interpretation of the brief's "renders...when status 'queued'" line,
+  // adjudicated reasonable in review; the PRD sign-off note for this lands
+  // in PROJECT_STATUS.md at Task 21. `'dismissed'`/anything else is already
+  // excluded by this being an allow-list of exactly the two live statuses
+  // (no separate `!== 'dismissed'` clause needed).
   const cardVisible = Boolean(
     flagOn && prefsLoaded && prefsEnabled && item
-    && item.status !== 'dismissed'
     && (item.status === 'queued' || item.status === 'shown'),
   );
 
@@ -184,17 +218,37 @@ const RevisitWidget = ({ size = '2x1', isEditing = false, onDelete, entries = []
   const reasonLine = cardVisible ? (item.reason || 'A memory from your journal') : '';
   const entryText = entry?.content || entry?.text || '';
 
-  const handleShow = () => {
-    setLocalRevealed(true);
-    if (uid) markShown(db, uid, item.id);
+  const handleShow = async () => {
+    if (!uid || !cardVisible || showBusy) return;
+    setCardError(null);
+    setShowBusy(true);
+    setLocalRevealed(true); // optimistic reveal
+    try {
+      await markShown(db, uid, item.id);
+    } catch {
+      setLocalRevealed(false); // rollback — the persisted status never changed
+      setCardError("Couldn't save that you viewed this. Please try again.");
+    } finally {
+      setShowBusy(false);
+    }
   };
 
-  const handleNotNow = () => {
-    if (uid) dismissRevisit(db, uid, item.id);
+  const handleNotNow = async () => {
+    if (!uid || !cardVisible || notNowBusy) return;
+    setCardError(null);
+    setNotNowBusy(true);
+    try {
+      await dismissRevisit(db, uid, item.id);
+    } catch {
+      setCardError("Couldn't dismiss this. Please try again.");
+    } finally {
+      setNotNowBusy(false);
+    }
   };
 
   const handleConfirmNeverShow = async () => {
-    if (!uid || !cardVisible) return;
+    if (!uid || !cardVisible || neverShowBusy) return;
+    setNeverShowError(null);
     setNeverShowBusy(true);
     try {
       await addRevisitExclusion(db, uid, {
@@ -205,22 +259,32 @@ const RevisitWidget = ({ size = '2x1', isEditing = false, onDelete, entries = []
       });
       await dismissRevisit(db, uid, item.id);
       closeNeverShow();
+    } catch {
+      setNeverShowError("Couldn't exclude this entry. Please try again.");
     } finally {
       setNeverShowBusy(false);
     }
   };
 
   const handleLessLikeThis = async () => {
-    if (!uid || !cardVisible || !topThemeOrEntity) return;
+    if (!uid || !cardVisible || !topThemeOrEntity || lessLikeBusy) return;
+    setCardError(null);
+    setLessLikeBusy(true);
     const expiresAt = new Date(Date.now() + NINETY_DAYS_MS).toISOString();
-    await addRevisitExclusion(db, uid, {
-      dimension: 'family',
-      value: topThemeOrEntity,
-      reason: 'less_like_this',
-      permanent: false,
-      expiresAt,
-    });
-    await dismissRevisit(db, uid, item.id);
+    try {
+      await addRevisitExclusion(db, uid, {
+        dimension: 'family',
+        value: topThemeOrEntity,
+        reason: 'less_like_this',
+        permanent: false,
+        expiresAt,
+      });
+      await dismissRevisit(db, uid, item.id);
+    } catch {
+      setCardError("Couldn't save that preference. Please try again.");
+    } finally {
+      setLessLikeBusy(false);
+    }
   };
 
   return (
@@ -243,14 +307,20 @@ const RevisitWidget = ({ size = '2x1', isEditing = false, onDelete, entries = []
               <p className="mt-2 text-sm text-secondary-foreground whitespace-pre-wrap">{entryText}</p>
             )}
 
+            {cardError && (
+              <div role="alert" className="mt-2 rounded-xl bg-[var(--destructive-wash)] p-2 text-xs text-destructive">
+                {cardError}
+              </div>
+            )}
+
             <div className="mt-3 flex flex-wrap gap-3">
               {!revealed && (
-                <button type="button" onClick={handleShow} className={actionButtonClass}>
-                  Show
+                <button type="button" onClick={handleShow} disabled={showBusy} className={actionButtonClass}>
+                  {showBusy ? 'Saving…' : 'Show'}
                 </button>
               )}
-              <button type="button" onClick={handleNotNow} className={actionButtonClass}>
-                Not now
+              <button type="button" onClick={handleNotNow} disabled={notNowBusy} className={actionButtonClass}>
+                {notNowBusy ? 'Dismissing…' : 'Not now'}
               </button>
               <button
                 type="button"
@@ -260,8 +330,8 @@ const RevisitWidget = ({ size = '2x1', isEditing = false, onDelete, entries = []
                 Never show this entry
               </button>
               {topThemeOrEntity && (
-                <button type="button" onClick={handleLessLikeThis} className={actionButtonClass}>
-                  Less like this
+                <button type="button" onClick={handleLessLikeThis} disabled={lessLikeBusy} className={actionButtonClass}>
+                  {lessLikeBusy ? 'Saving…' : 'Less like this'}
                 </button>
               )}
               <button type="button" onClick={openManage} className={actionButtonClass}>
@@ -276,6 +346,11 @@ const RevisitWidget = ({ size = '2x1', isEditing = false, onDelete, entries = []
         <DialogContent aria-labelledby="revisit-never-show-title">
           <DialogTitle id="revisit-never-show-title">Never show this entry again?</DialogTitle>
           <DialogDescription>This entry will be excluded from Gentle Revisit going forward.</DialogDescription>
+          {neverShowError && (
+            <div role="alert" className="mt-2 rounded-xl bg-[var(--destructive-wash)] p-2 text-xs text-destructive">
+              {neverShowError}
+            </div>
+          )}
           <div className="mt-4 flex gap-2">
             <button
               type="button"

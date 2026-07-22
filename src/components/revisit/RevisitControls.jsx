@@ -297,7 +297,7 @@ const RevisitControls = ({ uid, onClose, onEnabledChange }) => {
               <button
                 type="submit"
                 disabled={adding}
-                className="min-h-[36px] rounded-full bg-accent-deep px-4 text-sm font-medium text-background transition-opacity hover:opacity-90 disabled:opacity-50"
+                className="min-h-[44px] rounded-full bg-accent-deep px-4 text-sm font-medium text-background transition-opacity hover:opacity-90 disabled:opacity-50"
               >
                 {adding ? 'Hiding…' : 'Hide'}
               </button>

@@ -251,3 +251,22 @@ describe('RevisitControls — exclusion list remove/restore', () => {
     await waitFor(() => expect(screen.queryByText('grief')).toBeNull());
   });
 });
+
+describe('RevisitControls — copy', () => {
+  it('never renders guilt/streak/anniversary language, including inside the onboarding sheet', async () => {
+    mocks.getDocs.mockResolvedValue(docsSnapshot([
+      { id: 'ex-1', dimension: 'tag', value: 'grief', reason: 'hidden_dim', permanent: true, createdAt: '2026-01-01T00:00:00.000Z' },
+    ]));
+    await renderControls();
+    // Open the onboarding sheet too, so its copy is included in the sweep.
+    fireEvent.click(screen.getByRole('switch', { name: /gentle revisit/i }));
+    await screen.findByRole('dialog', { name: /before you turn on gentle revisit/i });
+
+    const text = document.body.textContent;
+    expect(text).not.toMatch(/streak/i);
+    expect(text).not.toMatch(/anniversary/i);
+    expect(text).not.toMatch(/you (missed|forgot|failed|didn'?t)/i);
+    expect(text).not.toMatch(/don'?t break/i);
+    expect(text).not.toMatch(/\bday[s]? in a row\b/i);
+  });
+});

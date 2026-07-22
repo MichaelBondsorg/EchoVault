@@ -21,6 +21,8 @@ const {
   selectRevisitCandidate,
   runGentleRevisitDaily,
   monthYearLabel,
+  matchesExclusion,
+  isExclusionActive,
   MIN_AGE_DAYS,
   MAX_AGE_DAYS,
   ADJACENCY_DAYS,
@@ -195,6 +197,116 @@ describe('selectRevisitCandidate — rule 5: revisit_exclusions', () => {
       now: NOW,
     });
     expect(result?.id).toBe('only-one');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// isExclusionActive — R2 review follow-up: "Less like this" (permanent:false
+// + ~90-day expiresAt) was written by the client but never enforced by the
+// selector, so it was silently permanent. Covered both directly and threaded
+// through selectRevisitCandidate's rule 5.
+// ---------------------------------------------------------------------------
+
+describe('isExclusionActive', () => {
+  it('an active non-permanent exclusion (expiresAt in the future) is active', () => {
+    expect(isExclusionActive({ permanent: false, expiresAt: NOW + DAY_MS }, NOW)).toBe(true);
+  });
+
+  it('an expired non-permanent exclusion (expiresAt in the past) is NOT active', () => {
+    expect(isExclusionActive({ permanent: false, expiresAt: NOW - DAY_MS }, NOW)).toBe(false);
+  });
+
+  it('a non-permanent exclusion with a malformed expiresAt fails closed (still active)', () => {
+    expect(isExclusionActive({ permanent: false, expiresAt: 'not-a-date' }, NOW)).toBe(true);
+  });
+
+  it('a non-permanent exclusion with a missing expiresAt fails closed (still active)', () => {
+    expect(isExclusionActive({ permanent: false }, NOW)).toBe(true);
+  });
+
+  it('a permanent exclusion is active regardless of expiresAt (ignored entirely)', () => {
+    expect(isExclusionActive({ permanent: true, expiresAt: NOW - DAY_MS }, NOW)).toBe(true);
+    expect(isExclusionActive({ permanent: true }, NOW)).toBe(true);
+  });
+});
+
+describe('selectRevisitCandidate — rule 5 respects exclusion expiry (via isExclusionActive)', () => {
+  it('an active (non-expired) "less like this" family exclusion still excludes', () => {
+    const target = baseEntry({ id: 'excl-active', tags: ['breakup'] });
+    const fallback = baseEntry({ id: 'fallback' });
+    const result = selectRevisitCandidate({
+      entries: [target, fallback],
+      exclusions: [{ dimension: 'family', value: 'breakup', permanent: false, expiresAt: NOW + 30 * DAY_MS }],
+      now: NOW,
+    });
+    expect(result?.id).toBe('fallback');
+  });
+
+  it('an expired "less like this" family exclusion no longer excludes', () => {
+    const target = baseEntry({ id: 'excl-expired', tags: ['breakup'] });
+    const result = selectRevisitCandidate({
+      entries: [target],
+      exclusions: [{ dimension: 'family', value: 'breakup', permanent: false, expiresAt: NOW - DAY_MS }],
+      now: NOW,
+    });
+    expect(result?.id).toBe('excl-expired');
+  });
+
+  it('a "never show" (permanent:true) exclusion excludes forever, ignoring any expiresAt', () => {
+    const target = baseEntry({ id: 'excl-permanent' });
+    const fallback = baseEntry({ id: 'fallback' });
+    const result = selectRevisitCandidate({
+      entries: [target, fallback],
+      exclusions: [{ dimension: 'entry', value: 'excl-permanent', permanent: true, expiresAt: NOW - DAY_MS }],
+      now: NOW,
+    });
+    expect(result?.id).toBe('fallback');
+  });
+
+  it('a non-permanent exclusion with a malformed expiresAt still excludes (fails closed)', () => {
+    const target = baseEntry({ id: 'excl-malformed', tags: ['grief'] });
+    const fallback = baseEntry({ id: 'fallback' });
+    const result = selectRevisitCandidate({
+      entries: [target, fallback],
+      exclusions: [{ dimension: 'family', value: 'grief', permanent: false, expiresAt: 'not-a-date' }],
+      now: NOW,
+    });
+    expect(result?.id).toBe('fallback');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// matchesExclusion / family dimension — production schema regression guard
+// (R2 review: the widget must derive its "Less like this" value from
+// EXACTLY the fields this function reads for `family`, i.e. top-level
+// `entry.tags`/`entry.entities`, never `entry.analysis.themes` or
+// `entry.analysis.entities`, which no real write path populates).
+// ---------------------------------------------------------------------------
+
+describe('matchesExclusion — family dimension reads top-level tags/entities only', () => {
+  it('matches via top-level entry.tags (the field production analysis writes populate)', () => {
+    expect(matchesExclusion(baseEntry({ tags: ['grief'] }), { dimension: 'family', value: 'grief' }, NOW)).toBe(true);
+  });
+
+  it('matches via top-level entry.entities id (preferred over name when both present)', () => {
+    expect(matchesExclusion(
+      baseEntry({ entities: [{ id: 'e1', name: 'old job' }] }),
+      { dimension: 'family', value: 'e1' },
+      NOW,
+    )).toBe(true);
+  });
+
+  it('matches via top-level entry.entities name (fallback when no id)', () => {
+    expect(matchesExclusion(
+      baseEntry({ entities: [{ name: 'old job' }] }),
+      { dimension: 'family', value: 'old job' },
+      NOW,
+    )).toBe(true);
+  });
+
+  it('does NOT match against entry.analysis.themes or entry.analysis.entities (never populated in production)', () => {
+    const entry = baseEntry({ tags: [], entities: [], analysis: { mood_score: 0.6, themes: ['grief'], entities: [{ name: 'grief' }] } });
+    expect(matchesExclusion(entry, { dimension: 'family', value: 'grief' }, NOW)).toBe(false);
   });
 });
 

@@ -33,7 +33,13 @@
  *   }
  *
  * `revisit_exclusions` doc shape (matches firestore.rules exactly):
- *   { dimension: 'entry'|'date'|'person'|'tag'|'space'|'family', value: string, ... }
+ *   { dimension: 'entry'|'date'|'person'|'tag'|'space'|'family', value: string,
+ *     reason: string, permanent: boolean, createdAt, expiresAt? }
+ * `permanent:true` exclusions (e.g. "Never show this entry") suppress
+ * forever; `permanent:false` exclusions (e.g. "Less like this", ~90-day
+ * `expiresAt`) stop suppressing once `expiresAt` passes — see
+ * `isExclusionActive`. A malformed/missing `expiresAt` on a non-permanent
+ * exclusion fails closed (still suppresses).
  * Dimension → entry-field match:
  *   - entry:  value === entry.id
  *   - date:   value === entry's createdAt date, 'YYYY-MM-DD' (UTC)
@@ -98,7 +104,32 @@ function entityValues(entry) {
   return (entry.entities || []).map((e) => e?.id || e?.name).filter(Boolean);
 }
 
-function matchesExclusion(entry, exclusion, entryMs) {
+/**
+ * Whether an exclusion should still suppress selection right now (R2 review
+ * follow-up: the 90-day "Less like this" expiry was written by the client
+ * but never enforced here, so every `family` exclusion was silently
+ * permanent). `permanent === true` exclusions (e.g. "Never show this entry")
+ * ignore `expiresAt` entirely — permanence is absolute. A non-permanent
+ * exclusion (e.g. "Less like this", `permanent:false` + a ~90-day
+ * `expiresAt`) is active only while `expiresAt` is still in the future;
+ * once past, it stops suppressing. A non-permanent exclusion with a
+ * missing/unparseable `expiresAt` FAILS CLOSED — it keeps excluding rather
+ * than risk resurfacing something the user deliberately suppressed over a
+ * malformed/legacy doc.
+ *
+ * @param {object} exclusion - a `revisit_exclusions` doc.
+ * @param {number} nowMs
+ * @returns {boolean}
+ */
+export function isExclusionActive(exclusion, nowMs) {
+  if (!exclusion) return false;
+  if (exclusion.permanent === true) return true;
+  const expiresMs = toMillis(exclusion.expiresAt);
+  if (!Number.isFinite(expiresMs)) return true; // fail closed
+  return expiresMs > nowMs;
+}
+
+export function matchesExclusion(entry, exclusion, entryMs) {
   const { dimension, value } = exclusion || {};
   switch (dimension) {
     case 'entry':
@@ -207,7 +238,7 @@ export function selectRevisitCandidate({ entries = [], exclusions = [], recentQu
     const mood = entry.analysis?.mood_score;
     if (typeof mood !== 'number' || Number.isNaN(mood) || mood < MOOD_FLOOR) continue; // rule 4
 
-    if ((exclusions || []).some((ex) => matchesExclusion(entry, ex, entryMs))) continue; // rule 5
+    if ((exclusions || []).some((ex) => isExclusionActive(ex, nowMs) && matchesExclusion(entry, ex, entryMs))) continue; // rule 5
 
     if (recentEntryIds.has(entry.id)) continue; // dedup vs last-60-day queue
 
@@ -417,4 +448,6 @@ export default {
   runGentleRevisitDaily,
   gentleRevisitDaily,
   monthYearLabel,
+  matchesExclusion,
+  isExclusionActive,
 };

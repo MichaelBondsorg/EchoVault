@@ -8,7 +8,7 @@
  * with contract-correct arguments, not just that some jest.fn() was called.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, act, within } from '@testing-library/react';
 
 let batchInstances = [];
 function makeBatch() {
@@ -91,14 +91,37 @@ function pushQueueItem(item) {
   });
 }
 
+// Production entry shape (R2 review fix): `orchestrator.js`'s
+// `buildSuccessPayload` writes top-level `tags` and an `analysis` object
+// with ONLY {mood_score, framework, cbt_breakdown, act_analysis,
+// vent_support, celebration, task_acknowledgment} — never
+// `analysis.themes`/`analysis.entities`. Fixtures below mirror that exactly
+// so `deriveTopThemeOrEntity`'s tests don't encode the same wrong schema the
+// bug did.
 function makeEntry(overrides = {}) {
   return {
     id: 'entry-1',
     text: 'It was a quiet afternoon by the lake, and everything felt still.',
     effectiveDate: '2026-03-14T00:00:00.000Z',
-    analysis: { themes: ['calm'], entities: [{ name: 'Lake Tahoe' }] },
+    analysis: { mood_score: 0.6, framework: 'general' },
+    tags: ['calm'],
     ...overrides,
   };
+}
+
+/**
+ * Replicates `matchesExclusion`'s `family` predicate
+ * (`functions/src/revisit/selectRevisits.js`) so this frontend test can
+ * prove a written exclusion value would actually match server-side, WITHOUT
+ * cross-importing a Cloud Functions module (which pulls in
+ * firebase-admin/firebase-functions at module scope — not something a
+ * frontend widget test should depend on). Kept in exact lockstep with the
+ * real function's logic; `selectRevisits.test.js` owns the authoritative
+ * tests for the real predicate itself.
+ */
+function familyExclusionWouldMatch(entry, value) {
+  const entityValues = (entry.entities || []).map((e) => e?.id || e?.name).filter(Boolean);
+  return entityValues.includes(value) || (Array.isArray(entry.tags) && entry.tags.includes(value));
 }
 
 beforeEach(() => {
@@ -224,6 +247,25 @@ describe('RevisitWidget — Show', () => {
     expect(Object.keys(payload).sort()).toEqual(['status', 'updatedAt']);
     expect(payload.status).toBe('shown');
   });
+
+  it('failure: markShown rejecting rolls back the reveal and shows an inline error', async () => {
+    pushQueueItem(queueItem());
+    mocks.updateDoc.mockRejectedValueOnce(new Error('boom'));
+    await renderWidget();
+
+    fireEvent.click(screen.getByText('Show'));
+    // Optimistic reveal happens immediately, before the rejection settles —
+    // the Show button itself unmounts at that point (only rendered while
+    // `!revealed`), which is itself the double-submit guard for this action.
+    expect(screen.getByText(/quiet afternoon by the lake/)).toBeTruthy();
+    expect(screen.queryByText('Show')).toBeNull();
+
+    await screen.findByText("Couldn't save that you viewed this. Please try again.");
+    expect(mocks.updateDoc).toHaveBeenCalledTimes(1);
+    // Rolled back: entry text hidden again, Show button back.
+    expect(screen.queryByText(/quiet afternoon by the lake/)).toBeNull();
+    expect(screen.getByText('Show')).toBeTruthy();
+  });
 });
 
 describe('RevisitWidget — Not now', () => {
@@ -237,6 +279,19 @@ describe('RevisitWidget — Not now', () => {
     const [, payload] = mocks.updateDoc.mock.calls[0];
     expect(payload.status).toBe('dismissed');
     expect(mocks.addDoc).not.toHaveBeenCalled();
+  });
+
+  it('failure: dismissRevisit rejecting shows an inline error, keeps the card, and guards against double-submit', async () => {
+    pushQueueItem(queueItem());
+    mocks.updateDoc.mockRejectedValueOnce(new Error('boom'));
+    await renderWidget();
+
+    fireEvent.click(screen.getByText('Not now'));
+    fireEvent.click(screen.getByText('Dismissing…')); // double-click while in flight — guarded, no-op
+
+    await screen.findByText("Couldn't dismiss this. Please try again.");
+    expect(mocks.updateDoc).toHaveBeenCalledTimes(1); // not called twice
+    expect(screen.getByText('A calm moment from March 2026')).toBeTruthy(); // card intact
   });
 });
 
@@ -278,6 +333,23 @@ describe('RevisitWidget — Never show this entry', () => {
     expect(mocks.updateDoc).not.toHaveBeenCalled();
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
   });
+
+  it('failure: addRevisitExclusion rejecting shows an inline error inside the dialog, keeps it open, and guards against double-submit', async () => {
+    pushQueueItem(queueItem());
+    mocks.addDoc.mockRejectedValueOnce(new Error('boom'));
+    await renderWidget();
+
+    fireEvent.click(screen.getByText('Never show this entry'));
+    const dialog = await screen.findByRole('dialog', { name: /never show this entry again/i });
+
+    fireEvent.click(screen.getByText('Never show'));
+    fireEvent.click(screen.getByText('Excluding…')); // double-click while in flight — guarded, no-op
+
+    await within(dialog).findByText("Couldn't exclude this entry. Please try again.");
+    expect(mocks.addDoc).toHaveBeenCalledTimes(1); // not called twice
+    expect(mocks.updateDoc).not.toHaveBeenCalled(); // never dismissed on failure
+    expect(screen.getByRole('dialog', { name: /never show this entry again/i })).toBeTruthy(); // stays open
+  });
 });
 
 describe('RevisitWidget — Less like this', () => {
@@ -292,7 +364,7 @@ describe('RevisitWidget — Less like this', () => {
     expect(Object.keys(payload).sort()).toEqual(['createdAt', 'dimension', 'expiresAt', 'permanent', 'reason', 'value']);
     expect(payload).toMatchObject({
       dimension: 'family',
-      value: 'calm', // entries fixture's analysis.themes[0]
+      value: 'calm', // entries fixture's top-level tags[0] (production shape)
       reason: 'less_like_this',
       permanent: false,
     });
@@ -308,17 +380,72 @@ describe('RevisitWidget — Less like this', () => {
     expect(screen.queryByRole('dialog')).toBeNull();
   });
 
-  it('hides the action entirely when the entry has neither theme nor entity', async () => {
+  it('R2 review regression: an entry shaped exactly like buildSuccessPayload\'s real output renders the button, and the written value would match the real selector\'s family predicate', async () => {
+    // No analysis.themes/analysis.entities anywhere — exactly what
+    // production analysis writes actually produce.
+    const productionEntry = {
+      id: 'entry-prod',
+      text: 'A quiet Sunday.',
+      effectiveDate: '2026-02-01T00:00:00.000Z',
+      tags: ['gratitude', 'family-time'],
+      analysis: { mood_score: 0.7, framework: 'general' },
+    };
+    pushQueueItem(queueItem({ entryId: 'entry-prod' }));
+    await renderWidget({ entries: [productionEntry] });
+
+    expect(screen.getByText('Less like this')).toBeTruthy();
+    fireEvent.click(screen.getByText('Less like this'));
+
+    await waitFor(() => expect(mocks.addDoc).toHaveBeenCalledTimes(1));
+    const [, payload] = mocks.addDoc.mock.calls[0];
+    expect(payload.dimension).toBe('family');
+    expect(payload.value).toBe('gratitude'); // tags[0] — the only populated source
+    // The value written would actually suppress this entry server-side —
+    // verified against a faithful replica of the real selector's predicate
+    // (see `familyExclusionWouldMatch`'s doc comment for why it's a replica,
+    // not a cross-package import).
+    expect(familyExclusionWouldMatch(productionEntry, payload.value)).toBe(true);
+  });
+
+  it('does NOT derive from entry.analysis.themes/entry.analysis.entities (old wrong-schema fields, never populated in production) — hides the action', async () => {
+    const oldSchemaShapedEntry = {
+      id: 'entry-2',
+      text: 'Some text.',
+      // No top-level tags/entities — only the (never-real) analysis fields.
+      analysis: { mood_score: 0.6, themes: ['calm'], entities: [{ name: 'Lake Tahoe' }] },
+    };
     pushQueueItem(queueItem({ entryId: 'entry-2' }));
-    await renderWidget({ entries: [makeEntry({ id: 'entry-2', analysis: {} })] });
+    await renderWidget({ entries: [oldSchemaShapedEntry] });
     expect(screen.queryByText('Less like this')).toBeNull();
   });
 
-  it('deriveTopThemeOrEntity prefers theme over entity, then falls back to entity, then null', () => {
-    expect(deriveTopThemeOrEntity({ analysis: { themes: ['grief'], entities: [{ name: 'Sam' }] } })).toBe('grief');
-    expect(deriveTopThemeOrEntity({ analysis: { entities: [{ name: 'Sam' }] } })).toBe('Sam');
-    expect(deriveTopThemeOrEntity({ analysis: {} })).toBeNull();
+  it('hides the action entirely when the entry has neither tags nor entities', async () => {
+    pushQueueItem(queueItem({ entryId: 'entry-2' }));
+    await renderWidget({ entries: [makeEntry({ id: 'entry-2', tags: [], analysis: { mood_score: 0.6 } })] });
+    expect(screen.queryByText('Less like this')).toBeNull();
+  });
+
+  it('deriveTopThemeOrEntity prefers top-level entity id, then entity name, then top-level tag, then null', () => {
+    expect(deriveTopThemeOrEntity({ entities: [{ id: 'e1', name: 'grief' }], tags: ['other'] })).toBe('e1');
+    expect(deriveTopThemeOrEntity({ entities: [{ name: 'Sam' }], tags: ['other'] })).toBe('Sam');
+    expect(deriveTopThemeOrEntity({ tags: ['grief'] })).toBe('grief');
+    expect(deriveTopThemeOrEntity({ tags: [], entities: [] })).toBeNull();
+    expect(deriveTopThemeOrEntity({ analysis: { themes: ['grief'] } })).toBeNull(); // wrong-schema field, never read
     expect(deriveTopThemeOrEntity(undefined)).toBeNull();
+  });
+
+  it('failure: addRevisitExclusion rejecting shows an inline error, keeps the card, and guards against double-submit', async () => {
+    pushQueueItem(queueItem());
+    mocks.addDoc.mockRejectedValueOnce(new Error('boom'));
+    await renderWidget();
+
+    fireEvent.click(screen.getByText('Less like this'));
+    fireEvent.click(screen.getByText('Saving…')); // double-click while in flight — guarded, no-op
+
+    await screen.findByText("Couldn't save that preference. Please try again.");
+    expect(mocks.addDoc).toHaveBeenCalledTimes(1); // not called twice
+    expect(mocks.updateDoc).not.toHaveBeenCalled(); // never dismissed on failure
+    expect(screen.getByText('A calm moment from March 2026')).toBeTruthy(); // card intact
   });
 });
 
