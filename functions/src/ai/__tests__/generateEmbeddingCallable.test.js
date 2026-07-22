@@ -11,16 +11,28 @@
  * generateEmbeddingV2, the cache keyspaces — are unit-tested directly in
  * embeddingV2.test.js / embeddingCache.test.js).
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterAll } from 'vitest';
 
 // functions/index.js registers an onObjectFinalized storage trigger at
 // module scope, which needs a resolvable bucket name even though this test
 // never exercises that trigger. Provide a fake one before importing index.js.
+// Restored in afterAll — vitest workers can be reused across files, and a
+// future test that cares about these vars being unset must not inherit
+// this file's fakes by load order (M1 review, Important).
+const PRIOR_FIREBASE_CONFIG = process.env.FIREBASE_CONFIG;
+const PRIOR_GCLOUD_PROJECT = process.env.GCLOUD_PROJECT;
 process.env.FIREBASE_CONFIG = JSON.stringify({
   projectId: 'test-project',
   storageBucket: 'test-project.appspot.com',
 });
 process.env.GCLOUD_PROJECT = 'test-project';
+
+afterAll(() => {
+  if (PRIOR_FIREBASE_CONFIG === undefined) delete process.env.FIREBASE_CONFIG;
+  else process.env.FIREBASE_CONFIG = PRIOR_FIREBASE_CONFIG;
+  if (PRIOR_GCLOUD_PROJECT === undefined) delete process.env.GCLOUD_PROJECT;
+  else process.env.GCLOUD_PROJECT = PRIOR_GCLOUD_PROJECT;
+});
 
 vi.mock('firebase-admin/app', () => ({
   initializeApp: vi.fn(),
