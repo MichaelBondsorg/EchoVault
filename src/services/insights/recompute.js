@@ -10,7 +10,8 @@
  *
  * PRD acceptance: "stale within 10 seconds". Every write below is an
  * immediate, awaited Firestore write — no debounce, no queue — so a caller
- * that awaits `onSourcesChanged` is guaranteed all three are marked stale
+ * that awaits `onSourcesChanged` is guaranteed all four consumers (Nexus,
+ * daily summary, weekly digest, basic insights) are marked stale/invalidated
  * before it returns (in practice, orders of magnitude under 10s).
  *
  * `db` is accepted for call-site symmetry with the exclusion mutators that

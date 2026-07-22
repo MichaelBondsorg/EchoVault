@@ -471,6 +471,41 @@ gcloud firestore indexes composite create \
 As of this writing this has not yet been run — flipping `reflectionRecipes`
 on before it is provisioned will surface the query error live.
 
+**The same manual-provisioning requirement applies to the other two R2
+composite indexes** recorded in `firestore.indexes.json` (nothing deploys
+them either):
+
+1. `source_exclusions (entryId ASC, appliesTo ASC)` — backs `excludeSource`'s
+   duplicate-check query (`src/services/insights/sourceExclusions.js`).
+   Without it, the first "Exclude source" / "Wrong source" tap under
+   `insightReceipts` throws a query-requires-an-index error. Provision
+   before flipping `insightReceipts`:
+
+   ```
+   gcloud firestore indexes composite create \
+     --project=echo-vault-app --collection-group=source_exclusions \
+     --field-config field-path=entryId,order=ascending \
+     --field-config field-path=appliesTo,order=ascending
+   ```
+
+2. `entries (safety_flagged ASC, createdAt ASC)` — backs the rule-3
+   crisis-window-adjacency anchor query in
+   `functions/src/revisit/selectRevisits.js`. **Safety-relevant failure
+   mode:** the daily sweep's per-user try/catch treats a missing-index
+   error as a per-user failure and skips — fail-closed (nothing unsafe is
+   ever selected) but SILENT: the sweep selects nothing for anyone,
+   indefinitely, with no user-facing signal. Provision before
+   `gentleRevisit` is enabled anywhere, including internal testing:
+
+   ```
+   gcloud firestore indexes composite create \
+     --project=echo-vault-app --collection-group=entries \
+     --field-config field-path=safety_flagged,order=ascending \
+     --field-config field-path=createdAt,order=ascending
+   ```
+
+Neither has been run as of this writing.
+
 | Flag | Default | What it enables | Turning it OFF restores | Verification |
 |---|---|---|---|---|
 | `insightReceipts` | `false` | The "Why am I seeing this?" `ReceiptSheet` (`src/components/insights/ReceiptSheet.jsx`) on Nexus insight cards (`NexusInsightsWidget.jsx`, `InsightsPage.jsx`), the `InsightControlCenter` screen (excluded sources, muted families, recompute, budget-withheld count) and its Settings/AppLayout nav row. Underlying data (`src/services/insights/receipts.js`, `sourceExclusions.js`, `recompute.js`) is flag-**independent** — receipts are attached to every insight at generation time regardless of this flag. | Nexus/Basic insight cards render exactly as they did pre-R2: no "Why am I seeing this?" trigger, no Control Center nav row. Receipt data keeps being computed and persisted in the background (harmless, invisible) so re-enabling needs no backfill. Source exclusions already created stay in effect either way (`getExcludedEntryIds` is read unconditionally by `generateInsights`/report `readEntries`, not flag-gated). | `src/__tests__/validationMatrix.test.js` rows (a)/(b); `src/services/nexus/__tests__/orchestrator.receipts.test.js`, `orchestrator.exclusions.test.js`; `src/components/insights/__tests__/ReceiptSheet.test.jsx`, `InsightControlCenter.test.jsx`. |
