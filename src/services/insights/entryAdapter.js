@@ -46,6 +46,12 @@
  *   dateKey: string|null,       // LOCAL 'YYYY-MM-DD' calendar day
  *                                // (device timezone by default), or null
  *                                // if the entry has no usable date at all.
+ *   timestampMs: number|null,   // exact instant (epoch ms) behind dateKey —
+ *                                // for consumers needing hour/day-of-week,
+ *                                // not just the calendar day (e.g.
+ *                                // timeCorrelations.js); same
+ *                                // effectiveDate??createdAt parse as
+ *                                // dateKey, just not truncated to a day.
  *   mood01: number|null,        // 0-1 scale (Mood01 convention). null when
  *                                // missing OR outside the declared [0,1]
  *                                // domain — NEVER fabricated, NEVER
@@ -115,21 +121,24 @@ export const isUnknown = (value) => value === UNKNOWN;
 const resolveId = (entry) => entry?.id || entry?.entryId || null;
 
 /**
- * The entry's LOCAL calendar day as a 'YYYY-MM-DD' dateKey, or null if the
- * entry has no usable date. Reuses `computeResult.js`'s exported
- * `localDateKeyForMs` for the actual ms->dateKey formatting; the
- * `effectiveDate ?? createdAt` field-precedence + Date-coercion glue is
- * replicated here in miniature because `computeResult.js`'s own
- * `entryDateKey` composition of that same logic is a private (non-exported)
- * helper — see that module's doc comment for why `effectiveDate` (the
- * user-corrected/backdated date) takes precedence over `createdAt`.
+ * The entry's effective Date (`effectiveDate ?? createdAt`, coerced), or
+ * null if the entry has no usable date. Single parse shared by `dateKey`
+ * (LOCAL calendar day) and `timestampMs` (exact instant — needed by
+ * `timeCorrelations.js` for hour/day-of-week classification, which a
+ * calendar-day dateKey alone can't provide) so both derive from the same
+ * parse rather than re-parsing twice. The `effectiveDate ?? createdAt`
+ * field-precedence is replicated here in miniature because
+ * `computeResult.js`'s own `entryDateKey` composition of that same logic is
+ * a private (non-exported) helper — see that module's doc comment for why
+ * `effectiveDate` (the user-corrected/backdated date) takes precedence over
+ * `createdAt`.
  */
-const resolveDateKey = (entry, timeZone) => {
+const resolveEntryDate = (entry) => {
   const raw = entry?.effectiveDate ?? entry?.createdAt;
   if (raw == null) return null;
   const d = safeDate(raw);
   if (!d || Number.isNaN(d.getTime())) return null;
-  return localDateKeyForMs(d.getTime(), timeZone);
+  return d;
 };
 
 /**
@@ -236,10 +245,12 @@ export const normalizeEntryForInsights = (entry, { timeZone } = {}) => {
 
   const resolvedTimeZone = timeZone || resolveDeviceTimezone();
   const text = entry.content ?? entry.text ?? '';
+  const entryDate = resolveEntryDate(entry);
 
   return {
     id: resolveId(entry),
-    dateKey: resolveDateKey(entry, resolvedTimeZone),
+    dateKey: entryDate ? localDateKeyForMs(entryDate.getTime(), resolvedTimeZone) : null,
+    timestampMs: entryDate ? entryDate.getTime() : null,
     mood01: resolveMood(entry),
     entryType: resolveStringField(entry.entry_type, entry.analysis?.entry_type ?? entry.classification?.entry_type),
     category: resolveStringField(entry.category, entry.classification?.primary_category),

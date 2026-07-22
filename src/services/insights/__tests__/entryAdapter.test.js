@@ -272,4 +272,23 @@ describe('entryAdapter', () => {
       expect(n.dateKey).toBe('2026-01-05');
     });
   });
+
+  describe('timestampMs', () => {
+    it('is the exact instant behind dateKey (effectiveDate ?? createdAt), not just the truncated day', () => {
+      const entry = { id: 'e', createdAt: '2026-07-10T14:30:00.000Z' };
+      const n = normalizeEntryForInsights(entry, { timeZone: TZ });
+      expect(n.timestampMs).toBe(Date.parse('2026-07-10T14:30:00.000Z'));
+    });
+
+    it('is null when there is no usable date', () => {
+      const n = normalizeEntryForInsights({ id: 'nodate' }, { timeZone: TZ });
+      expect(n.timestampMs).toBeNull();
+    });
+
+    it('prefers effectiveDate over createdAt, same as dateKey', () => {
+      const entry = { id: 'e', effectiveDate: '2026-01-05T08:00:00.000Z', createdAt: '2026-01-09T20:00:00.000Z' };
+      const n = normalizeEntryForInsights(entry, { timeZone: TZ });
+      expect(n.timestampMs).toBe(Date.parse('2026-01-05T08:00:00.000Z'));
+    });
+  });
 });
