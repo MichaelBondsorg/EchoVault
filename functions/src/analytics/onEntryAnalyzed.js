@@ -65,6 +65,42 @@ export function computeRecencyWeight(daysAgo) {
 }
 
 /**
+ * Resolve the analytics-relevant fields off a post-analysis entry document
+ * (`event.data.after.data()`).
+ *
+ * R4 Task 1 field-location fix: `functions/src/analysis/orchestrator.js`'s
+ * `buildSuccessPayload` writes `tags` and `entry_type` TOP-LEVEL — this
+ * function used to read `after.analysis?.tags`/`after.analysis?.entities`
+ * (never written there) and `after.localAnalysis?.entry_type` (the
+ * pre-analysis LOCAL guess, stale once analysis has actually completed —
+ * this trigger only ever fires when `analysisStatus` is 'complete'). Both
+ * are now read from their real top-level locations first, with the legacy/
+ * pre-analysis locations kept ONLY as a defensive fallback for an entry
+ * that somehow reached 'complete' without them.
+ *
+ * `entities` is not written by any known writer today (top-level or
+ * nested) — this resolves to `[]` either way, same practical effect as
+ * before, just from the correct (currently always-empty) location instead
+ * of a location that was never populated for a different reason.
+ *
+ * Pure and exported so this field-resolution logic is unit-testable
+ * without the Firestore emulator (`handleEntryAnalyzed` itself is not
+ * pure — see the module doc comment on this file's tests).
+ *
+ * @param {Object} after - `event.data.after.data()`
+ * @returns {{moodScore: number|null, category: string, entryType: string, entities: Array, tags: Array}}
+ */
+export function extractAnalyticsFields(after) {
+  const moodScore = after.analysis?.mood_score ?? after.localAnalysis?.mood_score ?? null;
+  const category = after.category || after.classification?.primary_category || 'personal';
+  const entryType = after.entry_type || after.localAnalysis?.entry_type || 'mixed';
+  const entities = after.entities || after.analysis?.entities || [];
+  const tags = after.tags || after.analysis?.tags || [];
+
+  return { moodScore, category, entryType, entities, tags };
+}
+
+/**
  * Computes period keys for a given date across all cadences.
  * Returns { weekly, monthly, quarterly, annual } keys.
  */
@@ -107,12 +143,9 @@ export async function handleEntryAnalyzed(event) {
   const analyticsPath = `artifacts/${APP_COLLECTION_ID}/users/${userId}/analytics`;
   const coverageRef = db.doc(`${analyticsPath}/topic_coverage`);
 
-  // Extract data from analyzed entry
-  const moodScore = after.analysis?.mood_score ?? after.localAnalysis?.mood_score ?? null;
-  const category = after.localAnalysis?.category || after.category || 'personal';
-  const entryType = after.localAnalysis?.entry_type || 'mixed';
-  const entities = after.analysis?.entities || [];
-  const tags = after.analysis?.tags || [];
+  // Extract data from analyzed entry (R4 Task 1: corrected field locations
+  // — tags/entry_type/category are top-level, not analysis.*/localAnalysis.*)
+  const { moodScore, category, entryType, entities, tags } = extractAnalyticsFields(after);
   const createdAt = after.createdAt?.toDate?.() || new Date();
 
   const now = new Date();

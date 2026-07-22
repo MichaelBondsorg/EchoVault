@@ -32,6 +32,12 @@ import { computeThemesCorrelations } from './correlations/themesCorrelations';
 // Configuration
 import { THRESHOLDS, CATEGORIES } from './utils/thresholds';
 
+// Entry-schema adapter (R4 Task 1) — the five correlation engines below
+// (activity/people/healthExtended/category/themes) consume ONLY this
+// normalized shape; health/environment/time correlations are untouched by
+// R4 Task 1 and keep reading raw `entries` directly.
+import { normalizeEntriesForInsights } from '../insights/entryAdapter';
+
 // Feedback learning
 import { filterInsightsByLearning } from './feedbackLearning';
 
@@ -133,6 +139,11 @@ export const generateBasicInsights = async (userId, entries) => {
     // Collect insights from all sources
     const allInsights = [];
 
+    // Normalize once (R4 Task 1) — every field-location bug fix, tri-state
+    // UNKNOWN handling, and day-grounding lives in the adapter; the five
+    // engines below never touch raw entry shape again.
+    const normalizedEntries = normalizeEntriesForInsights(entries);
+
     // 1. Existing health correlations (reuse healthCorrelations.js)
     const healthInsights = getTopHealthInsights(entries, THRESHOLDS.MAX_PER_CATEGORY);
     for (const insight of healthInsights) {
@@ -168,13 +179,13 @@ export const generateBasicInsights = async (userId, entries) => {
     console.log('[BasicInsights] Environment:', envInsights.length, 'insights');
 
     // 3. Activity correlations (new)
-    const activityInsights = computeActivityCorrelations(entries);
+    const activityInsights = computeActivityCorrelations(normalizedEntries);
     allInsights.push(...activityInsights);
     console.log('[BasicInsights] Activity:', activityInsights.length, 'insights',
       activityInsights.length > 0 ? activityInsights.map(i => i.activityKey || i.id) : '(none)');
 
     // 4. People correlations (new)
-    const peopleInsights = computePeopleCorrelations(entries);
+    const peopleInsights = computePeopleCorrelations(normalizedEntries);
     allInsights.push(...peopleInsights);
     console.log('[BasicInsights] People:', peopleInsights.length, 'insights',
       peopleInsights.length > 0 ? peopleInsights.map(i => i.peopleKey || i.id) : '(none)');
@@ -186,17 +197,17 @@ export const generateBasicInsights = async (userId, entries) => {
       timeInsights.length > 0 ? timeInsights.map(i => i.id) : '(none)');
 
     // 6. Extended health correlations (strain, deep sleep, REM, calories)
-    const extendedHealthInsights = computeExtendedHealthCorrelations(entries);
+    const extendedHealthInsights = computeExtendedHealthCorrelations(normalizedEntries);
     allInsights.push(...extendedHealthInsights);
     console.log('[BasicInsights] Extended Health:', extendedHealthInsights.length, 'insights');
 
     // 7. Category/type correlations (work vs personal, reflection vs vent)
-    const categoryInsights = computeCategoryCorrelations(entries);
+    const categoryInsights = computeCategoryCorrelations(normalizedEntries);
     allInsights.push(...categoryInsights);
     console.log('[BasicInsights] Category:', categoryInsights.length, 'insights');
 
     // 8. Themes & emotions correlations
-    const themesInsights = computeThemesCorrelations(entries);
+    const themesInsights = computeThemesCorrelations(normalizedEntries);
     allInsights.push(...themesInsights);
     console.log('[BasicInsights] Themes:', themesInsights.length, 'insights');
 

@@ -5,22 +5,38 @@
  * - Entry category (work, personal, health, relationships, growth)
  * - Entry type (reflection, vent, task, decision)
  *
+ * Consumes ONLY adapter-normalized entries (see
+ * `src/services/insights/entryAdapter.js`). `entry_type` is stored
+ * TOP-LEVEL by the current write pipeline — this file used to read
+ * `entry.analysis.entry_type`, which is never written there (a legacy
+ * shape), so entry-type correlations silently never fired. Entries whose
+ * category/entryType is UNKNOWN (adapter sentinel — no value found at any
+ * known location) are dropped from that specific grouping analysis
+ * entirely, never counted into either the present or the complement group.
+ *
+ * Baseline: non-overlapping complement (this category/type's entries vs
+ * every OTHER known-category/type entry — never an all-entries average
+ * that double-counts the group being measured inside its own baseline).
+ *
+ * Day-grounding: a category/type must appear on at least
+ * `THRESHOLDS.MIN_UNIQUE_DAYS` distinct calendar days.
+ *
  * Example insights:
- * - "Work entries show 15% lower mood than average"
- * - "Reflection entries correlate with 12% better mood"
- * - "Relationship entries have 18% higher mood"
+ * - "Work entries show 15% lower mood than your other entries"
+ * - "Reflection entries show 12% higher mood than your other entries"
  */
 
 import {
-  average,
-  calculateMoodDelta,
   determineStrength,
-  generateInsightId
+  generateInsightId,
+  countUniqueDays,
+  computeComplementBaseline
 } from '../utils/statisticalHelpers';
 import {
   THRESHOLDS,
   CATEGORIES
 } from '../utils/thresholds';
+import { isUnknown } from '../../insights/entryAdapter';
 
 /**
  * Category display configuration
@@ -44,8 +60,28 @@ const ENTRY_TYPE_CONFIG = {
 };
 
 /**
+ * Build present/absent complement groups keyed by a lowercased string
+ * field, dropping UNKNOWN-valued entries from the analysis entirely.
+ * @param {Array} entriesWithMood - adapter-normalized entries
+ * @param {(entry: Object) => (string|symbol)} fieldGetter
+ * @returns {{knownEntries: Array<{entry: Object, key: string}>, keys: Set<string>}}
+ */
+const groupByKnownField = (entriesWithMood, fieldGetter) => {
+  const knownEntries = [];
+  const keys = new Set();
+  for (const entry of entriesWithMood) {
+    const value = fieldGetter(entry);
+    if (isUnknown(value) || typeof value !== 'string' || value.length === 0) continue;
+    const key = value.toLowerCase();
+    knownEntries.push({ entry, key });
+    keys.add(key);
+  }
+  return { knownEntries, keys };
+};
+
+/**
  * Compute category-mood correlations
- * @param {Array} entries - Journal entries with mood scores
+ * @param {Array} entries - Adapter-normalized entries (entryAdapter.js)
  * @returns {Array} Category insight objects
  */
 export const computeCategoryCorrelations = (entries) => {
@@ -53,119 +89,103 @@ export const computeCategoryCorrelations = (entries) => {
     return [];
   }
 
-  // Filter entries with mood scores
-  const entriesWithMood = entries.filter(e => e.analysis?.mood_score != null);
+  const entriesWithMood = entries.filter(e => e.mood01 != null);
   if (entriesWithMood.length < THRESHOLDS.MIN_ENTRIES) {
     return [];
   }
 
-  // Calculate baseline mood
-  const allMoods = entriesWithMood.map(e => e.analysis.mood_score);
-  const baselineMood = average(allMoods);
-
   const insights = [];
 
   // ===== ENTRY CATEGORY CORRELATIONS =====
-  const categoryGroups = {};
+  const { knownEntries: knownCategoryEntries, keys: categoryKeys } =
+    groupByKnownField(entriesWithMood, (e) => e.category);
 
-  for (const entry of entriesWithMood) {
-    // Get category from entry or classification
-    const category = entry.category || entry.classification?.primary_category;
-    if (!category) continue;
+  for (const categoryKey of categoryKeys) {
+    const presentGroup = knownCategoryEntries.filter(ke => ke.key === categoryKey);
+    const absentGroup = knownCategoryEntries.filter(ke => ke.key !== categoryKey);
 
-    const categoryLower = category.toLowerCase();
-    if (!categoryGroups[categoryLower]) {
-      categoryGroups[categoryLower] = { moods: [], entryIds: [] };
-    }
-    categoryGroups[categoryLower].moods.push(entry.analysis.mood_score);
-    if (entry.id || entry.entryId) {
-      categoryGroups[categoryLower].entryIds.push(entry.id || entry.entryId);
-    }
-  }
+    if (presentGroup.length < THRESHOLDS.MIN_DATA_POINTS) continue;
 
-  // Generate insights for categories with enough data
-  for (const [category, data] of Object.entries(categoryGroups)) {
-    if (data.moods.length < THRESHOLDS.MIN_DATA_POINTS) continue;
+    const presentDayCount = countUniqueDays(presentGroup.map(ke => ke.entry));
+    if (presentDayCount < THRESHOLDS.MIN_UNIQUE_DAYS) continue;
 
-    const categoryMood = average(data.moods);
-    const moodDelta = calculateMoodDelta(categoryMood, baselineMood);
-
+    const { insufficient, presentMood, absentMood, moodDelta } = computeComplementBaseline({
+      presentMoods: presentGroup.map(ke => ke.entry.mood01),
+      absentMoods: absentGroup.map(ke => ke.entry.mood01)
+    });
+    if (insufficient) continue;
     if (Math.abs(moodDelta) < THRESHOLDS.MIN_MOOD_DELTA) continue;
 
-    const strength = determineStrength(moodDelta, data.moods.length);
+    const strength = determineStrength(moodDelta, presentGroup.length);
     if (strength === 'weak') continue;
 
-    const config = CATEGORY_CONFIG[category] || { label: category, emoji: '📝' };
+    const config = CATEGORY_CONFIG[categoryKey] || { label: categoryKey, emoji: '📝' };
     const direction = moodDelta > 0 ? 'positive' : 'negative';
 
     insights.push({
-      id: generateInsightId(CATEGORIES.CATEGORY, `category_${category}`),
+      id: generateInsightId(CATEGORIES.CATEGORY, `category_${categoryKey}`),
       category: CATEGORIES.CATEGORY,
       insight: moodDelta > 0
-        ? `${config.emoji} ${config.label} entries show ${Math.abs(moodDelta)}% higher mood than average`
-        : `${config.emoji} ${config.label} entries show ${Math.abs(moodDelta)}% lower mood than average`,
+        ? `${config.emoji} ${config.label} entries show ${Math.abs(moodDelta)}% higher mood than your other entries`
+        : `${config.emoji} ${config.label} entries show ${Math.abs(moodDelta)}% lower mood than your other entries`,
       moodDelta,
       direction,
       strength,
-      sampleSize: data.moods.length,
-      categoryMood: Math.round(categoryMood * 100),
-      baselineMood: Math.round(baselineMood * 100),
-      recommendation: moodDelta < 0 && category === 'work'
+      sampleSize: presentGroup.length,
+      uniqueDayCount: presentDayCount,
+      categoryMood: Math.round(presentMood * 100),
+      baselineMood: Math.round(absentMood * 100), // complement (other-category) group's average mood
+      recommendation: moodDelta < 0 && categoryKey === 'work'
         ? 'Consider work-life balance strategies'
         : null,
-      entryIds: data.entryIds
+      entryIds: presentGroup.map(ke => ke.entry.id).filter(Boolean)
     });
   }
 
   // ===== ENTRY TYPE CORRELATIONS =====
-  const typeGroups = {};
+  const { knownEntries: knownTypeEntries, keys: typeKeys } =
+    groupByKnownField(entriesWithMood, (e) => e.entryType);
 
-  for (const entry of entriesWithMood) {
-    const entryType = entry.analysis?.entry_type;
-    if (!entryType) continue;
+  for (const typeKey of typeKeys) {
+    const presentGroup = knownTypeEntries.filter(ke => ke.key === typeKey);
+    const absentGroup = knownTypeEntries.filter(ke => ke.key !== typeKey);
 
-    const typeLower = entryType.toLowerCase();
-    if (!typeGroups[typeLower]) {
-      typeGroups[typeLower] = { moods: [], entryIds: [] };
-    }
-    typeGroups[typeLower].moods.push(entry.analysis.mood_score);
-    if (entry.id || entry.entryId) {
-      typeGroups[typeLower].entryIds.push(entry.id || entry.entryId);
-    }
-  }
+    if (presentGroup.length < THRESHOLDS.MIN_DATA_POINTS) continue;
 
-  // Generate insights for entry types with enough data
-  for (const [entryType, data] of Object.entries(typeGroups)) {
-    if (data.moods.length < THRESHOLDS.MIN_DATA_POINTS) continue;
+    const presentDayCount = countUniqueDays(presentGroup.map(ke => ke.entry));
+    if (presentDayCount < THRESHOLDS.MIN_UNIQUE_DAYS) continue;
 
-    const typeMood = average(data.moods);
-    const moodDelta = calculateMoodDelta(typeMood, baselineMood);
-
+    const { insufficient, presentMood, absentMood, moodDelta } = computeComplementBaseline({
+      presentMoods: presentGroup.map(ke => ke.entry.mood01),
+      absentMoods: absentGroup.map(ke => ke.entry.mood01)
+    });
+    if (insufficient) continue;
     if (Math.abs(moodDelta) < THRESHOLDS.MIN_MOOD_DELTA) continue;
 
-    const strength = determineStrength(moodDelta, data.moods.length);
+    const strength = determineStrength(moodDelta, presentGroup.length);
     if (strength === 'weak') continue;
 
-    const config = ENTRY_TYPE_CONFIG[entryType] || { label: entryType, emoji: '📝' };
+    const config = ENTRY_TYPE_CONFIG[typeKey] || { label: typeKey, emoji: '📝' };
     const direction = moodDelta > 0 ? 'positive' : 'negative';
 
     insights.push({
-      id: generateInsightId(CATEGORIES.CATEGORY, `type_${entryType}`),
+      id: generateInsightId(CATEGORIES.CATEGORY, `type_${typeKey}`),
       category: CATEGORIES.CATEGORY,
       insight: moodDelta > 0
-        ? `${config.emoji} ${config.label} entries show ${Math.abs(moodDelta)}% higher mood`
-        : `${config.emoji} ${config.label} entries show ${Math.abs(moodDelta)}% lower mood`,
+        ? `${config.emoji} ${config.label} entries show ${Math.abs(moodDelta)}% higher mood than your other entries`
+        : `${config.emoji} ${config.label} entries show ${Math.abs(moodDelta)}% lower mood than your other entries`,
       moodDelta,
       direction,
       strength,
-      sampleSize: data.moods.length,
-      entryType,
-      recommendation: entryType === 'vent' && moodDelta < 0
+      sampleSize: presentGroup.length,
+      uniqueDayCount: presentDayCount,
+      entryType: typeKey,
+      recommendation: typeKey === 'vent' && moodDelta < 0
         ? 'Venting may reflect rather than cause low mood - consider balanced journaling'
-        : entryType === 'reflection' && moodDelta > 0
-        ? 'Reflective journaling seems to help your mood'
+        : typeKey === 'reflection' && moodDelta > 0
+        ? 'Reflective journaling tends to appear alongside a better mood'
         : null,
-      entryIds: data.entryIds
+      entryIds: presentGroup.map(ke => ke.entry.id).filter(Boolean)
     });
   }
 

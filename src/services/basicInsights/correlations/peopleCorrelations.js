@@ -2,121 +2,138 @@
  * People/Entity-Mood Correlations
  *
  * Detects people and social contexts from journal entries and correlates
- * them with mood. Based on entity extraction pattern from orchestrator.js.
+ * them with mood.
+ *
+ * Consumes ONLY adapter-normalized entries (see
+ * `src/services/insights/entryAdapter.js`). `entities` is NEVER written by
+ * the current analysis pipeline (confirmed: no writer sets it anywhere) —
+ * the adapter resolves it as the UNKNOWN sentinel. Detection here is
+ * multi-source and degrades gracefully per source (a source being UNKNOWN
+ * just means that source contributes nothing — it does not make the whole
+ * entry "unknown", since tags and text-pattern matching are independently
+ * known for every entry).
  *
  * Sources:
- * - entry.analysis.entities (AI-extracted)
- * - entry.memoryMentions (memory graph)
- * - Keyword matching for common groups (family, friends, etc.)
+ * - entry.tags (structured @person:/@pet: tags — always known once an
+ *   entry has completed analysis, possibly known-empty)
+ * - entry.entities (AI-extracted named entities — UNKNOWN today)
+ * - entry.memoryMentions (memory graph mentions — UNKNOWN unless populated)
+ * - Keyword matching for common groups (family, friends, etc.) in entry text
+ *
+ * Baseline: non-overlapping complement (entries mentioning this
+ * person/group vs entries that don't — never an all-entries average).
+ *
+ * Day-grounding: a person/group must appear on at least
+ * `THRESHOLDS.MIN_UNIQUE_DAYS` distinct calendar days.
+ *
+ * Wording: association only ("correlates with"), never causal
+ * ("boosts") — same-entry co-occurrence is not evidence of effect.
  *
  * Example insights:
- * - "Time with family correlates with 22% better mood"
- * - "Friend hangouts boost mood by 18%"
- * - "Pet time shows 15% mood improvement"
+ * - "Time with family correlates with a 22% higher mood"
+ * - "Friend hangouts correlate with an 18% higher mood"
+ * - "Pet time correlates with a 15% higher mood"
  */
 
 import {
-  average,
-  calculateMoodDelta,
   determineStrength,
-  generateInsightId
+  generateInsightId,
+  countUniqueDays,
+  computeComplementBaseline
 } from '../utils/statisticalHelpers';
 import {
   THRESHOLDS,
   CATEGORIES,
   PEOPLE_PATTERNS
 } from '../utils/thresholds';
+import { isUnknown } from '../../insights/entryAdapter';
 
 /**
- * Extract people/entities from a single entry
- * @param {Object} entry - Journal entry
+ * Extract people/entities from a single adapter-normalized entry
+ * @param {Object} entry - Adapter-normalized entry (see entryAdapter.js)
  * @returns {Map<string, {type: string, name: string}>} Map of entity keys to info
  */
 const extractPeople = (entry) => {
   const people = new Map();
-  const text = (entry.content || entry.text || '').toLowerCase();
+  const text = (entry.text || '').toLowerCase();
 
-  // Source 1: Structured tags from entry.tags (e.g., @person:spencer, @pet:sterling)
-  // This is where the enhanced context extraction stores people
-  if (Array.isArray(entry.tags)) {
-    for (const tag of entry.tags) {
-      const tagLower = (tag || '').toLowerCase();
+  // Source 1: Structured tags (e.g., @person:spencer, @pet:sterling).
+  // UNKNOWN tags (no tags array anywhere on the entry) contribute nothing
+  // from this source rather than crashing/being read as "no people".
+  const tags = isUnknown(entry.tags) ? [] : entry.tags;
+  for (const tag of tags) {
+    const tagLower = (tag || '').toLowerCase();
 
-      // Extract @person:name tags
-      if (tagLower.startsWith('@person:')) {
-        const name = tag.replace(/@person:/i, '').replace(/_/g, ' ');
-        const key = name.toLowerCase();
-        if (name.length > 2 && !people.has(key)) {
-          // Capitalize name properly
-          const displayName = name.split(' ')
-            .map(w => w.charAt(0).toUpperCase() + w.slice(1))
-            .join(' ');
-          people.set(key, {
-            name: displayName,
-            type: 'person',
-            source: 'tags'
-          });
-        }
+    if (tagLower.startsWith('@person:')) {
+      const name = tag.replace(/@person:/i, '').replace(/_/g, ' ');
+      const key = name.toLowerCase();
+      if (name.length > 2 && !people.has(key)) {
+        const displayName = name.split(' ')
+          .map(w => w.charAt(0).toUpperCase() + w.slice(1))
+          .join(' ');
+        people.set(key, {
+          name: displayName,
+          type: 'person',
+          source: 'tags'
+        });
       }
+    }
 
-      // Extract @pet:name tags
-      if (tagLower.startsWith('@pet:')) {
-        const name = tag.replace(/@pet:/i, '').replace(/_/g, ' ');
-        const key = name.toLowerCase();
-        if (name.length > 2 && !people.has(key)) {
-          const displayName = name.split(' ')
-            .map(w => w.charAt(0).toUpperCase() + w.slice(1))
-            .join(' ');
-          people.set(key, {
-            name: displayName,
-            type: 'pet',
-            source: 'tags',
-            emoji: '🐾'
-          });
-        }
+    if (tagLower.startsWith('@pet:')) {
+      const name = tag.replace(/@pet:/i, '').replace(/_/g, ' ');
+      const key = name.toLowerCase();
+      if (name.length > 2 && !people.has(key)) {
+        const displayName = name.split(' ')
+          .map(w => w.charAt(0).toUpperCase() + w.slice(1))
+          .join(' ');
+        people.set(key, {
+          name: displayName,
+          type: 'pet',
+          source: 'tags',
+          emoji: '🐾'
+        });
       }
     }
   }
 
-  // Source 2: analysis.entities (AI-extracted named entities)
-  if (entry.analysis?.entities && Array.isArray(entry.analysis.entities)) {
-    for (const entity of entry.analysis.entities) {
-      if (entity.name && entity.name.length > 2) {
-        const key = entity.name.toLowerCase();
-        if (!people.has(key)) {
-          people.set(key, {
-            name: entity.name,
-            type: entity.type || 'person',
-            source: 'analysis'
-          });
-        }
+  // Source 2: entities (AI-extracted named entities). UNKNOWN (never
+  // written today) contributes nothing from this source.
+  const entities = isUnknown(entry.entities) ? [] : entry.entities;
+  for (const entity of entities) {
+    if (entity?.name && entity.name.length > 2) {
+      const key = entity.name.toLowerCase();
+      if (!people.has(key)) {
+        people.set(key, {
+          name: entity.name,
+          type: entity.type || 'person',
+          source: 'analysis'
+        });
       }
     }
   }
 
-  // Source 3: memoryMentions (from memory graph)
-  if (entry.memoryMentions && Array.isArray(entry.memoryMentions)) {
-    for (const mention of entry.memoryMentions) {
-      if (mention.name && mention.name.length > 2) {
-        const key = mention.name.toLowerCase();
-        if (!people.has(key)) {
-          people.set(key, {
-            name: mention.name,
-            type: mention.entityType || 'person',
-            source: 'memory'
-          });
-        }
+  // Source 3: memoryMentions (from memory graph). UNKNOWN contributes
+  // nothing from this source.
+  const memoryMentions = isUnknown(entry.memoryMentions) ? [] : entry.memoryMentions;
+  for (const mention of memoryMentions) {
+    if (mention?.name && mention.name.length > 2) {
+      const key = mention.name.toLowerCase();
+      if (!people.has(key)) {
+        people.set(key, {
+          name: mention.name,
+          type: mention.entityType || 'person',
+          source: 'memory'
+        });
       }
     }
   }
 
-  // Source 5: Pattern matching for common groups
+  // Source 4: Pattern matching for common groups (always known — text
+  // defaults to '' when absent, a genuinely known "no text").
   for (const [groupKey, config] of Object.entries(PEOPLE_PATTERNS)) {
     for (const pattern of config.patterns) {
-      // Reset lastIndex for global regex
       pattern.lastIndex = 0;
       if (pattern.test(text)) {
-        // Use group key as the entity key for aggregation
         if (!people.has(groupKey)) {
           people.set(groupKey, {
             name: config.label,
@@ -126,7 +143,7 @@ const extractPeople = (entry) => {
             emoji: config.emoji
           });
         }
-        break; // Only need one match per group
+        break;
       }
     }
   }
@@ -136,7 +153,7 @@ const extractPeople = (entry) => {
 
 /**
  * Compute people-mood correlations
- * @param {Array} entries - Journal entries with mood scores
+ * @param {Array} entries - Adapter-normalized entries (entryAdapter.js)
  * @returns {Array} People insight objects
  */
 export const computePeopleCorrelations = (entries) => {
@@ -144,60 +161,52 @@ export const computePeopleCorrelations = (entries) => {
     return [];
   }
 
-  // Filter entries with mood scores
-  const entriesWithMood = entries.filter(e => e.analysis?.mood_score != null);
+  const entriesWithMood = entries.filter(e => e.mood01 != null);
   if (entriesWithMood.length < THRESHOLDS.MIN_ENTRIES) {
     return [];
   }
 
-  // Calculate baseline mood
-  const allMoods = entriesWithMood.map(e => e.analysis.mood_score);
-  const baselineMood = average(allMoods);
+  // Detect people once per entry, and collect the set of all detected keys.
+  const perEntry = entriesWithMood.map(entry => ({
+    entry,
+    people: extractPeople(entry)
+  }));
 
-  // Track entity occurrences, moods, and entry references
-  const entityStats = new Map();
-
-  for (const entry of entriesWithMood) {
-    const mood = entry.analysis.mood_score;
-    const people = extractPeople(entry);
-    const entryId = entry.id || entry.entryId;
-
+  const allEntityKeys = new Map(); // entityKey -> info (for display metadata)
+  for (const { people } of perEntry) {
     for (const [key, info] of people) {
-      if (!entityStats.has(key)) {
-        entityStats.set(key, {
-          ...info,
-          moods: [],
-          entryIds: [],
-          mentionCount: 0
-        });
-      }
-      const stats = entityStats.get(key);
-      stats.moods.push(mood);
-      if (entryId) stats.entryIds.push(entryId);
-      stats.mentionCount++;
+      if (!allEntityKeys.has(key)) allEntityKeys.set(key, info);
     }
   }
 
-  // Generate insights for entities with enough mentions
   const insights = [];
 
-  for (const [entityKey, stats] of entityStats) {
-    // Need minimum mentions for statistical relevance
-    if (stats.mentionCount < THRESHOLDS.MIN_MENTIONS) {
+  for (const [entityKey, info] of allEntityKeys) {
+    const presentGroup = perEntry.filter(pe => pe.people.has(entityKey));
+    const absentGroup = perEntry.filter(pe => !pe.people.has(entityKey));
+
+    if (presentGroup.length < THRESHOLDS.MIN_MENTIONS) {
       continue;
     }
 
-    const entityMood = average(stats.moods);
-    const moodDelta = calculateMoodDelta(entityMood, baselineMood);
+    const presentDayCount = countUniqueDays(presentGroup.map(pe => pe.entry));
+    if (presentDayCount < THRESHOLDS.MIN_UNIQUE_DAYS) {
+      continue;
+    }
 
-    // Skip if delta is below threshold
+    const { insufficient, moodDelta } = computeComplementBaseline({
+      presentMoods: presentGroup.map(pe => pe.entry.mood01),
+      absentMoods: absentGroup.map(pe => pe.entry.mood01)
+    });
+    if (insufficient) {
+      continue;
+    }
+
     if (Math.abs(moodDelta) < THRESHOLDS.MIN_MOOD_DELTA) {
       continue;
     }
 
-    const strength = determineStrength(moodDelta, stats.mentionCount);
-
-    // Only include moderate or strong insights
+    const strength = determineStrength(moodDelta, presentGroup.length);
     if (strength === 'weak') {
       continue;
     }
@@ -205,24 +214,23 @@ export const computePeopleCorrelations = (entries) => {
     const direction = moodDelta > 0 ? 'positive' : 'negative';
     const absPercent = Math.abs(moodDelta);
 
-    // Build insight message based on entity type
+    // Build insight message based on entity type — association wording
+    // only, never causal ("boosts").
     let insightText;
-    const emoji = stats.emoji || (stats.type === 'pet' ? '🐾' : '👤');
+    const emoji = info.emoji || (info.type === 'pet' ? '🐾' : '👤');
 
-    if (stats.isGroup) {
-      // Generic group (family, friends, etc.)
+    if (info.isGroup) {
       insightText = moodDelta > 0
-        ? `${emoji} Time with ${stats.name.toLowerCase()} correlates with ${absPercent}% better mood`
-        : `${emoji} ${stats.name} time correlates with ${absPercent}% lower mood`;
-    } else if (stats.type === 'pet') {
+        ? `${emoji} Time with ${info.name.toLowerCase()} correlates with a ${absPercent}% higher mood`
+        : `${emoji} ${info.name} time correlates with a ${absPercent}% lower mood`;
+    } else if (info.type === 'pet') {
       insightText = moodDelta > 0
-        ? `🐾 Time with ${stats.name} boosts mood by ${absPercent}%`
-        : `🐾 ${stats.name} mentions correlate with ${absPercent}% lower mood`;
+        ? `🐾 Time with ${info.name} correlates with a ${absPercent}% higher mood`
+        : `🐾 ${info.name} mentions correlate with a ${absPercent}% lower mood`;
     } else {
-      // Specific person
       insightText = moodDelta > 0
-        ? `👤 Time with ${stats.name} correlates with ${absPercent}% better mood`
-        : `👤 ${stats.name} mentions correlate with ${absPercent}% lower mood`;
+        ? `👤 Time with ${info.name} correlates with a ${absPercent}% higher mood`
+        : `👤 ${info.name} mentions correlate with a ${absPercent}% lower mood`;
     }
 
     insights.push({
@@ -232,37 +240,33 @@ export const computePeopleCorrelations = (entries) => {
       moodDelta,
       direction,
       strength,
-      sampleSize: stats.mentionCount,
-      baselineMood: Math.round(baselineMood * 100),
-      entityMood: Math.round(entityMood * 100),
+      sampleSize: presentGroup.length,
+      uniqueDayCount: presentDayCount,
       entityKey,
-      entityName: stats.name,
-      entityType: stats.type,
-      isGroup: stats.isGroup || false,
-      recommendation: moodDelta > 0 && stats.isGroup
-        ? `Prioritize ${stats.name.toLowerCase()} time when you need a boost`
+      entityName: info.name,
+      entityType: info.type,
+      isGroup: info.isGroup || false,
+      recommendation: moodDelta > 0 && info.isGroup
+        ? `Prioritize ${info.name.toLowerCase()} time when you need a boost`
         : null,
-      entryIds: stats.entryIds // References to cited entries
+      entryIds: presentGroup.map(pe => pe.entry.id).filter(Boolean) // References to cited entries
     });
   }
 
   // Sort by absolute mood delta (strongest correlations first)
   // Prioritize groups over specific names for privacy/generalizability
   insights.sort((a, b) => {
-    // Groups first
     if (a.isGroup && !b.isGroup) return -1;
     if (!a.isGroup && b.isGroup) return 1;
-    // Then by delta
     return Math.abs(b.moodDelta) - Math.abs(a.moodDelta);
   });
 
-  // Return top insights
   return insights.slice(0, THRESHOLDS.MAX_PER_CATEGORY);
 };
 
 /**
  * Get a single top people insight
- * @param {Array} entries - Journal entries
+ * @param {Array} entries - Adapter-normalized entries
  * @returns {Object|null} Top people insight or null
  */
 export const getTopPeopleInsight = (entries) => {

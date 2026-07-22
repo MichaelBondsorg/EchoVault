@@ -113,6 +113,60 @@ export const generateInsightId = (category, factor) => {
   return `${category}_${normalizedFactor}_mood`;
 };
 
+/**
+ * Count unique calendar days across a set of adapter-normalized entries
+ * (or any object carrying a `.dateKey`). Used for the R4 day-grounding
+ * gate: a factor can pass the entry-count threshold while only ever
+ * appearing on 1-2 actual days (e.g. several journal entries the same
+ * afternoon) — this catches that case so `MIN_UNIQUE_DAYS` can gate on it
+ * separately from `MIN_DATA_POINTS`/`MIN_MENTIONS`.
+ * @param {Array<{dateKey?: string|null}>} items
+ * @returns {number}
+ */
+export const countUniqueDays = (items) => {
+  const days = new Set();
+  for (const item of items || []) {
+    if (item?.dateKey) days.add(item.dateKey);
+  }
+  return days.size;
+};
+
+/**
+ * Non-overlapping complement baseline (R4 finding 4): compares a factor's
+ * "present" group directly against the "absent" complement (never against
+ * an all-entries baseline that DOUBLE-COUNTS the present group inside its
+ * own baseline, which mechanically shrinks every real delta).
+ *
+ * `healthCorrelations`-class empty-group guard: `average([])` silently
+ * returns `0`, which would manufacture a false delta the moment either
+ * group is empty (e.g. a factor present in EVERY entry has zero "absent"
+ * entries). Both groups are checked for emptiness BEFORE averaging —
+ * an empty group makes the whole comparison `insufficient`, never a
+ * comparison against a fabricated zero.
+ *
+ * @param {Object} params
+ * @param {number[]} params.presentMoods - mood01 values for entries where
+ *   the factor is present (known-present, never UNKNOWN entries).
+ * @param {number[]} params.absentMoods - mood01 values for entries where
+ *   the factor is known-absent (never UNKNOWN entries — UNKNOWN observations
+ *   must be dropped by the caller before reaching this function, mirroring
+ *   the experiments missing-tags rule).
+ * @returns {{insufficient: boolean, presentMood: number|null, absentMood: number|null, moodDelta: number|null}}
+ */
+export const computeComplementBaseline = ({ presentMoods, absentMoods } = {}) => {
+  if (!presentMoods?.length || !absentMoods?.length) {
+    return { insufficient: true, presentMood: null, absentMood: null, moodDelta: null };
+  }
+  const presentMood = average(presentMoods);
+  const absentMood = average(absentMoods);
+  return {
+    insufficient: false,
+    presentMood,
+    absentMood,
+    moodDelta: calculateMoodDelta(presentMood, absentMood),
+  };
+};
+
 export default {
   average,
   median,
@@ -120,5 +174,7 @@ export default {
   pearsonCorrelation,
   calculateMoodDelta,
   determineStrength,
-  generateInsightId
+  generateInsightId,
+  countUniqueDays,
+  computeComplementBaseline
 };

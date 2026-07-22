@@ -2,26 +2,47 @@
  * Themes & Emotions-Mood Correlations
  *
  * Analyzes mood patterns based on AI-extracted themes and emotions:
- * - Themes from entry analysis
+ * - Themes from entry analysis (+ tags + text keyword matching)
  * - Emotions and their intensities
  * - Cognitive patterns
  *
+ * Consumes ONLY adapter-normalized entries (see
+ * `src/services/insights/entryAdapter.js`). `themes`/`emotions`/
+ * `cognitive_patterns` are NEVER written by the current analysis pipeline —
+ * the adapter resolves them as the UNKNOWN sentinel, not `null`/`[]`.
+ * UNKNOWN != absent: entries whose `emotions`/`cognitivePatterns` field is
+ * UNKNOWN are dropped from those specific sub-analyses entirely (never
+ * counted into either the present OR the complement group) — mirrors the
+ * Personal Experiments "missing tags = UNKNOWN" rule
+ * (`src/services/experiments/computeResult.js`'s `exposureValueForEntry`).
+ * The THEME sub-analysis is more resilient: it also matches against tags
+ * and entry text, so it still functions even while `themes` itself is
+ * always UNKNOWN today.
+ *
+ * Baseline: non-overlapping complement, computed only within the subset of
+ * entries that were actually checked for the field in question (never an
+ * all-entries average, and never including UNKNOWN entries on either side).
+ *
+ * Day-grounding: a theme/emotion/pattern must appear on at least
+ * `THRESHOLDS.MIN_UNIQUE_DAYS` distinct calendar days.
+ *
  * Example insights:
- * - "Entries mentioning 'gratitude' show 22% higher mood"
+ * - "Entries mentioning 'gratitude' correlate with 22% higher mood"
  * - "High-intensity anxiety correlates with 25% lower mood"
  * - "Self-compassion themes correlate with 15% better mood"
  */
 
 import {
-  average,
-  calculateMoodDelta,
   determineStrength,
-  generateInsightId
+  generateInsightId,
+  countUniqueDays,
+  computeComplementBaseline
 } from '../utils/statisticalHelpers';
 import {
   THRESHOLDS,
   CATEGORIES
 } from '../utils/thresholds';
+import { isUnknown } from '../../insights/entryAdapter';
 
 /**
  * Theme patterns to look for and aggregate
@@ -95,13 +116,33 @@ const EMOTION_CONFIG = {
  * Check if a theme matches any pattern in a group
  */
 const matchesThemeGroup = (theme, patterns) => {
-  const themeLower = theme.toLowerCase();
+  const themeLower = (theme || '').toLowerCase();
   return patterns.some(p => themeLower.includes(p));
 };
 
 /**
+ * Whether an adapter-normalized entry matches a theme group, checking
+ * every source that's actually KNOWN for this entry (themes/tags may be
+ * UNKNOWN — skipped, not treated as non-matching — text is always known,
+ * possibly empty).
+ */
+const entryMatchesTheme = (entry, config) => {
+  if (!isUnknown(entry.themes) && entry.themes.some(theme => matchesThemeGroup(theme, config.patterns))) {
+    return true;
+  }
+  if (!isUnknown(entry.tags) && entry.tags.some(tag => matchesThemeGroup(tag, config.patterns))) {
+    return true;
+  }
+  if (entry.hasText) {
+    const text = entry.text.toLowerCase();
+    if (config.patterns.some(p => text.includes(p))) return true;
+  }
+  return false;
+};
+
+/**
  * Compute themes-mood correlations
- * @param {Array} entries - Journal entries with mood scores
+ * @param {Array} entries - Adapter-normalized entries (entryAdapter.js)
  * @returns {Array} Themes insight objects
  */
 export const computeThemesCorrelations = (entries) => {
@@ -109,50 +150,33 @@ export const computeThemesCorrelations = (entries) => {
     return [];
   }
 
-  // Filter entries with mood scores
-  const entriesWithMood = entries.filter(e => e.analysis?.mood_score != null);
+  const entriesWithMood = entries.filter(e => e.mood01 != null);
   if (entriesWithMood.length < THRESHOLDS.MIN_ENTRIES) {
     return [];
   }
-
-  // Calculate baseline mood
-  const allMoods = entriesWithMood.map(e => e.analysis.mood_score);
-  const baselineMood = average(allMoods);
 
   const insights = [];
 
   // ===== THEME CORRELATIONS =====
   for (const [themeKey, config] of Object.entries(THEME_AGGREGATIONS)) {
-    const matchingEntries = entriesWithMood.filter(entry => {
-      // Check analysis.themes (AI-extracted themes)
-      const analysisThemes = entry.analysis?.themes || [];
-      if (analysisThemes.some(theme => matchesThemeGroup(theme, config.patterns))) {
-        return true;
-      }
+    const presentGroup = entriesWithMood.filter(e => entryMatchesTheme(e, config));
 
-      // Check entry.tags (structured tags like @topic:anxiety, @situation:stress)
-      const tags = entry.tags || [];
-      if (tags.some(tag => matchesThemeGroup(tag, config.patterns))) {
-        return true;
-      }
+    if (presentGroup.length < THRESHOLDS.MIN_MENTIONS) continue;
 
-      // Check entry text for theme patterns
-      const text = (entry.content || entry.text || '').toLowerCase();
-      if (config.patterns.some(p => text.includes(p))) {
-        return true;
-      }
+    const presentDayCount = countUniqueDays(presentGroup);
+    if (presentDayCount < THRESHOLDS.MIN_UNIQUE_DAYS) continue;
 
-      return false;
+    const presentSet = new Set(presentGroup);
+    const absentGroup = entriesWithMood.filter(e => !presentSet.has(e));
+
+    const { insufficient, moodDelta } = computeComplementBaseline({
+      presentMoods: presentGroup.map(e => e.mood01),
+      absentMoods: absentGroup.map(e => e.mood01)
     });
-
-    if (matchingEntries.length < THRESHOLDS.MIN_MENTIONS) continue;
-
-    const themeMood = average(matchingEntries.map(e => e.analysis.mood_score));
-    const moodDelta = calculateMoodDelta(themeMood, baselineMood);
-
+    if (insufficient) continue;
     if (Math.abs(moodDelta) < THRESHOLDS.MIN_MOOD_DELTA) continue;
 
-    const strength = determineStrength(moodDelta, matchingEntries.length);
+    const strength = determineStrength(moodDelta, presentGroup.length);
     if (strength === 'weak') continue;
 
     const direction = moodDelta > 0 ? 'positive' : 'negative';
@@ -166,116 +190,115 @@ export const computeThemesCorrelations = (entries) => {
       moodDelta,
       direction,
       strength,
-      sampleSize: matchingEntries.length,
+      sampleSize: presentGroup.length,
+      uniqueDayCount: presentDayCount,
       themeKey,
       recommendation: themeKey === 'gratitude' && moodDelta > 0
         ? 'Consider a gratitude practice to boost mood'
         : themeKey === 'anxiety' && moodDelta < 0
         ? 'Mindfulness or breathing exercises may help with anxiety'
         : null,
-      entryIds: matchingEntries.map(e => e.id || e.entryId).filter(Boolean)
+      entryIds: presentGroup.map(e => e.id).filter(Boolean)
     });
   }
 
   // ===== EMOTION INTENSITY CORRELATIONS =====
-  const emotionStats = {};
+  // Only entries with a KNOWN emotions array participate — UNKNOWN (never
+  // written today) is dropped, never treated as "no emotion".
+  const knownEmotionEntries = entriesWithMood.filter(e => !isUnknown(e.emotions));
+  const highIntensityByEmotion = {}; // emotionKey -> entries with this emotion at 'high' intensity
 
-  for (const entry of entriesWithMood) {
-    const emotions = entry.analysis?.emotions || [];
-
-    for (const emotion of emotions) {
-      if (!emotion.name) continue;
-
+  for (const entry of knownEmotionEntries) {
+    for (const emotion of entry.emotions) {
+      if (!emotion?.name) continue;
       const emotionKey = emotion.name.toLowerCase();
       const intensity = emotion.intensity || 'medium';
-
-      if (!emotionStats[emotionKey]) {
-        emotionStats[emotionKey] = {
-          high: { moods: [], entryIds: [] },
-          medium: { moods: [], entryIds: [] },
-          low: { moods: [], entryIds: [] },
-          all: { moods: [], entryIds: [] }
-        };
-      }
-
-      const mood = entry.analysis.mood_score;
-      const entryId = entry.id || entry.entryId;
-
-      emotionStats[emotionKey][intensity].moods.push(mood);
-      if (entryId) emotionStats[emotionKey][intensity].entryIds.push(entryId);
-      emotionStats[emotionKey].all.moods.push(mood);
-      if (entryId) emotionStats[emotionKey].all.entryIds.push(entryId);
+      if (intensity !== 'high') continue;
+      if (!highIntensityByEmotion[emotionKey]) highIntensityByEmotion[emotionKey] = [];
+      highIntensityByEmotion[emotionKey].push(entry);
     }
   }
 
-  // Generate insights for high-intensity emotions
-  for (const [emotionKey, stats] of Object.entries(emotionStats)) {
+  for (const [emotionKey, highGroup] of Object.entries(highIntensityByEmotion)) {
     const config = EMOTION_CONFIG[emotionKey];
     if (!config) continue;
 
-    // Check for enough high-intensity occurrences
-    if (stats.high.moods.length >= THRESHOLDS.MIN_MENTIONS) {
-      const highIntensityMood = average(stats.high.moods);
-      const moodDelta = calculateMoodDelta(highIntensityMood, baselineMood);
+    if (highGroup.length < THRESHOLDS.MIN_MENTIONS) continue;
 
-      if (Math.abs(moodDelta) >= THRESHOLDS.MIN_MOOD_DELTA + 5) { // Higher threshold for emotion insights
-        const strength = determineStrength(moodDelta, stats.high.moods.length);
+    const presentDayCount = countUniqueDays(highGroup);
+    if (presentDayCount < THRESHOLDS.MIN_UNIQUE_DAYS) continue;
 
-        if (strength !== 'weak') {
-          const direction = moodDelta > 0 ? 'positive' : 'negative';
+    // Complement is the rest of the KNOWN-emotions population — never
+    // UNKNOWN entries, never entries that were never checked at all.
+    const highSet = new Set(highGroup);
+    const absentGroup = knownEmotionEntries.filter(e => !highSet.has(e));
 
-          insights.push({
-            id: generateInsightId(CATEGORIES.THEMES, `emotion_high_${emotionKey}`),
-            category: CATEGORIES.THEMES,
-            insight: config.valence === 'positive'
-              ? `${config.emoji} High ${config.label.toLowerCase()} correlates with ${Math.abs(moodDelta)}% higher mood`
-              : `${config.emoji} High ${config.label.toLowerCase()} correlates with ${Math.abs(moodDelta)}% lower mood`,
-            moodDelta,
-            direction,
-            strength,
-            sampleSize: stats.high.moods.length,
-            emotionKey,
-            intensity: 'high',
-            recommendation: config.valence === 'negative'
-              ? `Consider strategies to manage ${config.label.toLowerCase()}`
-              : `${config.label} seems to boost your mood - cultivate it`,
-            entryIds: stats.high.entryIds
-          });
-        }
-      }
-    }
+    const { insufficient, moodDelta } = computeComplementBaseline({
+      presentMoods: highGroup.map(e => e.mood01),
+      absentMoods: absentGroup.map(e => e.mood01)
+    });
+    if (insufficient) continue;
+    // Higher threshold for emotion insights (preserved from pre-R4 tuning)
+    if (Math.abs(moodDelta) < THRESHOLDS.MIN_MOOD_DELTA + 5) continue;
+
+    const strength = determineStrength(moodDelta, highGroup.length);
+    if (strength === 'weak') continue;
+
+    const direction = moodDelta > 0 ? 'positive' : 'negative';
+
+    insights.push({
+      id: generateInsightId(CATEGORIES.THEMES, `emotion_high_${emotionKey}`),
+      category: CATEGORIES.THEMES,
+      insight: config.valence === 'positive'
+        ? `${config.emoji} High ${config.label.toLowerCase()} correlates with ${Math.abs(moodDelta)}% higher mood`
+        : `${config.emoji} High ${config.label.toLowerCase()} correlates with ${Math.abs(moodDelta)}% lower mood`,
+      moodDelta,
+      direction,
+      strength,
+      sampleSize: highGroup.length,
+      uniqueDayCount: presentDayCount,
+      emotionKey,
+      intensity: 'high',
+      recommendation: config.valence === 'negative'
+        ? `Consider strategies to manage ${config.label.toLowerCase()}`
+        : `${config.label} tends to appear alongside a better mood for you`,
+      entryIds: highGroup.map(e => e.id).filter(Boolean)
+    });
   }
 
   // ===== COGNITIVE PATTERN CORRELATIONS =====
-  const cognitivePatternStats = {};
+  // Only entries with a KNOWN cognitivePatterns array participate.
+  const knownPatternEntries = entriesWithMood.filter(e => !isUnknown(e.cognitivePatterns));
+  const presentByPattern = {}; // patternType -> entries carrying this pattern
 
-  for (const entry of entriesWithMood) {
-    const patterns = entry.analysis?.cognitive_patterns || [];
-
-    for (const pattern of patterns) {
-      const patternType = pattern.type?.toLowerCase();
-      if (!patternType) continue;
-
-      if (!cognitivePatternStats[patternType]) {
-        cognitivePatternStats[patternType] = { moods: [], entryIds: [] };
-      }
-
-      cognitivePatternStats[patternType].moods.push(entry.analysis.mood_score);
-      const entryId = entry.id || entry.entryId;
-      if (entryId) cognitivePatternStats[patternType].entryIds.push(entryId);
+  for (const entry of knownPatternEntries) {
+    const seenTypes = new Set();
+    for (const pattern of entry.cognitivePatterns) {
+      const patternType = pattern?.type?.toLowerCase();
+      if (!patternType || seenTypes.has(patternType)) continue;
+      seenTypes.add(patternType);
+      if (!presentByPattern[patternType]) presentByPattern[patternType] = [];
+      presentByPattern[patternType].push(entry);
     }
   }
 
-  // Generate insights for cognitive patterns
-  for (const [patternType, stats] of Object.entries(cognitivePatternStats)) {
-    if (stats.moods.length < THRESHOLDS.MIN_MENTIONS) continue;
+  for (const [patternType, presentGroup] of Object.entries(presentByPattern)) {
+    if (presentGroup.length < THRESHOLDS.MIN_MENTIONS) continue;
 
-    const patternMood = average(stats.moods);
-    const moodDelta = calculateMoodDelta(patternMood, baselineMood);
+    const presentDayCount = countUniqueDays(presentGroup);
+    if (presentDayCount < THRESHOLDS.MIN_UNIQUE_DAYS) continue;
 
+    const presentSet = new Set(presentGroup);
+    const absentGroup = knownPatternEntries.filter(e => !presentSet.has(e));
+
+    const { insufficient, moodDelta } = computeComplementBaseline({
+      presentMoods: presentGroup.map(e => e.mood01),
+      absentMoods: absentGroup.map(e => e.mood01)
+    });
+    if (insufficient) continue;
     if (Math.abs(moodDelta) < THRESHOLDS.MIN_MOOD_DELTA) continue;
 
-    const strength = determineStrength(moodDelta, stats.moods.length);
+    const strength = determineStrength(moodDelta, presentGroup.length);
     if (strength === 'weak') continue;
 
     const direction = moodDelta > 0 ? 'positive' : 'negative';
@@ -290,12 +313,13 @@ export const computeThemesCorrelations = (entries) => {
       moodDelta,
       direction,
       strength,
-      sampleSize: stats.moods.length,
+      sampleSize: presentGroup.length,
+      uniqueDayCount: presentDayCount,
       cognitivePattern: patternType,
       recommendation: moodDelta < 0
         ? 'This thinking pattern may be worth exploring with a therapist'
         : null,
-      entryIds: stats.entryIds
+      entryIds: presentGroup.map(e => e.id).filter(Boolean)
     });
   }
 

@@ -2,7 +2,27 @@
  * Extended Health-Mood Correlations
  *
  * Additional health metrics beyond the basic healthCorrelations.js
- * Includes: strain, deep sleep, REM sleep, calories
+ * Includes: strain, deep sleep, REM sleep, calories, exercise minutes.
+ *
+ * Consumes ONLY adapter-normalized entries (see
+ * `src/services/insights/entryAdapter.js`) — reads `entry.healthSignals`
+ * (built via the REAL `extractHealthSignals`, `src/services/health/
+ * healthFormatter.js`, extended with the extra fields this file needs)
+ * rather than reaching into raw `healthContext.*` paths itself, so this
+ * file can never drift out of sync with the real object shape again — the
+ * adapter is the one place that shape lives.
+ *
+ * Baseline: each metric splits entries into a high-value group and a
+ * low-value group with a deliberate excluded middle band (e.g. strain
+ * >=15 vs <10) — a non-overlapping complement by construction. Both groups
+ * are checked for emptiness BEFORE averaging (`healthCorrelations`-class
+ * `average([])`->`0` guard) via the shared `computeComplementBaseline`.
+ *
+ * Day-grounding: the reported (high-value) group must appear on at least
+ * `THRESHOLDS.MIN_UNIQUE_DAYS` distinct calendar days.
+ *
+ * Wording: association only ("correlates with"), never causal claims about
+ * what "helps"/"boosts" the user's mood.
  *
  * Example insights:
  * - "High strain days (15+) correlate with 12% lower mood"
@@ -11,10 +31,10 @@
  */
 
 import {
-  average,
-  calculateMoodDelta,
   determineStrength,
-  generateInsightId
+  generateInsightId,
+  countUniqueDays,
+  computeComplementBaseline
 } from '../utils/statisticalHelpers';
 import {
   THRESHOLDS,
@@ -22,56 +42,8 @@ import {
 } from '../utils/thresholds';
 
 /**
- * Extract extended health signals from healthContext
- * @param {Object} healthContext - Entry health context
- * @returns {Object} Extracted signals
- */
-const extractExtendedHealthSignals = (healthContext) => {
-  if (!healthContext) return {};
-
-  const signals = {};
-
-  // Strain (Whoop - 0-21 scale)
-  if (healthContext.strain?.score != null) {
-    signals.strainScore = healthContext.strain.score;
-  }
-
-  // Deep sleep hours
-  if (healthContext.sleep?.stages?.deep != null) {
-    signals.deepSleepHours = healthContext.sleep.stages.deep;
-  }
-
-  // REM sleep hours
-  if (healthContext.sleep?.stages?.rem != null) {
-    signals.remSleepHours = healthContext.sleep.stages.rem;
-  }
-
-  // Active calories
-  if (healthContext.activity?.activeCalories != null) {
-    signals.activeCalories = healthContext.activity.activeCalories;
-  }
-
-  // Total calories
-  if (healthContext.activity?.totalCalories != null) {
-    signals.totalCalories = healthContext.activity.totalCalories;
-  }
-
-  // Exercise minutes
-  if (healthContext.activity?.totalExerciseMinutes != null) {
-    signals.exerciseMinutes = healthContext.activity.totalExerciseMinutes;
-  }
-
-  // Distance (if available)
-  if (healthContext.activity?.distance != null) {
-    signals.distance = healthContext.activity.distance;
-  }
-
-  return signals;
-};
-
-/**
  * Compute extended health-mood correlations
- * @param {Array} entries - Journal entries with mood scores
+ * @param {Array} entries - Adapter-normalized entries (entryAdapter.js)
  * @returns {Array} Extended health insight objects
  */
 export const computeExtendedHealthCorrelations = (entries) => {
@@ -79,184 +51,123 @@ export const computeExtendedHealthCorrelations = (entries) => {
     return [];
   }
 
-  // Filter entries with mood scores and health context
-  const entriesWithData = entries
-    .filter(e => e.analysis?.mood_score != null && e.healthContext)
-    .map(e => ({
-      mood: e.analysis.mood_score,
-      entryId: e.id || e.entryId,
-      ...extractExtendedHealthSignals(e.healthContext)
-    }));
+  // Filter entries with a known mood01 and health signals
+  const entriesWithData = entries.filter(e => e.mood01 != null && e.healthSignals);
 
   if (entriesWithData.length < THRESHOLDS.MIN_ENTRIES) {
     return [];
   }
 
-  // Calculate baseline mood
-  const allMoods = entriesWithData.map(e => e.mood);
-  const baselineMood = average(allMoods);
-
   const insights = [];
 
+  /**
+   * Shared logic for a threshold-split metric: high group (>= highCutoff)
+   * vs low group (< lowCutoff), excluded middle band, complement baseline
+   * with the empty-group guard, and day-grounding on the high group.
+   */
+  const emitThresholdInsight = ({
+    metricField, highCutoff, lowCutoff, categoryId, insightIdKey,
+    buildInsightText, buildRecommendation, entryIdsFromHighGroup = true
+  }) => {
+    const withMetric = entriesWithData.filter(e => e.healthSignals[metricField] != null);
+    if (withMetric.length < THRESHOLDS.MIN_DATA_POINTS) return;
+
+    const highGroup = withMetric.filter(e => e.healthSignals[metricField] >= highCutoff);
+    const lowGroup = withMetric.filter(e => e.healthSignals[metricField] < lowCutoff);
+
+    if (highGroup.length < 2 || lowGroup.length < 2) return;
+
+    const highDayCount = countUniqueDays(highGroup);
+    if (highDayCount < THRESHOLDS.MIN_UNIQUE_DAYS) return;
+
+    const { insufficient, presentMood: highMood, absentMood: lowMood, moodDelta } = computeComplementBaseline({
+      presentMoods: highGroup.map(e => e.mood01),
+      absentMoods: lowGroup.map(e => e.mood01)
+    });
+    if (insufficient) return;
+    if (Math.abs(moodDelta) < THRESHOLDS.MIN_MOOD_DELTA) return;
+
+    const strength = determineStrength(moodDelta, withMetric.length);
+    if (strength === 'weak') return;
+
+    const better = highMood > lowMood ? 'high' : 'low';
+    const citedGroup = entryIdsFromHighGroup
+      ? (better === 'high' ? highGroup : lowGroup)
+      : highGroup;
+
+    insights.push({
+      id: generateInsightId(categoryId, insightIdKey),
+      category: categoryId,
+      insight: buildInsightText({ better, moodDelta: Math.abs(moodDelta) }),
+      moodDelta: better === 'high' ? moodDelta : -moodDelta,
+      direction: better === 'high' ? 'positive' : 'negative',
+      strength,
+      sampleSize: withMetric.length,
+      uniqueDayCount: highDayCount,
+      recommendation: buildRecommendation ? buildRecommendation({ better }) : null,
+      entryIds: citedGroup.map(e => e.id).filter(Boolean)
+    });
+  };
+
   // ===== STRAIN-MOOD CORRELATION (Whoop) =====
-  const strainEntries = entriesWithData.filter(e => e.strainScore != null);
-  if (strainEntries.length >= THRESHOLDS.MIN_DATA_POINTS) {
-    const highStrainEntries = strainEntries.filter(e => e.strainScore >= 15);
-    const lowStrainEntries = strainEntries.filter(e => e.strainScore < 10);
-
-    if (highStrainEntries.length >= 2 && lowStrainEntries.length >= 2) {
-      const highStrainMood = average(highStrainEntries.map(e => e.mood));
-      const lowStrainMood = average(lowStrainEntries.map(e => e.mood));
-      const moodDelta = calculateMoodDelta(highStrainMood, lowStrainMood);
-
-      if (Math.abs(moodDelta) >= THRESHOLDS.MIN_MOOD_DELTA) {
-        const strength = determineStrength(moodDelta, strainEntries.length);
-
-        if (strength !== 'weak') {
-          const better = highStrainMood > lowStrainMood ? 'high' : 'low';
-          insights.push({
-            id: generateInsightId(CATEGORIES.HEALTH, 'strain'),
-            category: CATEGORIES.HEALTH,
-            insight: better === 'high'
-              ? `🔥 High strain days (15+) correlate with ${Math.abs(moodDelta)}% better mood`
-              : `🔥 Lower strain days (<10) correlate with ${Math.abs(moodDelta)}% better mood`,
-            moodDelta: better === 'high' ? moodDelta : -moodDelta,
-            direction: better === 'high' ? 'positive' : 'negative',
-            strength,
-            sampleSize: strainEntries.length,
-            recommendation: better === 'low'
-              ? 'Consider moderating physical exertion when feeling stressed'
-              : 'Physical challenge seems to boost your mood',
-            entryIds: (better === 'high' ? highStrainEntries : lowStrainEntries).map(e => e.entryId).filter(Boolean)
-          });
-        }
-      }
-    }
-  }
+  emitThresholdInsight({
+    metricField: 'strainScore',
+    highCutoff: 15,
+    lowCutoff: 10,
+    categoryId: CATEGORIES.HEALTH,
+    insightIdKey: 'strain',
+    buildInsightText: ({ better, moodDelta }) => better === 'high'
+      ? `🔥 High strain days (15+) correlate with a ${moodDelta}% better mood`
+      : `🔥 Lower strain days (<10) correlate with a ${moodDelta}% better mood`,
+    buildRecommendation: ({ better }) => better === 'high'
+      ? 'Physical challenge tends to appear alongside a better mood for you'
+      : 'Consider moderating physical exertion when feeling stressed'
+  });
 
   // ===== DEEP SLEEP-MOOD CORRELATION =====
-  const deepSleepEntries = entriesWithData.filter(e => e.deepSleepHours != null);
-  if (deepSleepEntries.length >= THRESHOLDS.MIN_DATA_POINTS) {
-    const goodDeepSleep = deepSleepEntries.filter(e => e.deepSleepHours >= 1.5);
-    const poorDeepSleep = deepSleepEntries.filter(e => e.deepSleepHours < 1);
-
-    if (goodDeepSleep.length >= 2 && poorDeepSleep.length >= 2) {
-      const goodMood = average(goodDeepSleep.map(e => e.mood));
-      const poorMood = average(poorDeepSleep.map(e => e.mood));
-      const moodDelta = calculateMoodDelta(goodMood, poorMood);
-
-      if (Math.abs(moodDelta) >= THRESHOLDS.MIN_MOOD_DELTA) {
-        const strength = determineStrength(moodDelta, deepSleepEntries.length);
-
-        if (strength !== 'weak') {
-          insights.push({
-            id: generateInsightId(CATEGORIES.SLEEP_DETAIL, 'deep_sleep'),
-            category: CATEGORIES.SLEEP_DETAIL,
-            insight: `🌙 Good deep sleep (1.5h+) correlates with ${Math.abs(moodDelta)}% better mood`,
-            moodDelta,
-            direction: 'positive',
-            strength,
-            sampleSize: deepSleepEntries.length,
-            recommendation: 'Prioritize sleep hygiene for better deep sleep',
-            entryIds: goodDeepSleep.map(e => e.entryId).filter(Boolean)
-          });
-        }
-      }
-    }
-  }
+  emitThresholdInsight({
+    metricField: 'deepSleepHours',
+    highCutoff: 1.5,
+    lowCutoff: 1,
+    categoryId: CATEGORIES.SLEEP_DETAIL,
+    insightIdKey: 'deep_sleep',
+    buildInsightText: ({ moodDelta }) => `🌙 Good deep sleep (1.5h+) correlates with a ${moodDelta}% better mood`,
+    buildRecommendation: () => 'Prioritize sleep hygiene for better deep sleep',
+    entryIdsFromHighGroup: true
+  });
 
   // ===== REM SLEEP-MOOD CORRELATION =====
-  const remSleepEntries = entriesWithData.filter(e => e.remSleepHours != null);
-  if (remSleepEntries.length >= THRESHOLDS.MIN_DATA_POINTS) {
-    const goodREM = remSleepEntries.filter(e => e.remSleepHours >= 1.5);
-    const poorREM = remSleepEntries.filter(e => e.remSleepHours < 1);
-
-    if (goodREM.length >= 2 && poorREM.length >= 2) {
-      const goodMood = average(goodREM.map(e => e.mood));
-      const poorMood = average(poorREM.map(e => e.mood));
-      const moodDelta = calculateMoodDelta(goodMood, poorMood);
-
-      if (Math.abs(moodDelta) >= THRESHOLDS.MIN_MOOD_DELTA) {
-        const strength = determineStrength(moodDelta, remSleepEntries.length);
-
-        if (strength !== 'weak') {
-          insights.push({
-            id: generateInsightId(CATEGORIES.SLEEP_DETAIL, 'rem_sleep'),
-            category: CATEGORIES.SLEEP_DETAIL,
-            insight: `💤 Good REM sleep (1.5h+) correlates with ${Math.abs(moodDelta)}% better mood`,
-            moodDelta,
-            direction: 'positive',
-            strength,
-            sampleSize: remSleepEntries.length,
-            recommendation: 'REM sleep helps emotional processing - maintain consistent sleep schedule',
-            entryIds: goodREM.map(e => e.entryId).filter(Boolean)
-          });
-        }
-      }
-    }
-  }
+  emitThresholdInsight({
+    metricField: 'remSleepHours',
+    highCutoff: 1.5,
+    lowCutoff: 1,
+    categoryId: CATEGORIES.SLEEP_DETAIL,
+    insightIdKey: 'rem_sleep',
+    buildInsightText: ({ moodDelta }) => `💤 Good REM sleep (1.5h+) correlates with a ${moodDelta}% better mood`,
+    buildRecommendation: () => 'REM sleep is associated with emotional processing - maintain a consistent sleep schedule'
+  });
 
   // ===== ACTIVE CALORIES-MOOD CORRELATION =====
-  const calorieEntries = entriesWithData.filter(e => e.activeCalories != null);
-  if (calorieEntries.length >= THRESHOLDS.MIN_DATA_POINTS) {
-    const activeCalorieEntries = calorieEntries.filter(e => e.activeCalories >= 500);
-    const lowCalorieEntries = calorieEntries.filter(e => e.activeCalories < 200);
-
-    if (activeCalorieEntries.length >= 2 && lowCalorieEntries.length >= 2) {
-      const activeMood = average(activeCalorieEntries.map(e => e.mood));
-      const lowMood = average(lowCalorieEntries.map(e => e.mood));
-      const moodDelta = calculateMoodDelta(activeMood, lowMood);
-
-      if (Math.abs(moodDelta) >= THRESHOLDS.MIN_MOOD_DELTA) {
-        const strength = determineStrength(moodDelta, calorieEntries.length);
-
-        if (strength !== 'weak') {
-          insights.push({
-            id: generateInsightId(CATEGORIES.HEALTH, 'active_calories'),
-            category: CATEGORIES.HEALTH,
-            insight: `🔥 Active days (500+ calories burned) show ${Math.abs(moodDelta)}% better mood`,
-            moodDelta,
-            direction: 'positive',
-            strength,
-            sampleSize: calorieEntries.length,
-            recommendation: 'Try to stay physically active throughout the day',
-            entryIds: activeCalorieEntries.map(e => e.entryId).filter(Boolean)
-          });
-        }
-      }
-    }
-  }
+  emitThresholdInsight({
+    metricField: 'activeCalories',
+    highCutoff: 500,
+    lowCutoff: 200,
+    categoryId: CATEGORIES.HEALTH,
+    insightIdKey: 'active_calories',
+    buildInsightText: ({ moodDelta }) => `🔥 Active days (500+ calories burned) show a ${moodDelta}% better mood`,
+    buildRecommendation: () => 'Try to stay physically active throughout the day'
+  });
 
   // ===== EXERCISE MINUTES-MOOD CORRELATION =====
-  const exerciseEntries = entriesWithData.filter(e => e.exerciseMinutes != null);
-  if (exerciseEntries.length >= THRESHOLDS.MIN_DATA_POINTS) {
-    const activeExercise = exerciseEntries.filter(e => e.exerciseMinutes >= 30);
-    const lowExercise = exerciseEntries.filter(e => e.exerciseMinutes < 10);
-
-    if (activeExercise.length >= 2 && lowExercise.length >= 2) {
-      const activeMood = average(activeExercise.map(e => e.mood));
-      const lowMood = average(lowExercise.map(e => e.mood));
-      const moodDelta = calculateMoodDelta(activeMood, lowMood);
-
-      if (Math.abs(moodDelta) >= THRESHOLDS.MIN_MOOD_DELTA) {
-        const strength = determineStrength(moodDelta, exerciseEntries.length);
-
-        if (strength !== 'weak') {
-          insights.push({
-            id: generateInsightId(CATEGORIES.HEALTH, 'exercise_minutes'),
-            category: CATEGORIES.HEALTH,
-            insight: `⏱️ 30+ minutes of exercise correlates with ${Math.abs(moodDelta)}% better mood`,
-            moodDelta,
-            direction: 'positive',
-            strength,
-            sampleSize: exerciseEntries.length,
-            recommendation: 'Aim for at least 30 minutes of exercise daily',
-            entryIds: activeExercise.map(e => e.entryId).filter(Boolean)
-          });
-        }
-      }
-    }
-  }
+  emitThresholdInsight({
+    metricField: 'exerciseMinutes',
+    highCutoff: 30,
+    lowCutoff: 10,
+    categoryId: CATEGORIES.HEALTH,
+    insightIdKey: 'exercise_minutes',
+    buildInsightText: ({ moodDelta }) => `⏱️ 30+ minutes of exercise correlates with a ${moodDelta}% better mood`,
+    buildRecommendation: () => 'Aim for at least 30 minutes of exercise daily'
+  });
 
   // Sort by absolute mood delta
   insights.sort((a, b) => Math.abs(b.moodDelta) - Math.abs(a.moodDelta));

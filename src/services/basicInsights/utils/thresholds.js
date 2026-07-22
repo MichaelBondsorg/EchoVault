@@ -27,7 +27,15 @@ export const THRESHOLDS = {
   MAX_INSIGHTS: 10,
 
   // Maximum insights per category
-  MAX_PER_CATEGORY: 3
+  MAX_PER_CATEGORY: 3,
+
+  // R4 day-grounding floor (DR finding 4): a factor must appear on at
+  // least this many DISTINCT calendar days (adapter dateKey), not merely
+  // this many entries, before an insight is emitted for it — several
+  // journal entries the same afternoon should not read as a pattern.
+  // Applied ALONGSIDE (not instead of) MIN_DATA_POINTS/MIN_MENTIONS.
+  // Review-driven floor, revisable as real usage data comes in.
+  MIN_UNIQUE_DAYS: 3
 };
 
 /**
