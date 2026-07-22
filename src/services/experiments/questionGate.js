@@ -20,10 +20,28 @@
  *     trips both a crisis and a medical pattern is a crisis decline, full
  *     stop -- the crisis surface (safety plan) is what matters, not a
  *     medical disclaimer.
- *   - Mapping an 'ok' question to a template (or discovering it maps to
- *     none, i.e. "unmappable") is Task 3/6's `matchQuestionToTemplate`
- *     concern, NOT this module's. `screenQuestion` never imports the
- *     template catalog and never returns 'unmappable'.
+ *   - The plan doc and task-4-brief.md both describe a 4-verdict union
+ *     (ok|crisis|medical|unmappable). This module's dispatch instructions
+ *     explicitly narrowed that: mapping an 'ok' question to a template (or
+ *     discovering it maps to none, i.e. "unmappable") is Task 3/6's
+ *     `matchQuestionToTemplate` concern, NOT this module's.
+ *     `screenQuestion` never imports the template catalog and never
+ *     returns 'unmappable' -- Task 6 combines this function's 3-verdict
+ *     result with `matchQuestionToTemplate`'s null/non-null result to get
+ *     the full 4-way decline surface.
+ *
+ * KNOWN LIMITATIONS (deliberately not pattern-matched, to avoid over-block
+ * regressions on ambiguous everyday phrasing that reads as much like
+ * benign journaling as like a medical question):
+ *   - "when I don't take anything" (no medication noun/verb pair to anchor
+ *     on -- "anything" is too generic to scope a pattern around without
+ *     matching a huge swath of unrelated sentences).
+ *   - "is my therapist making me worse" (bare "therapist" is common,
+ *     legitimate journaling vocabulary on its own; only "therapy" combined
+ *     with a should-I/vs-medication frame is currently in scope).
+ *   Both fall through to 'ok' today. If real-world usage shows these are a
+ *   meaningful gap, add narrowly-scoped patterns + fixtures rather than
+ *   broadening the existing ones.
  */
 
 import { checkCrisisKeywords, checkWarningIndicators } from '../safety/index.js';
@@ -54,6 +72,28 @@ const CONDITION_WORDS_SRC =
   'schizophrenia|mania|manic|panic(?:\\s+disorder)?|insomnia|' +
   'an?\\s+eating\\s+disorder|a\\s+personality\\s+disorder';
 
+// Dose-change verbs and dose-referring nouns, combined below via
+// co-occurrence patterns (see "medication decision-verbs" section). Kept as
+// named fragments so the verb list and noun list are each defined once and
+// reused in both matching directions (verb-then-noun, noun-then-verb).
+//
+// Each verb alternative spells out only its real inflections (no bare
+// "reduc"/"increas"/"rais" stems) so the group never matches a non-word
+// fragment.
+const DOSE_CHANGE_VERBS_SRC =
+  '(?:cut(?:ting)?|halv(?:e|es|ing|ed)|lower(?:s|ing|ed)?|reduc(?:e|es|ing|ed)|' +
+  'increas(?:e|es|ing|ed)|upping|rais(?:e|es|ing|ed))';
+
+// "medicine" appears here (dose-noun co-occurrence path) but deliberately
+// NOT in the unscoped drug-class list below -- bare "medicine" alone
+// collides with "medicine-ball" (a common workout term: word-boundary
+// regex treats the hyphen as a boundary, so `\bmedicine\b` matches inside
+// "medicine-ball" too). Requiring a nearby dose-change verb keeps that
+// benign case intact while still catching "reducing how much medicine I
+// take" (see questionGate.test.js's DOSE_CHANGE_MEDICAL fixtures and the
+// "medicine-ball" benign fixture that pins this exact boundary).
+const DOSE_NOUNS_SRC = '(?:doses?|dosage|pills?|medications?|medicine|meds|prescriptions?)';
+
 const MEDICAL_PATTERNS = [
   // --- medication / dosage -------------------------------------------------
   // Drug classes and generic prescription/medication language.
@@ -61,8 +101,11 @@ const MEDICAL_PATTERNS = [
   // (unscoped) -- specific enough in normal usage that the over-block risk
   // is low, and a bare mention of one's medication is exactly the kind of
   // content this tier exists to catch (e.g. "does skipping my meds affect
-  // my mood?").
-  /\b(ssris?|snris?|maois?|antidepressants?|anti-anxiety|antianxiety|benzos?|benzodiazepines?|antipsychotics?|mood stabilizers?|stimulant medication|prescriptions?|medications?|meds)\b/i,
+  // my mood?"). `anti[\s-]?depressants?` / `anti[\s-]?anxiety` cover the
+  // spaced, hyphenated, and closed-up spellings uniformly ("anti
+  // depressants", "anti-depressant", "antidepressants") instead of
+  // enumerating each variant separately.
+  /\b(ssris?|snris?|maois?|anti[\s-]?depressants?|anti[\s-]?anxiety|benzos?|benzodiazepines?|antipsychotics?|mood stabilizers?|stimulant medication|prescriptions?|medications?|meds)\b/i,
 
   // Common psychotropic brand/generic names. Specific proper nouns rarely
   // appear in non-medical journaling contexts.
@@ -87,6 +130,17 @@ const MEDICAL_PATTERNS = [
   /\btaper(ing)?\b/i,
   /\bwean(ing)?\s+off\b/i,
   /\bgo(ing)?\s+off\b/i,
+
+  // Dose-CHANGE verbs (cut/halve/lower/reduce/increase/up/raise) are, on
+  // their own, ordinary general-purpose words ("increasing my exercise",
+  // "cutting sugar from my diet", "lowering my screen time") -- unlike
+  // "taper"/"wean off" above, they are NOT safe to leave unscoped. They
+  // only signal a medication-decision question in combination with a
+  // nearby dose-referring noun, checked in both word orders with a
+  // short connector gap ("cutting my dose", "halved my pills", "lower
+  // my dose", "reducing how much medicine I take").
+  new RegExp(`\\b${DOSE_CHANGE_VERBS_SRC}\\b.{0,20}\\b${DOSE_NOUNS_SRC}\\b`, 'i'),
+  new RegExp(`\\b${DOSE_NOUNS_SRC}\\b.{0,20}\\b${DOSE_CHANGE_VERBS_SRC}\\b`, 'i'),
 
   // --- diagnosis-seeking ----------------------------------------------------
   new RegExp(`\\bdo\\s+i\\s+have\\s+(?:${CONDITION_WORDS_SRC})\\b`, 'i'),

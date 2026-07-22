@@ -35,6 +35,12 @@ const OBVIOUS_MEDICAL = [
   'Can you diagnose me with ADHD based on my entries?',
   'Should I switch from therapy to medication?',
   'How many milligrams of lithium should I take?',
+  // masked-verb path: caught via the drug-name pattern (Xanax), pins that
+  // a dose-change verb next to a named drug still resolves to medical.
+  'Cutting back on my Xanax -- mood pattern?',
+  // spaced misspelling of "antidepressants" -- anti[\s-]?depressants?
+  // must cover the space-separated form, not just the closed-up one.
+  'Is it time to talk to my doctor about anti depressants?',
 ];
 
 // oblique-medical (>=8): euphemisms and indirect phrasing that still needs
@@ -49,6 +55,22 @@ const OBLIQUE_MEDICAL = [
   'Am I manic or just having a good week?',
   'Is journaling working as well as my benzo does?',
   'Would this count as an eating disorder if I tracked it?',
+];
+
+// dose-change-verb fixtures (CRITICAL fix, review round 2): natural
+// phrasings that change a dose/pill/medicine amount without naming a
+// specific drug or using the already-covered "stop/start taking",
+// "taper", "wean/go off" decision-verbs. Each pairs a change verb
+// (cut/halve/lower/reduce/increase/up/raise) with a bare dose-referring
+// noun (dose/pills/medicine) in either word order.
+const DOSE_CHANGE_MEDICAL = [
+  // the exact reviewer repro for the CRITICAL under-block.
+  'does cutting my dose improve my mood?',
+  'since halving the white pills',
+  'halved my pills this week, mood better?',
+  'should I lower my dose?',
+  'increasing my dose lately, does that track with mood?',
+  'reducing how much medicine I take, mood impact?',
 ];
 
 // crisis (>=6): drawn to trip the REAL imported checkers. Each one is
@@ -90,6 +112,15 @@ const BENIGN_SCARY_WORDS = [
   'I treated myself to a nap today -- did that help my mood?',
   'This diet is torture, does it affect my energy?',
   "I'm drowning in email, does that correlate with poor sleep?",
+  // Pins the "medicine" boundary decision (review round 2, Important 1):
+  // bare "medicine" is intentionally NOT in the unscoped drug-class list
+  // because it collides with "medicine-ball" -- this must keep passing.
+  'I did medicine-ball workouts today -- does that affect my mood?',
+  // Pins that dose-change verbs alone (no dose/pill/medicine noun nearby)
+  // do not trigger the new co-occurrence patterns.
+  "I'm increasing my exercise minutes this week -- does that affect my mood?",
+  'Lowering my screen time before bed, does that help my mood?',
+  'Cutting sugar out of my diet, does that affect my mood?',
 ];
 
 // canonical-template questions (>=8): natural phrasings of every v1 template
@@ -132,6 +163,7 @@ describe('fixture sanity checks', () => {
     expect(CRISIS.length).toBeGreaterThanOrEqual(6);
     expect(BENIGN_SCARY_WORDS.length).toBeGreaterThanOrEqual(8);
     expect(CANONICAL_TEMPLATE_QUESTIONS.length).toBeGreaterThanOrEqual(8);
+    expect(DOSE_CHANGE_MEDICAL.length).toBeGreaterThanOrEqual(6);
   });
 });
 
@@ -150,6 +182,14 @@ describe('screenQuestion verdicts', () => {
 
   describe('oblique-medical fixtures decline as medical', () => {
     OBLIQUE_MEDICAL.forEach((text) => {
+      it(`declines: "${text}"`, () => {
+        expect(screenQuestion(text)).toEqual({ verdict: 'medical' });
+      });
+    });
+  });
+
+  describe('dose-change-verb fixtures decline as medical (review round 2 fix)', () => {
+    DOSE_CHANGE_MEDICAL.forEach((text) => {
       it(`declines: "${text}"`, () => {
         expect(screenQuestion(text)).toEqual({ verdict: 'medical' });
       });
