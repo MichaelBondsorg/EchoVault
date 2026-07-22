@@ -23,11 +23,13 @@ const writeBlocks = vi.fn();
 function reflectionsPath(uid) {
   return `artifacts/echo-vault-v5-fresh/users/${uid}/reflections`;
 }
+let mockBlockIdCounter = 0;
 vi.mock('../runRecipe', () => ({
   runQuestions: (...a) => runQuestions(...a),
   loadReflection: (...a) => loadReflection(...a),
   writeBlocks: (...a) => writeBlocks(...a),
   reflectionsPath: (...a) => reflectionsPath(...a),
+  newBlockId: () => `block_test_${++mockBlockIdCounter}`,
 }));
 
 const loadJsPDF = vi.fn();

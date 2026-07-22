@@ -72,7 +72,7 @@ function nowIso() {
   return new Date().toISOString();
 }
 
-function newBlockId() {
+export function newBlockId() {
   try {
     if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
       return crypto.randomUUID();

@@ -50,9 +50,9 @@
  * Export (`composeSessionPrepPdf`) is a separate, SAFETY-CRITICAL concern —
  * see that function's own doc comment.
  */
-import { runQuestions, loadReflection, writeBlocks, reflectionsPath } from './runRecipe';
+import { runQuestions, loadReflection, writeBlocks, reflectionsPath, newBlockId } from './runRecipe';
 import { STARTER_RECIPES } from './starterRecipes';
-import { computeMissingness } from '../insights/receipts';
+import { computeMissingness, toISOTimestamp } from '../insights/receipts';
 import { collection, addDoc } from '../../config/firebase';
 import { loadJsPDF } from '../../utils/pdf';
 
@@ -80,17 +80,6 @@ const SECTIONS = [
   { key: 'patterns', title: 'Patterns' },
   { key: 'open_questions', title: 'Open questions' },
 ];
-
-function newBlockId() {
-  try {
-    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-      return crypto.randomUUID();
-    }
-  } catch {
-    /* fall through */
-  }
-  return `block_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
-}
 
 function toDate(value) {
   if (!value) return null;
@@ -274,9 +263,13 @@ function formatDateLabel(iso) {
  *   - any content (date, excerpt, text) belonging to an entry that IS
  *     `safety_flagged` or `has_warning_indicators`,
  *   - any content for a source entry id that isn't present in
- *     `entriesById` at all (the caller is expected to omit
- *     already-excluded entries from that map; a missing lookup is treated
- *     exactly like an unsafe one — silently dropped, never a crash), or
+ *     `entriesById` at all (a missing lookup is treated exactly like an
+ *     unsafe one — silently dropped, never a crash). Excluded-source
+ *     entries never reach a block's `sources` in the first place:
+ *     `runQuestions` filters them out of the retrieval pool at
+ *     generation/regeneration time, so this composer never sees them.
+ *     The `safety_flagged`/`has_warning_indicators` re-check below is
+ *     defense-in-depth on top of that, not the primary gate. Or —
  *   - anything from a block that isn't in `brief.blocks` (removing a block
  *     before export removes its citations along with it — there is no
  *     separate "all sources ever cited" list this function could fall
@@ -343,7 +336,13 @@ export async function composeSessionPrepPdf(brief, entriesById = {}) {
     const safeDates = (block.sources || [])
       .map((id) => entriesById?.[id])
       .filter((entry) => entry && !entry.safety_flagged && !entry.has_warning_indicators)
-      .map((entry) => formatDateLabel(entry.createdAt || entry.effectiveDate))
+      .map((entry) =>
+        formatDateLabel(
+          toISOTimestamp(
+            entry.createdAt ?? entry.date ?? entry.timestamp ?? entry.entryDate ?? entry.effectiveDate ?? null,
+          ),
+        ),
+      )
       .filter(Boolean);
     if (safeDates.length > 0) {
       writeWrapped(`Sources: ${safeDates.join(', ')}`, { fontSize: 8, italic: true, lineHeight: 6 });
