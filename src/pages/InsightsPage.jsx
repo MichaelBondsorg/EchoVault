@@ -3,7 +3,8 @@ import {
   Brain, Sparkles, TrendingUp, AlertTriangle, Lightbulb, X,
   ChevronDown, ChevronUp, RefreshCw, Loader2, CheckCircle2,
   Activity, FileText, Target, Sun, Moon, Heart, Thermometer,
-  CloudRain, Footprints, Zap, Download, ThumbsUp, ThumbsDown, Flag, Info
+  CloudRain, Footprints, Zap, Download, ThumbsUp, ThumbsDown, Flag, Info,
+  HelpCircle
 } from 'lucide-react';
 import { reportInsight } from '../services/moderation/reportInsight';
 import { recordInsightEngagement } from '../services/analytics/insightEngagement';
@@ -13,6 +14,7 @@ import { useState, useEffect, useMemo, useCallback } from 'react';
 import { recordFeedbackAndLearn } from '../services/basicInsights/feedbackLearning';
 import { getFlag } from '../config/flags';
 import ReceiptSheet from '../components/insights/ReceiptSheet';
+import { ownerStorageKey } from '../services/storage/ownerScopedStorage';
 import {
   computeHealthMoodCorrelations,
   getTopHealthInsights,
@@ -38,6 +40,37 @@ import { getMoodTrendDays, getMoodMomentum, getEntryFillMetric } from '../utils/
  * - Narrative arcs (life story patterns)
  * - Counterfactuals (what-if analysis)
  */
+
+// First-use tip: "Why am I seeing this?" (R2 Task 11 follow-up). InsightsPage
+// is the one place both the Nexus and basic-insight receipt triggers render
+// (see InsightsPage.receiptTrigger.test.jsx), so this is the single home for
+// the tip — Gentle Revisit and Experiments already have their own onboarding
+// explainers elsewhere; this just points at an existing affordance, once.
+// Owner-scoped (not the plain `featureName.tipsDismissed` key CLAUDE.md's
+// page-tips example uses) because `userId` is always available here — same
+// reasoning as WhatsNewModal's per-feature seen-keys and RevisitControls'
+// onboarding marker, following the "local caches are owner-scoped" invariant
+// wherever a uid is on hand at the mount site.
+const RECEIPTS_TIP_AREA = 'insights/receiptsTipDismissed';
+
+function hasSeenReceiptsTip(uid) {
+  if (!uid) return false;
+  try {
+    return localStorage.getItem(ownerStorageKey(uid, RECEIPTS_TIP_AREA)) === 'true';
+  } catch {
+    return false;
+  }
+}
+
+function markReceiptsTipSeen(uid) {
+  if (!uid) return;
+  try {
+    localStorage.setItem(ownerStorageKey(uid, RECEIPTS_TIP_AREA), 'true');
+  } catch {
+    // localStorage unavailable — the tip will simply reappear next time,
+    // which is safe (never blocks the receipts feature itself).
+  }
+}
 const InsightsPage = ({
   entries,
   category,
@@ -55,6 +88,14 @@ const InsightsPage = ({
   // whole page, mounted at the top level (not nested inside a card's
   // clickable area — see the mount site below for why).
   const [receiptInsight, setReceiptInsight] = useState(null);
+
+  // First-use tip dismissal state — see RECEIPTS_TIP_AREA doc comment above.
+  const [showReceiptsTip, setShowReceiptsTip] = useState(() => !hasSeenReceiptsTip(userId));
+
+  const dismissReceiptsTip = () => {
+    setShowReceiptsTip(false);
+    markReceiptsTipSeen(userId);
+  };
 
   // Synchronous entryId -> entry lookup for ReceiptSheet's source rows (v1:
   // never fetches a missing entry from Firestore — see ReceiptSheet's own
@@ -185,6 +226,15 @@ const InsightsPage = ({
     .filter(i => !dismissedInsights.has(i.id || i.message))
     .filter(hasQualityContent);
 
+  // Eligible only once a receipt-bearing insight (Nexus or basic) is
+  // actually visible on the page AND the flag that gates the trigger
+  // itself is on — mirrors NexusInsightCard/QuickInsightsSection's own
+  // `onWhyThis && getFlag('insightReceipts')` gate, so the tip never
+  // claims to point at something that isn't rendered. Flag off => always
+  // false, so the tip and its HelpCircle re-show button render nothing.
+  const receiptsTipEligible =
+    getFlag('insightReceipts') && (filteredInsights.length > 0 || basicInsights.length > 0);
+
   const handleDismissInsight = (insight, e) => {
     e.stopPropagation();
     setDismissedInsights(prev => new Set([...prev, insight.id || insight.message]));
@@ -232,18 +282,55 @@ const InsightsPage = ({
           </p>
         </div>
 
-        {/* Refresh Button */}
-        <button
-          onClick={refresh}
-          disabled={loading || refreshing}
-          className="cloud-icon-button bg-card disabled:opacity-50"
-        >
-          <RefreshCw
-            size={18}
-            className={`text-muted-foreground ${refreshing ? 'animate-spin' : ''}`}
-          />
-        </button>
+        <div className="flex items-center gap-2">
+          {/* Re-show the "Why am I seeing this?" tip once dismissed */}
+          {receiptsTipEligible && !showReceiptsTip && (
+            <button
+              type="button"
+              onClick={() => setShowReceiptsTip(true)}
+              className="cloud-icon-button bg-card"
+              aria-label="Show tip: why am I seeing this?"
+              title="Show tip"
+            >
+              <HelpCircle size={18} className="text-muted-foreground" />
+            </button>
+          )}
+
+          {/* Refresh Button */}
+          <button
+            onClick={refresh}
+            disabled={loading || refreshing}
+            className="cloud-icon-button bg-card disabled:opacity-50"
+          >
+            <RefreshCw
+              size={18}
+              className={`text-muted-foreground ${refreshing ? 'animate-spin' : ''}`}
+            />
+          </button>
+        </div>
       </div>
+
+      {/* First-use tip: "Why am I seeing this?" (see RECEIPTS_TIP_AREA doc
+          comment above) — one dismissible pointer, shown once per owner. */}
+      {receiptsTipEligible && showReceiptsTip && (
+        <div className="bg-accent-wash border border-border rounded-2xl p-3.5 flex items-start gap-3">
+          <Info size={18} className="text-accent-deep flex-shrink-0 mt-0.5" />
+          <div className="flex-1 min-w-0">
+            <p className="text-sm text-accent-deep font-medium">See what's behind an insight</p>
+            <p className="text-xs text-accent-deep/80 mt-0.5">
+              Tap "Why am I seeing this?" on any insight to see the entries, time window, and sample size it's based on.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={dismissReceiptsTip}
+            aria-label="Dismiss tip"
+            className="relative shrink-0 text-accent-deep before:absolute before:-inset-2.5 before:content-['']"
+          >
+            <X size={16} />
+          </button>
+        </div>
+      )}
 
       {/* Mood trend — Week/Month tabs, accent bars, tide+streak (C5b) */}
       <InsightsMoodTrendSection entries={entries} />

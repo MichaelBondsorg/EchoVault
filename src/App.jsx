@@ -3324,8 +3324,8 @@ export default function App() {
         />
       )}
 
-      {/* What's New Modal - shows once after feature updates */}
-      <WhatsNewModal />
+      {/* What's New Modal - flag-aware, shows unseen enabled-feature entries */}
+      <WhatsNewModal uid={user?.uid} />
 
       {/* First-run AI-processing consent (must acknowledge before using AI features) */}
       {needsAiConsent && (
