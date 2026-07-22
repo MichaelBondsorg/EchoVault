@@ -38,7 +38,7 @@ pure function module with 100% rule coverage in
 | 3 | **Estimator: median split on the exposure variable → difference in mean outcome (high group vs low group), with a 95% bootstrap CI (2,000 resamples, deterministic/seeded).** Pearson r is computed as a supplementary internal field on the estimate object but is NEVER the headline number and is never shown as the primary result. | A median-split mean-difference ("on days with more sleep than your typical night, your mood averaged X points higher") is far easier for a layperson to read correctly than a correlation coefficient, and it's harder to over-claim from ("8 points higher, uncertain by ±Y" reads as an observed difference; "r = 0.34" reads, to most non-statisticians, as an opaque score that either "means something" or doesn't — it invites over- or under-interpretation in both directions). The bootstrap CI (rather than a normal-theory CI) makes no distributional assumption about mood scores, which is appropriate for a bounded, often skewed variable. 2,000 resamples is a conventional bootstrap size (comfortably past the point of diminishing returns for 95% CI stability) and is cheap to run client-side. The RNG is seeded and deterministic — **no `Math.random()` anywhere in the module, including its defaults** — specifically so `computeResult` (Task 5) is a pure, re-runnable function of `(experiment, entries)`: rerunning after the user excludes one observation must not also silently reshuffle the CI for unrelated reasons. |
 | 4 | **No outlier removal in v1.** Outcome means are reported as-is; the CI carries whatever spread the data has. Winsorization/trimming is explicitly deferred, not forgotten. | The median split already makes the *exposure* side rank-robust (a single extreme sleep-hours value can only ever move that one day between the high/low groups, never distort the split point the way an extreme value distorts a mean-based split). On the *outcome* side, silently dropping or capping "outlier" mood scores in a mental-health app is its own hazard — a very bad day is not noise to be cleaned away, it's exactly the kind of data point a correlation-safety review should be uncomfortable auto-discarding without a human decision about criteria. v1's choice is therefore to do nothing and let the CI honestly reflect the spread (a wide CI is the correct, visible consequence of high variance, not a bug to be engineered away). |
 | 5 | **Uncertainty display: the CI is always shown in plain language. A CI that spans zero renders as "no clear association" — never "no effect."** | "No effect" is itself a causal-sounding claim (it implies the study measured an effect and found none). "No clear association" accurately describes what a CI spanning zero means for an observational mean-difference: the data doesn't rule out zero difference, not that we've established there IS no difference. This wording is copy-frozen below (see "Fixed strings") specifically so Task 5/6 cannot drift from it under normal editing. |
-| 6 | **Lag structure is pre-declared per template** (same-day or next-day/lag-1), frozen as part of the experiment's `analysisPlan` at creation time. | Choosing the lag *after* seeing the data (e.g. trying same-day, then lag-1, then picking whichever "worked better") is a classic multiple-comparisons/p-hacking pattern even in a non-p-value framework — trying several lags and reporting the most flattering one manufactures the appearance of a stronger association than the data supports. Pre-declaring the lag per template (Task 3's template catalog) and freezing it into the experiment doc (Task 2's plan-freeze rules) removes the researcher-degrees-of-freedom problem structurally, not by asking anyone to self-restrain. |
+| 6 | **Lag structure is pre-declared per template** (same-day or next-day/lag-1), frozen as part of the experiment's `analysisPlan` at creation time. `runAnalysisPlan` enforces this at the estimator layer too: when `plan.lag` is supplied, every pair's actual `(outcomeDateKey − dateKey)` gap must match it exactly, or the whole result fails closed as `insufficient`/`lag_mismatch` — never silently computes an estimate under the wrong lag. | Choosing the lag *after* seeing the data (e.g. trying same-day, then lag-1, then picking whichever "worked better") is a classic multiple-comparisons/p-hacking pattern even in a non-p-value framework — trying several lags and reporting the most flattering one manufactures the appearance of a stronger association than the data supports. Pre-declaring the lag per template (Task 3's template catalog) and freezing it into the experiment doc (Task 2's plan-freeze rules) removes the researcher-degrees-of-freedom problem structurally, not by asking anyone to self-restrain. The estimator-layer check is a second, independent backstop: if a future caller ever constructs `pairs` some other way (bypassing `pairObservations`) and passes a stale or mismatched `plan.lag`, the result must not come back looking like a normal, trustworthy estimate — a methodologically wrong number that LOOKS plausible is worse than an insufficiency state, so this fails closed rather than silently computing anyway. |
 | 7 | **One experiment = one variable pair = one pre-declared estimate. No secondary or spliced analyses on the result screen.** | Same rationale as #6, generalized: every additional analysis run on the same data and silently offered to the user (a different split point, a different confounder cut, a different date range) is another opportunity to cherry-pick the most interesting-looking result. `runAnalysisPlan` takes one frozen plan and produces one estimate; there is no code path that runs multiple plans against one experiment and surfaces the best one. |
 | 8 | **Fixed non-causal wording is frozen below, verbatim, for Task 5's templates to import (not re-type).** | Making the non-causal-wording acceptance criterion structural (frozen strings, imported not authored per-template) rather than a discipline every future template author has to remember independently. This mirrors R2's Session Prep safety posture (fixed exclusion behavior, not a per-call-site judgment call). |
 
@@ -96,6 +96,21 @@ should come back through this same sign-off process, because it changes what
   either by an explicit `seed` argument or, if omitted, by an FNV-1a hash of
   the pairs themselves — **never by `Math.random()` or `Date.now()`**, so
   "no seed passed" is still perfectly reproducible given the same pairs.
+- **Order-independence (canonicalization):** `runAnalysisPlan` sorts its
+  `pairs` input by `dateKey` then `outcomeDateKey` as the very first step,
+  before the seed derivation or the bootstrap ever see it, and
+  `pairObservations`'s output is sorted the same way for the same reason.
+  This was NOT true in an earlier version of this module — hashing/
+  resampling in caller-supplied order meant the same pairs reversed could
+  produce a visibly different CI (caught in review before ship: reversing
+  one 10-pair fixture changed the no-seed CI from `[18.33, 40.83]` to
+  `[18.33, 41.67]`). Since Firestore does not guarantee document read
+  order, an uncanonicalized implementation would have meant a rerun of the
+  exact same experiment data could show the user a different number purely
+  because of read ordering — a direct violation of the reproducibility
+  claim this whole section makes. Regression-tested in `estimator.test.js`
+  with both a reversed-array and an arbitrarily-shuffled-array fixture,
+  with and without an explicit seed.
 
 ## Fixed strings (verbatim — Task 5 imports these, does not re-type them)
 
@@ -138,7 +153,7 @@ template.
 ## Automated fixture set
 
 `src/services/experiments/__tests__/estimator.test.js` is the authoritative
-automated coverage for this spec (28 tests as of this task). Relevant to
+automated coverage for this spec (34 tests as of this task). Relevant to
 this memo:
 
 - **Golden fixture, hand-computed arithmetic in comments** — a 10-pair
@@ -178,6 +193,18 @@ this memo:
   needs to apply the CI-spans-zero copy rule (default #5), even though the
   actual "no clear association" classification and rendering is Task 5/6's
   concern, not this module's.
+- **Order-independence:** the same 10-pair fixture, reversed (no explicit
+  seed) and arbitrarily shuffled (explicit seed), each asserted to produce
+  a `toEqual`-identical `estimate` object — including the CI — to the
+  forward-order run. This is the regression test for the reordering bug
+  described in "Estimator implementation notes" above.
+- **Lag-consistency (default #6):** a matching-lag fixture does not raise
+  `lag_mismatch`; a full-size (10-pair) matching-lag fixture reaches `ok`;
+  a fixture with one pair's `outcomeDateKey` hand-corrupted to violate the
+  declared lag fails closed with `lag_mismatch` and no `estimate`; a
+  fixture with `plan.lag` entirely omitted skips the check even when a
+  pair's gap would otherwise fail it (back-compat with the "plan is
+  forward-compat, not required" contract).
 
 This is engineering-test coverage of the *rules as written* — it proves the
 estimator does what this memo says it does. It is not a substitute for the

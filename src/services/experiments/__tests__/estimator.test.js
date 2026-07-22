@@ -102,10 +102,12 @@ describe('pairObservations', () => {
   });
 
   it('is timezone-independent (UTC date arithmetic, not local-date shifting)', () => {
-    // A leap-year Feb boundary, chosen specifically because local-date
+    // A Feb month-end boundary, chosen specifically because local-date
     // arithmetic (new Date('2026-02-28').setDate(+1)) can shift by a day
     // depending on the host TZ offset if it round-trips through a
-    // non-UTC Date constructor. 2026 is not a leap year, so Feb 28 -> Mar 1.
+    // non-UTC Date constructor. 2026 is not a leap year, so Feb 28 -> Mar 1
+    // (as opposed to Feb 29 -> Mar 1 in a leap year) — either way this
+    // exercises the same UTC-arithmetic code path.
     const exposureSeries = [{ dateKey: '2026-02-28', value: 3 }];
     const outcomeSeries = [{ dateKey: '2026-03-01', value: 30 }];
     const pairs = pairObservations({ exposureSeries, outcomeSeries, lag: 1 });
@@ -273,6 +275,98 @@ describe('runAnalysisPlan — determinism', () => {
   it('bootstrap uses exactly BOOTSTRAP_RESAMPLES=2000 and CI_LEVEL=0.95 (spec constants)', () => {
     expect(BOOTSTRAP_RESAMPLES).toBe(2000);
     expect(CI_LEVEL).toBe(0.95);
+  });
+
+  // Regression coverage: a prior version hashed/resampled pairs in arrival
+  // order, so the SAME 10 pairs reversed produced a DIFFERENT no-seed CI
+  // ([18.33, 40.83] vs [18.33, 41.67]) — a rerun of the identical
+  // experiment data (e.g. after a Firestore read returned docs in a
+  // different order) would show a visibly different result to the user.
+  // `runAnalysisPlan` now canonicalizes `pairs` (sort by dateKey, then
+  // outcomeDateKey) before EITHER the seed derivation or the bootstrap
+  // resampling, so order must never leak into the output.
+  it('is bitwise-identical for reordered pairs with no explicit seed (order-independence)', () => {
+    const reversed = [...pairs].reverse();
+    const forward = runAnalysisPlan({ pairs, plan: {} });
+    const backward = runAnalysisPlan({ pairs: reversed, plan: {} });
+
+    expect(forward.status).toBe('ok');
+    expect(backward.status).toBe('ok');
+    expect(backward.estimate).toEqual(forward.estimate);
+  });
+
+  it('is bitwise-identical for reordered pairs with an explicit seed (order-independence)', () => {
+    const shuffled = [pairs[4], pairs[0], pairs[9], pairs[2], pairs[7], pairs[1], pairs[8], pairs[3], pairs[6], pairs[5]];
+    const forward = runAnalysisPlan({ pairs, plan: {}, seed: 99 });
+    const shuffledResult = runAnalysisPlan({ pairs: shuffled, plan: {}, seed: 99 });
+
+    expect(forward.status).toBe('ok');
+    expect(shuffledResult.status).toBe('ok');
+    expect(shuffledResult.estimate).toEqual(forward.estimate);
+  });
+});
+
+describe('runAnalysisPlan — lag-consistency check (plan.lag, fail-closed)', () => {
+  it('passes when every pair matches the declared lag', () => {
+    const exposureSeries = [
+      { dateKey: '2026-04-01', value: 5 },
+      { dateKey: '2026-04-02', value: 60 },
+    ];
+    const outcomeSeries = [
+      { dateKey: '2026-04-02', value: 50 }, // D+1 from 04-01
+      { dateKey: '2026-04-03', value: 65 }, // D+1 from 04-02
+    ];
+    const pairs = pairObservations({ exposureSeries, outcomeSeries, lag: 1 });
+    expect(pairs).toHaveLength(2);
+
+    // Only 2 pairs, so this can't reach 'ok' on its own — the point of
+    // this test is narrower: confirm the lag check does NOT add
+    // 'lag_mismatch' when every pair's actual gap matches plan.lag.
+    const result = runAnalysisPlan({ pairs, plan: { lag: 1 }, seed: 1 });
+    expect(result.status).toBe('insufficient');
+    expect(result.reasons).not.toContain('lag_mismatch');
+    expect(result.reasons).toContain('insufficient_paired_observations');
+  });
+
+  it('passes the lag check (no lag_mismatch) at full sample size and reaches ok', () => {
+    // 10 lag-1 pairs, exposure = index, outcome = index*10, all D -> D+1.
+    const dates = Array.from({ length: 11 }, (_, i) => `2026-05-${String(i + 1).padStart(2, '0')}`);
+    const exposureSeries = dates.slice(0, 10).map((dateKey, i) => ({ dateKey, value: i + 1 }));
+    const outcomeSeries = dates.slice(1, 11).map((dateKey, i) => ({ dateKey, value: (i + 1) * 10 }));
+    const pairs = pairObservations({ exposureSeries, outcomeSeries, lag: 1 });
+    expect(pairs).toHaveLength(10);
+
+    const result = runAnalysisPlan({ pairs, plan: { lag: 1 }, seed: 1 });
+    expect(result.status).toBe('ok');
+  });
+
+  it('fails closed with lag_mismatch when one pair does not match the declared lag', () => {
+    // Build a valid lag-1 pairing, then hand-corrupt one pair's
+    // outcomeDateKey to simulate a mismatched/miscomputed pair reaching
+    // runAnalysisPlan directly (bypassing pairObservations).
+    const dates = Array.from({ length: 11 }, (_, i) => `2026-05-${String(i + 1).padStart(2, '0')}`);
+    const exposureSeries = dates.slice(0, 10).map((dateKey, i) => ({ dateKey, value: i + 1 }));
+    const outcomeSeries = dates.slice(1, 11).map((dateKey, i) => ({ dateKey, value: (i + 1) * 10 }));
+    const pairs = pairObservations({ exposureSeries, outcomeSeries, lag: 1 });
+    const corrupted = pairs.map((p, i) => (i === 0 ? { ...p, outcomeDateKey: p.dateKey } : p)); // lag 0, not 1
+
+    const result = runAnalysisPlan({ pairs: corrupted, plan: { lag: 1 }, seed: 1 });
+
+    expect(result.status).toBe('insufficient');
+    expect(result.reasons).toContain('lag_mismatch');
+    expect(result.estimate).toBeUndefined();
+  });
+
+  it('skips the lag check entirely when plan.lag is absent (back-compat)', () => {
+    const { exposureSeries, outcomeSeries } = buildGoldenSeries();
+    const pairs = pairObservations({ exposureSeries, outcomeSeries, lag: 0 });
+    // Corrupt one pair's outcomeDateKey so it would fail a lag check if one ran.
+    const corrupted = pairs.map((p, i) => (i === 0 ? { ...p, outcomeDateKey: '2099-01-01' } : p));
+
+    const result = runAnalysisPlan({ pairs: corrupted, plan: {}, seed: 1 }); // no plan.lag
+
+    expect(result.status).toBe('ok');
+    expect(result.reasons).toBeUndefined();
   });
 });
 

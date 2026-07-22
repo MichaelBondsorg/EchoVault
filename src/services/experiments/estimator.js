@@ -91,10 +91,17 @@ function shiftDateKey(dateKey, days) {
  * @param {number} [args.lag=0] - 0 = same-day pairing; 1 = exposure day D
  *   pairs with outcome day D+1 (next calendar day, UTC arithmetic).
  * @returns {{dateKey: string, outcomeDateKey: string, exposure: number, outcome: number}[]}
- *   One entry per paired day, in `exposureSeries` order. Non-finite or
+ *   One entry per paired day, sorted by `dateKey` then `outcomeDateKey`
+ *   (canonical order — NOT `exposureSeries` input order). Non-finite or
  *   missing values (NaN, null, undefined, Infinity) on EITHER side are
  *   dropped from pairing entirely — never coerced to 0 (the magic-zero bug
  *   class in the three existing Pearson implementations).
+ *
+ *   Sorting the output is deliberate hygiene, not just cosmetic: callers
+ *   (Firestore reads, in particular) do not guarantee a stable document
+ *   order, and `runAnalysisPlan` also independently canonicalizes its
+ *   `pairs` input before use — see that function's docblock for why input
+ *   order must never affect the computed estimate.
  */
 export function pairObservations({ exposureSeries = [], outcomeSeries = [], lag = 0 } = {}) {
   const outcomeByDate = new Map();
@@ -118,7 +125,34 @@ export function pairObservations({ exposureSeries = [], outcomeSeries = [], lag 
       outcome: outcomeByDate.get(outcomeDateKey),
     });
   }
-  return pairs;
+  return canonicalizePairs(pairs);
+}
+
+/**
+ * Sort a copy of `pairs` by `dateKey` then `outcomeDateKey` (stable,
+ * deterministic order independent of input array order). This is the
+ * canonicalization step that makes both the derived-seed hash and the
+ * bootstrap resampling order-independent — see `runAnalysisPlan`'s
+ * docblock.
+ */
+function canonicalizePairs(pairs) {
+  return [...pairs].sort((a, b) => {
+    if (a.dateKey !== b.dateKey) return a.dateKey < b.dateKey ? -1 : 1;
+    if (a.outcomeDateKey !== b.outcomeDateKey) return a.outcomeDateKey < b.outcomeDateKey ? -1 : 1;
+    return 0;
+  });
+}
+
+/**
+ * Days between a pair's exposure day and its outcome day (outcomeDateKey -
+ * dateKey), via UTC epoch-ms arithmetic. Used by `runAnalysisPlan`'s
+ * lag-consistency check. Returns null if either dateKey is malformed.
+ */
+function pairLagDays(pair) {
+  const startMs = parseDateKeyToUtcMs(pair.dateKey);
+  const endMs = parseDateKeyToUtcMs(pair.outcomeDateKey);
+  if (startMs === null || endMs === null) return null;
+  return Math.round((endMs - startMs) / DAY_MS);
 }
 
 // ---------------------------------------------------------------------------
@@ -184,6 +218,13 @@ function fnv1a(str) {
  * requires the bootstrap to be reproducible from (pairs, seed) alone, and
  * "no seed provided" must still be reproducible, not merely "random but
  * consistent within one process."
+ *
+ * IMPORTANT: callers must pass an already-canonicalized (sorted) `pairs`
+ * array. Hashing in arrival order would make the derived seed — and
+ * therefore the whole bootstrap CI — sensitive to how the caller happened
+ * to order its input (e.g. Firestore document order), which breaks the
+ * "same data, same result" reproducibility guarantee. `runAnalysisPlan`
+ * canonicalizes before calling this.
  */
 function deriveSeedFromPairs(pairs) {
   let str = '';
@@ -304,37 +345,63 @@ function bootstrapDeltaCI(highValues, lowValues, rng) {
  * (default #2) are checked by the caller against `computeCoverage`'s output
  * BEFORE calling this function — but this function's own `reasons` array is
  * still built to hold more than one machine-readable reason, because more
- * than one of ITS OWN checks (pair count, degenerate split) can fail at
- * once, and a caller merging in upstream coverage reasons should be able to
- * concat onto the same shape.
+ * than one of ITS OWN checks (pair count, degenerate split, lag mismatch)
+ * can fail at once, and a caller merging in upstream coverage reasons should
+ * be able to concat onto the same shape.
+ *
+ * ORDER-INDEPENDENCE: `pairs` is canonicalized (sorted by `dateKey` then
+ * `outcomeDateKey`) as the very first step, before anything else reads it —
+ * including the derived-seed hash and the arrays fed into the bootstrap.
+ * Without this, two callers passing the SAME pairs in different orders
+ * (e.g. because Firestore doesn't guarantee document read order) would get
+ * different derived seeds AND different resample-index-to-value mappings,
+ * producing visibly different CIs for identical data. That would silently
+ * violate this module's core reproducibility promise, so canonicalization
+ * happens unconditionally, not just when `seed` is omitted.
  *
  * @param {Object} args
- * @param {{dateKey: string, exposure: number, outcome: number}[]} args.pairs
- *   - output of `pairObservations`.
+ * @param {{dateKey: string, outcomeDateKey?: string, exposure: number, outcome: number}[]} args.pairs
+ *   - output of `pairObservations` (any order — this function canonicalizes).
  * @param {Object} [args.plan] - the experiment's frozen analysis plan.
  *   Accepted for forward-compatibility with callers (e.g. logging/receipt
- *   context) but NEVER used to override the spec thresholds below — those
- *   are fixed constants, not configurable per-experiment (spec default #7:
- *   one pre-declared estimate, not a knob to be tuned after the fact).
+ *   context) and NEVER used to override the spec thresholds — those are
+ *   fixed constants, not configurable per-experiment (spec default #7: one
+ *   pre-declared estimate, not a knob to be tuned after the fact). The one
+ *   exception is `plan.lag`: when present, it is used only to VALIDATE that
+ *   every pair's actual (outcomeDateKey - dateKey) gap matches the
+ *   pre-declared lag (spec default #6) — never to change how the estimate
+ *   is computed. A mismatch fails closed (`lag_mismatch`) rather than
+ *   silently computing a methodologically-wrong estimate that would still
+ *   look plausible. Omit `plan.lag` to skip this check (e.g. callers that
+ *   already trust `pairObservations` produced the pairs).
  * @param {number} [args.seed] - seed for the deterministic bootstrap RNG.
- *   If omitted, a seed is derived deterministically from `pairs` (never
- *   from Math.random()/Date.now()) so "no seed passed" is still
- *   reproducible.
+ *   If omitted, a seed is derived deterministically from the canonicalized
+ *   `pairs` (never from Math.random()/Date.now()) so "no seed passed" is
+ *   still reproducible — and, per the canonicalization above, reproducible
+ *   regardless of the input pairs' array order.
  * @returns {{status:'ok', estimate:{meanHigh:number, meanLow:number,
  *   delta:number, ci:[number,number], n:number, pearsonR:number|null}} |
  *   {status:'insufficient', reasons: string[]}}
  */
 export function runAnalysisPlan({ pairs = [], plan = {}, seed } = {}) {
-  const n = pairs.length;
+  const canonicalPairs = canonicalizePairs(pairs);
+  const n = canonicalPairs.length;
   const reasons = [];
 
   if (n < MIN_PAIRED_OBSERVATIONS) {
     reasons.push('insufficient_paired_observations');
   }
 
+  if (Number.isFinite(plan?.lag)) {
+    const lagMismatch = canonicalPairs.some((p) => pairLagDays(p) !== plan.lag);
+    if (lagMismatch) {
+      reasons.push('lag_mismatch');
+    }
+  }
+
   let split = null;
   if (n > 0) {
-    split = medianSplit(pairs);
+    split = medianSplit(canonicalPairs);
     if (split.highGroup.length === 0 || split.lowGroup.length === 0) {
       reasons.push('degenerate_exposure_split');
     }
@@ -348,9 +415,9 @@ export function runAnalysisPlan({ pairs = [], plan = {}, seed } = {}) {
   const meanHigh = mean(highGroup.map((p) => p.outcome));
   const meanLow = mean(lowGroup.map((p) => p.outcome));
   const delta = meanHigh - meanLow;
-  const pearsonR = computePearsonR(pairs);
+  const pearsonR = computePearsonR(canonicalPairs);
 
-  const resolvedSeed = Number.isFinite(seed) ? seed >>> 0 : deriveSeedFromPairs(pairs);
+  const resolvedSeed = Number.isFinite(seed) ? seed >>> 0 : deriveSeedFromPairs(canonicalPairs);
   const rng = mulberry32(resolvedSeed);
   const ci = bootstrapDeltaCI(
     highGroup.map((p) => p.outcome),
