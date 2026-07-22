@@ -234,7 +234,11 @@ describe('ReceiptSheet — distinct repair actions call the exact service with e
       [
         entriesById.e1,
         { id: 'e2', entryId: 'e2', date: baseReceipt.sources[1].date, excerpt: baseReceipt.sources[1].excerpt },
-      ]
+      ],
+      // R4 Task 5: currentEntryCount, derived from entriesById's size (the
+      // full corpus this mount was given) — `entriesById` here has exactly
+      // one key (`e1`; `e2` intentionally absent, see above).
+      1
     );
     await vi.waitFor(() => expect(onFeedback).toHaveBeenCalledWith('not_true'));
   });
@@ -267,7 +271,8 @@ describe('ReceiptSheet — distinct repair actions call the exact service with e
         moodDelta: 12,
         sampleSize: 9,
       }),
-      expect.any(Array)
+      expect.any(Array),
+      expect.any(Number)
     );
   });
 

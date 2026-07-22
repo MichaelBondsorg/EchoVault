@@ -289,7 +289,11 @@ const ReceiptSheet = ({
     try {
       const citedEntries = citedEntriesFromReceipt(receipt, entriesById);
       const feedbackData = feedbackDataFor(insight, citedEntries);
-      const result = await recordFeedbackAndLearn(uid, feedbackData, citedEntries);
+      // `entriesById` is built by every mount site (NexusInsightsWidget,
+      // InsightsPage) from the FULL entries prop, not just cited ones — its
+      // size is a valid `currentEntryCount` for the resurfacing-bug fix
+      // (R4 Task 5) in `recordFeedbackAndLearn`.
+      const result = await recordFeedbackAndLearn(uid, feedbackData, citedEntries, Object.keys(entriesById).length);
       // recordFeedbackAndLearn returns null on any failure (bad patternType,
       // Firestore error, ...) — only report success to the caller when the
       // write actually happened. Reporting success on a silent no-op is

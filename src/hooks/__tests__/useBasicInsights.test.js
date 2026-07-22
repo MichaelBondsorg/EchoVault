@@ -64,6 +64,7 @@ vi.mock('firebase/firestore', () => ({
 // (same precedent as basicInsightsOrchestrator.receipts.test.js) so this test
 // stays focused on the exclusion-filtering seam, not learning suppression.
 vi.mock('../../services/basicInsights/feedbackLearning', () => ({
+  filterFalsePositiveCandidates: vi.fn(async (userId, insights) => insights),
   filterInsightsByLearning: vi.fn(async (userId, insights) =>
     insights.map((i) => ({ ...i, _showDecision: { show: true, adjustedConfidence: 1 } }))
   ),

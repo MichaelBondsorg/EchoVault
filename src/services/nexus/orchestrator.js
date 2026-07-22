@@ -44,6 +44,10 @@ import { getExcludedEntryIds } from '../insights/sourceExclusions';
 // Staleness (extracted, R2 Task 10 — see staleness.js for why)
 import { markInsightsStale } from './staleness';
 
+// Insight Dismissal Persistence (R4 Task 5, DR finding 10 — see that
+// module's own doc comment for the full "why a separate file" rationale)
+import { recordInsightDismissal, getDismissedInsightIds } from './insightDismissal';
+
 // ============================================================
 // MOOD01 CONVENTION (R4 T3)
 // ============================================================
@@ -256,6 +260,12 @@ const getPatternDisplayInfo = (patternId, moodMean) => {
 // MAIN ORCHESTRATION
 // ============================================================
 
+// Re-exported so existing/other callers that import dismissal helpers from
+// the orchestrator (the module that owns `nexus/insights`, the doc these
+// live under) keep working; `insightDismissal.js` is the source of truth —
+// see that module's doc comment for the full seam rationale.
+export { recordInsightDismissal, getDismissedInsightIds };
+
 /**
  * Get cached insights (for immediate display)
  */
@@ -271,9 +281,15 @@ export const getCachedInsights = async (userId) => {
     if (!insightDoc.exists()) return null;
 
     const data = insightDoc.data();
+    // R4 Task 5: dismissed-stays-dismissed across reloads. Read-time filter
+    // (see the module comment above for why) — active/history are both
+    // filtered so a dismissed insight can't resurface via either list.
+    const dismissedIds = await getDismissedInsightIds(userId);
+    const active = data.active || [];
+    const history = data.history || [];
     return {
-      insights: data.active || [],
-      history: data.history || [],
+      insights: dismissedIds.size === 0 ? active : active.filter((i) => !dismissedIds.has(i.id)),
+      history: dismissedIds.size === 0 ? history : history.filter((i) => !dismissedIds.has(i.id)),
       generatedAt: data.generatedAt,
       stale: data.stale || false,
       expiresAt: data.expiresAt

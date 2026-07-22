@@ -119,9 +119,16 @@ export const getAllPatternLearning = async (userId) => {
  * @param {string} userId
  * @param {Object} feedback - Feedback data from UI
  * @param {Array} citedEntries - Full entry objects for analysis
+ * @param {number|null} [currentEntryCount] - Total entries in the caller's
+ *   corpus at feedback time (R4 Task 5, DR finding 10). Used ONLY to stamp
+ *   `entriesAtLastEvaluation` the moment a pattern newly transitions into
+ *   suppression — see that block below for why this fixes the resurfacing
+ *   bug. Optional/nullable for backward compatibility with any caller that
+ *   doesn't have an entry count on hand; omitting it just means that
+ *   suppression event won't get a baseline stamped (same as today).
  * @returns {Object} Updated learning data
  */
-export const recordFeedbackAndLearn = async (userId, feedback, citedEntries = []) => {
+export const recordFeedbackAndLearn = async (userId, feedback, citedEntries = [], currentEntryCount = null) => {
   const { insightId, category, insightText, moodDelta, activityKey, themeKey, peopleKey, entryIds } = feedback;
   const isAccurate = feedback.feedback === 'accurate';
 
@@ -183,6 +190,21 @@ export const recordFeedbackAndLearn = async (userId, feedback, citedEntries = []
       learning.suppressReason = 'low_accuracy';
       // To resurface, need a stronger signal
       learning.requiredMoodDeltaToResurface = Math.abs(moodDelta) * CONFIG.RESURFACE_STRENGTH_MULTIPLIER;
+      // R4 Task 5 (DR finding 10 — the resurfacing bug): stamp the entry-
+      // count baseline suppression is measured against, right as
+      // suppression begins. `entriesAtLastEvaluation` was previously only
+      // ever written by the default-structure literal in
+      // `getPatternLearning` (i.e. 0, forever) — nothing here update it —
+      // so `shouldShowInsight`/`filterInsightsByLearning`'s
+      // `currentEntryCount - entriesAtLastEvaluation` was really just
+      // "total entries in the corpus," which clears
+      // MIN_NEW_ENTRIES_FOR_REEVALUATION (5) on literally the next read
+      // regardless of whether any new entries were added since suppression.
+      // Stamping it here means "new entries" is actually measured since
+      // suppression began, not since the corpus was empty.
+      if (currentEntryCount != null) {
+        learning.entriesAtLastEvaluation = currentEntryCount;
+      }
       console.log(`[FeedbackLearning] Suppressing pattern "${patternType}" (accuracy: ${(learning.accuracyRate * 100).toFixed(0)}%)`);
     }
 
@@ -259,6 +281,93 @@ const analyzeFalsePositivePatterns = (entries, existingPatterns = []) => {
     .slice(0, 10); // Keep top 10
 
   return patterns;
+};
+
+/**
+ * Resolve the learning pattern-type key for a candidate insight — the same
+ * activityKey -> themeKey -> peopleKey -> id fallback chain
+ * `recordFeedbackAndLearn`/`shouldShowInsight`/`filterInsightsByLearning`
+ * already each computed independently inline. Factored out here (R4 Task 5)
+ * only for the new `filterFalsePositiveCandidates` below, so it can't drift
+ * from the others; the existing inline copies are left as-is to avoid
+ * churning unrelated, already-shipped code.
+ * @param {Object} insight
+ * @returns {string|undefined}
+ */
+const resolvePatternType = (insight) =>
+  insight.activityKey ? `activity_${insight.activityKey}` :
+  insight.themeKey ? `theme_${insight.themeKey}` :
+  insight.peopleKey ? `people_${insight.peopleKey}` :
+  insight.id;
+
+/**
+ * Filter generation candidates against recorded false-positive evidence
+ * (R4 Task 5, DR finding 10: "falsePositivePatterns never filter
+ * generation"). Called PRE-scoring in `generateBasicInsights` — before
+ * receipts are attached and before the strength/moodDelta sort — so a
+ * candidate this filter drops never occupies one of the MAX_INSIGHTS slots
+ * a genuine insight could otherwise have filled.
+ *
+ * Distinct from `filterInsightsByLearning` below (confidence adjustment +
+ * suppression, applied post-receipt to the survivors of this filter): this
+ * one only removes candidates with affirmative false-positive evidence
+ * against them — it never touches confidence, and a candidate with no
+ * matching learning doc (or no false-positive data on that doc) always
+ * survives unchanged, so behavior with no learning doc at all is
+ * byte-identical to today's (no filtering happens).
+ *
+ * A candidate is dropped when EVERY one of its own `entryIds` is explained
+ * by false-positive evidence, via either signal (either is sufficient):
+ *  - `falsePositiveEntryIds`: that exact entry was previously cited as
+ *    inaccurate for this pattern.
+ *  - `falsePositivePatterns`: the entry's own text matches one of the
+ *    pattern's known false-positive text indicators (see
+ *    `analyzeFalsePositivePatterns` above — meta-references, negations,
+ *    hypotheticals, ...).
+ * Candidates with no `entryIds` at all (e.g. the pre-existing health/
+ * environment insights) are never touched by this filter — there's nothing
+ * to check against, so they fall through to the post-receipt confidence
+ * filter below like they always have.
+ *
+ * @param {string} userId
+ * @param {Array} insights - raw candidates (pre-receipt, pre-sort)
+ * @param {Map<string, Object>} [entriesById] - id -> raw entry, for the
+ *   falsePositivePatterns text check
+ * @returns {Array} candidates with fully-false-positive-explained entries removed
+ */
+export const filterFalsePositiveCandidates = async (userId, insights, entriesById = new Map()) => {
+  if (!insights || insights.length === 0) return [];
+
+  try {
+    const allLearning = await getAllPatternLearning(userId);
+    if (!allLearning || allLearning.size === 0) return insights;
+
+    return insights.filter((insight) => {
+      const patternType = resolvePatternType(insight);
+      const learning = allLearning.get(patternType);
+      if (!learning) return true;
+
+      const ids = insight.entryIds || [];
+      if (ids.length === 0) return true;
+
+      const fpEntryIds = new Set(learning.falsePositiveEntryIds || []);
+      const allFlaggedById = ids.every((id) => fpEntryIds.has(id));
+
+      const fpPatterns = (learning.falsePositivePatterns || [])
+        .map((p) => p.pattern?.toLowerCase())
+        .filter(Boolean);
+      const allFlaggedByPattern = fpPatterns.length > 0 && ids.every((id) => {
+        const entry = entriesById.get(id);
+        const text = (entry?.content || entry?.text || '').toLowerCase();
+        return text && fpPatterns.some((p) => text.includes(p));
+      });
+
+      return !(allFlaggedById || allFlaggedByPattern);
+    });
+  } catch (error) {
+    console.error('[FeedbackLearning] Failed to filter false-positive candidates:', error);
+    return insights;
+  }
 };
 
 /**
@@ -452,6 +561,7 @@ export default {
   getPatternLearning,
   getAllPatternLearning,
   recordFeedbackAndLearn,
+  filterFalsePositiveCandidates,
   shouldShowInsight,
   filterInsightsByLearning,
   getSuppressedPatterns,

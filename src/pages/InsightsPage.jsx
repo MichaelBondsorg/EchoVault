@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import { reportInsight } from '../services/moderation/reportInsight';
 import { recordInsightEngagement } from '../services/analytics/insightEngagement';
+import { recordInsightDismissal } from '../services/nexus/insightDismissal';
 import { useNexusInsights } from '../hooks/useNexusInsights';
 import { useBasicInsights } from '../hooks/useBasicInsights';
 import { useState, useEffect, useMemo, useCallback } from 'react';
@@ -247,6 +248,14 @@ const InsightsPage = ({
     }
     // Fire-and-forget engagement instrumentation (best-effort, never blocks UI).
     recordInsightEngagement(userId, insight, 'dismissed');
+    // R4 Task 5 (DR finding 10): write-through so this dismissal survives
+    // reload, not just this tab's `dismissedInsights` local state. Only
+    // Nexus insights carry a stable `id` this can key on (basic-insight
+    // dismissal isn't part of this fix — QuickInsightsSection has no
+    // dismiss action); best-effort, same as the engagement call above.
+    if (insight.id) {
+      recordInsightDismissal(userId, insight.id);
+    }
   };
 
   const handleReportInsight = async (insight, e) => {
@@ -256,6 +265,11 @@ const InsightsPage = ({
     setDismissedInsights(prev => new Set([...prev, insight.id || insight.message]));
     if (expandedInsight === insight.id) {
       setExpandedInsight(null);
+    }
+    // R4 Task 5: a reported insight is dismissed too — persist it the same
+    // way, so it doesn't resurface after reload either.
+    if (insight.id) {
+      recordInsightDismissal(userId, insight.id);
     }
   };
 
@@ -1372,7 +1386,9 @@ const QuickInsightsSection = ({
         feedback: isPositive ? 'accurate' : 'inaccurate'
       };
 
-      const learningResult = await recordFeedbackAndLearn(userId, feedbackData, citedEntries);
+      // `entries` here is the full corpus prop (R4 Task 5) — valid
+      // `currentEntryCount` for the resurfacing-bug fix.
+      const learningResult = await recordFeedbackAndLearn(userId, feedbackData, citedEntries, entries?.length ?? null);
 
       setFeedbackSubmitted(prev => new Set([...prev, insight.id]));
 

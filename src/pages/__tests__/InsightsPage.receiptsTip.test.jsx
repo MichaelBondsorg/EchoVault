@@ -54,6 +54,10 @@ vi.mock('../../services/analytics/insightEngagement', () => ({
   recordInsightEngagement: vi.fn().mockResolvedValue(true),
 }));
 
+vi.mock('../../services/nexus/insightDismissal', () => ({
+  recordInsightDismissal: vi.fn().mockResolvedValue(true),
+}));
+
 vi.mock('../../services/basicInsights/feedbackLearning', () => ({
   recordFeedbackAndLearn: vi.fn().mockResolvedValue(null),
 }));

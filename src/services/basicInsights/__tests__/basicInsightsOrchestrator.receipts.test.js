@@ -25,6 +25,7 @@ vi.mock('firebase/firestore', () => ({
 // Feedback learning touches Firestore internally; stub it to a pure
 // pass-through so this test stays focused on receipts, not learning.
 vi.mock('../feedbackLearning', () => ({
+  filterFalsePositiveCandidates: vi.fn(async (userId, insights) => insights),
   filterInsightsByLearning: vi.fn(async (userId, insights) =>
     insights.map((i) => ({ ...i, _showDecision: { show: true, adjustedConfidence: 1 } }))
   ),

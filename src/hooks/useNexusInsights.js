@@ -191,14 +191,24 @@ export const useNexusInsights = (user, options = {}) => {
       const result = await generateInsights(user.uid);
 
       if (result.success) {
-        setActiveInsights(result.insights);
         setDataStatus(result.dataStatus);
         setLastGenerated(result.generatedAt);
 
-        // Re-fetch cached to get updated history
+        // Re-fetch cached (R4 Task 5: this is the dismissal read-time
+        // filter seam, `getCachedInsights` in orchestrator.js) to get both
+        // updated history AND the dismissal-filtered active set — using
+        // `result.insights` directly here would bypass that filter and let
+        // a just-dismissed insight resurface on regeneration.
         const cached = await getCachedInsights(user.uid);
-        if (cached?.history) {
-          setHistoryInsights(cached.history);
+        if (cached) {
+          setActiveInsights(cached.insights || []);
+          if (cached.history) {
+            setHistoryInsights(cached.history);
+          }
+        } else {
+          // Cache read failed but generation itself succeeded — fall back
+          // to the ungenerated-filtered result rather than showing nothing.
+          setActiveInsights(result.insights);
         }
       } else {
         setError(result.errors?.[0] || 'Failed to generate insights');

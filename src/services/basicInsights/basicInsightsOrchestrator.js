@@ -40,7 +40,7 @@ import { THRESHOLDS, CATEGORIES } from './utils/thresholds';
 import { normalizeEntriesForInsights } from '../insights/entryAdapter';
 
 // Feedback learning
-import { filterInsightsByLearning } from './feedbackLearning';
+import { filterInsightsByLearning, filterFalsePositiveCandidates } from './feedbackLearning';
 
 // Insight Receipts (R2 Task 8) — single seam: correlation modules already
 // produce `entryIds`; we wrap them into the shared receipt shape here
@@ -214,6 +214,26 @@ export const generateBasicInsights = async (userId, entries) => {
 
     console.log('[BasicInsights] Total raw insights:', allInsights.length);
 
+    // entryId -> raw entry lookup, built once and reused by both the
+    // false-positive filter below and the receipt-attachment step after it.
+    const entriesById = new Map(
+      entries.filter((e) => e.id || e.entryId).map((e) => [e.id || e.entryId, e])
+    );
+
+    // 8.4. Filter candidates against recorded false-positive evidence (R4
+    // Task 5, DR finding 10: "falsePositivePatterns never filter
+    // generation"). PRE-scoring — before receipts are attached and before
+    // the strength/moodDelta sort below — so a false-positive candidate
+    // never occupies one of the MAX_INSIGHTS slots a genuine insight could
+    // have filled. Distinct from the post-receipt `filterInsightsByLearning`
+    // confidence/suppression pass at step 9: this only drops candidates
+    // with affirmative false-positive evidence against them. No learning
+    // doc at all -> no filtering -> byte-identical to pre-R4-T5 behavior.
+    const falsePositiveFiltered = await filterFalsePositiveCandidates(userId, allInsights, entriesById);
+    if (falsePositiveFiltered.length !== allInsights.length) {
+      console.log(`[BasicInsights] Filtered ${allInsights.length - falsePositiveFiltered.length} false-positive candidates`);
+    }
+
     // 8.5. Attach receipts (R2 Task 8). Correlation insights already carry
     // `entryIds` (the exact entries their correlation was computed over) —
     // wrap those into a real receipt; anything without entryIds (e.g. the
@@ -221,10 +241,7 @@ export const generateBasicInsights = async (userId, entries) => {
     // window-level receipt over the full `entries` set passed in. Single
     // seam: no correlations/*.js file needs to change.
     const basicInsightsTimeWindow = computeTimeWindow(30);
-    const entriesById = new Map(
-      entries.filter((e) => e.id || e.entryId).map((e) => [e.id || e.entryId, e])
-    );
-    const allInsightsWithReceipts = allInsights.map((insight) =>
+    const allInsightsWithReceipts = falsePositiveFiltered.map((insight) =>
       attachBasicInsightReceipt(insight, entriesById, basicInsightsTimeWindow, entries)
     );
 
