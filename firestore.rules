@@ -41,6 +41,14 @@ service cloud.firestore {
     // further status change is ever legal once either is reached — draft ->
     // stopped and draft -> completed are deliberately absent (stop is only
     // meaningful once running/paused; a draft that shouldn't run is deleted).
+    // paused -> completed is ALLOWED (execution-time product call, batch
+    // review of Task 2): every v1 variable is passive (no active
+    // check-in/data-collection surface), so "paused" carries no
+    // data-collection meaning of its own — it is UI-state only. Forcing a
+    // resume->complete two-step just to view results after endAt would be
+    // pure friction with no safety or data-integrity benefit. Logged for
+    // Michael's ratification alongside the other R3 decisions (PROJECT_STATUS,
+    // Task 7).
     function experimentTransitionAllowed(from, to) {
       return from == to
         || (from == 'draft' && to == 'running')
@@ -48,21 +56,24 @@ service cloud.firestore {
         || (from == 'paused' && to == 'running')
         || (from == 'running' && to == 'stopped')
         || (from == 'paused' && to == 'stopped')
-        || (from == 'running' && to == 'completed');
+        || (from == 'running' && to == 'completed')
+        || (from == 'paused' && to == 'completed');
     }
 
     // Full update-shape + freeze contract for /experiments/{id} (match block
     // below). A plain diff().affectedKeys().hasOnly([...]) can't express two
     // things this collection needs, so they're resolved here:
     //   1. startAt/endAt freeze: the plan says these ride in the CREATE
-    //      hasOnly list (so a draft can be created with them absent/null) but
+    //      hasOnly list (reserving the field names on the schema) but the
+    //      create rule additionally requires their ABSENCE (see the match
+    //      block below) — a draft is always created with them unset, and
     //      the service contract stamps them from durationDays at
     //      startExperiment — an UPDATE, on the draft->running transition
     //      (the "freeze moment"). Resolution: startAt/endAt are added to the
     //      update affectedKeys allow-list, but whenever either key is part of
     //      the diff, the transition MUST be draft->running. Every other
-    //      update leaves them untouched, so they are effectively writable
-    //      exactly once.
+    //      update leaves them untouched, so — combined with the create-time
+    //      absence guard — they are writable exactly once, ever.
     //   2. result is writable only alongside a post-state of 'completed' —
     //      this covers both the running->completed transition AND the
     //      completed->completed no-op rerun-after-exclusion case (PRD
@@ -414,7 +425,12 @@ service cloud.firestore {
       // docs/quality/experiments-data-method.md). Owner has full CRUD.
       // Create is shape- and draft-only validated (no `result` may be
       // written at create time — an experiment cannot be born with a
-      // result). Update is governed entirely by experimentUpdateAllowed
+      // result; same absence guard applies to `startAt`/`endAt` — they ride
+      // in the hasOnly list so the field names are reserved on the schema,
+      // but a client cannot seed a non-null value at create time, only the
+      // draft->running stamp in experimentUpdateAllowed can ever write them,
+      // which is what makes "writable exactly once, at the freeze moment"
+      // true). Update is governed entirely by experimentUpdateAllowed
       // above: question/template/analysisPlan/scope/createdAt are NOT in
       // its affectedKeys allow-list at all, so they are immutable for the
       // life of the document once created — the PRD plan-freeze invariant.
@@ -429,7 +445,8 @@ service cloud.firestore {
           && request.resource.data.status == 'draft'
           && request.resource.data.durationDays in [14, 28]
           && request.resource.data.excludedObservations is list
-          && !request.resource.data.keys().hasAny(['result']);
+          && !request.resource.data.keys().hasAny(['result'])
+          && !request.resource.data.keys().hasAny(['startAt', 'endAt']);
         allow update: if isOwner(userId) && experimentUpdateAllowed(resource.data, request.resource.data);
       }
     }

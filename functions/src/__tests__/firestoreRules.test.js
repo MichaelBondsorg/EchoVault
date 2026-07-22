@@ -1269,14 +1269,16 @@ async function seedExperiment(id, status, extra = {}) {
 }
 
 describe('Experiments collection rules (create shape)', () => {
+  // startAt/endAt are deliberately ABSENT here: they are reserved on the
+  // create hasOnly schema but must not be present (even as null) at create
+  // time — only the draft->running update stamp may ever write them (see
+  // the startAt/endAt freeze describe block below).
   const validExperiment = {
     question: 'Does sleep affect my mood?',
     template: 'sleep_mood_lag1',
     analysisPlan: { exposure: 'sleep_hours', outcome: 'mood_score', lag: 1 },
     scope: 'all',
     status: 'draft',
-    startAt: null,
-    endAt: null,
     durationDays: 14,
     excludedObservations: [],
     createdAt: 'now',
@@ -1335,6 +1337,18 @@ describe('Experiments collection rules (create shape)', () => {
     const ref = doc(db, userPath(USER_ID), 'experiments', 'e-badplan');
     await assertFails(setDoc(ref, { ...validExperiment, analysisPlan: 'not-a-map' }));
   });
+
+  it('denies a create that seeds a non-null startAt (freeze hole guard)', async () => {
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    const ref = doc(db, userPath(USER_ID), 'experiments', 'e-seed-startat');
+    await assertFails(setDoc(ref, { ...validExperiment, startAt: '2026-07-22T00:00:00.000Z' }));
+  });
+
+  it('denies a create that seeds a non-null endAt (freeze hole guard)', async () => {
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    const ref = doc(db, userPath(USER_ID), 'experiments', 'e-seed-endat');
+    await assertFails(setDoc(ref, { ...validExperiment, endAt: '2026-08-05T00:00:00.000Z' }));
+  });
 });
 
 describe('Experiments collection rules (plan-freeze after create)', () => {
@@ -1385,6 +1399,15 @@ describe('Experiments collection rules (plan-freeze after create)', () => {
       durationDays: 28,
     }));
   });
+
+  it('denies an update touching an unlisted key (e.g. a forged "hacked" field)', async () => {
+    await seedExperiment('e-freeze-junk', 'draft');
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    await assertFails(updateDoc(doc(db, userPath(USER_ID), 'experiments', 'e-freeze-junk'), {
+      hacked: true,
+      updatedAt: 'now',
+    }));
+  });
 });
 
 describe('Experiments collection rules (status transition matrix)', () => {
@@ -1432,6 +1455,22 @@ describe('Experiments collection rules (status transition matrix)', () => {
     await seedExperiment('e-t-running-completed', 'running');
     const db = testEnv.authenticatedContext(USER_ID).firestore();
     await assertSucceeds(updateDoc(doc(db, userPath(USER_ID), 'experiments', 'e-t-running-completed'), {
+      status: 'completed', updatedAt: 'now',
+    }));
+  });
+
+  it('ALLOWS paused -> completed (v1 variables are all passive; pause is UI-state only, so viewing results after endAt should not require a resume step first)', async () => {
+    await seedExperiment('e-t-paused-completed', 'paused');
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    await assertSucceeds(updateDoc(doc(db, userPath(USER_ID), 'experiments', 'e-t-paused-completed'), {
+      status: 'completed', updatedAt: 'now',
+    }));
+  });
+
+  it('FORBIDS stopped -> completed (terminal asymmetry: stopped never advances anywhere, unlike paused)', async () => {
+    await seedExperiment('e-t-stopped-completed', 'stopped');
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    await assertFails(updateDoc(doc(db, userPath(USER_ID), 'experiments', 'e-t-stopped-completed'), {
       status: 'completed', updatedAt: 'now',
     }));
   });
@@ -1490,6 +1529,15 @@ describe('Experiments collection rules (startAt/endAt freeze)', () => {
     await assertFails(updateDoc(doc(db, userPath(USER_ID), 'experiments', 'e-start-immutable'), {
       status: 'paused',
       startAt: '2026-07-23T00:00:00.000Z',
+      updatedAt: 'now',
+    }));
+  });
+
+  it('FORBIDS a draft -> draft no-op update that also writes startAt (freeze edge: the transition must be draft->running, not merely "before is draft")', async () => {
+    await seedExperiment('e-start-noop-draft', 'draft');
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    await assertFails(updateDoc(doc(db, userPath(USER_ID), 'experiments', 'e-start-noop-draft'), {
+      startAt: '2026-07-22T00:00:00.000Z',
       updatedAt: 'now',
     }));
   });
@@ -1575,7 +1623,7 @@ describe('Experiments collection rules (owner isolation)', () => {
     await assertFails(getDoc(ref));
     await assertFails(setDoc(ref, {
       question: 'Hacked?', template: 't', analysisPlan: {}, scope: 'all', status: 'draft',
-      startAt: null, endAt: null, durationDays: 14, excludedObservations: [],
+      durationDays: 14, excludedObservations: [],
       createdAt: 'now', updatedAt: 'now',
     }));
     await assertFails(updateDoc(ref, { status: 'running', updatedAt: 'now' }));
