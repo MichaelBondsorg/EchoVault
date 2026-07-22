@@ -34,45 +34,60 @@ export const computeHealthMoodCorrelations = (entries) => {
   const correlations = {};
 
   // ===== SLEEP-MOOD CORRELATION =====
+  // R4 T1b: `average([])` returns 0 (src/utils/statistics.js), so an empty
+  // good/poor group used to silently become a fabricated "0% mood" data
+  // point instead of no data at all — manufacturing a large false
+  // difference against whatever real value the other side had. Both sides
+  // must have at least one member before this comparison runs at all.
   const sleepData = dataPoints.filter(d => d.sleepHours != null);
   if (sleepData.length >= 5) {
     // Compare good sleep (7+h) vs poor sleep (<6h)
-    const goodSleepMood = average(sleepData.filter(d => d.sleepHours >= 7).map(d => d.mood));
-    const poorSleepMood = average(sleepData.filter(d => d.sleepHours < 6).map(d => d.mood));
-    const sleepMoods = sleepData.map(d => d.mood);
-    const sleepHours = sleepData.map(d => d.sleepHours);
-    const sleepCorr = pearsonCorrelation(sleepHours, sleepMoods);
+    const goodSleepEntries = sleepData.filter(d => d.sleepHours >= 7);
+    const poorSleepEntries = sleepData.filter(d => d.sleepHours < 6);
 
-    if (Math.abs(goodSleepMood - poorSleepMood) > 0.1 || Math.abs(sleepCorr) > 0.3) {
-      correlations.sleepMood = {
-        type: 'sleep_mood',
-        correlation: sleepCorr,
-        goodSleepAvgMood: goodSleepMood,
-        poorSleepAvgMood: poorSleepMood,
-        difference: goodSleepMood - poorSleepMood,
-        insight: `Mood is ${Math.round(Math.abs(goodSleepMood - poorSleepMood) * 100)}% ${goodSleepMood > poorSleepMood ? 'higher' : 'lower'} on days with 7+ hours of sleep`,
-        strength: Math.abs(sleepCorr) > 0.5 ? 'strong' : Math.abs(sleepCorr) > 0.3 ? 'moderate' : 'weak',
-        sampleSize: sleepData.length
-      };
+    if (goodSleepEntries.length > 0 && poorSleepEntries.length > 0) {
+      const goodSleepMood = average(goodSleepEntries.map(d => d.mood));
+      const poorSleepMood = average(poorSleepEntries.map(d => d.mood));
+      const sleepMoods = sleepData.map(d => d.mood);
+      const sleepHours = sleepData.map(d => d.sleepHours);
+      const sleepCorr = pearsonCorrelation(sleepHours, sleepMoods);
+
+      if (Math.abs(goodSleepMood - poorSleepMood) > 0.1 || Math.abs(sleepCorr) > 0.3) {
+        correlations.sleepMood = {
+          type: 'sleep_mood',
+          correlation: sleepCorr,
+          goodSleepAvgMood: goodSleepMood,
+          poorSleepAvgMood: poorSleepMood,
+          difference: goodSleepMood - poorSleepMood,
+          insight: `Mood is ${Math.round(Math.abs(goodSleepMood - poorSleepMood) * 100)}% ${goodSleepMood > poorSleepMood ? 'higher' : 'lower'} on days with 7+ hours of sleep`,
+          strength: Math.abs(sleepCorr) > 0.5 ? 'strong' : Math.abs(sleepCorr) > 0.3 ? 'moderate' : 'weak',
+          sampleSize: sleepData.length
+        };
+      }
     }
   }
 
   // ===== SLEEP SCORE-MOOD CORRELATION =====
   const sleepScoreData = dataPoints.filter(d => d.sleepScore != null);
   if (sleepScoreData.length >= 5) {
-    const highScoreMood = average(sleepScoreData.filter(d => d.sleepScore >= 80).map(d => d.mood));
-    const lowScoreMood = average(sleepScoreData.filter(d => d.sleepScore < 60).map(d => d.mood));
+    const highScoreEntries = sleepScoreData.filter(d => d.sleepScore >= 80);
+    const lowScoreEntries = sleepScoreData.filter(d => d.sleepScore < 60);
 
-    if (Math.abs(highScoreMood - lowScoreMood) > 0.15) {
-      correlations.sleepQualityMood = {
-        type: 'sleep_quality_mood',
-        highScoreAvgMood: highScoreMood,
-        lowScoreAvgMood: lowScoreMood,
-        difference: highScoreMood - lowScoreMood,
-        insight: `Sleep quality (score 80+) correlates with ${Math.round((highScoreMood - lowScoreMood) * 100)}% better mood`,
-        strength: highScoreMood - lowScoreMood > 0.25 ? 'strong' : 'moderate',
-        sampleSize: sleepScoreData.length
-      };
+    if (highScoreEntries.length > 0 && lowScoreEntries.length > 0) {
+      const highScoreMood = average(highScoreEntries.map(d => d.mood));
+      const lowScoreMood = average(lowScoreEntries.map(d => d.mood));
+
+      if (Math.abs(highScoreMood - lowScoreMood) > 0.15) {
+        correlations.sleepQualityMood = {
+          type: 'sleep_quality_mood',
+          highScoreAvgMood: highScoreMood,
+          lowScoreAvgMood: lowScoreMood,
+          difference: highScoreMood - lowScoreMood,
+          insight: `Sleep quality (score 80+) correlates with ${Math.round((highScoreMood - lowScoreMood) * 100)}% better mood`,
+          strength: highScoreMood - lowScoreMood > 0.25 ? 'strong' : 'moderate',
+          sampleSize: sleepScoreData.length
+        };
+      }
     }
   }
 
@@ -80,24 +95,29 @@ export const computeHealthMoodCorrelations = (entries) => {
   const hrvData = dataPoints.filter(d => d.hrv != null);
   if (hrvData.length >= 5) {
     const medianHRV = median(hrvData.map(d => d.hrv));
-    const highHRVMood = average(hrvData.filter(d => d.hrv >= medianHRV).map(d => d.mood));
-    const lowHRVMood = average(hrvData.filter(d => d.hrv < medianHRV).map(d => d.mood));
-    const hrvMoods = hrvData.map(d => d.mood);
-    const hrvValues = hrvData.map(d => d.hrv);
-    const hrvCorr = pearsonCorrelation(hrvValues, hrvMoods);
+    const highHRVEntries = hrvData.filter(d => d.hrv >= medianHRV);
+    const lowHRVEntries = hrvData.filter(d => d.hrv < medianHRV);
 
-    if (Math.abs(highHRVMood - lowHRVMood) > 0.1 || Math.abs(hrvCorr) > 0.3) {
-      correlations.hrvMood = {
-        type: 'hrv_mood',
-        correlation: hrvCorr,
-        medianHRV,
-        highHRVAvgMood: highHRVMood,
-        lowHRVAvgMood: lowHRVMood,
-        difference: highHRVMood - lowHRVMood,
-        insight: `Higher HRV (${Math.round(medianHRV)}ms+) correlates with ${Math.round(Math.abs(highHRVMood - lowHRVMood) * 100)}% ${highHRVMood > lowHRVMood ? 'better' : 'worse'} mood`,
-        strength: Math.abs(hrvCorr) > 0.5 ? 'strong' : Math.abs(hrvCorr) > 0.3 ? 'moderate' : 'weak',
-        sampleSize: hrvData.length
-      };
+    if (highHRVEntries.length > 0 && lowHRVEntries.length > 0) {
+      const highHRVMood = average(highHRVEntries.map(d => d.mood));
+      const lowHRVMood = average(lowHRVEntries.map(d => d.mood));
+      const hrvMoods = hrvData.map(d => d.mood);
+      const hrvValues = hrvData.map(d => d.hrv);
+      const hrvCorr = pearsonCorrelation(hrvValues, hrvMoods);
+
+      if (Math.abs(highHRVMood - lowHRVMood) > 0.1 || Math.abs(hrvCorr) > 0.3) {
+        correlations.hrvMood = {
+          type: 'hrv_mood',
+          correlation: hrvCorr,
+          medianHRV,
+          highHRVAvgMood: highHRVMood,
+          lowHRVAvgMood: lowHRVMood,
+          difference: highHRVMood - lowHRVMood,
+          insight: `Higher HRV (${Math.round(medianHRV)}ms+) correlates with ${Math.round(Math.abs(highHRVMood - lowHRVMood) * 100)}% ${highHRVMood > lowHRVMood ? 'better' : 'worse'} mood`,
+          strength: Math.abs(hrvCorr) > 0.5 ? 'strong' : Math.abs(hrvCorr) > 0.3 ? 'moderate' : 'weak',
+          sampleSize: hrvData.length
+        };
+      }
     }
   }
 
@@ -175,20 +195,25 @@ export const computeHealthMoodCorrelations = (entries) => {
   const rhrData = dataPoints.filter(d => d.rhr != null);
   if (rhrData.length >= 5) {
     const medianRHR = median(rhrData.map(d => d.rhr));
-    const lowRHRMood = average(rhrData.filter(d => d.rhr <= medianRHR).map(d => d.mood));
-    const highRHRMood = average(rhrData.filter(d => d.rhr > medianRHR).map(d => d.mood));
+    const lowRHREntries = rhrData.filter(d => d.rhr <= medianRHR);
+    const highRHREntries = rhrData.filter(d => d.rhr > medianRHR);
 
-    if (Math.abs(lowRHRMood - highRHRMood) > 0.1) {
-      correlations.rhrMood = {
-        type: 'rhr_mood',
-        medianRHR,
-        lowRHRMood,
-        highRHRMood,
-        difference: lowRHRMood - highRHRMood,
-        insight: `Lower resting heart rate (${Math.round(medianRHR)}bpm or less) correlates with ${Math.round(Math.abs(lowRHRMood - highRHRMood) * 100)}% better mood`,
-        strength: Math.abs(lowRHRMood - highRHRMood) > 0.2 ? 'strong' : 'moderate',
-        sampleSize: rhrData.length
-      };
+    if (lowRHREntries.length > 0 && highRHREntries.length > 0) {
+      const lowRHRMood = average(lowRHREntries.map(d => d.mood));
+      const highRHRMood = average(highRHREntries.map(d => d.mood));
+
+      if (Math.abs(lowRHRMood - highRHRMood) > 0.1) {
+        correlations.rhrMood = {
+          type: 'rhr_mood',
+          medianRHR,
+          lowRHRMood,
+          highRHRMood,
+          difference: lowRHRMood - highRHRMood,
+          insight: `Lower resting heart rate (${Math.round(medianRHR)}bpm or less) correlates with ${Math.round(Math.abs(lowRHRMood - highRHRMood) * 100)}% better mood`,
+          strength: Math.abs(lowRHRMood - highRHRMood) > 0.2 ? 'strong' : 'moderate',
+          sampleSize: rhrData.length
+        };
+      }
     }
   }
 

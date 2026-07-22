@@ -32,10 +32,11 @@ import { computeThemesCorrelations } from './correlations/themesCorrelations';
 // Configuration
 import { THRESHOLDS, CATEGORIES } from './utils/thresholds';
 
-// Entry-schema adapter (R4 Task 1) — the five correlation engines below
-// (activity/people/healthExtended/category/themes) consume ONLY this
-// normalized shape; health/environment/time correlations are untouched by
-// R4 Task 1 and keep reading raw `entries` directly.
+// Entry-schema adapter (R4 Task 1 + T1b) — six correlation engines below
+// (activity/people/healthExtended/category/themes/time) consume ONLY this
+// normalized shape; health/environment correlations (src/services/health/,
+// src/services/environment/) are a different module tree, out of this
+// task's scope, and keep reading raw `entries` directly.
 import { normalizeEntriesForInsights } from '../insights/entryAdapter';
 
 // Feedback learning
@@ -190,8 +191,8 @@ export const generateBasicInsights = async (userId, entries) => {
     console.log('[BasicInsights] People:', peopleInsights.length, 'insights',
       peopleInsights.length > 0 ? peopleInsights.map(i => i.peopleKey || i.id) : '(none)');
 
-    // 5. Time correlations (new)
-    const timeInsights = computeTimeCorrelations(entries);
+    // 5. Time correlations (new) — R4 T1b: now under the adapter too
+    const timeInsights = computeTimeCorrelations(normalizedEntries);
     allInsights.push(...timeInsights);
     console.log('[BasicInsights] Time:', timeInsights.length, 'insights',
       timeInsights.length > 0 ? timeInsights.map(i => i.id) : '(none)');
