@@ -90,7 +90,11 @@ const InsightsPage = ({
   const [receiptInsight, setReceiptInsight] = useState(null);
 
   // First-use tip dismissal state — see RECEIPTS_TIP_AREA doc comment above.
-  const [showReceiptsTip, setShowReceiptsTip] = useState(() => !hasSeenReceiptsTip(userId));
+  // Flag-first, storage-second — mirrors getUnseenAnnouncements' discipline:
+  // with insightReceipts off, no localStorage read ever fires (review fix).
+  const [showReceiptsTip, setShowReceiptsTip] = useState(
+    () => getFlag('insightReceipts') && !hasSeenReceiptsTip(userId)
+  );
 
   const dismissReceiptsTip = () => {
     setShowReceiptsTip(false);
@@ -325,8 +329,9 @@ const InsightsPage = ({
             type="button"
             onClick={dismissReceiptsTip}
             aria-label="Dismiss tip"
-            className="relative shrink-0 text-accent-deep before:absolute before:-inset-2.5 before:content-['']"
+            className="relative shrink-0 text-accent-deep before:absolute before:-inset-3.5 before:content-['']"
           >
+            {/* 16px icon + before:-inset-3.5 (14px/side) = 44px tap target */}
             <X size={16} />
           </button>
         </div>

@@ -9,8 +9,9 @@
  *
  * Real timers throughout (not fake) — the modal's AnimatePresence exit
  * animation relies on requestAnimationFrame, which fake timers don't
- * advance, so dismissal assertions would hang. Matches ReceiptSheet's own
- * test file, the other AnimatePresence-driven overlay in this codebase.
+ * advance, so dismissal assertions would hang. (First AnimatePresence
+ * overlay test in this codebase — no prior precedent file exists; the
+ * review corrected an earlier comment here that cited one.)
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor, fireEvent } from '@testing-library/react';
