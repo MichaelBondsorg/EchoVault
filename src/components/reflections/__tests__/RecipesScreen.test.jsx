@@ -16,9 +16,15 @@ import { subscribeSpaces } from '../../../services/spaces/spacesService';
 import { previewRecipe, runRecipe } from '../../../services/reflections/runRecipe';
 import { getExcludedEntryIds } from '../../../services/insights/sourceExclusions';
 import { generateEmbedding } from '../../../services/ai';
+import { getFlag } from '../../../config/flags';
 import { STARTER_RECIPES } from '../../../services/reflections/starterRecipes';
 
 vi.mock('../../../config/firebase', () => ({ db: { __db: true } }));
+
+// Default true: the scope-picker gating (review fix) is exercised
+// explicitly in its own describe block below; every other test's edit-form
+// assertions predate that gate and should keep seeing the picker.
+vi.mock('../../../config/flags', () => ({ getFlag: vi.fn() }));
 
 vi.mock('../../../services/reflections/recipeService', () => ({
   subscribeRecipes: vi.fn(),
@@ -85,6 +91,7 @@ function recipe(overrides = {}) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  getFlag.mockReturnValue(true);
   withRecipes([]);
   withSpaces([]);
   previewRecipe.mockReturnValue({
@@ -279,6 +286,60 @@ describe('RecipesScreen — inline edit (name + questions)', () => {
     fireEvent.click(await screen.findByLabelText('Edit Monthly review'));
     expect(screen.getByText('Save').className).not.toMatch(/min-h-\[36px\]/);
     expect(screen.getByText('Cancel').className).not.toMatch(/min-h-\[36px\]/);
+  });
+});
+
+describe('RecipesScreen — Space picker gated behind contextSpaces flag (review fix)', () => {
+  it('flag off: renders no Space picker and never subscribes to spaces', async () => {
+    getFlag.mockImplementation((flag) => flag !== 'contextSpaces');
+    withRecipes([recipe({ questions: ['Q1?'] })]);
+    render(<RecipesScreen uid={UID} entries={[]} onClose={vi.fn()} />);
+
+    fireEvent.click(await screen.findByLabelText('Edit Monthly review'));
+    expect(screen.queryByText('Space')).toBeNull();
+    expect(screen.queryByLabelText(/Space for Monthly review/)).toBeNull();
+    expect(subscribeSpaces).not.toHaveBeenCalled();
+    // Time range editing is unaffected — it has no contextSpaces dependency.
+    expect(screen.getByText('90 days')).toBeTruthy();
+  });
+
+  it('flag off: saving an edit leaves a previously-stored scope untouched (never stripped)', async () => {
+    getFlag.mockImplementation((flag) => flag !== 'contextSpaces');
+    const existing = recipe({ questions: ['Q1?'], scope: { spaceId: 'space-1' }, timeRangeDays: 30 });
+    withRecipes([existing]);
+    render(<RecipesScreen uid={UID} entries={[]} onClose={vi.fn()} />);
+
+    fireEvent.click(await screen.findByLabelText('Edit Monthly review'));
+    fireEvent.click(screen.getByText('Save'));
+
+    await waitFor(() =>
+      expect(updateRecipe).toHaveBeenCalledWith(
+        { __db: true },
+        UID,
+        existing,
+        { name: 'Monthly review', questions: ['Q1?'], scope: { spaceId: 'space-1' }, timeRangeDays: 30 },
+      ),
+    );
+  });
+
+  it('flag off: the run-preview never resolves a real space name (spaces list stays empty)', async () => {
+    getFlag.mockImplementation((flag) => flag !== 'contextSpaces');
+    withRecipes([recipe({ scope: { spaceId: 'space-1' } })]);
+    render(<RecipesScreen uid={UID} entries={[]} onClose={vi.fn()} />);
+
+    fireEvent.click(await screen.findByLabelText('Run Monthly review'));
+
+    await waitFor(() => expect(previewRecipe).toHaveBeenCalled());
+    expect(previewRecipe.mock.calls[0][3]).toEqual([]);
+  });
+
+  it('flag on: renders the Space picker', async () => {
+    getFlag.mockReturnValue(true);
+    withRecipes([recipe({ questions: ['Q1?'] })]);
+    render(<RecipesScreen uid={UID} entries={[]} onClose={vi.fn()} />);
+
+    fireEvent.click(await screen.findByLabelText('Edit Monthly review'));
+    expect(screen.getByLabelText('Space for Monthly review: All spaces')).toBeTruthy();
   });
 });
 

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Archive, Layers, Pencil, Play, X } from 'lucide-react';
 import { db } from '../../config/firebase';
+import { getFlag } from '../../config/flags';
 import { Button, Chip } from '../cloud';
 import SpacePicker from '../spaces/SpacePicker';
 import { useDismissablePopover } from '../../hooks/useDismissablePopover';
@@ -26,7 +27,19 @@ import ReflectionDraft from './ReflectionDraft';
  *     Space via the shared `SpacePicker`, and time range via a Chip-row
  *     segmented control — PRD §5.6 requires a recipe to declare all three)
  *     and archive (confirm-gated; recipes are archived, never deleted, and
- *     existing reflections are untouched — see `recipeService.js`).
+ *     existing reflections are untouched — see `recipeService.js`). The
+ *     Space picker (and its `subscribeSpaces` effect) is gated behind
+ *     `getFlag('contextSpaces')`, matching every other `SpacePicker`
+ *     consumer (`EntryBar`/`EntryCard`/`UnifiedConversation`) — spaces are
+ *     archive-not-delete, so a user who ever had the flag on still has
+ *     space docs, and `runRecipe.js` applies `filterEntriesByScope`
+ *     unconditionally, so an ungated picker would be a real scoping leak,
+ *     not just a cosmetic one. With the flag off, `editScope` still starts
+ *     from the recipe's stored value and is saved back untouched (the UI
+ *     just can't change it), and `previewRecipe` gets an empty `spaces`
+ *     list — same as before this fix, and `previewRecipe`'s own doc
+ *     comment: a scoped recipe with no space match falls back to showing
+ *     the raw `spaceId` rather than mislabeling it "All spaces".
  *  3. Run: preview dialog (`previewRecipe` — PRD "preview exactly what
  *     will be used before first run") -> explicit "Run" confirm -> a
  *     progress state while per-question embeddings are generated (the
@@ -68,6 +81,7 @@ const RecipesScreen = ({ uid, entries = [], onClose }) => {
   const [seeding, setSeeding] = useState(false);
   const [error, setError] = useState(null);
   const [spaces, setSpaces] = useState([]);
+  const contextSpacesOn = getFlag('contextSpaces');
 
   // Inline edit
   const [editingId, setEditingId] = useState(null);
@@ -115,10 +129,17 @@ const RecipesScreen = ({ uid, entries = [], onClose }) => {
     );
   }, [uid]);
 
+  // Context Space picker (flag: contextSpaces) — same gate as EntryBar's
+  // SpacePill/EntryCard's SpaceChip/UnifiedConversation's scope selector:
+  // subscribe only while the flag is on, and reset to [] when it's off so
+  // an already-populated list doesn't linger after a flag flip mid-session.
   useEffect(() => {
-    if (!uid) return undefined;
+    if (!contextSpacesOn || !uid) {
+      setSpaces([]);
+      return undefined;
+    }
     return subscribeSpaces(db, uid, setSpaces);
-  }, [uid]);
+  }, [contextSpacesOn, uid]);
 
   const handleSeed = async () => {
     if (!uid || seeding) return;
@@ -408,32 +429,34 @@ const RecipesScreen = ({ uid, entries = [], onClose }) => {
                           </button>
                         )}
 
-                        <div className="space-y-1 pt-1">
-                          <p className="text-xs font-medium text-[var(--muted-foreground)]">Space</p>
-                          <div className="relative inline-block" ref={scopePickerRef}>
-                            <Chip
-                              as="button"
-                              type="button"
-                              onClick={() => setScopePickerOpen((prev) => !prev)}
-                              aria-haspopup="listbox"
-                              aria-expanded={scopePickerOpen}
-                              aria-label={`Space for ${recipe.name}: ${selectedSpaceLabel}`}
-                            >
-                              {selectedSpaceLabel}
-                            </Chip>
-                            {scopePickerOpen && (
-                              <SpacePicker
-                                spaces={spaces}
-                                selectedSpaceId={editScope?.spaceId || null}
-                                onSelect={(spaceId) => {
-                                  setEditScope(spaceId ? { spaceId } : null);
-                                  setScopePickerOpen(false);
-                                }}
-                                defaultLabel="All spaces"
-                              />
-                            )}
+                        {contextSpacesOn && (
+                          <div className="space-y-1 pt-1">
+                            <p className="text-xs font-medium text-[var(--muted-foreground)]">Space</p>
+                            <div className="relative inline-block" ref={scopePickerRef}>
+                              <Chip
+                                as="button"
+                                type="button"
+                                onClick={() => setScopePickerOpen((prev) => !prev)}
+                                aria-haspopup="listbox"
+                                aria-expanded={scopePickerOpen}
+                                aria-label={`Space for ${recipe.name}: ${selectedSpaceLabel}`}
+                              >
+                                {selectedSpaceLabel}
+                              </Chip>
+                              {scopePickerOpen && (
+                                <SpacePicker
+                                  spaces={spaces}
+                                  selectedSpaceId={editScope?.spaceId || null}
+                                  onSelect={(spaceId) => {
+                                    setEditScope(spaceId ? { spaceId } : null);
+                                    setScopePickerOpen(false);
+                                  }}
+                                  defaultLabel="All spaces"
+                                />
+                              )}
+                            </div>
                           </div>
-                        </div>
+                        )}
 
                         <div className="space-y-1">
                           <p className="text-xs font-medium text-[var(--muted-foreground)]">Look back</p>
