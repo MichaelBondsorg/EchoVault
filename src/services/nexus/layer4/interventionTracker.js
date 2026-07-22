@@ -484,6 +484,21 @@ export const updateInterventionData = async (userId, entries, whoopHistory) => {
 /**
  * Get intervention data
  */
+/**
+ * Self-healing note (R4 T3d, key-rename persistence): `updateInterventionData`
+ * below always writes a FULL replacement doc — `setDoc(interventionRef,
+ * {...interventionData, lastUpdated}, {merge: false-by-default})`, keyed
+ * fresh from `INTERVENTION_PATTERNS`' current (post-privacy-sweep) key
+ * names every time it runs. A user whose Firestore doc still has entries
+ * under the pre-rename keys (`sterling_walk`/`spencer_time`/`barrys`) will
+ * have those keys silently absent from `getInterventionData`'s result
+ * until the next full `updateInterventionData` run overwrites the doc
+ * entirely under the new generic keys — no migration script needed, this
+ * is expected interim silence (a stale key going unread for one cycle),
+ * not data loss: the underlying journal entries are re-scanned from
+ * scratch every time, so the new keys repopulate with the same real
+ * history the old keys would have shown.
+ */
 export const getInterventionData = async (userId) => {
   if (!userId) return null;
 
