@@ -342,12 +342,16 @@ export async function runGentleRevisitDaily(db, { now = new Date() } = {}) {
         // backfill flagged anchors the recency-capped query might have
         // dropped; it is never itself a source of selectable candidates (age
         // window + every other rule is still enforced per-entry inside
-        // `selectRevisitCandidate`). Composite index:
+        // `selectRevisitCandidate`). Ordered ASC (oldest first) so the limit
+        // keeps the FAR-EDGE anchors — the exact region the main query's
+        // recency cap starves; recent flagged entries are already covered by
+        // the main query's top slice. Composite index:
         // firestore.indexes.json (entries: safety_flagged ASC, createdAt ASC).
         db.collection(`${userBase}/entries`)
           .where('safety_flagged', '==', true)
           .where('createdAt', '>=', new Date(windowStartMs))
           .where('createdAt', '<=', new Date(windowEndMs))
+          .orderBy('createdAt', 'asc')
           .limit(FLAGGED_ANCHOR_READ_LIMIT)
           .get(),
         db.collection(`${userBase}/revisit_exclusions`).get(),
