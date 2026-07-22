@@ -22,19 +22,53 @@ import {
  * without a live queue item in view.
  *
  * Three sections:
- *   (a) Opt-in toggle — turning ON for the first time ever (per-device,
- *       owner-scoped — see `ONBOARDING_AREA` below) shows a one-time
- *       explainer sheet (what it does / what's excluded / how to stop, PRD
- *       P0 "explicit onboarding choice") BEFORE the toggle actually flips;
- *       cancelling leaves it off. Turning OFF calls `setRevisitEnabled(db,
- *       uid, false)` directly — the service itself deletes every queued
- *       doc as part of that call (PRD: immediate cancel, not a fade-out) —
- *       no extra confirm needed since disabling is fully reversible (just
- *       toggle back on).
+ *   (a) Opt-in toggle — a two-step onboarding flow (GR2, Michael's safety
+ *       review: "let users exclude people, Spaces, topics, and dates
+ *       during opt-in — 'Less like this' only helps after harm or
+ *       discomfort has already occurred") gates the FIRST time `enabled`
+ *       is ever written true this device-session-onward:
+ *         1. Explainer (`onboardingStep === 'explainer'`) — what it does /
+ *            what's excluded / how to stop. Shown at MOST ONCE EVER per
+ *            owner (localStorage marker, see `ONBOARDING_AREA` below),
+ *            marked seen as soon as the user reads it and clicks
+ *            "Continue" — deliberately NOT tied to actually finishing the
+ *            enable flow (see `handleExplainerContinue`), so re-reading it
+ *            buys the user nothing once they've seen it once.
+ *         2. Exclusions (`onboardingStep === 'exclusions'`) — "Anything
+ *            you'd like to keep out?", surfacing the SAME hidden-dims
+ *            add-row controls as section (b) below (same
+ *            `addRevisitExclusion` payload shape, `reason:'hidden_dim'`).
+ *            Unlike the explainer, this step is offered on EVERY enable —
+ *            including re-enables after a disable — since the manager UI
+ *            already exists and costs nothing to skip; "Skip for now" and
+ *            "Done — turn on Gentle Revisit" are two equally-discoverable
+ *            ways to finish (see `finishOnboardingAndEnable` — they're
+ *            the same action under two labels: a quick skip for someone
+ *            with nothing to hide, and an explicit confirm for someone who
+ *            just configured something).
+ *       `setRevisitEnabled(true)` is called ONLY from
+ *       `finishOnboardingAndEnable` — the toggle itself
+ *       (`handleToggle`) never shortcuts past step 2 on a first-ever
+ *       enable, and can only skip step 1 once it's been marked seen.
+ *       Abandoning either step (the sheet's own close button, Escape, or
+ *       backdrop click — all route through `handleOnboardingCancel`) never
+ *       enables Gentle Revisit, but does NOT roll back any exclusion the
+ *       user added while the sheet was open: `addRevisitExclusion` writes
+ *       straight to Firestore independent of `enabled`, and a standing
+ *       suppression rule is safe to keep even if the user never finishes
+ *       opting in — it can only ever narrow what would be shown, never
+ *       widen it.
+ *       Turning OFF calls `setRevisitEnabled(db, uid, false)` directly —
+ *       the service itself deletes every queued doc as part of that call
+ *       (PRD: immediate cancel, not a fade-out) — no extra confirm needed
+ *       since disabling is fully reversible (just toggle back on, which
+ *       re-offers the exclusions step).
  *   (b) Hidden dimensions — add hide-by Space/Person/Tag/Date rows, written
  *       as `revisit_exclusions` with `reason:'hidden_dim'` (permanent — a
  *       deliberate standing suppression, unlike the 90-day "Less like this"
- *       signal from the widget).
+ *       signal from the widget). `renderHiddenDimensionForm` renders this
+ *       add-row once and is reused verbatim inside the onboarding
+ *       exclusions step above — same state, same handler, same payload.
  *   (c) Exclusions — every exclusion regardless of reason (hidden_dim,
  *       never_show, less_like_this), each removable (delete is the only
  *       restore path — firestore.rules denies updates on this collection,
@@ -91,7 +125,9 @@ const RevisitControls = ({ uid, onClose, onEnabledChange }) => {
   const [enabled, setEnabled] = useState(false);
   const [prefsLoaded, setPrefsLoaded] = useState(false);
   const [toggling, setToggling] = useState(false);
-  const [showOnboarding, setShowOnboarding] = useState(false);
+  // null | 'explainer' | 'exclusions' — see the module doc comment's
+  // "(a) Opt-in toggle" section for the full two-step flow this drives.
+  const [onboardingStep, setOnboardingStep] = useState(null);
 
   const [exclusions, setExclusions] = useState([]);
   const [exclusionsLoaded, setExclusionsLoaded] = useState(false);
@@ -156,21 +192,26 @@ const RevisitControls = ({ uid, onClose, onEnabledChange }) => {
       applyEnabled(false);
       return;
     }
-    if (hasSeenOnboarding(uid)) {
-      applyEnabled(true);
-      return;
-    }
-    setShowOnboarding(true);
+    // First-ever enable (this owner has never marked the explainer seen):
+    // start at the explainer. Every OTHER enable — including re-enables
+    // after a disable — skips straight to the exclusions step, which is
+    // offered every time (GR2 owner directive; see module doc comment).
+    // Either way, `applyEnabled(true)` never fires from here directly.
+    setOnboardingStep(hasSeenOnboarding(uid) ? 'exclusions' : 'explainer');
   };
 
-  const confirmOnboarding = async () => {
+  const handleExplainerContinue = () => {
     markOnboardingSeen(uid);
-    setShowOnboarding(false);
-    await applyEnabled(true);
+    setOnboardingStep('exclusions');
   };
 
-  const cancelOnboarding = () => {
-    setShowOnboarding(false);
+  const handleOnboardingCancel = () => {
+    setOnboardingStep(null);
+  };
+
+  const finishOnboardingAndEnable = async () => {
+    setOnboardingStep(null);
+    await applyEnabled(true);
   };
 
   const handleRemoveExclusion = async (exclusionId) => {
@@ -212,13 +253,55 @@ const RevisitControls = ({ uid, onClose, onEnabledChange }) => {
 
   const selectedDimensionOption = dimensionOptions.find((opt) => opt.value === addDimension) || dimensionOptions[0];
 
+  // Reused verbatim by both the always-visible "HIDDEN DIMENSIONS" section
+  // and the onboarding exclusions step — same state, same handler, same
+  // `addRevisitExclusion` payload. Rendered twice in the DOM when the
+  // onboarding exclusions dialog is open (once inert in the background,
+  // once live in the dialog) — harmless duplication, matching how the rest
+  // of this component already handles the nested-overlay case (see
+  // `nestedOverlayOpen` below).
+  const renderHiddenDimensionForm = () => (
+    <>
+      <form onSubmit={handleAddHidden} className="flex flex-wrap items-center gap-2">
+        <select
+          aria-label="Dimension to hide"
+          value={selectedDimensionOption?.value}
+          onChange={(e) => setAddDimension(e.target.value)}
+          className="rounded-lg border border-border bg-card px-2 py-1.5 text-sm"
+        >
+          {dimensionOptions.map((opt) => (
+            <option key={opt.value} value={opt.value}>{opt.label}</option>
+          ))}
+        </select>
+        <input
+          type={addDimension === 'date' ? 'date' : 'text'}
+          aria-label={`Value to hide (${selectedDimensionOption?.label || ''})`}
+          value={addValue}
+          onChange={(e) => setAddValue(e.target.value)}
+          placeholder={addDimension === 'date' ? undefined : 'e.g. Work, Alex, #travel'}
+          className="min-w-0 flex-1 rounded-lg border border-border bg-card px-2 py-1.5 text-sm"
+        />
+        <button
+          type="submit"
+          disabled={adding}
+          className="min-h-[44px] rounded-full bg-accent-deep px-4 text-sm font-medium text-background transition-opacity hover:opacity-90 disabled:opacity-50"
+        >
+          {adding ? 'Hiding…' : 'Hide'}
+        </button>
+      </form>
+      {addError && <p role="alert" className="text-xs text-destructive">{addError}</p>}
+    </>
+  );
+
   // Nested-overlay a11y (RecipesScreen precedent): only one `aria-modal`
-  // dialog may be active at a time. While the onboarding sheet (a real
+  // dialog may be active at a time. While an onboarding sheet (a real
   // Radix `Dialog`, its own independent portal) is open, this outer
   // hand-rolled `role="dialog"` wrapper drops `aria-modal` and gains
   // `aria-hidden`/`inert` (string, matching the convention) instead of
-  // colliding with it as a second simultaneous dialog.
-  const nestedOverlayOpen = showOnboarding;
+  // colliding with it as a second simultaneous dialog. Both onboarding
+  // steps share this flag — at most one of `showOnboarding`/`onboardingStep`
+  // states is ever truthy at a time.
+  const nestedOverlayOpen = onboardingStep !== null;
 
   return (
     <div
@@ -275,34 +358,7 @@ const RevisitControls = ({ uid, onClose, onEnabledChange }) => {
             <p className="text-sm text-[var(--secondary-foreground)]">
               Hide a Space, person, tag, or date from ever being resurfaced.
             </p>
-            <form onSubmit={handleAddHidden} className="flex flex-wrap items-center gap-2">
-              <select
-                aria-label="Dimension to hide"
-                value={selectedDimensionOption?.value}
-                onChange={(e) => setAddDimension(e.target.value)}
-                className="rounded-lg border border-border bg-card px-2 py-1.5 text-sm"
-              >
-                {dimensionOptions.map((opt) => (
-                  <option key={opt.value} value={opt.value}>{opt.label}</option>
-                ))}
-              </select>
-              <input
-                type={addDimension === 'date' ? 'date' : 'text'}
-                aria-label={`Value to hide (${selectedDimensionOption?.label || ''})`}
-                value={addValue}
-                onChange={(e) => setAddValue(e.target.value)}
-                placeholder={addDimension === 'date' ? undefined : 'e.g. Work, Alex, #travel'}
-                className="min-w-0 flex-1 rounded-lg border border-border bg-card px-2 py-1.5 text-sm"
-              />
-              <button
-                type="submit"
-                disabled={adding}
-                className="min-h-[44px] rounded-full bg-accent-deep px-4 text-sm font-medium text-background transition-opacity hover:opacity-90 disabled:opacity-50"
-              >
-                {adding ? 'Hiding…' : 'Hide'}
-              </button>
-            </form>
-            {addError && <p role="alert" className="text-xs text-destructive">{addError}</p>}
+            {renderHiddenDimensionForm()}
           </div>
         </section>
 
@@ -338,7 +394,7 @@ const RevisitControls = ({ uid, onClose, onEnabledChange }) => {
         </section>
       </div>
 
-      <Dialog open={showOnboarding} onOpenChange={(next) => { if (!next) cancelOnboarding(); }}>
+      <Dialog open={onboardingStep === 'explainer'} onOpenChange={(next) => { if (!next) handleOnboardingCancel(); }}>
         <DialogContent aria-labelledby="revisit-onboarding-title">
           <DialogTitle id="revisit-onboarding-title">Before you turn on Gentle Revisit</DialogTitle>
           <DialogDescription asChild>
@@ -351,17 +407,47 @@ const RevisitControls = ({ uid, onClose, onEnabledChange }) => {
           <div className="mt-4 flex gap-2">
             <button
               type="button"
-              onClick={cancelOnboarding}
+              onClick={handleOnboardingCancel}
               className="min-h-[44px] flex-1 rounded-full border border-border text-sm font-medium text-secondary-foreground transition-colors hover:bg-divider"
             >
               Not now
             </button>
             <button
               type="button"
-              onClick={confirmOnboarding}
+              onClick={handleExplainerContinue}
               className="min-h-[44px] flex-1 rounded-full bg-accent-deep text-sm font-medium text-background transition-opacity hover:opacity-90"
             >
-              Turn on
+              Continue
+            </button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={onboardingStep === 'exclusions'} onOpenChange={(next) => { if (!next) handleOnboardingCancel(); }}>
+        <DialogContent aria-labelledby="revisit-onboarding-exclusions-title">
+          <DialogTitle id="revisit-onboarding-exclusions-title">Anything you&apos;d like to keep out?</DialogTitle>
+          <DialogDescription asChild>
+            <p className="text-sm text-[var(--secondary-foreground)]">
+              Hide a Space, person, tag, or date before you turn this on. You can always change this later from Gentle Revisit settings.
+            </p>
+          </DialogDescription>
+          <div className="mt-3 space-y-3">
+            {renderHiddenDimensionForm()}
+          </div>
+          <div className="mt-4 flex gap-2">
+            <button
+              type="button"
+              onClick={finishOnboardingAndEnable}
+              className="min-h-[44px] flex-1 rounded-full border border-border text-sm font-medium text-secondary-foreground transition-colors hover:bg-divider"
+            >
+              Skip for now
+            </button>
+            <button
+              type="button"
+              onClick={finishOnboardingAndEnable}
+              className="min-h-[44px] flex-1 rounded-full bg-accent-deep text-sm font-medium text-background transition-opacity hover:opacity-90"
+            >
+              Done — turn on Gentle Revisit
             </button>
           </div>
         </DialogContent>

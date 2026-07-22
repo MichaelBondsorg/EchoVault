@@ -1,5 +1,6 @@
 /**
- * RevisitControls tests (R2 Task 20).
+ * RevisitControls tests (R2 Task 20; GR2 exclusions-before-first-enable
+ * step added per Michael's review — see the component's own doc comment).
  *
  * Exercises the REAL `revisitService` module (mirrors
  * `revisitService.test.js`'s mock harness, plus the real
@@ -47,6 +48,9 @@ const UID = 'user-1';
 const SETTINGS_PATH = 'artifacts/echo-vault-v5-fresh/users/user-1/settings';
 const EXCLUSIONS_PATH = 'artifacts/echo-vault-v5-fresh/users/user-1/revisit_exclusions';
 const QUEUE_PATH = 'artifacts/echo-vault-v5-fresh/users/user-1/revisit_queue';
+
+const EXPLAINER_NAME = /before you turn on gentle revisit/i;
+const EXCLUSIONS_STEP_NAME = /anything you.?d like to keep out/i;
 
 function docsSnapshot(rows) {
   return { docs: rows.map((r) => ({ id: r.id, data: () => { const { id, ...rest } = r; return rest; } })) };
@@ -107,13 +111,13 @@ describe('RevisitControls — load', () => {
   });
 });
 
-describe('RevisitControls — onboarding on first toggle-on', () => {
+describe('RevisitControls — onboarding: explainer step', () => {
   it('shows the explainer sheet before enabling, and does NOT call setRevisitEnabled yet', async () => {
     const { onEnabledChange } = await renderControls();
 
     fireEvent.click(screen.getByRole('switch', { name: /gentle revisit/i }));
 
-    const dialog = await screen.findByRole('dialog', { name: /before you turn on gentle revisit/i });
+    const dialog = await screen.findByRole('dialog', { name: EXPLAINER_NAME });
     // Exact-string matches (not regex substrings) — a regex would also match
     // the paragraphs' shared ancestor `<div>` (whose concatenated text
     // contains every paragraph), throwing a multiple-elements error.
@@ -133,40 +137,128 @@ describe('RevisitControls — onboarding on first toggle-on', () => {
   it('"Not now" closes the sheet without enabling', async () => {
     await renderControls();
     fireEvent.click(screen.getByRole('switch', { name: /gentle revisit/i }));
-    await screen.findByRole('dialog', { name: /before you turn on gentle revisit/i });
+    await screen.findByRole('dialog', { name: EXPLAINER_NAME });
 
     fireEvent.click(screen.getByText('Not now'));
 
     // The RevisitControls root itself is also `role="dialog"` (PrivacyCenter
     // template) — scope by accessible name to the nested onboarding sheet.
-    await waitFor(() => expect(screen.queryByRole('dialog', { name: /before you turn on gentle revisit/i })).toBeNull());
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: EXPLAINER_NAME })).toBeNull());
     expect(mocks.setDoc).not.toHaveBeenCalled();
     expect(screen.getByRole('switch', { name: /gentle revisit/i }).getAttribute('data-state')).toBe('unchecked');
   });
 
-  it('"Turn on" enables, marks onboarding seen (owner-scoped), and does not reappear next time', async () => {
-    const { onEnabledChange } = await renderControls();
+  it('never shows the explainer again once marked seen, even across a disable/re-enable', async () => {
+    await renderControls();
     fireEvent.click(screen.getByRole('switch', { name: /gentle revisit/i }));
-    await screen.findByRole('dialog', { name: /before you turn on gentle revisit/i });
+    await screen.findByRole('dialog', { name: EXPLAINER_NAME });
+    fireEvent.click(screen.getByText('Continue'));
+    const exclusionsDialog = await screen.findByRole('dialog', { name: EXCLUSIONS_STEP_NAME });
+    fireEvent.click(within(exclusionsDialog).getByText('Skip for now'));
+    await waitFor(() => expect(mocks.setDoc).toHaveBeenCalledTimes(1));
 
-    fireEvent.click(screen.getByText('Turn on'));
+    // Disable, then re-enable — explainer must not reappear.
+    mocks.setDoc.mockClear();
+    fireEvent.click(screen.getByRole('switch', { name: /gentle revisit/i })); // off
+    await waitFor(() => expect(mocks.setDoc).toHaveBeenCalledTimes(1));
+
+    fireEvent.click(screen.getByRole('switch', { name: /gentle revisit/i })); // on again
+    await screen.findByRole('dialog', { name: EXCLUSIONS_STEP_NAME });
+    expect(screen.queryByRole('dialog', { name: EXPLAINER_NAME })).toBeNull();
+  });
+});
+
+describe('RevisitControls — onboarding: exclusions step (GR2)', () => {
+  async function openExclusionsStepFirstTime() {
+    const utils = await renderControls();
+    fireEvent.click(screen.getByRole('switch', { name: /gentle revisit/i }));
+    await screen.findByRole('dialog', { name: EXPLAINER_NAME });
+    fireEvent.click(screen.getByText('Continue'));
+    const dialog = await screen.findByRole('dialog', { name: EXCLUSIONS_STEP_NAME });
+    return { ...utils, dialog };
+  }
+
+  it('is shown after the explainer, before any enable call, and "Skip for now" then enables', async () => {
+    const { onEnabledChange, dialog } = await openExclusionsStepFirstTime();
+    expect(mocks.setDoc).not.toHaveBeenCalled();
+    expect(onEnabledChange).not.toHaveBeenCalled();
+
+    fireEvent.click(within(dialog).getByText('Skip for now'));
 
     await waitFor(() => expect(mocks.setDoc).toHaveBeenCalledTimes(1));
     const [, payload, opts] = mocks.setDoc.mock.calls[0];
     expect(payload.enabled).toBe(true);
     expect(opts).toEqual({ merge: true });
     expect(onEnabledChange).toHaveBeenCalledWith(true);
+    expect(mocks.addDoc).not.toHaveBeenCalled();
+    expect(screen.queryByRole('dialog', { name: EXCLUSIONS_STEP_NAME })).toBeNull();
+  });
 
-    // Owner-scoped marker written — flipping the switch off and back on
-    // (still same uid) should NOT show the sheet again.
+  it('adding a Space and a Date exclusion writes exact hidden_dim payloads, then "Done" enables', async () => {
+    mocks.addDoc.mockResolvedValueOnce({ id: 'excl-space' }).mockResolvedValueOnce({ id: 'excl-date' });
+    const { onEnabledChange, dialog } = await openExclusionsStepFirstTime();
+
+    fireEvent.change(within(dialog).getByLabelText('Dimension to hide'), { target: { value: 'space' } });
+    fireEvent.change(within(dialog).getByLabelText(/value to hide/i), { target: { value: 'Family' } });
+    fireEvent.click(within(dialog).getByText('Hide'));
+    await waitFor(() => expect(mocks.addDoc).toHaveBeenCalledTimes(1));
+
+    fireEvent.change(within(dialog).getByLabelText('Dimension to hide'), { target: { value: 'date' } });
+    fireEvent.change(within(dialog).getByLabelText(/value to hide/i), { target: { value: '2026-01-01' } });
+    fireEvent.click(within(dialog).getByText('Hide'));
+    await waitFor(() => expect(mocks.addDoc).toHaveBeenCalledTimes(2));
+
+    const [, spacePayload] = mocks.addDoc.mock.calls[0];
+    expect(spacePayload).toMatchObject({ dimension: 'space', value: 'Family', reason: 'hidden_dim', permanent: true });
+    const [, datePayload] = mocks.addDoc.mock.calls[1];
+    expect(datePayload).toMatchObject({ dimension: 'date', value: '2026-01-01', reason: 'hidden_dim', permanent: true });
+
+    expect(mocks.setDoc).not.toHaveBeenCalled();
+    fireEvent.click(within(dialog).getByText('Done — turn on Gentle Revisit'));
+
+    await waitFor(() => expect(mocks.setDoc).toHaveBeenCalledTimes(1));
+    expect(mocks.setDoc.mock.calls[0][1].enabled).toBe(true);
+    expect(onEnabledChange).toHaveBeenCalledWith(true);
+  });
+
+  it('abandoning (closing the sheet) after adding an exclusion does NOT enable, but the exclusion is written', async () => {
+    const { onEnabledChange, dialog } = await openExclusionsStepFirstTime();
+
+    fireEvent.change(within(dialog).getByLabelText('Dimension to hide'), { target: { value: 'tag' } });
+    fireEvent.change(within(dialog).getByLabelText(/value to hide/i), { target: { value: 'grief' } });
+    fireEvent.click(within(dialog).getByText('Hide'));
+    await waitFor(() => expect(mocks.addDoc).toHaveBeenCalledTimes(1));
+
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Close' }));
+
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: EXCLUSIONS_STEP_NAME })).toBeNull());
+    expect(mocks.setDoc).not.toHaveBeenCalled();
+    expect(onEnabledChange).not.toHaveBeenCalled();
+    expect(screen.getByRole('switch', { name: /gentle revisit/i }).getAttribute('data-state')).toBe('unchecked');
+    // The exclusion itself is NOT rolled back — it's a suppression-only
+    // write, safe to keep even though the user never finished opting in.
+    expect(mocks.addDoc).toHaveBeenCalledTimes(1);
+  });
+
+  it('is re-offered on every subsequent enable, even after the explainer has been seen', async () => {
+    const { dialog: firstDialog } = await openExclusionsStepFirstTime();
+    fireEvent.click(within(firstDialog).getByText('Skip for now'));
+    await waitFor(() => expect(mocks.setDoc).toHaveBeenCalledTimes(1));
+
     mocks.setDoc.mockClear();
     fireEvent.click(screen.getByRole('switch', { name: /gentle revisit/i })); // off
     await waitFor(() => expect(mocks.setDoc).toHaveBeenCalledTimes(1));
     mocks.setDoc.mockClear();
 
     fireEvent.click(screen.getByRole('switch', { name: /gentle revisit/i })); // on again
+    // No explainer this time — straight to the exclusions step.
+    expect(screen.queryByRole('dialog', { name: EXPLAINER_NAME })).toBeNull();
+    const dialog = await screen.findByRole('dialog', { name: EXCLUSIONS_STEP_NAME });
+    expect(mocks.setDoc).not.toHaveBeenCalled();
+
+    fireEvent.click(within(dialog).getByText('Done — turn on Gentle Revisit'));
     await waitFor(() => expect(mocks.setDoc).toHaveBeenCalledTimes(1));
-    expect(screen.queryByRole('dialog', { name: /before you turn on gentle revisit/i })).toBeNull();
+    expect(mocks.setDoc.mock.calls[0][1].enabled).toBe(true);
   });
 });
 
@@ -253,14 +345,16 @@ describe('RevisitControls — exclusion list remove/restore', () => {
 });
 
 describe('RevisitControls — copy', () => {
-  it('never renders guilt/streak/anniversary language, including inside the onboarding sheet', async () => {
+  it('never renders guilt/streak/anniversary language, including inside both onboarding steps', async () => {
     mocks.getDocs.mockResolvedValue(docsSnapshot([
       { id: 'ex-1', dimension: 'tag', value: 'grief', reason: 'hidden_dim', permanent: true, createdAt: '2026-01-01T00:00:00.000Z' },
     ]));
     await renderControls();
-    // Open the onboarding sheet too, so its copy is included in the sweep.
+    // Walk through both onboarding steps so their copy is included in the sweep.
     fireEvent.click(screen.getByRole('switch', { name: /gentle revisit/i }));
-    await screen.findByRole('dialog', { name: /before you turn on gentle revisit/i });
+    await screen.findByRole('dialog', { name: EXPLAINER_NAME });
+    fireEvent.click(screen.getByText('Continue'));
+    await screen.findByRole('dialog', { name: EXCLUSIONS_STEP_NAME });
 
     const text = document.body.textContent;
     expect(text).not.toMatch(/streak/i);
