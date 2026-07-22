@@ -151,13 +151,13 @@ function sleepEntries(n) {
 function runningExperiment(overrides = {}) {
   return {
     id: 'exp-1',
-    question: 'Does how much I sleep affect my mood?',
+    question: 'How does my sleep move together with my mood?',
     template: 'sleep-hours-mood-same-day',
     analysisPlan: {
       templateId: 'sleep-hours-mood-same-day',
       lag: 0,
       exposure: { source: 'health', field: 'sleepHours', label: 'sleep hours' },
-      outcome: { field: 'analysis.mood_score', label: 'mood' },
+      outcome: { field: 'analysis.mood_score', label: 'mood', unit: 'mood_0_100' },
       minPairedObservations: 10,
       coverageFloor: 0.5,
       confounders: [],
@@ -224,10 +224,10 @@ describe('ExperimentsScreen — list states', () => {
   });
 
   it('renders each experiment question and status', async () => {
-    withExperiments([runningExperiment(), runningExperiment({ id: 'exp-2', status: 'stopped', question: 'Does exercise affect my mood?' })]);
+    withExperiments([runningExperiment(), runningExperiment({ id: 'exp-2', status: 'stopped', question: 'How does exercise move together with my mood?' })]);
     render(<ExperimentsScreen uid={UID} entries={sleepEntries(28)} onClose={vi.fn()} />);
-    expect(await screen.findByText('Does how much I sleep affect my mood?')).toBeTruthy();
-    expect(screen.getByText('Does exercise affect my mood?')).toBeTruthy();
+    expect(await screen.findByText('How does my sleep move together with my mood?')).toBeTruthy();
+    expect(screen.getByText('How does exercise move together with my mood?')).toBeTruthy();
     expect(screen.getByText('Stopped — entries were not affected.')).toBeTruthy();
   });
 });
@@ -243,7 +243,7 @@ describe('ExperimentsScreen — gate ordering (binding)', () => {
 
     fireEvent.click(await screen.findByText('New experiment'));
     const textarea = await screen.findByLabelText(/or ask your own question/i);
-    fireEvent.change(textarea, { target: { value: 'does exercise affect my mood stabilizer dose' } });
+    fireEvent.change(textarea, { target: { value: 'how does exercise move together with my mood stabilizer dose' } });
     fireEvent.click(screen.getByText('Ask'));
 
     // Declined (medical: "mood stabilizer" + dose-noun co-occurrence) —
@@ -255,7 +255,7 @@ describe('ExperimentsScreen — gate ordering (binding)', () => {
 
   it('sanity check: the same phrase WOULD match the exercise template if the matcher ran directly (proves this is a real bypass phrase, not a vacuous test)', async () => {
     const { matchQuestionToTemplate } = await import('../../../services/experiments/templates');
-    const direct = matchQuestionToTemplate('does exercise affect my mood stabilizer dose', []);
+    const direct = matchQuestionToTemplate('how does exercise move together with my mood stabilizer dose', []);
     expect(direct?.template?.id).toBe('exercise-minutes-mood');
   });
 
@@ -334,7 +334,7 @@ describe('ExperimentsScreen — decline UX', () => {
   it('unmappable question: shows a notice and keeps the template picker visible', async () => {
     await openCreateAndAsk('What is the meaning of life');
     expect(await screen.findByText(/not something engram can measure/i)).toBeTruthy();
-    expect(screen.getByText('Does exercise affect my mood?')).toBeTruthy();
+    expect(screen.getByText('How does exercise move together with my mood?')).toBeTruthy();
   });
 });
 
@@ -350,7 +350,7 @@ describe('ExperimentsScreen — template picker (tag template gating)', () => {
     fireEvent.click(await screen.findByText('New experiment'));
     await screen.findByText('Pick a question');
     expect(screen.queryByLabelText('Choose a tag')).toBeNull();
-    expect(screen.queryByText('Does this affect my mood?')).toBeNull();
+    expect(screen.queryByText('See how this moves with my mood')).toBeNull();
   });
 
   it('shows the tag-presence picker once the user has at least one tag', async () => {
@@ -375,13 +375,13 @@ describe('ExperimentsScreen — picker/tag direct template selection (Important 
   it('a canned template tap is STILL screened by screenQuestion first (a forced non-ok verdict declines even though the button picks a known-safe template)', async () => {
     render(<ExperimentsScreen uid={UID} entries={[]} onClose={vi.fn()} onOpenRecipes={vi.fn()} />);
     fireEvent.click(await screen.findByText('New experiment'));
-    await screen.findByText('Does exercise affect my mood?');
+    await screen.findByText('How does exercise move together with my mood?');
 
     // Force the NEXT screenQuestion call (this tap's) to decline, proving
     // the picker path still funnels through the safety gate even though it
     // never calls matchQuestionToTemplate.
     screenQuestionSpy.mockReturnValueOnce({ verdict: 'medical' });
-    fireEvent.click(screen.getByText('Does exercise affect my mood?'));
+    fireEvent.click(screen.getByText('How does exercise move together with my mood?'));
 
     expect(await screen.findByText(DECLINE_MEDICAL_SNIPPET)).toBeTruthy();
     expect(matchQuestionToTemplateSpy).not.toHaveBeenCalled();
@@ -394,7 +394,7 @@ describe('ExperimentsScreen — picker/tag direct template selection (Important 
     fireEvent.click(await screen.findByText('New experiment'));
     await screen.findByLabelText('Choose a tag'); // sanity: the tag picker is present too
 
-    fireEvent.click(screen.getByText('Does exercise affect my mood?'));
+    fireEvent.click(screen.getByText('How does exercise move together with my mood?'));
 
     // Proceeds straight to duration (no SpacePicker in this test's flag
     // config) instead of dead-ending on the unmappable notice.
@@ -411,7 +411,7 @@ describe('ExperimentsScreen — picker/tag direct template selection (Important 
 
     const tagSelect = await screen.findByLabelText('Choose a tag');
     fireEvent.change(tagSelect, { target: { value: '@habit:exercise' } });
-    fireEvent.click(screen.getByText('Does this affect my mood?'));
+    fireEvent.click(screen.getByText('See how this moves with my mood'));
 
     expect(await screen.findByText('How long should this run?')).toBeTruthy();
     expect(screen.queryByText(/not something engram can measure/i)).toBeNull();
@@ -420,7 +420,7 @@ describe('ExperimentsScreen — picker/tag direct template selection (Important 
 
   it('sanity check: the ambiguity this fix closes is real — matchQuestionToTemplate alone returns null (ambiguous) for the colliding text', async () => {
     const { matchQuestionToTemplate } = await import('../../../services/experiments/templates');
-    const direct = matchQuestionToTemplate('Does exercise affect my mood?', ['@habit:exercise']);
+    const direct = matchQuestionToTemplate('How does exercise move together with my mood?', ['@habit:exercise']);
     expect(direct).toBeNull();
   });
 });
@@ -433,7 +433,7 @@ describe('ExperimentsScreen — preflight review', () => {
   it('blocks Start and shows reasons when the preflight is not appropriate (empty history)', async () => {
     render(<ExperimentsScreen uid={UID} entries={[]} onClose={vi.fn()} />);
     fireEvent.click(await screen.findByText('New experiment'));
-    fireEvent.click(await screen.findByText('Does exercise affect my mood?'));
+    fireEvent.click(await screen.findByText('How does exercise move together with my mood?'));
     fireEvent.click(await screen.findByText('14 days'));
 
     const startBtn = await screen.findByText('Start');
@@ -444,7 +444,7 @@ describe('ExperimentsScreen — preflight review', () => {
   it('shows the freeze copy on the preflight screen', async () => {
     render(<ExperimentsScreen uid={UID} entries={[]} onClose={vi.fn()} />);
     fireEvent.click(await screen.findByText('New experiment'));
-    fireEvent.click(await screen.findByText('Does exercise affect my mood?'));
+    fireEvent.click(await screen.findByText('How does exercise move together with my mood?'));
     fireEvent.click(await screen.findByText('14 days'));
     expect(await screen.findByText(/your question and analysis plan lock when you start/i)).toBeTruthy();
   });
@@ -452,7 +452,7 @@ describe('ExperimentsScreen — preflight review', () => {
   it('enables Start and creates+starts the experiment when data is sufficient', async () => {
     render(<ExperimentsScreen uid={UID} entries={sleepEntries(28)} onClose={vi.fn()} />);
     fireEvent.click(await screen.findByText('New experiment'));
-    fireEvent.click(await screen.findByText('Does how much I sleep affect my mood?'));
+    fireEvent.click(await screen.findByText('How does my sleep move together with my mood?'));
     fireEvent.click(await screen.findByText('14 days'));
 
     const startBtn = await screen.findByText('Start');
@@ -463,7 +463,7 @@ describe('ExperimentsScreen — preflight review', () => {
     const [dbArg, uidArg, payload] = createExperiment.mock.calls[0];
     expect(dbArg).toEqual({ __db: true });
     expect(uidArg).toBe(UID);
-    expect(payload.question).toBe('Does how much I sleep affect my mood?');
+    expect(payload.question).toBe('How does my sleep move together with my mood?');
     expect(payload.durationDays).toBe(14);
     expect(payload.scope).toBeNull();
     expect(payload.analysisPlan.templateId).toBe('sleep-hours-mood-same-day');
@@ -525,10 +525,10 @@ describe('ExperimentsScreen — running card', () => {
   it('never renders streak/guilt/urgency copy anywhere on the screen', async () => {
     withExperiments([
       runningExperiment(),
-      runningExperiment({ id: 'exp-2', status: 'paused', question: 'Does exercise affect my mood?' }),
+      runningExperiment({ id: 'exp-2', status: 'paused', question: 'How does exercise move together with my mood?' }),
     ]);
     render(<ExperimentsScreen uid={UID} entries={sleepEntries(28)} onClose={vi.fn()} />);
-    await screen.findByText('Does how much I sleep affect my mood?');
+    await screen.findByText('How does my sleep move together with my mood?');
     const text = document.body.textContent;
     expect(text).not.toMatch(/streak/i);
     expect(text).not.toMatch(/you (missed|forgot|failed)/i);
@@ -546,21 +546,21 @@ describe('ExperimentsScreen — pause/resume/stop/delete', () => {
   it('pauses a running experiment immediately (no confirm)', async () => {
     withExperiments([runningExperiment()]);
     render(<ExperimentsScreen uid={UID} entries={sleepEntries(28)} onClose={vi.fn()} />);
-    fireEvent.click(await screen.findByLabelText(/pause does how much i sleep affect my mood/i));
+    fireEvent.click(await screen.findByLabelText(/pause how does my sleep move together with my mood/i));
     await waitFor(() => expect(pauseExperiment).toHaveBeenCalledWith({ __db: true }, UID, 'exp-1'));
   });
 
   it('resumes a paused experiment immediately (no confirm)', async () => {
     withExperiments([runningExperiment({ status: 'paused' })]);
     render(<ExperimentsScreen uid={UID} entries={sleepEntries(28)} onClose={vi.fn()} />);
-    fireEvent.click(await screen.findByLabelText(/resume does how much i sleep affect my mood/i));
+    fireEvent.click(await screen.findByLabelText(/resume how does my sleep move together with my mood/i));
     await waitFor(() => expect(resumeExperiment).toHaveBeenCalledWith({ __db: true }, UID, 'exp-1'));
   });
 
   it('stop requires confirmation and states entries are untouched', async () => {
     withExperiments([runningExperiment()]);
     render(<ExperimentsScreen uid={UID} entries={sleepEntries(28)} onClose={vi.fn()} />);
-    fireEvent.click(await screen.findByLabelText(/stop does how much i sleep affect my mood/i));
+    fireEvent.click(await screen.findByLabelText(/stop how does my sleep move together with my mood/i));
     expect(stopExperiment).not.toHaveBeenCalled();
     expect(await screen.findByText(/never changed or removed/i)).toBeTruthy();
     fireEvent.click(screen.getByText('Stop'));
@@ -570,7 +570,7 @@ describe('ExperimentsScreen — pause/resume/stop/delete', () => {
   it('Cancel on the stop dialog never calls stopExperiment', async () => {
     withExperiments([runningExperiment()]);
     render(<ExperimentsScreen uid={UID} entries={sleepEntries(28)} onClose={vi.fn()} />);
-    fireEvent.click(await screen.findByLabelText(/stop does how much i sleep affect my mood/i));
+    fireEvent.click(await screen.findByLabelText(/stop how does my sleep move together with my mood/i));
     fireEvent.click(await screen.findByText('Cancel'));
     expect(stopExperiment).not.toHaveBeenCalled();
   });
@@ -578,7 +578,7 @@ describe('ExperimentsScreen — pause/resume/stop/delete', () => {
   it('delete requires confirmation and calls deleteExperiment(db, uid, id)', async () => {
     withExperiments([runningExperiment({ status: 'stopped' })]);
     render(<ExperimentsScreen uid={UID} entries={sleepEntries(28)} onClose={vi.fn()} />);
-    fireEvent.click(await screen.findByLabelText(/delete does how much i sleep affect my mood/i));
+    fireEvent.click(await screen.findByLabelText(/delete how does my sleep move together with my mood/i));
     expect(deleteExperiment).not.toHaveBeenCalled();
     fireEvent.click(await screen.findByText('Delete'));
     await waitFor(() => expect(deleteExperiment).toHaveBeenCalledWith({ __db: true }, UID, 'exp-1'));
@@ -596,7 +596,7 @@ describe('ExperimentsScreen — result view', () => {
     fireEvent.click(await screen.findByText('View result'));
     expect(await screen.findByTestId('result-view')).toBeTruthy();
     expect(within(screen.getByTestId('result-view')).getByTestId('result-view-question').textContent)
-      .toBe('Does how much I sleep affect my mood?');
+      .toBe('How does my sleep move together with my mood?');
   });
 });
 
@@ -609,7 +609,7 @@ describe('ExperimentsScreen — SpacePicker gated behind contextSpaces', () => {
     getFlag.mockImplementation((flag) => flag === 'contextSpaces' ? false : false);
     render(<ExperimentsScreen uid={UID} entries={[]} onClose={vi.fn()} />);
     fireEvent.click(await screen.findByText('New experiment'));
-    fireEvent.click(await screen.findByText('Does exercise affect my mood?'));
+    fireEvent.click(await screen.findByText('How does exercise move together with my mood?'));
     expect(await screen.findByText('How long should this run?')).toBeTruthy();
     expect(subscribeSpaces).not.toHaveBeenCalled();
   });
@@ -618,7 +618,7 @@ describe('ExperimentsScreen — SpacePicker gated behind contextSpaces', () => {
     getFlag.mockImplementation((flag) => flag === 'contextSpaces');
     render(<ExperimentsScreen uid={UID} entries={[]} onClose={vi.fn()} />);
     fireEvent.click(await screen.findByText('New experiment'));
-    fireEvent.click(await screen.findByText('Does exercise affect my mood?'));
+    fireEvent.click(await screen.findByText('How does exercise move together with my mood?'));
     expect(await screen.findByText('Which space should this look at?')).toBeTruthy();
   });
 });
@@ -632,7 +632,7 @@ describe('ExperimentsScreen — a11y', () => {
   it('exposes a single labelled aria-modal dialog when no nested overlay is open', async () => {
     withExperiments([runningExperiment()]);
     render(<ExperimentsScreen uid={UID} entries={sleepEntries(28)} onClose={vi.fn()} />);
-    await screen.findByText('Does how much I sleep affect my mood?');
+    await screen.findByText('How does my sleep move together with my mood?');
 
     const modals = document.querySelectorAll('[aria-modal="true"]');
     expect(modals).toHaveLength(1);
@@ -642,7 +642,7 @@ describe('ExperimentsScreen — a11y', () => {
   it('only one aria-modal="true" node exists while the stop-confirm dialog is open', async () => {
     withExperiments([runningExperiment()]);
     render(<ExperimentsScreen uid={UID} entries={sleepEntries(28)} onClose={vi.fn()} />);
-    fireEvent.click(await screen.findByLabelText(/stop does how much i sleep affect my mood/i));
+    fireEvent.click(await screen.findByLabelText(/stop how does my sleep move together with my mood/i));
     await screen.findByText('Stop this experiment?');
 
     expect(document.querySelectorAll('[aria-modal="true"]')).toHaveLength(1);
@@ -651,7 +651,7 @@ describe('ExperimentsScreen — a11y', () => {
   it('only one aria-modal="true" node exists while the delete-confirm dialog is open', async () => {
     withExperiments([runningExperiment({ status: 'stopped' })]);
     render(<ExperimentsScreen uid={UID} entries={sleepEntries(28)} onClose={vi.fn()} />);
-    fireEvent.click(await screen.findByLabelText(/delete does how much i sleep affect my mood/i));
+    fireEvent.click(await screen.findByLabelText(/delete how does my sleep move together with my mood/i));
     await screen.findByText('Delete this experiment?');
 
     expect(document.querySelectorAll('[aria-modal="true"]')).toHaveLength(1);
@@ -718,7 +718,7 @@ describe('ExperimentsScreen — auto-completion', () => {
   it('does NOT auto-complete a running experiment whose window has not elapsed', async () => {
     withExperiments([runningExperiment()]); // default fixture: endAt 14 days in the future
     render(<ExperimentsScreen uid={UID} entries={sleepEntries(28)} onClose={vi.fn()} />);
-    await screen.findByText('Does how much I sleep affect my mood?');
+    await screen.findByText('How does my sleep move together with my mood?');
     expect(writeResult).not.toHaveBeenCalled();
   });
 
@@ -762,7 +762,7 @@ describe('ExperimentsScreen — auto-completion', () => {
 
     await waitFor(() => expect(writeResult).toHaveBeenCalledTimes(1));
     // No crash: the screen is still up and rendering normally.
-    expect(await screen.findByText('Does how much I sleep affect my mood?')).toBeTruthy();
+    expect(await screen.findByText('How does my sleep move together with my mood?')).toBeTruthy();
 
     // The completingRef guard is released in a `finally`, so once the first
     // (rejected) attempt has settled, a later snapshot of the SAME
@@ -782,7 +782,7 @@ describe('ExperimentsScreen — auto-completion', () => {
     const experiment = elapsedExperiment();
     withExperiments([experiment]);
     render(<ExperimentsScreen uid={UID} entries={[]} onClose={vi.fn()} />);
-    await screen.findByText('Does how much I sleep affect my mood?');
+    await screen.findByText('How does my sleep move together with my mood?');
     // Give any (wrongly) fired effect a tick to have called writeResult.
     await act(async () => { await Promise.resolve(); });
     expect(writeResult).not.toHaveBeenCalled();
@@ -792,7 +792,7 @@ describe('ExperimentsScreen — auto-completion', () => {
     const experiment = elapsedExperiment();
     withExperiments([experiment]);
     const { rerender } = render(<ExperimentsScreen uid={UID} entries={[]} onClose={vi.fn()} />);
-    await screen.findByText('Does how much I sleep affect my mood?');
+    await screen.findByText('How does my sleep move together with my mood?');
     await act(async () => { await Promise.resolve(); });
     expect(writeResult).not.toHaveBeenCalled();
 
@@ -816,7 +816,7 @@ describe('ExperimentsScreen — auto-completion', () => {
     const experiment = elapsedExperiment();
     withExperiments([experiment]);
     render(<ExperimentsScreen uid={UID} entries={sleepEntries(40)} entriesLoaded={false} onClose={vi.fn()} />);
-    await screen.findByText('Does how much I sleep affect my mood?');
+    await screen.findByText('How does my sleep move together with my mood?');
     await act(async () => { await Promise.resolve(); });
     expect(writeResult).not.toHaveBeenCalled();
   });

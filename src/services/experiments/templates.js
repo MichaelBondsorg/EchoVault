@@ -51,21 +51,40 @@
 // Shared fixed pieces
 // ---------------------------------------------------------------------------
 
-/** Fixed outcome for every v1 template (decision: mood is the only outcome variable in v1). */
-const MOOD_OUTCOME = Object.freeze({ field: 'analysis.mood_score', label: 'mood' });
+/**
+ * Fixed outcome for every v1 template (decision: mood is the only outcome
+ * variable in v1). `unit: 'mood_0_100'` (Michael review hardening, EX2 item
+ * 1) is frozen onto every experiment's `analysisPlan.outcome` via
+ * `experimentsService.buildAnalysisPlan`'s `{...template.outcome}` spread —
+ * `computeResult.js` asserts this exact unit string before normalizing the
+ * outcome series (mood_score is captured on a 0-1 scale; the display/
+ * estimate scale is 0-100 "points") and fails closed
+ * (`unknown_outcome_unit`) for anything else, including an absent unit on a
+ * legacy plan. See `computeResult.js`'s module doc comment for the full
+ * normalization rule.
+ */
+const MOOD_OUTCOME = Object.freeze({ field: 'analysis.mood_score', label: 'mood', unit: 'mood_0_100' });
 
 /**
  * Data-method spec's verbatim "what this does not prove" bullets
  * (docs/quality/experiments-data-method.md, "Fixed strings" section), with
- * the {exposure}/{outcome} slots filled per-template. The two bullets that
+ * the {exposure}/{outcome} slots filled per-template. The three bullets that
  * carry no slot are copied character-for-character from the spec — nothing
  * about their wording is re-authored per template.
+ *
+ * FOURTH BULLET (Michael review hardening, item 6 — "all attempts
+ * preserved"): a cross-experiment multiplicity caveat, added here so it
+ * renders on every result alongside the per-template caveats — a user who
+ * runs several experiments is, structurally, running several chances for a
+ * pattern to appear by chance alone; any ONE result is still just one
+ * observation, not a verdict about "what's true" for them.
  */
 function whatThisDoesNotProveFor(exposureLabel, outcomeLabel) {
   return [
     `This does not show that ${exposureLabel} caused the change in ${outcomeLabel}.`,
     'Other things that changed around the same time could explain some or all of this difference.',
     "Your own habits and days aren't a controlled experiment — this is a pattern in your own data, not a scientific study of what works for everyone.",
+    'Running many experiments makes a chance pattern more likely somewhere; treat any single result as one observation, not a verdict.',
   ];
 }
 
@@ -125,7 +144,7 @@ const RECOVERY_ALT = altGroup('recovery');
 export const TEMPLATES = Object.freeze([
   Object.freeze({
     id: 'sleep-hours-mood-same-day',
-    title: 'Does how much I sleep affect my mood?',
+    title: 'How does my sleep move together with my mood?',
     questionPatterns: [requireAllExcept(LAG1_ALT, SLEEP_ALT, MOOD_ALT)],
     exposure: Object.freeze({ source: 'health', field: 'sleepHours', label: 'sleep hours' }),
     outcome: MOOD_OUTCOME,
@@ -139,7 +158,7 @@ export const TEMPLATES = Object.freeze([
   }),
   Object.freeze({
     id: 'sleep-hours-mood-lag1',
-    title: 'Does how much I sleep affect my mood the next day?',
+    title: 'How does my sleep move together with my mood the next day?',
     questionPatterns: [requireAll(SLEEP_ALT, MOOD_ALT, LAG1_ALT)],
     exposure: Object.freeze({ source: 'health', field: 'sleepHours', label: 'sleep hours' }),
     outcome: MOOD_OUTCOME,
@@ -153,7 +172,7 @@ export const TEMPLATES = Object.freeze([
   }),
   Object.freeze({
     id: 'exercise-minutes-mood',
-    title: 'Does exercise affect my mood?',
+    title: 'How does exercise move together with my mood?',
     questionPatterns: [requireAll(EXERCISE_ALT, MOOD_ALT)],
     exposure: Object.freeze({ source: 'health', field: 'exerciseMinutes', label: 'exercise minutes' }),
     outcome: MOOD_OUTCOME,
@@ -167,7 +186,7 @@ export const TEMPLATES = Object.freeze([
   }),
   Object.freeze({
     id: 'sunshine-percent-mood',
-    title: 'Does sunshine affect my mood?',
+    title: 'How does sunshine move together with my mood?',
     questionPatterns: [requireAll(SUNSHINE_ALT, MOOD_ALT)],
     exposure: Object.freeze({ source: 'environment', field: 'sunshinePercent', label: 'sunshine' }),
     outcome: MOOD_OUTCOME,
@@ -181,7 +200,7 @@ export const TEMPLATES = Object.freeze([
   }),
   Object.freeze({
     id: 'steps-mood',
-    title: 'Does how much I walk affect my mood?',
+    title: 'How do my steps move together with my mood?',
     questionPatterns: [requireAll(STEPS_ALT, MOOD_ALT)],
     exposure: Object.freeze({ source: 'health', field: 'steps', label: 'steps' }),
     outcome: MOOD_OUTCOME,
@@ -195,7 +214,7 @@ export const TEMPLATES = Object.freeze([
   }),
   Object.freeze({
     id: 'recovery-score-mood',
-    title: 'Does my recovery score affect my mood?',
+    title: 'How does my recovery score move together with my mood?',
     questionPatterns: [requireAll(RECOVERY_ALT, MOOD_ALT)],
     exposure: Object.freeze({ source: 'health', field: 'recoveryScore', label: 'recovery score' }),
     outcome: MOOD_OUTCOME,
@@ -212,7 +231,7 @@ export const TEMPLATES = Object.freeze([
     // {tag} is filled in by the caller (Task 6 UI) with the user's chosen
     // tag's display value once matched/selected — this string is a fixed
     // template with one placeholder, not a per-instance narrative.
-    title: 'Does {tag} affect my mood?',
+    title: 'How does {tag} move together with my mood?',
     // Matching for this template ALSO requires a concrete tag from the
     // caller's availableTags to appear in the text (see matchAvailableTag /
     // matchQuestionToTemplate below) — questionPatterns alone only checks
@@ -221,6 +240,18 @@ export const TEMPLATES = Object.freeze([
     questionPatterns: [requireAll(MOOD_ALT)],
     exposure: Object.freeze({ source: 'tags', field: 'tags', label: 'tag presence' }),
     outcome: MOOD_OUTCOME,
+    // splitMode: 'binary' (Michael review hardening, EX1's H2 finding acted
+    // on here per EX1's explicit recommendation to EX2): tag-presence
+    // exposure is 0/1-coded (a day either carries the tag or doesn't), which
+    // is exactly the tie-heavy shape that reliably trips the bootstrap's
+    // `split_unstable` gate under the default MEDIAN split (every resample
+    // draws from a pool that's roughly half 0s and half 1s, so a
+    // per-resample median frequently lands exactly on a tied value).
+    // `buildAnalysisPlan` (experimentsService.js) carries this field from
+    // the template onto the frozen plan; every other v1 template omits it
+    // and stays on the 'median' default (continuous exposure values don't
+    // have this degeneracy).
+    splitMode: 'binary',
     lag: 0,
     confounders: Object.freeze([
       'Other things happening on the same days this tag appears could explain the mood difference.',

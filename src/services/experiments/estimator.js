@@ -339,6 +339,13 @@ function medianSplit(pairs) {
  *
  * @returns {{highGroup: object[], lowGroup: object[], splitThreshold: null}}
  */
+// NEGATIVE-EXPOSURE PIN (EX2, Minor review fix, per estimator.js's own
+// binarySplit contract above): an exposure value `<= 0` (not just `=== 0`)
+// resolves to LOW, mirroring the "absent" treatment exactly — HIGH is
+// reserved for a strictly positive ("present") value, the same rule this
+// function already implements below; documented explicitly here because no
+// current template produces a negative exposure, so the behavior was
+// previously implicit in the code's shape rather than a stated policy.
 function binarySplit(pairs) {
   const highGroup = [];
   const lowGroup = [];

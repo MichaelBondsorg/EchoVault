@@ -1,29 +1,39 @@
 /**
- * ExperimentResultView — tests (R3 Task 6).
+ * ExperimentResultView — tests (R3 Task 6; result-integrity dialog flow
+ * added Michael review hardening, EX2 item 3).
  *
- * Only `config/firebase` and `experimentsService`'s two write functions
- * (`setObservationExcluded`/`writeResult`) are mocked. `computeResult.js`,
- * `estimator.js`, `templates.js`, `scopeFilter.js`, and `receipts.js` are
- * REAL — the exclude/rerun round trip below feeds synthetic entries through
- * the genuine estimator and asserts the recomputed estimate actually
- * changes, per the binding TDD requirement.
+ * `config/firebase` and `experimentsService`'s Firestore-touching write
+ * functions (`setObservationExcluded`/`writeResult`/`writeAdjustedResult`)
+ * are mocked; `buildAdjustedResultUpdate` (a PURE helper, no Firestore) is
+ * kept REAL via `importOriginal`, same as `computeResult.js`/`estimator.js`/
+ * `templates.js`/`scopeFilter.js`/`receipts.js` — the exclude/rerun round
+ * trip below feeds synthetic entries through the genuine estimator and
+ * asserts the recomputed estimate actually changes, per the binding TDD
+ * requirement.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
-import ExperimentResultView, { buildObservationRows, reasonCopy } from '../ExperimentResultView';
+import ExperimentResultView, { buildObservationRows, reasonCopy, normalizeStoredResult } from '../ExperimentResultView';
 import { computeExperimentResult, NON_CAUSAL_FRAMING } from '../../../services/experiments/computeResult';
 import { getTemplateById } from '../../../services/experiments/templates';
-import { setObservationExcluded, writeResult } from '../../../services/experiments/experimentsService';
+import { setObservationExcluded, writeResult, writeAdjustedResult } from '../../../services/experiments/experimentsService';
 
 vi.mock('../../../config/firebase', () => ({ db: { __db: true } }));
 
-vi.mock('../../../services/experiments/experimentsService', () => ({
-  setObservationExcluded: vi.fn(),
-  writeResult: vi.fn().mockResolvedValue(undefined),
-}));
+vi.mock('../../../services/experiments/experimentsService', async (importOriginal) => {
+  const actual = await importOriginal();
+  return {
+    ...actual,
+    setObservationExcluded: vi.fn(),
+    writeResult: vi.fn().mockResolvedValue(undefined),
+    writeAdjustedResult: vi.fn().mockResolvedValue(undefined),
+  };
+});
 
 const UID = 'user-a';
 const SLEEP_TEMPLATE = getTemplateById('sleep-hours-mood-same-day');
+
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 function isoDay(y, m, d, hour = 12) {
   return new Date(Date.UTC(y, m - 1, d, hour)).toISOString();
@@ -66,6 +76,14 @@ function buildAnalysisPlan(template) {
   };
 }
 
+// PARTIAL START DAY RULE (Michael review hardening, EX2 item 2): the
+// experiment window is whole local calendar days starting the day AFTER
+// `startAt` — GOLDEN_START above is written to mean "the first full data
+// day" (matching every entry fixture in this file), so the REAL stored
+// `startAt` field is one day earlier. Mirrors computeResult.test.js's own
+// `baseExperiment`/`dayBefore` convention.
+const GOLDEN_STORED_START = new Date(Date.parse(GOLDEN_START) - DAY_MS).toISOString();
+
 function goldenExperiment(overrides = {}) {
   return {
     id: 'exp-1',
@@ -74,12 +92,12 @@ function goldenExperiment(overrides = {}) {
     analysisPlan: buildAnalysisPlan(SLEEP_TEMPLATE),
     scope: null,
     status: 'completed',
-    startAt: GOLDEN_START,
+    startAt: GOLDEN_STORED_START,
     endAt: GOLDEN_END,
     durationDays: 28,
     excludedObservations: [],
-    createdAt: GOLDEN_START,
-    updatedAt: GOLDEN_START,
+    createdAt: GOLDEN_STORED_START,
+    updatedAt: GOLDEN_STORED_START,
     ...overrides,
   };
 }
@@ -250,8 +268,8 @@ describe('buildObservationRows', () => {
 // Exclude -> recompute -> visible rerun (real computeExperimentResult)
 // ---------------------------------------------------------------------------
 
-describe('ExperimentResultView — exclusion round trip (real computeExperimentResult)', () => {
-  it('excluding an observation calls setObservationExcluded, recomputes via the REAL estimator, writes the new result, and the displayed estimate changes', async () => {
+describe('ExperimentResultView — exclusion round trip (real computeExperimentResult, result-integrity dialog)', () => {
+  it('excluding an observation requires a reason, calls setObservationExcluded, recomputes via the REAL estimator, writes an ADJUSTED result (original untouched), and the displayed estimate changes', async () => {
     const entries = buildGoldenEntries();
     const originalResult = computeExperimentResult({ experiment: goldenExperiment(), entries, now: GOLDEN_NOW });
     const experiment = goldenExperiment({ result: originalResult });
@@ -267,25 +285,48 @@ describe('ExperimentResultView — exclusion round trip (real computeExperimentR
     const originalN = originalResult.estimate.n;
     expect(screen.getByText(`${originalN} matched days`)).toBeTruthy();
 
-    const excludeBtn = screen.getByRole('button', { name: `Exclude ${excludedDateKey}` });
-    fireEvent.click(excludeBtn);
+    fireEvent.click(screen.getByRole('button', { name: `Exclude ${excludedDateKey}` }));
+    // Reason dialog appears; Continue is disabled until a reason is chosen.
+    expect(await screen.findByText('Why exclude this day?')).toBeTruthy();
+    expect(setObservationExcluded).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: 'Continue' })).toBeDisabled();
+
+    fireEvent.click(screen.getByRole('radio', { name: /something else/i }));
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
 
     await waitFor(() => expect(setObservationExcluded).toHaveBeenCalledWith(
       { __db: true }, UID, 'exp-1', excludedDateKey, true,
     ));
-    await waitFor(() => expect(writeResult).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(writeAdjustedResult).toHaveBeenCalledTimes(1));
+    expect(writeResult).not.toHaveBeenCalled();
 
-    const [dbArg, uidArg, expIdArg, newResultArg] = writeResult.mock.calls[0];
+    const [dbArg, uidArg, expIdArg, nextFieldArg] = writeAdjustedResult.mock.calls[0];
     expect(dbArg).toEqual({ __db: true });
     expect(uidArg).toBe(UID);
     expect(expIdArg).toBe('exp-1');
-    expect(newResultArg.status).toBe('ok');
-    expect(newResultArg.estimate.n).toBe(originalN - 1);
-    // The recomputed estimate is genuinely different (real math, not a stub).
-    expect(newResultArg.estimate.delta).not.toBeCloseTo(originalDelta, 5);
+    // Result integrity: original is carried through UNCHANGED (bitwise the
+    // same object the experiment started with), adjusted is the new one.
+    expect(nextFieldArg.original).toBe(originalResult);
+    expect(nextFieldArg.adjusted.status).toBe('ok');
+    expect(nextFieldArg.adjusted.estimate.n).toBe(originalN - 1);
+    expect(nextFieldArg.adjusted.estimate.delta).not.toBeCloseTo(originalDelta, 5);
+    expect(nextFieldArg.exclusionHistory).toEqual([
+      { dateKey: excludedDateKey, excluded: true, reason: 'other', at: expect.any(String) },
+    ]);
 
-    // Visible rerun: the DOM now reflects the NEW sample size.
+    // Visible rerun: the DOM now reflects the NEW sample size AND the
+    // "Modified after seeing the result" banner + history.
     await waitFor(() => expect(screen.getByText(`${originalN - 1} matched days`)).toBeTruthy());
+    expect(screen.getByText('Modified after seeing the result')).toBeTruthy();
+    // Original is always accessible via the toggle button.
+    fireEvent.click(screen.getByRole('button', { name: 'View original result' }));
+    expect(await screen.findByText(`${originalN} matched days`)).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'View latest result' }));
+    expect(await screen.findByText(`${originalN - 1} matched days`)).toBeTruthy();
+    // History is collapsible and shows the reason.
+    fireEvent.click(screen.getByRole('button', { name: 'Show history' }));
+    expect(screen.getByText(new RegExp(`${excludedDateKey}.*excluded.*Something else`, 'i'))).toBeTruthy();
+
     // The excluded row now offers "Include" instead of "Exclude".
     const includeBtn = await screen.findByRole('button', { name: `Include ${excludedDateKey}` });
 
@@ -298,24 +339,31 @@ describe('ExperimentResultView — exclusion round trip (real computeExperimentR
     // guarantee), not an approximate one.
     setObservationExcluded.mockResolvedValueOnce([]);
     fireEvent.click(includeBtn);
+    fireEvent.click(await screen.findByRole('radio', { name: /something else/i }));
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
 
     await waitFor(() => expect(setObservationExcluded).toHaveBeenCalledWith(
       { __db: true }, UID, 'exp-1', excludedDateKey, false,
     ));
-    await waitFor(() => expect(writeResult).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(writeAdjustedResult).toHaveBeenCalledTimes(2));
 
-    const restoredResult = writeResult.mock.calls[1][3];
-    expect(restoredResult.estimate).toEqual(originalResult.estimate);
-    expect({ ...restoredResult.receipt, versions: { ...restoredResult.receipt.versions, generatedAt: null } })
+    const restoredField = writeAdjustedResult.mock.calls[1][3];
+    expect(restoredField.original).toBe(originalResult);
+    expect(restoredField.adjusted.estimate).toEqual(originalResult.estimate);
+    expect(restoredField.exclusionHistory).toHaveLength(2);
+    expect({ ...restoredField.adjusted.receipt, versions: { ...restoredField.adjusted.receipt.versions, generatedAt: null } })
       .toEqual({ ...originalResult.receipt, versions: { ...originalResult.receipt.versions, generatedAt: null } });
-    expect(restoredResult.narrative).toEqual(originalResult.narrative);
+    expect(restoredField.adjusted.narrative).toEqual(originalResult.narrative);
 
-    // Visible rerun back to the original sample size.
+    // Visible rerun back to the original sample size (still "modified", per
+    // the immutability contract — the label never disappears once a result
+    // has been adjusted, even if the adjustment round-trips back to the
+    // same numbers).
     await waitFor(() => expect(screen.getByText(`${originalN} matched days`)).toBeTruthy());
     expect(await screen.findByRole('button', { name: `Exclude ${excludedDateKey}` })).toBeTruthy();
   });
 
-  it('a failed setObservationExcluded surfaces an error and never calls writeResult', async () => {
+  it('a failed setObservationExcluded surfaces an error and never calls writeAdjustedResult', async () => {
     const entries = buildGoldenEntries();
     const originalResult = computeExperimentResult({ experiment: goldenExperiment(), entries, now: GOLDEN_NOW });
     const experiment = goldenExperiment({ result: originalResult });
@@ -323,9 +371,12 @@ describe('ExperimentResultView — exclusion round trip (real computeExperimentR
 
     render(<ExperimentResultView uid={UID} entries={entries} experiment={experiment} onClose={vi.fn()} />);
     fireEvent.click(screen.getByRole('button', { name: 'Exclude 2026-01-01' }));
+    fireEvent.click(await screen.findByRole('radio', { name: /something else/i }));
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
 
     expect(await screen.findByRole('alert')).toBeTruthy();
     expect(writeResult).not.toHaveBeenCalled();
+    expect(writeAdjustedResult).not.toHaveBeenCalled();
   });
 });
 
@@ -341,5 +392,57 @@ describe('ExperimentResultView — navigation', () => {
     render(<ExperimentResultView uid={UID} entries={entries} experiment={goldenExperiment({ result })} onClose={onClose} />);
     fireEvent.click(screen.getByLabelText('Back to experiments'));
     expect(onClose).toHaveBeenCalledTimes(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// normalizeStoredResult — pure helper (Michael review hardening, item 3)
+// ---------------------------------------------------------------------------
+
+describe('normalizeStoredResult', () => {
+  it('returns null for a falsy stored field', () => {
+    expect(normalizeStoredResult(null)).toBeNull();
+    expect(normalizeStoredResult(undefined)).toBeNull();
+  });
+
+  it('unwraps a {original, adjusted, exclusionHistory} field as-is', () => {
+    const stored = { original: { status: 'ok' }, adjusted: { status: 'ok', estimate: {} }, exclusionHistory: [{ dateKey: 'x' }] };
+    expect(normalizeStoredResult(stored)).toEqual(stored);
+  });
+
+  it('treats a bare (legacy, pre-wrapping) result as the original, with no adjusted and empty history', () => {
+    const bare = { status: 'ok', estimate: { delta: 5 } };
+    expect(normalizeStoredResult(bare)).toEqual({ original: bare, adjusted: null, exclusionHistory: [] });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Sensitive-day disclosure (Michael review hardening, item 5)
+// ---------------------------------------------------------------------------
+
+describe('ExperimentResultView — sensitive-day disclosure', () => {
+  it('shows the disclosure sentence and hides raw values for a sensitive paired day, keeping the Exclude toggle available', () => {
+    const entries = buildGoldenEntries().map((e, i) => (i === 0 ? { ...e, safety_flagged: true } : e));
+    const result = computeExperimentResult({ experiment: goldenExperiment(), entries, now: GOLDEN_NOW });
+    expect(result.sensitiveObservationCount).toBeGreaterThan(0);
+    const experiment = goldenExperiment({ result });
+
+    render(<ExperimentResultView uid={UID} entries={entries} experiment={experiment} onClose={vi.fn()} />);
+
+    expect(screen.getByText(
+      `${result.sensitiveObservationCount} sensitive day${result.sensitiveObservationCount === 1 ? '' : 's'} contributed to the statistics; details are hidden.`,
+    )).toBeTruthy();
+    expect(screen.getByText('Sensitive day — details hidden')).toBeTruthy();
+    // The dateKey and the toggle are still visible for that row.
+    expect(screen.getByText('2026-01-01')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Exclude 2026-01-01' })).toBeTruthy();
+  });
+
+  it('does not show the disclosure sentence when nothing is sensitive', () => {
+    const entries = buildGoldenEntries();
+    const result = computeExperimentResult({ experiment: goldenExperiment(), entries, now: GOLDEN_NOW });
+    expect(result.sensitiveObservationCount).toBe(0);
+    render(<ExperimentResultView uid={UID} entries={entries} experiment={goldenExperiment({ result })} onClose={vi.fn()} />);
+    expect(screen.queryByText(/sensitive day/i)).toBeNull();
   });
 });

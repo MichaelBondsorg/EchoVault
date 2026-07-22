@@ -25,7 +25,12 @@
  */
 import { computeCoverage, MIN_PAIRED_OBSERVATIONS, COVERAGE_FLOOR } from './estimator';
 import { filterEntriesByScope } from '../spaces/scopeFilter';
-import { exposureValueForEntry as sharedExposureValueForEntry } from './computeResult';
+import {
+  exposureValueForEntry as sharedExposureValueForEntry,
+  resolveDeviceTimezone,
+  localDateKeyForMs,
+  pseudoMsFromDateKey,
+} from './computeResult';
 import { safeDate } from '../../utils/date';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -34,32 +39,31 @@ const SHORT_DURATION_DAYS = 14;
 const LONG_DURATION_DAYS = 28;
 
 // ---------------------------------------------------------------------------
-// Date-key helpers (UTC-based, matching estimator.js's convention — pairing
-// and coverage must never depend on the host machine's timezone).
+// Date-key helpers (Michael review hardening, EX2 item 2): LOCAL calendar
+// days in the DEVICE's timezone — preflight runs before any experiment (and
+// therefore any frozen `analysisPlan.timezone`) exists, so it resolves the
+// device's current timezone directly (`resolveDeviceTimezone`, shared with
+// `computeResult.js`/`experimentsService.js`'s own copies of the same tiny
+// helper — see that module's doc comment on why these small date helpers
+// are intentionally duplicated rather than imported from estimator.js).
+// Once the user actually starts an experiment, `buildAnalysisPlan` freezes
+// THIS SAME device-resolved value onto the plan, so a preflight review and
+// the experiment it leads to agree on which zone's calendar days they mean.
 // ---------------------------------------------------------------------------
 
-const DATE_KEY_RE = /^(\d{4})-(\d{2})-(\d{2})$/;
-
-function parseDateKeyToUtcMs(dateKey) {
-  const m = DATE_KEY_RE.exec(dateKey);
-  if (!m) return null;
-  const [, y, mo, d] = m;
-  return Date.UTC(Number(y), Number(mo) - 1, Number(d));
-}
-
-/** The entry's calendar day, as a 'YYYY-MM-DD' UTC dateKey, or null if undated. */
-function entryDateKey(entry) {
+/** The entry's calendar day, as a LOCAL (device timezone) 'YYYY-MM-DD' dateKey, or null if undated. */
+function entryDateKey(entry, timeZone) {
   const raw = entry?.effectiveDate ?? entry?.createdAt;
   if (!raw) return null;
   const d = safeDate(raw);
   if (Number.isNaN(d.getTime())) return null;
-  return d.toISOString().split('T')[0];
+  return localDateKeyForMs(d.getTime(), timeZone);
 }
 
-/** Exclusive end of the "last 28 days" window: start of the UTC day AFTER `now`. */
-function windowEndMs(now) {
-  const d = safeDate(now);
-  return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()) + DAY_MS;
+/** Exclusive end of the "last 28 days" window, in PSEUDO-ms (dateKey-label space — see computeResult.js's module doc comment): the local dateKey of the day AFTER `now`, shifted by one day. */
+function windowEndMs(now, timeZone) {
+  const nowLocalKey = localDateKeyForMs(safeDate(now).getTime(), timeZone);
+  return pseudoMsFromDateKey(nowLocalKey) + DAY_MS;
 }
 
 // ---------------------------------------------------------------------------
@@ -75,18 +79,19 @@ function windowEndMs(now) {
  * `healthContext.activity` object present with a null/non-finite
  * `exerciseMinutes`/`steps` extractor value now counts as a KNOWN ZERO day
  * (kept), not a missing one (dropped) — see its doc comment for the full
- * rationale. Every other source/field keeps drop-on-null semantics
- * unchanged, including the tags source's "no tags array -> known absent
- * (0)" rule.
+ * rationale. The tags source's rule is (Michael review hardening, item 4)
+ * "no explicit `tags` array -> UNKNOWN (dropped)", not a known absence —
+ * this preflight module inherits that fix automatically by delegating here,
+ * with no logic of its own to update.
  */
 function exposureValueForEntry(entry, template, params) {
   return sharedExposureValueForEntry(entry, template.exposure, params?.tag);
 }
 
-function buildExposureSeries(entries, template, params) {
+function buildExposureSeries(entries, template, params, timeZone) {
   const series = [];
   for (const entry of entries) {
-    const dateKey = entryDateKey(entry);
+    const dateKey = entryDateKey(entry, timeZone);
     if (!dateKey) continue;
     const value = exposureValueForEntry(entry, template, params);
     if (value === null) continue;
@@ -95,10 +100,10 @@ function buildExposureSeries(entries, template, params) {
   return series;
 }
 
-function buildOutcomeSeries(entries) {
+function buildOutcomeSeries(entries, timeZone) {
   const series = [];
   for (const entry of entries) {
-    const dateKey = entryDateKey(entry);
+    const dateKey = entryDateKey(entry, timeZone);
     if (!dateKey) continue;
     const value = entry?.analysis?.mood_score;
     if (!Number.isFinite(value)) continue;
@@ -138,16 +143,21 @@ export function preflightExperiment({ entries = [], template, params = {}, scope
 
   const scoped = filterEntriesByScope(Array.isArray(entries) ? entries : [], scope);
 
+  // Device timezone (Michael review hardening, item 2) — no frozen plan
+  // exists yet at preflight time, so this resolves the DEVICE's current
+  // zone directly; see module doc comment above.
+  const timeZone = resolveDeviceTimezone();
+
   // Available history: how many calendar days back the user's (in-scope)
   // journaling actually goes, uncapped by the 28-day coverage window — this
   // tells the reviewer whether a 28-day experiment is even plausible before
   // it starts, distinct from "coverage within the last 28 days".
-  const scopedDateKeys = scoped.map(entryDateKey).filter(Boolean);
-  const endMs = windowEndMs(nowDate);
+  const scopedDateKeys = scoped.map((entry) => entryDateKey(entry, timeZone)).filter(Boolean);
+  const endMs = windowEndMs(nowDate, timeZone);
   let availableHistoryDays = 0;
   if (scopedDateKeys.length > 0) {
     const earliestKey = scopedDateKeys.reduce((a, b) => (a < b ? a : b));
-    const earliestMs = parseDateKeyToUtcMs(earliestKey);
+    const earliestMs = pseudoMsFromDateKey(earliestKey);
     if (earliestMs !== null) {
       availableHistoryDays = Math.max(0, Math.round((endMs - earliestMs) / DAY_MS));
     }
@@ -155,8 +165,8 @@ export function preflightExperiment({ entries = [], template, params = {}, scope
 
   const windowStartMs = endMs - HISTORY_WINDOW_DAYS * DAY_MS;
 
-  const exposureSeries = buildExposureSeries(scoped, template, params);
-  const outcomeSeries = buildOutcomeSeries(scoped);
+  const exposureSeries = buildExposureSeries(scoped, template, params, timeZone);
+  const outcomeSeries = buildOutcomeSeries(scoped, timeZone);
 
   const exposureCoverage = computeCoverage(exposureSeries, windowStartMs, endMs);
   const outcomeCoverage = computeCoverage(outcomeSeries, windowStartMs, endMs);

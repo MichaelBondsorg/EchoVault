@@ -155,6 +155,12 @@ exact hand-verified numbers.
 | H4 | **Leave-one-day-out (LOO) stability check.** For each paired observation, recompute the delta with that ONE observation excluded (cheap mean recomputation against the ORIGINAL split's group assignment, NOT a full re-split, and NOT a bootstrap — `n` recomputations total, not `n × 2000`). Exposed as `stability: {deltaMin, deltaMax, signConsistent}`. `signConsistent` is `false` if ANY leave-one-out delta lands on the opposite sign from another, OR exactly at zero (a delta of exactly 0 counts as a sign break, not a tie — see `estimator.js`'s `computeStability` docblock). No new insufficiency gate — this is diagnostic, not a blocker. | A result can pass every gate above and still be "one day's worth of data away from pointing the other direction" — the classic single-influential-point fragility a correlation-safety review should surface, not hide behind a confidence interval that (per the independence-assumption caveat above) may itself understate the true uncertainty. `signConsistent: false` is exactly the situation where a user should NOT walk away thinking "my sleep clearly helps my mood" even if the headline delta says so. EX2's narrative layer is expected to use `signConsistent` to soften or caveat the result copy; this module only computes and exposes the number, per its unit-agnostic/no-copy-decisions discipline. |
 | H5 | **Practical significance threshold.** `SMALL_EFFECT_DELTA = 5`, exported from `estimator.js` as the single source of truth, but DISPLAY-SCALE (points on the 0-100 mood/outcome scale EX2 introduces at the series boundary) — `estimator.js` itself never compares `delta` to this constant; it stays unit-agnostic. | A statistically "clear" result (CI doesn't span zero, split is stable) can still be a practically tiny difference (e.g. 1.2 points on a 0-100 scale) that isn't worth a user reorganizing their life around. Classification is EX2's job (delta was already on the estimate); this task's job is making sure there's exactly one place the number `5` lives, so the UI, the narrative copy, and any future consumer read the same threshold rather than three slightly-different hardcoded `5`s drifting apart over time. |
 
+**Negative-exposure pin (EX2, Minor review fix):** in binary split mode, an
+exposure value `<= 0` (not just `=== 0`) resolves to LOW, mirroring the
+"absent" treatment exactly — no current template produces a negative
+exposure, but the rule is now a stated, documented policy rather than
+implicit in `binarySplit`'s code shape alone.
+
 **New estimate fields (item 6):** every `status: 'ok'` estimate now also
 carries `nHigh`, `nLow`, `splitThreshold` (the median value used, or `null`
 in binary mode), `exposureContrast`, `resampleFallbackCount`, and
@@ -272,6 +278,17 @@ template):**
 > - Your own habits and days aren't a controlled experiment — this is a
 >   pattern in your own data, not a scientific study of what works for
 >   everyone.
+> - Running many experiments makes a chance pattern more likely somewhere;
+>   treat any single result as one observation, not a verdict.
+
+**ADDED 2026-07-22 (Michael review hardening, EX2 item 6 — "all attempts
+preserved"):** the fourth bullet above is new. The experiments list already
+kept every completed/insufficient result visible (no promote/hide
+mechanism existed to remove this task) — this bullet adds the explicit
+cross-experiment multiplicity caveat itself: a user who runs several
+experiments is, structurally, running several chances for a pattern to
+appear by chance alone in at least one of them, and no single result
+should be read as "the" answer about them.
 
 **Insufficiency (shown instead of any estimate whenever the estimator
 returns `status: 'insufficient'`, never alongside a number):**
@@ -414,6 +431,21 @@ about whether 10 pairs / 50% coverage / median-split-and-bootstrap is the
 *right* statistical design for a mental-health app's users — that's exactly
 what the sign-off is for.
 
+## Michael's UI/pipeline review hardening (Task EX2, 2026-07-22)
+
+Follow-on to Task EX1, applied in `computeResult.js`, `preflight.js`,
+`experimentsService.js`, `templates.js`, and both experiments UI components.
+
+| # | Item | What changed |
+|---|------|--------------|
+| 1 | **Mood normalization to 0-100.** `analysis.mood_score` is captured on a 0-1 scale; every estimate/CI/narrative number is on a 0-100 "points" scale. Normalization happens at the series-builder boundary (`computeResult.js`'s `normalizeMoodTo100`): a value `<= 1` is multiplied by 100; a value already `> 1` (defensive legacy) passes through unmultiplied; either way the result is clamped to `[0, 100]`. `analysisPlan.outcome.unit` is frozen to `'mood_0_100'` (`templates.js`'s `MOOD_OUTCOME`); `computeExperimentResult` asserts this exact unit before trusting the outcome series and fails the WHOLE result closed (`unknown_outcome_unit`, a single, unambiguous reason) for anything else, including an absent unit on a legacy plan. UI copy says "points (0-100)" everywhere a magnitude is shown. `SMALL_EFFECT_DELTA` (EX1, H5) is now wired: when the CI does not span zero and `\|delta\| < 5`, `SMALL_EFFECT_COPY` ("This difference is small — worth noticing, not worth reorganizing your life around.") is appended to the headline sentence. |
+| 2 | **Local calendar days + frozen timezone.** `createExperiment`/`buildAnalysisPlan` freezes `analysisPlan.timezone` from `Intl.DateTimeFormat().resolvedOptions().timeZone` at create time (fallback `'UTC'`). Series building, coverage, and pairing all derive dateKeys in THAT zone via `Intl`-parts helpers (`localDateKeyForMs`, no date library) — a 9pm-local entry that's already past UTC midnight now correctly lands on the LOCAL calendar day, not the UTC one. **Partial start day rule (pinned):** the experiment window is whole local calendar days starting the day AFTER `startAt` — day 1 is the first FULL local day; the calendar day `startAt` itself falls on is excluded ENTIRELY (never partially counted), since the experiment could have started at any time of that day. Coverage denominators are consistent with this window. `preflight.js` has no frozen plan yet, so it resolves the DEVICE's current timezone directly via the same helper — once an experiment is actually created, `buildAnalysisPlan` freezes that same device-resolved value, so preflight and the experiment it leads to agree on which zone's days they mean. Estimator lag arithmetic (shifting a dateKey string by N days) stays pure calendar-day math and is unchanged/tz-agnostic, per EX1. |
+| 3 | **Result integrity (anti-cherry-picking).** The stored `result` field is now `{original, adjusted?, exclusionHistory}` — `writeResult` (first completion) writes `{original: result, exclusionHistory: []}`; `original` is NEVER overwritten again by anything in the client. A post-result exclusion toggle requires a reason (`EXCLUSION_REASONS`: `wrong_data`\|`wrong_date`\|`other`, chosen via a calm-copy dialog, `other` pairs with an optional free-text `note`) and appends `{dateKey, excluded, reason, at}` to `exclusionHistory` via the pure `buildAdjustedResultUpdate`, writing the recomputation to `adjusted` via the new `writeAdjustedResult` (only `result`/`updatedAt` touched — the experiment is already `completed`, a legal no-op transition). The UI labels an adjusted result "Modified after seeing the result", shows a collapsible history, and an always-available toggle to view the original. A legacy bare-shape `result` (pre-dating this wrapping — none in prod, flag OFF) is read as `{original: <bare>, adjusted: null, exclusionHistory: []}`. `excludedObservations` itself is UNCHANGED (still `list<string>` of dateKeys) — the reason/history live entirely inside `result`, which the rules already treat as an opaque map with no further shape constraint. `computeExperimentResult` itself is unchanged in output shape — this wrapping is a storage/UI-layer concern only. |
+| 4 | **Missing tags = unknown.** A day contributes to a tag-presence series only when the entry carries an EXPLICIT `tags` array (`Array.isArray(entry.tags)`). A missing `tags` field (legacy entry, or analysis that never completed) is now DROPPED as unknown/missing, never counted as a known "tag absent" (0) day — reversing the pre-EX2 behavior, which silently manufactured false absences out of entries that were never actually screened for the tag. The tag-presence template's frozen plan also declares `splitMode: 'binary'` (per EX1's H2 finding: 0/1-coded exposure reliably destabilizes the default median-split bootstrap). |
+| 5 | **Sensitive-day disclosure.** `result.sensitiveObservationCount` (present on both `ok` and `insufficient` results) counts paired days with at least one contributing `safety_flagged`/`has_warning_indicators` entry. When `> 0`, the UI discloses the count ("N sensitive days contributed to the statistics; details are hidden.") and the observation table renders those rows as "Sensitive day — details hidden" (dateKey visible, no exposure/outcome numbers, Exclude/Include toggle still available — the user may exclude their own sensitive day). `receipt.sources` continues to exclude these entries entirely (unchanged invariant). |
+| 6 | **All attempts preserved.** The experiments list already showed every completed/insufficient result (no promote/hide mechanism existed to remove). A 4th, fixed "what this does not prove" bullet was added to every template: "Running many experiments makes a chance pattern more likely somewhere; treat any single result as one observation, not a verdict." |
+| 7 | **Co-movement copy.** Every template's `title` is reframed from causal ("Does X affect my mood?") to co-movement ("How does X move together with my mood?") phrasing — `questionPatterns` (keyword-based, not exact-phrase) match BOTH the old causal and new co-movement phrasings unchanged, since both mention the same exposure/mood keywords; matching is not endorsement of either framing. `CI_SPANS_ZERO_COPY`'s string literal (constant name unchanged, per EX1's instruction) is updated to the spec's new wording below. `ExperimentsScreen.jsx`'s tag-ask composed question/button label are also de-causalized. |
+
 ## Sign-off
 
 `personalExperiments` stays `false` in `config/flags` until this line is
@@ -426,6 +458,15 @@ comes back:
       `personalExperiments` on for internal testing.** (Unchecked = flag
       stays off. This checkbox is not self-certifying — an agent must never
       check this box on Michael's behalf.)
+
+**2026-07-22 (Task EX2) re-gate note (supersedes/extends the EX1 note
+below):** EX2's changes are launch-blocker-grade, not cosmetic — the 0-1 ->
+0-100 mood normalization directly fixes the "deltas rendered as 'points'
+read 100x too small" launch blocker, and the local-day/timezone,
+result-integrity, missing-tags, and sensitive-day-disclosure changes each
+alter what a user is actually shown. Every reason EX1's re-gate note below
+already applies (new method, no prior approval to revoke) applies again
+here, compounded.
 
 **2026-07-22 (Task EX1) re-gate note:** this checkbox was already unchecked
 before this task (the flag has never shipped on), so there is no prior

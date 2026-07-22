@@ -122,6 +122,26 @@ function toValidDate(now) {
  *   minPairedObservations:number, coverageFloor:number, confounders:string[],
  *   whatThisDoesNotProve:string[]}}
  */
+/**
+ * Resolve the device's IANA timezone via `Intl.DateTimeFormat`, falling back
+ * to `'UTC'` when unavailable (an older/degraded environment, or a runtime
+ * that reports an empty string) — never throws. This is called ONCE, here,
+ * at plan-build time, and the result is FROZEN onto `analysisPlan.timezone`
+ * for the life of the experiment (Michael review hardening, item 2): the
+ * user's device timezone at creation time, not whatever timezone a later
+ * render/session happens to run in (e.g. after travel) — series building,
+ * coverage, and pairing all derive their calendar-day keys in this ONE
+ * frozen zone so a single experiment's day boundaries never shift mid-run.
+ */
+export function resolveDeviceTimezone() {
+  try {
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    return typeof tz === 'string' && tz ? tz : 'UTC';
+  } catch {
+    return 'UTC';
+  }
+}
+
 export function buildAnalysisPlan(template, params = {}) {
   if (!template || typeof template.id !== 'string' || !template.exposure || !template.outcome) {
     throw new Error('buildAnalysisPlan: a valid template object is required.');
@@ -134,7 +154,7 @@ export function buildAnalysisPlan(template, params = {}) {
     }
     exposure.tag = tag;
   }
-  return {
+  const plan = {
     templateId: template.id,
     lag: template.lag,
     exposure,
@@ -143,7 +163,20 @@ export function buildAnalysisPlan(template, params = {}) {
     coverageFloor: COVERAGE_FLOOR,
     confounders: [...(template.confounders || [])],
     whatThisDoesNotProve: [...(template.whatThisDoesNotProve || [])],
+    // Frozen device timezone (Michael review hardening, item 2) — see
+    // `resolveDeviceTimezone`'s doc comment above.
+    timezone: resolveDeviceTimezone(),
   };
+  // splitMode is a MODE selection, not a threshold (see estimator.js's
+  // runAnalysisPlan docblock) — only carried onto the plan when the
+  // template itself declares one (today: only tag-presence-mood, via
+  // 'binary'). Every other template omits the field entirely, so
+  // `runAnalysisPlan`'s own `plan?.splitMode === 'binary' ? 'binary' :
+  // 'median'` default still applies unchanged.
+  if (template.splitMode === 'binary') {
+    plan.splitMode = 'binary';
+  }
+  return plan;
 }
 
 /**
@@ -332,21 +365,29 @@ export async function setObservationExcluded(db, uid, experimentId, dateKey, exc
 }
 
 /**
- * Write a result and mark the experiment `completed` in ONE update. Covers
- * both the first-completion path (running/paused -> completed) and the
- * completed-rerun case (status stays `completed`, `result` replaced after
- * an observation exclusion) — both are legal under
- * `experimentTransitionAllowed` (completed->completed is a no-op transition)
- * and `experimentUpdateAllowed`'s "`result` writable only when after.status
- * == 'completed'" rule, which this function always satisfies by construction.
+ * Write a FIRST-completion result and mark the experiment `completed` in ONE
+ * update (running/paused -> completed). Only ever called for a fresh
+ * completion (auto-completion, `ExperimentsScreen.jsx`) — a result that
+ * has never been shown to the user yet, so there is no "adjusted after
+ * seeing the result" concern for this path.
+ *
+ * RESULT INTEGRITY (Michael review hardening, item 3): the stored `result`
+ * field is NOT the bare `computeExperimentResult` output — it is wrapped as
+ * `{original: result, exclusionHistory: []}`. `original` is written exactly
+ * once, here, and is never overwritten again by anything in this module;
+ * every later exclusion-driven rerun goes through `writeAdjustedResult`
+ * below, which writes `result.adjusted` (never touching `original`) and
+ * appends to `exclusionHistory`. See `computeResult.js`'s module doc
+ * comment — `computeExperimentResult` itself stays a pure function that
+ * returns the bare (unwrapped) result shape; this wrapping is a
+ * storage-layer concern only, owned entirely by this module.
  *
  * @param {object} db
  * @param {string} uid
  * @param {string} experimentId
- * @param {object} result - the computed result object (Task 5's
- *   `computeExperimentResult` output's `result`-shaped payload); this
- *   module does not validate its internal shape, only that it's a plain
- *   object.
+ * @param {object} result - the computed result object (`computeResult.js`'s
+ *   `computeExperimentResult` output); this module does not validate its
+ *   internal shape, only that it's a plain object.
  */
 export async function writeResult(db, uid, experimentId, result) {
   if (typeof experimentId !== 'string' || !experimentId) {
@@ -356,8 +397,100 @@ export async function writeResult(db, uid, experimentId, result) {
     throw new Error('writeResult: result (a plain object) is required.');
   }
   await updateDoc(doc(db, experimentsPath(uid), experimentId), {
-    result,
+    result: { original: result, exclusionHistory: [] },
     status: 'completed',
+    updatedAt: nowIso(),
+  });
+}
+
+/**
+ * The reason enum a post-result exclusion toggle must supply (Michael
+ * review hardening, item 3) — `'other'` is meant to be paired with an
+ * optional free-text note in the UI dialog (stored as `note` on the history
+ * entry; not itself validated/length-capped here, matching this module's
+ * existing posture of trusting caller-shaped `result`/`analysisPlan`
+ * payloads rather than deep-validating their contents).
+ */
+export const EXCLUSION_REASONS = Object.freeze(['wrong_data', 'wrong_date', 'other']);
+
+/**
+ * Pure helper (no Firestore) — builds the next `result` field value for a
+ * post-result exclusion toggle, given the EXISTING stored `result` field
+ * (whatever shape it's currently in — see the legacy-shape note below) and
+ * the new adjusted computation.
+ *
+ * IMMUTABILITY (binding): `original` is carried through UNCHANGED from
+ * whatever the existing stored value's `original` already is — this
+ * function has no code path that replaces it. `exclusionHistory` is
+ * APPENDED to (never replaced/truncated), and `adjusted` is the only field
+ * that's ever overwritten wholesale (by design: it should always reflect
+ * the MOST RECENT recomputation, not accumulate its own history).
+ *
+ * LEGACY BARE-SHAPE FALLBACK: if `existingResultField` does not carry an
+ * `original` key at all (a result written before this wrapping existed —
+ * none in prod today, `personalExperiments` is flag-gated OFF, but a
+ * defensive fallback per the plan), the ENTIRE existing value is treated as
+ * the original (matching `writeResult`'s own wrapping convention) and
+ * `exclusionHistory` starts fresh at `[]`.
+ *
+ * @param {object} existingResultField - `experiment.result` as currently
+ *   stored (either `{original, adjusted?, exclusionHistory}` or, for a
+ *   legacy doc, the bare computed-result shape itself).
+ * @param {{adjusted:object, dateKey:string, excluded:boolean, reason:string, at:string, note?:string}} args
+ *   `note` is an OPTIONAL free-text elaboration, meant to be paired with
+ *   `reason: 'other'` (not enforced — a note alongside a different reason
+ *   is harmless and not rejected).
+ * @returns {{original:object, adjusted:object, exclusionHistory:object[]}}
+ */
+export function buildAdjustedResultUpdate(existingResultField, { adjusted, dateKey, excluded, reason, at, note }) {
+  if (!adjusted || typeof adjusted !== 'object') {
+    throw new Error('buildAdjustedResultUpdate: adjusted (a plain object) is required.');
+  }
+  if (typeof dateKey !== 'string' || !dateKey) {
+    throw new Error('buildAdjustedResultUpdate: dateKey is required.');
+  }
+  if (!EXCLUSION_REASONS.includes(reason)) {
+    throw new Error(`buildAdjustedResultUpdate: reason must be one of ${EXCLUSION_REASONS.join(', ')}.`);
+  }
+  const original = existingResultField && typeof existingResultField === 'object' && 'original' in existingResultField
+    ? existingResultField.original
+    : existingResultField;
+  const priorHistory = Array.isArray(existingResultField?.exclusionHistory) ? existingResultField.exclusionHistory : [];
+  const historyEntry = { dateKey, excluded, reason, at: at || nowIso() };
+  if (typeof note === 'string' && note.trim()) {
+    historyEntry.note = note.trim();
+  }
+  return {
+    original,
+    adjusted,
+    exclusionHistory: [...priorHistory, historyEntry],
+  };
+}
+
+/**
+ * Write an ADJUSTED (post-result exclusion toggle) recomputation. Status is
+ * NOT included in this write's payload — the experiment is already
+ * `completed` (a precondition of this ever being called; the rules'
+ * `experimentTransitionAllowed` treats `completed -> completed` as a legal
+ * no-op transition either way) — only `result`/`updatedAt` are touched,
+ * matching the update allow-list exactly.
+ *
+ * @param {object} db
+ * @param {string} uid
+ * @param {string} experimentId
+ * @param {{original:object, adjusted:object, exclusionHistory:object[]}} resultField
+ *   - the FULL next value for the `result` field, e.g. from
+ *   `buildAdjustedResultUpdate`.
+ */
+export async function writeAdjustedResult(db, uid, experimentId, resultField) {
+  if (typeof experimentId !== 'string' || !experimentId) {
+    throw new Error('writeAdjustedResult: experimentId is required.');
+  }
+  if (!resultField || typeof resultField !== 'object' || Array.isArray(resultField)) {
+    throw new Error('writeAdjustedResult: resultField (a plain object) is required.');
+  }
+  await updateDoc(doc(db, experimentsPath(uid), experimentId), {
+    result: resultField,
     updatedAt: nowIso(),
   });
 }
@@ -404,6 +537,7 @@ export async function markExplainerSeen(db, uid) {
 }
 
 export default {
+  resolveDeviceTimezone,
   buildAnalysisPlan,
   subscribeExperiments,
   createExperiment,
@@ -414,6 +548,9 @@ export default {
   deleteExperiment,
   setObservationExcluded,
   writeResult,
+  EXCLUSION_REASONS,
+  buildAdjustedResultUpdate,
+  writeAdjustedResult,
   getExperimentPrefs,
   markExplainerSeen,
 };

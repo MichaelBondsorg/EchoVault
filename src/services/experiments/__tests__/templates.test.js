@@ -31,13 +31,15 @@ describe('TEMPLATES catalog', () => {
       expect(typeof t.exposure.source).toBe('string');
       expect(typeof t.exposure.field).toBe('string');
       expect(typeof t.exposure.label).toBe('string');
-      expect(t.outcome).toEqual({ field: 'analysis.mood_score', label: 'mood' });
+      expect(t.outcome).toEqual({ field: 'analysis.mood_score', label: 'mood', unit: 'mood_0_100' });
       expect([0, 1]).toContain(t.lag);
       expect(Array.isArray(t.confounders)).toBe(true);
       expect(t.confounders.length).toBeGreaterThan(0);
       for (const c of t.confounders) expect(typeof c).toBe('string');
       expect(Array.isArray(t.whatThisDoesNotProve)).toBe(true);
-      expect(t.whatThisDoesNotProve.length).toBe(3);
+      // 4 bullets (Michael review hardening, item 6 added a 4th,
+      // cross-experiment multiplicity caveat — see whatThisDoesNotProveFor).
+      expect(t.whatThisDoesNotProve.length).toBe(4);
     }
   });
 
@@ -56,11 +58,21 @@ describe('TEMPLATES catalog', () => {
     expect(new Set(firstBullets).size).toBe(TEMPLATES.length);
   });
 
-  it('the second and third "what this does not prove" bullets are verbatim-identical across every template (unslotted, spec-frozen)', () => {
+  it('the second, third, and fourth "what this does not prove" bullets are verbatim-identical across every template (unslotted, spec-frozen)', () => {
     const seconds = new Set(TEMPLATES.map((t) => t.whatThisDoesNotProve[1]));
     const thirds = new Set(TEMPLATES.map((t) => t.whatThisDoesNotProve[2]));
+    const fourths = new Set(TEMPLATES.map((t) => t.whatThisDoesNotProve[3]));
     expect(seconds.size).toBe(1);
     expect(thirds.size).toBe(1);
+    expect(fourths.size).toBe(1);
+  });
+
+  it('the fourth bullet is the cross-experiment multiplicity caveat (Michael review hardening, item 6)', () => {
+    for (const t of TEMPLATES) {
+      expect(t.whatThisDoesNotProve[3]).toBe(
+        'Running many experiments makes a chance pattern more likely somewhere; treat any single result as one observation, not a verdict.',
+      );
+    }
   });
 
   it('health-source exposure.field values are real keys returned by extractHealthSignals', () => {
@@ -92,6 +104,19 @@ describe('TEMPLATES catalog', () => {
     expect(tagTemplate.exposure.source).toBe('tags');
     expect(tagTemplate.exposure.field).toBe('tags');
   });
+
+  it('the tag-presence template declares splitMode: "binary" (Michael review hardening, EX1 H2 finding); every other template omits splitMode (median default)', () => {
+    const tagTemplate = getTemplateById('tag-presence-mood');
+    expect(tagTemplate.splitMode).toBe('binary');
+    const nonTag = TEMPLATES.filter((t) => t.id !== 'tag-presence-mood');
+    for (const t of nonTag) expect(t.splitMode).toBeUndefined();
+  });
+
+  it('every template title is co-movement framed (Michael review, item 7) — never uses causal "affect" wording', () => {
+    for (const t of TEMPLATES) {
+      expect(t.title.toLowerCase()).not.toMatch(/\baffect(s|ed)?\b/);
+    }
+  });
 });
 
 describe('matchQuestionToTemplate — canonical questions', () => {
@@ -115,6 +140,42 @@ describe('matchQuestionToTemplate — canonical questions', () => {
     expect(result).not.toBeNull();
     expect(result.template.id).toBe(expectedId);
     expect(result.params).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Co-movement phrasing (Michael review, item 7): the matcher must accept
+// BOTH the old causal phrasing (asserted above) AND the new co-movement
+// phrasing users will also type — matching is keyword-based (requireAll/
+// requireAllExcept over exposure+mood terms), not an exact-title match, so
+// both phrasings resolving to the same template is the same underlying
+// mechanism, not a special case — these tests pin that explicitly rather
+// than leaving it merely implied by the keyword design.
+// ---------------------------------------------------------------------------
+
+describe('matchQuestionToTemplate — co-movement phrasing (Michael review, item 7)', () => {
+  const coMovementCases = [
+    ['How does my sleep move together with my mood?', 'sleep-hours-mood-same-day'],
+    ['How do sleep and mood move together in my recorded days?', 'sleep-hours-mood-same-day'],
+    ['How does my sleep move together with my mood the next day?', 'sleep-hours-mood-lag1'],
+    ['How does exercise move together with my mood?', 'exercise-minutes-mood'],
+    ['How does sunshine move together with my mood?', 'sunshine-percent-mood'],
+    ['How do my steps move together with my mood?', 'steps-mood'],
+    ['How does my recovery score move together with my mood?', 'recovery-score-mood'],
+  ];
+
+  it.each(coMovementCases)('%s -> %s', (text, expectedId) => {
+    const result = matchQuestionToTemplate(text, []);
+    expect(result).not.toBeNull();
+    expect(result.template.id).toBe(expectedId);
+  });
+
+  it('co-movement tag phrasing matches the tag-presence template, same as causal phrasing', () => {
+    const availableTags = ['@person:spencer'];
+    const result = matchQuestionToTemplate('How does Spencer move together with my mood?', availableTags);
+    expect(result).not.toBeNull();
+    expect(result.template.id).toBe('tag-presence-mood');
+    expect(result.params).toEqual({ tag: '@person:spencer' });
   });
 });
 

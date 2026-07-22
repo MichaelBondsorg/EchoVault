@@ -1542,7 +1542,22 @@ function r3AnalysisPlan(template, params = {}) {
   };
 }
 
+/**
+ * PARTIAL START DAY RULE (Michael review hardening, EX2 item 2, plan-pinned):
+ * the experiment window is whole local calendar days starting the day AFTER
+ * `experiment.startAt` — every fixture below is written with `startAt`
+ * meaning "the first full data day" (matching `computeResult.test.js`'s own
+ * convention), so the REAL stored `startAt` field is shifted back one day
+ * here, transparently, keeping every hand-computed expectation below
+ * unchanged. Mirrors `computeResult.test.js`'s `baseExperiment`/`dayBefore`.
+ */
+function r3DayBefore(iso) {
+  const ms = Date.parse(iso);
+  return Number.isNaN(ms) ? iso : new Date(ms - R3_DAY_MS).toISOString();
+}
+
 function r3BaseExperiment({ template, params = {}, startAt, endAt, durationDays, excludedObservations = [], scope = null }) {
+  const shiftedStartAt = r3DayBefore(startAt);
   return {
     id: 'r3-exp-test',
     question: 'test question',
@@ -1550,12 +1565,12 @@ function r3BaseExperiment({ template, params = {}, startAt, endAt, durationDays,
     analysisPlan: r3AnalysisPlan(template, params),
     scope,
     status: 'running',
-    startAt,
+    startAt: shiftedStartAt,
     endAt,
     durationDays,
     excludedObservations,
-    createdAt: startAt,
-    updatedAt: startAt,
+    createdAt: shiftedStartAt,
+    updatedAt: shiftedStartAt,
   };
 }
 

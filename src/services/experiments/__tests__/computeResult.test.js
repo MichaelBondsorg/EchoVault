@@ -11,8 +11,11 @@ import {
   exposureValueForEntry,
   outcomeValueForEntry,
   buildDaySeries,
+  localDateKeyForMs,
   NON_CAUSAL_FRAMING,
   INSUFFICIENCY_COPY,
+  CI_SPANS_ZERO_COPY,
+  SMALL_EFFECT_COPY,
 } from '../computeResult';
 import { getTemplateById } from '../templates';
 import { MIN_PAIRED_OBSERVATIONS, COVERAGE_FLOOR } from '../estimator';
@@ -46,6 +49,12 @@ function buildAnalysisPlan(template, params = {}) {
     coverageFloor: COVERAGE_FLOOR,
     confounders: [...(template.confounders || [])],
     whatThisDoesNotProve: [...(template.whatThisDoesNotProve || [])],
+    // Fixed to 'UTC' for every fixture in this file (deterministic,
+    // independent of the host machine's timezone) — dedicated tests below
+    // (`local calendar days + frozen timezone`) exercise a real non-UTC
+    // zone explicitly instead.
+    timezone: 'UTC',
+    ...(template.splitMode === 'binary' ? { splitMode: 'binary' } : {}),
   };
 }
 
@@ -69,7 +78,33 @@ function dateKeyFor(y, m, d) {
   return isoDay(y, m, d, 0).slice(0, 10);
 }
 
+/**
+ * PARTIAL START DAY RULE (Michael review hardening, EX2 item 2, plan-pinned):
+ * the experiment window is whole LOCAL calendar days starting the day AFTER
+ * `experiment.startAt` — day 1 is the first FULL local day, and the
+ * calendar day `startAt` itself falls on is excluded entirely (only
+ * partially observed). Every fixture in this file is written with `startAt`
+ * meaning "the first full data day" (the pre-EX2 convention, and the
+ * intuitive one for hand-verified fixtures) — `baseExperiment` shifts the
+ * REAL stored `experiment.startAt` field back by exactly one day
+ * internally, so `day1` (computed inside `computeExperimentResult` as
+ * `shiftLocalDateKey(startLocalKey, 1)`) lands EXACTLY back on the caller's
+ * given `startAt` value. This keeps every hand-computed pair count/coverage
+ * total in this file's fixtures numerically unchanged from their pre-EX2
+ * values while still exercising the real partial-start-day rule (dedicated
+ * tests below assert the day-0 exclusion directly). An invalid `startAt`
+ * (e.g. the deliberate `'nope'` fixture) is passed through UNSHIFTED so the
+ * existing "throws on invalid startAt" test still exercises
+ * `computeExperimentResult`'s own validation, not a NaN from this helper.
+ */
+const DAY_MS_TEST = 24 * 60 * 60 * 1000;
+function dayBefore(iso) {
+  const ms = Date.parse(iso);
+  return Number.isNaN(ms) ? iso : new Date(ms - DAY_MS_TEST).toISOString();
+}
+
 function baseExperiment({ template, params = {}, startAt, endAt, durationDays, excludedObservations = [], scope = null }) {
+  const shiftedStartAt = dayBefore(startAt);
   return {
     id: 'exp-test',
     question: 'test question',
@@ -77,12 +112,12 @@ function baseExperiment({ template, params = {}, startAt, endAt, durationDays, e
     analysisPlan: buildAnalysisPlan(template, params),
     scope,
     status: 'running',
-    startAt,
+    startAt: shiftedStartAt,
     endAt,
     durationDays,
     excludedObservations,
-    createdAt: startAt,
-    updatedAt: startAt,
+    createdAt: shiftedStartAt,
+    updatedAt: shiftedStartAt,
   };
 }
 
@@ -127,7 +162,12 @@ function buildGoldenEntries() {
       id: `golden-${day}`,
       createdAt: isoDay(2026, 1, day),
       healthContext: { sleep: { totalHours: hours } },
-      analysis: { mood_score: hours * 10 },
+      // Production-scale input: mood_score captured 0-1, normalized to
+      // 0-100 at the series boundary (Michael review hardening, item 1) —
+      // dividing by 100 here means every hand-computed expectation below
+      // (in 0-100 "points") is numerically unchanged from this fixture's
+      // pre-EX2 values, while genuinely exercising the real normalization.
+      analysis: { mood_score: (hours * 10) / 100 },
     });
   }
   return entries;
@@ -190,10 +230,13 @@ describe('computeExperimentResult — golden fixture (end-to-end, hand-computed)
     // understate the real sample size).
     expect(result.receipt.sampleSize).toBe(28);
     expect(result.receipt.sources).toHaveLength(20);
-    expect(result.receipt.timeWindow).toEqual({ start: GOLDEN_START, end: GOLDEN_END });
+    // `experiment.startAt` (the real stored field) is one day BEFORE
+    // GOLDEN_START — see `baseExperiment`'s doc comment (partial-start-day
+    // rule): GOLDEN_START is written to mean "the first full data day".
+    expect(result.receipt.timeWindow).toEqual({ start: dayBefore(GOLDEN_START), end: GOLDEN_END });
 
     expect(result.narrative.summary).toContain(NON_CAUSAL_FRAMING);
-    expect(result.narrative.summary).toContain('35 points higher');
+    expect(result.narrative.summary).toContain('35 points (0-100) higher');
     expect(result.narrative.alternatives).toEqual(SLEEP_TEMPLATE.confounders);
     expect(result.narrative.whatThisDoesNotProve).toEqual(SLEEP_TEMPLATE.whatThisDoesNotProve);
     expect(result.narrative).not.toHaveProperty('insufficiency');
@@ -226,7 +269,7 @@ describe('computeExperimentResult — coverage floor (spec default #2) enforceme
         id: `sparse60-${i + 1}`,
         createdAt: isoAtOffset(SPARSE_BASE_MS, i),
         healthContext: i < exposureDays ? { sleep: { totalHours: 6 + (i % 3) } } : undefined,
-        analysis: { mood_score: 50 + (i % 10) }, // present every day -> outcome coverage 60/60
+        analysis: { mood_score: (50 + (i % 10)) / 100 }, // present every day -> outcome coverage 60/60
       });
     }
     return entries;
@@ -259,9 +302,28 @@ describe('computeExperimentResult — coverage floor (spec default #2) enforceme
   it('exactly 50% coverage passes the floor (operator is >=, matching the spec doc)', () => {
     // 24-day window, 12 of 24 exposure days (exactly 50%), all paired -> 12
     // pairs (>= MIN_PAIRED_OBSERVATIONS), isolating the floor check alone.
+    //
+    // Michael review hardening update (EX1 group-size guards, H1 AND H3):
+    // the original `6 + (i%3)` cycling formula produced a 4-high/8-low
+    // split that now correctly trips `group_too_small` (nHigh=4 <
+    // MIN_GROUP_SIZE=5) — this test's whole point is isolating the
+    // COVERAGE floor check alone, so the fixture is reshaped (not the
+    // assertion) to clear the newer, independent group-size AND
+    // per-resample-split-stability guards without changing what's being
+    // tested. `4 + (i%6)` gives six distinct graduated values (4-9, two
+    // each) rather than only two distinct values — a two-value fixture
+    // (e.g. six 5's/six 9's) turned out to be exactly the tie-heavy shape
+    // H3's per-resample bootstrap split reliably degenerates on
+    // (`split_unstable`), same root cause as H2's tag-presence finding.
+    // Sorted: 4,4,5,5,6,6,7,7,8,8,9,9 -> median = avg(sorted[5],sorted[6])
+    // = avg(6,7) = 6.5 -> HIGH (>6.5) = {7,7,8,8,9,9}, LOW (<=6.5) =
+    // {4,4,5,5,6,6}: nHigh=nLow=6, both >= MIN_GROUP_SIZE(5), fraction
+    // 6/12=0.5 >= MIN_GROUP_FRACTION(0.25), and graduated enough that the
+    // bootstrap's per-resample split stays comfortably under the 10%
+    // fallback limit.
     const entries = buildSparseExposureEntries(12).slice(0, 24).map((e, i) => ({
       ...e,
-      healthContext: i < 12 ? { sleep: { totalHours: 6 + (i % 3) } } : undefined,
+      healthContext: i < 12 ? { sleep: { totalHours: 4 + (i % 6) } } : undefined,
     }));
     const experiment = baseExperiment({
       template: SLEEP_TEMPLATE,
@@ -304,7 +366,7 @@ describe('computeExperimentResult — coverage floor (spec default #2) enforceme
         id: `outcome-floor-${i + 1}`,
         createdAt: isoAtOffset(SPARSE_BASE_MS, i),
         healthContext: { sleep: { totalHours: 6 + (i % 3) } }, // full exposure coverage
-        analysis: i < 11 ? { mood_score: 50 + (i % 10) } : undefined, // 11 of 24 outcome days (below floor)
+        analysis: i < 11 ? { mood_score: (50 + (i % 10)) / 100 } : undefined, // 11 of 24 outcome days (below floor)
       });
     }
     const experiment = baseExperiment({
@@ -362,7 +424,7 @@ describe('computeExperimentResult — plan-frozen thresholds are honored (Import
         id: `thresh-${i + 1}`,
         createdAt: isoAtOffset(THRESH_BASE_MS, i),
         healthContext: i < exposureDays ? { sleep: { totalHours: 4 + (i % 7) } } : undefined,
-        analysis: { mood_score: 50 + i },
+        analysis: { mood_score: (50 + i) / 100 },
       });
     }
     return entries;
@@ -429,13 +491,23 @@ describe('computeExperimentResult — plan-frozen thresholds are honored (Import
     // NOT the estimator's own hardcoded MIN_PAIRED_OBSERVATIONS (10). This
     // pins that runAnalysisPlan's internal gate is never bypassed, even
     // when a plan (hypothetically) snapshots a lower number.
+    //
+    // Michael review hardening update (EX1 group-size guards, H1): with
+    // n=8, ANY median split necessarily puts fewer than MIN_GROUP_SIZE (5)
+    // pairs in at least one group (5+5=10 > 8) — `group_too_small` now
+    // ALSO legitimately fires here, accumulating with
+    // `insufficient_paired_observations` per the existing "reasons
+    // accumulate" convention (see estimator.js's runAnalysisPlan docblock).
+    // This fixture's split is exactly 4-high/4-low (sleepHours
+    // 4,5,6,7,8,9,10,4 -> sorted 4,4,5,6,7,8,9,10 -> median 6.5 -> high
+    // {7,8,9,10}, low {4,4,5,6}), verified by hand.
     const entries = [];
     for (let i = 0; i < 8; i++) {
       entries.push({
         id: `floor-${i + 1}`,
         createdAt: isoAtOffset(THRESH_BASE_MS, i),
         healthContext: { sleep: { totalHours: 4 + (i % 7) } },
-        analysis: { mood_score: 50 + i },
+        analysis: { mood_score: (50 + i) / 100 },
       });
     }
     const experiment = baseExperiment({
@@ -453,7 +525,7 @@ describe('computeExperimentResult — plan-frozen thresholds are honored (Import
 
     expect(result.coverage.exposure).toEqual({ covered: 8, total: 8, label: '8 of 8 days' });
     expect(result.status).toBe('insufficient');
-    expect(result.reasons).toEqual(['insufficient_paired_observations']);
+    expect(result.reasons).toEqual(['insufficient_paired_observations', 'group_too_small']);
   });
 });
 
@@ -467,7 +539,7 @@ describe('computeExperimentResult — insufficiency payload-exactness', () => {
         id: `sparse-${day}`,
         createdAt: isoDay(2026, 3, day),
         healthContext: { sleep: { totalHours: 7 + i } },
-        analysis: { mood_score: 60 + i },
+        analysis: { mood_score: (60 + i) / 100 },
       });
     }
     const experiment = baseExperiment({
@@ -584,7 +656,7 @@ function buildFourteenDayEntries() {
       id: `excl-${day}`,
       createdAt: isoDay(2026, 5, day),
       healthContext: { sleep: { totalHours: 4 + i } }, // distinct values 4..17, no ties
-      analysis: { mood_score: 50 + i },
+      analysis: { mood_score: (50 + i) / 100 },
     });
   }
   return entries;
@@ -705,7 +777,7 @@ describe('computeExperimentResult — known-zero series fix (end-to-end)', () =>
         healthContext: NO_DATA_DAYS.has(day)
           ? undefined
           : { activity: { totalExerciseMinutes: ZERO_EXERCISE_DAYS.has(day) ? 0 : 30 + day, stepsToday: 1000 } },
-        analysis: { mood_score: 50 + day },
+        analysis: { mood_score: (50 + day) / 100 },
       });
     }
     const experiment = baseExperiment({
@@ -740,7 +812,7 @@ describe('computeExperimentResult — tag-source series (end-to-end)', () => {
         id: `tag-${day}`,
         createdAt: isoDay(2026, 8, day),
         tags: day % 2 === 0 ? [TAG] : [],
-        analysis: { mood_score: day % 2 === 0 ? 40 : 70 },
+        analysis: { mood_score: (day % 2 === 0 ? 40 : 70) / 100 },
       });
     }
     const experiment = baseExperiment({
@@ -776,7 +848,7 @@ describe('computeExperimentResult — lag-1 template (end-to-end)', () => {
         id: `lag-${day}`,
         createdAt: isoDay(2026, 9, day),
         healthContext: { sleep: { totalHours: 4 + (day % 8) } },
-        analysis: { mood_score: 50 + day },
+        analysis: { mood_score: (50 + day) / 100 },
       });
     }
     const experiment = baseExperiment({
@@ -811,7 +883,7 @@ describe('computeExperimentResult — coverage covers the experiment window, not
         id: `win-${day}`,
         createdAt: isoDay(2026, 10, day),
         healthContext: { sleep: { totalHours: 7 } },
-        analysis: { mood_score: 60 },
+        analysis: { mood_score: 0.6 },
       });
     }
     const experiment = baseExperiment({
@@ -905,8 +977,8 @@ describe('exposureValueForEntry — shared series-builder helper', () => {
     expect(exposureValueForEntry(entry, { source: 'health', field: 'sleepHours' })).toBeNull();
   });
 
-  it('tags: no tags array on a journaled entry -> known absent (0)', () => {
-    expect(exposureValueForEntry({}, { source: 'tags', field: 'tags' }, '@person:spencer')).toBe(0);
+  it('tags: no tags array on a journaled entry -> UNKNOWN, dropped (Michael review hardening, item 4)', () => {
+    expect(exposureValueForEntry({}, { source: 'tags', field: 'tags' }, '@person:spencer')).toBeNull();
   });
 
   it('tags: tag present -> 1', () => {
@@ -958,5 +1030,298 @@ describe('buildDaySeries', () => {
     const entries = [{ createdAt: isoDay(2026, 1, 1) }];
     const series = buildDaySeries(entries, (e) => outcomeValueForEntry(e, { field: 'analysis.mood_score' }));
     expect(series).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Michael review hardening — EX2 new-behavior tests (items 1, 2, 5)
+// ---------------------------------------------------------------------------
+
+describe('computeExperimentResult — unknown outcome unit fails closed (item 1)', () => {
+  it('a plan with no outcome.unit (legacy) fails closed with reasons:["unknown_outcome_unit"], no estimate', () => {
+    const entries = buildGoldenEntries();
+    const experiment = baseExperiment({ template: SLEEP_TEMPLATE, startAt: GOLDEN_START, endAt: GOLDEN_END, durationDays: 28 });
+    const { unit, ...outcomeNoUnit } = experiment.analysisPlan.outcome;
+    experiment.analysisPlan = { ...experiment.analysisPlan, outcome: outcomeNoUnit };
+
+    const result = computeExperimentResult({ experiment, entries, now: GOLDEN_NOW });
+
+    expect(result.status).toBe('insufficient');
+    expect(result.reasons).toEqual(['unknown_outcome_unit']);
+    expect(result).not.toHaveProperty('estimate');
+    expect(result.narrative.insufficiency).toBe(INSUFFICIENCY_COPY);
+    // Receipt invariant still holds.
+    expect(result.receipt).toBeTruthy();
+    expect(result.receipt.versions.generator).toBe('experiment_v1');
+    expect(result.sensitiveObservationCount).toBe(0);
+  });
+
+  it('a plan with an unrecognized outcome.unit string also fails closed the same way', () => {
+    const entries = buildGoldenEntries();
+    const experiment = baseExperiment({ template: SLEEP_TEMPLATE, startAt: GOLDEN_START, endAt: GOLDEN_END, durationDays: 28 });
+    experiment.analysisPlan = {
+      ...experiment.analysisPlan,
+      outcome: { ...experiment.analysisPlan.outcome, unit: 'mood_0_1' },
+    };
+
+    const result = computeExperimentResult({ experiment, entries, now: GOLDEN_NOW });
+
+    expect(result.status).toBe('insufficient');
+    expect(result.reasons).toEqual(['unknown_outcome_unit']);
+  });
+
+  it('the recognized unit (mood_0_100) reaches a real estimate — sanity contrast', () => {
+    const entries = buildGoldenEntries();
+    const experiment = baseExperiment({ template: SLEEP_TEMPLATE, startAt: GOLDEN_START, endAt: GOLDEN_END, durationDays: 28 });
+    expect(experiment.analysisPlan.outcome.unit).toBe('mood_0_100');
+    const result = computeExperimentResult({ experiment, entries, now: GOLDEN_NOW });
+    expect(result.status).toBe('ok');
+  });
+});
+
+describe('computeExperimentResult — partial start day rule (item 2, plan-pinned)', () => {
+  it('excludes the calendar day `startAt` falls on entirely, even when an entry exists on it (day 1 = first FULL local day, in UTC here)', () => {
+    // startAt is mid-afternoon on March 1 (UTC) — a partial day. One entry
+    // exists ON that same day; it must be excluded entirely (not partially
+    // counted), and the window's day 1 is March 2.
+    const startAt = isoDay(2026, 3, 1, 15); // 15:00 UTC, March 1
+    const endAt = isoDay(2026, 3, 15, 0); // exclusive end: March 15 00:00 UTC
+    const entries = [
+      { id: 'day0', createdAt: isoDay(2026, 3, 1, 20), healthContext: { sleep: { totalHours: 7 } }, analysis: { mood_score: 0.5 } },
+    ];
+    for (let i = 0; i < 10; i++) {
+      entries.push({
+        id: `full-${i}`,
+        createdAt: isoDay(2026, 3, 2 + i, 12),
+        healthContext: { sleep: { totalHours: 4 + (i % 6) } },
+        analysis: { mood_score: (50 + i) / 100 },
+      });
+    }
+    const experiment = {
+      id: 'exp-partial-start',
+      question: 'q',
+      analysisPlan: {
+        templateId: SLEEP_TEMPLATE.id,
+        lag: 0,
+        exposure: { ...SLEEP_TEMPLATE.exposure },
+        outcome: { ...SLEEP_TEMPLATE.outcome },
+        minPairedObservations: MIN_PAIRED_OBSERVATIONS,
+        coverageFloor: COVERAGE_FLOOR,
+        confounders: [...SLEEP_TEMPLATE.confounders],
+        whatThisDoesNotProve: [...SLEEP_TEMPLATE.whatThisDoesNotProve],
+        timezone: 'UTC',
+      },
+      scope: null,
+      status: 'running',
+      startAt,
+      endAt,
+      durationDays: 14,
+      excludedObservations: [],
+      createdAt: startAt,
+      updatedAt: startAt,
+    };
+    const result = computeExperimentResult({ experiment, entries, now: new Date(isoDay(2026, 4, 1, 0)) });
+
+    // Window is March 2 (day 1) through March 14 inclusive (endAt exclusive
+    // at March 15) = 13 whole days — March 1's partial day never counts.
+    expect(result.coverage.exposure.total).toBe(13);
+    // Only the 10 full-day entries count; the day-0 entry is excluded
+    // entirely (not even partially).
+    expect(result.coverage.exposure.covered).toBe(10);
+    expect(result.coverage.outcome.covered).toBe(10);
+  });
+});
+
+describe('computeExperimentResult — local calendar days + frozen timezone (item 2)', () => {
+  const TZ = 'America/Los_Angeles';
+  const N = 12;
+
+  /** LA calendar day (2026-07-(2+dayOffset)) at 22:00 PDT = 05:00 UTC the NEXT calendar date — a real UTC-midnight crossing. */
+  function laEveningIso(dayOffset) {
+    return new Date(Date.UTC(2026, 6, 3 + dayOffset, 5, 0, 0)).toISOString();
+  }
+
+  function buildLaEntries() {
+    const entries = [];
+    for (let i = 0; i < N; i++) {
+      entries.push({
+        id: `la-${i}`,
+        createdAt: laEveningIso(i),
+        healthContext: { sleep: { totalHours: 4 + (i % 6) } },
+        analysis: { mood_score: (50 + i) / 100 },
+      });
+    }
+    return entries;
+  }
+
+  const START = '2026-07-01T20:00:00.000Z'; // LA-local July 1 (13:00 PDT) -> day1 = July 2
+  const END = '2026-07-14T07:00:00.000Z'; // LA-local midnight, July 14 (00:00 PDT) -> exclusive end (window = July 2..July 13 inclusive = 12 days)
+  const NOW = new Date('2026-08-01T00:00:00.000Z');
+
+  function laExperiment() {
+    return {
+      id: 'exp-la',
+      question: 'q',
+      analysisPlan: {
+        templateId: SLEEP_TEMPLATE.id,
+        lag: 0,
+        exposure: { ...SLEEP_TEMPLATE.exposure },
+        outcome: { ...SLEEP_TEMPLATE.outcome },
+        minPairedObservations: MIN_PAIRED_OBSERVATIONS,
+        coverageFloor: COVERAGE_FLOOR,
+        confounders: [...SLEEP_TEMPLATE.confounders],
+        whatThisDoesNotProve: [...SLEEP_TEMPLATE.whatThisDoesNotProve],
+        timezone: TZ,
+      },
+      scope: null,
+      status: 'running',
+      startAt: START,
+      endAt: END,
+      durationDays: 14,
+      excludedObservations: [],
+      createdAt: START,
+      updatedAt: START,
+    };
+  }
+
+  it('sanity check: the fixture really does cross UTC midnight (LA dateKey and UTC dateKey of the same instant disagree)', () => {
+    const ms = Date.parse(laEveningIso(0));
+    expect(localDateKeyForMs(ms, 'UTC')).toBe('2026-07-03');
+    expect(localDateKeyForMs(ms, TZ)).toBe('2026-07-02');
+    expect(localDateKeyForMs(ms, TZ)).not.toBe(localDateKeyForMs(ms, 'UTC'));
+  });
+
+  it('groups/pairs entries by the FROZEN plan timezone`s local calendar day, not UTC', () => {
+    const entries = buildLaEntries();
+    const result = computeExperimentResult({ experiment: laExperiment(), entries, now: NOW });
+
+    expect(result.status).toBe('ok');
+    // All N entries pair, each on its OWN distinct LA calendar day — had
+    // this module grouped by UTC day instead, the evening-PDT entries
+    // (05:00 UTC the next date) would still land on distinct UTC days too
+    // in this particular fixture (one entry per real day), so the REAL
+    // proof is the sanity check above; this assertion pins the practical
+    // consequence: nothing gets dropped or double-counted by the local-day
+    // grouping.
+    expect(result.estimate.n).toBe(N);
+    expect(result.coverage.exposure).toEqual({ covered: N, total: N, label: `${N} of ${N} days` });
+    expect(result.coverage.outcome).toEqual({ covered: N, total: N, label: `${N} of ${N} days` });
+  });
+});
+
+describe('computeExperimentResult — sensitive-day disclosure (item 5)', () => {
+  it('counts PAIRS with a safety_flagged or has_warning_indicators contributing entry; those entries still contribute to the estimate', () => {
+    const entries = buildFourteenDayEntries().map((e, i) => {
+      if (i === 2) return { ...e, safety_flagged: true };
+      if (i === 7) return { ...e, has_warning_indicators: true };
+      return e;
+    });
+    const experiment = baseExperiment({ template: SLEEP_TEMPLATE, startAt: EXCL_START, endAt: EXCL_END, durationDays: 14 });
+    const result = computeExperimentResult({ experiment, entries, now: EXCL_NOW });
+
+    expect(result.status).toBe('ok');
+    expect(result.estimate.n).toBe(14); // both flagged days still counted in the statistics
+    expect(result.sensitiveObservationCount).toBe(2);
+    // Receipt sources still exclude the flagged entries entirely (existing invariant, unchanged).
+    expect(result.receipt.sources).toHaveLength(12);
+  });
+
+  it('sensitiveObservationCount is 0 when nothing is flagged', () => {
+    const entries = buildFourteenDayEntries();
+    const experiment = baseExperiment({ template: SLEEP_TEMPLATE, startAt: EXCL_START, endAt: EXCL_END, durationDays: 14 });
+    const result = computeExperimentResult({ experiment, entries, now: EXCL_NOW });
+    expect(result.sensitiveObservationCount).toBe(0);
+  });
+
+  it('sensitiveObservationCount is present (and 0) on an insufficient result too — the observation table renders in both states', () => {
+    const experiment = baseExperiment({
+      template: SLEEP_TEMPLATE,
+      startAt: isoDay(2026, 3, 1, 0),
+      endAt: isoDay(2026, 3, 29, 0),
+      durationDays: 28,
+    });
+    const result = computeExperimentResult({ experiment, entries: [], now: new Date(isoDay(2026, 4, 5, 0)) });
+    expect(result.status).toBe('insufficient');
+    expect(result.sensitiveObservationCount).toBe(0);
+  });
+});
+
+describe('computeExperimentResult — CI-spans-zero copy (Task EX1 wording update, consumed here)', () => {
+  it('uses the NEW spec wording verbatim when the CI spans zero', () => {
+    // Equal high/low group means by construction, real within-group spread
+    // (mirrors estimator.test.js's own CI-spans-zero fixture idea).
+    const entries = [];
+    const hours = [4, 5, 6, 15, 16, 17, 4, 5, 6, 15, 16, 17]; // low {4,5,6}x2, high {15,16,17}x2
+    const moods = [40, 60, 80, 40, 60, 80, 40, 60, 80, 40, 60, 80]; // same mood pattern regardless of group -> equal means
+    for (let i = 0; i < 12; i++) {
+      entries.push({
+        id: `zero-${i}`,
+        createdAt: isoDay(2026, 5, i + 1),
+        healthContext: { sleep: { totalHours: hours[i] } },
+        analysis: { mood_score: moods[i] / 100 },
+      });
+    }
+    const experiment = baseExperiment({
+      template: SLEEP_TEMPLATE,
+      startAt: isoDay(2026, 5, 1, 0),
+      endAt: isoDay(2026, 5, 13, 0),
+      durationDays: 14,
+    });
+    const result = computeExperimentResult({ experiment, entries, now: new Date(isoDay(2026, 6, 1, 0)) });
+
+    expect(result.status).toBe('ok');
+    expect(result.estimate.ci[0]).toBeLessThanOrEqual(0);
+    expect(result.estimate.ci[1]).toBeGreaterThanOrEqual(0);
+    expect(result.narrative.summary).toContain(CI_SPANS_ZERO_COPY);
+    expect(CI_SPANS_ZERO_COPY).toBe(
+      'These recorded days are compatible with both higher and lower mood; no consistent direction appears.',
+    );
+    // No small-effect suffix layered on top of the CI-spans-zero copy.
+    expect(result.narrative.summary).not.toContain(SMALL_EFFECT_COPY);
+  });
+});
+
+describe('computeExperimentResult — practical significance / small-effect classification (EX1 H5, wired here)', () => {
+  const SMALL_BASE_MS = Date.UTC(2026, 6, 1);
+
+  /** 12 pairs, graduated exposure 4-15 (no ties), LOW group (hours<10) mood exactly 50, HIGH group (hours>=10) mood exactly 53 -> delta=3 (<5), zero within-group variance -> a tight CI clear of zero. */
+  function buildSmallEffectEntries() {
+    const entries = [];
+    for (let i = 0; i < 12; i++) {
+      const hours = 4 + i;
+      entries.push({
+        id: `small-${i}`,
+        createdAt: isoAtOffset(SMALL_BASE_MS, i),
+        healthContext: { sleep: { totalHours: hours } },
+        analysis: { mood_score: (hours < 10 ? 50 : 53) / 100 },
+      });
+    }
+    return entries;
+  }
+
+  it('appends SMALL_EFFECT_COPY when |delta| < SMALL_EFFECT_DELTA(5) and the CI does not span zero', () => {
+    const entries = buildSmallEffectEntries();
+    const experiment = baseExperiment({
+      template: SLEEP_TEMPLATE,
+      startAt: new Date(SMALL_BASE_MS).toISOString(),
+      endAt: new Date(SMALL_BASE_MS + 12 * DAY_MS).toISOString(),
+      durationDays: 14,
+    });
+    const result = computeExperimentResult({ experiment, entries, now: new Date(SMALL_BASE_MS + 30 * DAY_MS) });
+
+    expect(result.status).toBe('ok');
+    expect(result.estimate.delta).toBeCloseTo(3, 10);
+    expect(Math.abs(result.estimate.delta)).toBeLessThan(5);
+    expect(result.estimate.ci[0] > 0 || result.estimate.ci[1] < 0).toBe(true); // does not span zero
+    expect(result.narrative.summary).toContain(SMALL_EFFECT_COPY);
+    expect(result.narrative.summary).toContain('3 points (0-100) higher');
+  });
+
+  it('does NOT append SMALL_EFFECT_COPY for the golden fixture (delta=35, well above the threshold)', () => {
+    const entries = buildGoldenEntries();
+    const experiment = baseExperiment({ template: SLEEP_TEMPLATE, startAt: GOLDEN_START, endAt: GOLDEN_END, durationDays: 28 });
+    const result = computeExperimentResult({ experiment, entries, now: GOLDEN_NOW });
+    expect(Math.abs(result.estimate.delta)).toBeGreaterThan(5);
+    expect(result.narrative.summary).not.toContain(SMALL_EFFECT_COPY);
   });
 });

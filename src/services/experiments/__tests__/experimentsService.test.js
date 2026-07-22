@@ -24,6 +24,7 @@ vi.mock('../../../config/firebase', () => mocks);
 vi.mock('../../../config/constants', () => ({ APP_COLLECTION_ID: 'echo-vault-v5-fresh' }));
 
 const {
+  resolveDeviceTimezone,
   buildAnalysisPlan,
   subscribeExperiments,
   createExperiment,
@@ -34,6 +35,9 @@ const {
   deleteExperiment,
   setObservationExcluded,
   writeResult,
+  EXCLUSION_REASONS,
+  buildAdjustedResultUpdate,
+  writeAdjustedResult,
   getExperimentPrefs,
   markExplainerSeen,
 } = await import('../experimentsService.js');
@@ -84,7 +88,7 @@ beforeEach(() => {
 });
 
 describe('buildAnalysisPlan', () => {
-  it('snapshots template id, lag, exposure, outcome, the estimator constants, and the narrative caveat strings', () => {
+  it('snapshots template id, lag, exposure, outcome, the estimator constants, the frozen device timezone, and the narrative caveat strings', () => {
     const plan = buildAnalysisPlan(validTemplate());
     expect(plan).toEqual({
       templateId: 'sleep-hours-mood-same-day',
@@ -95,7 +99,31 @@ describe('buildAnalysisPlan', () => {
       coverageFloor: COVERAGE_FLOOR,
       confounders: ['Confounder one.', 'Confounder two.'],
       whatThisDoesNotProve: ['Does not prove one.', 'Does not prove two.'],
+      timezone: resolveDeviceTimezone(),
     });
+  });
+
+  it('carries splitMode onto the plan only when the template declares one (e.g. tag-presence-mood: binary)', () => {
+    const tagTemplate = validTemplate({
+      id: 'tag-presence-mood',
+      exposure: { source: 'tags', field: 'tags', label: 'tag presence' },
+      splitMode: 'binary',
+    });
+    const plan = buildAnalysisPlan(tagTemplate, { tag: '@person:spencer' });
+    expect(plan.splitMode).toBe('binary');
+
+    const noSplitModePlan = buildAnalysisPlan(validTemplate());
+    expect(noSplitModePlan).not.toHaveProperty('splitMode');
+  });
+
+  it('resolveDeviceTimezone falls back to UTC when Intl throws', () => {
+    const original = Intl.DateTimeFormat;
+    Intl.DateTimeFormat = () => { throw new Error('no Intl here'); };
+    try {
+      expect(resolveDeviceTimezone()).toBe('UTC');
+    } finally {
+      Intl.DateTimeFormat = original;
+    }
   });
 
   it('snapshotted confounders/whatThisDoesNotProve are copies, not the same array reference (defensive — the template catalog is frozen but callers must not assume it)', () => {
@@ -365,25 +393,29 @@ describe('setObservationExcluded — read-modify-write, dedupe, round-trip', () 
   });
 });
 
-describe('writeResult — sets result + status:completed in one update', () => {
-  it('writes exactly {result, status:completed, updatedAt} on first completion', async () => {
+describe('writeResult — sets result + status:completed in one update (result integrity, Michael review item 3)', () => {
+  it('wraps the FIRST-completion result as {original: result, exclusionHistory: []}, status:completed, updatedAt', async () => {
     const result = { status: 'ok', estimate: { delta: 4 } };
     await writeResult(db, UID, 'exp-1', result);
     const payload = mocks.updateDoc.mock.calls[0][1];
     expect(Object.keys(payload).sort()).toEqual(['result', 'status', 'updatedAt']);
     expect(payload.status).toBe('completed');
-    expect(payload.result).toBe(result);
+    expect(payload.result).toEqual({ original: result, exclusionHistory: [] });
+    // `original` is the SAME object reference as the passed-in result — no
+    // deep clone, matching this module's existing "trust the caller's
+    // already-shaped payload" posture.
+    expect(payload.result.original).toBe(result);
   });
 
-  it('supports the completed-rerun case: status stays completed, result is replaced', async () => {
+  it('a second writeResult call ALSO wraps fresh (writeResult is only ever a first-completion writer; reruns after a result exists go through writeAdjustedResult)', async () => {
     const firstResult = { status: 'ok', estimate: { delta: 4 } };
-    const rerunResult = { status: 'ok', estimate: { delta: 6 } };
+    const secondResult = { status: 'ok', estimate: { delta: 6 } };
     await writeResult(db, UID, 'exp-1', firstResult);
-    await writeResult(db, UID, 'exp-1', rerunResult);
+    await writeResult(db, UID, 'exp-1', secondResult);
     expect(mocks.updateDoc).toHaveBeenCalledTimes(2);
     const secondPayload = mocks.updateDoc.mock.calls[1][1];
     expect(secondPayload.status).toBe('completed');
-    expect(secondPayload.result).toBe(rerunResult);
+    expect(secondPayload.result).toEqual({ original: secondResult, exclusionHistory: [] });
   });
 
   it('supports the insufficiency result shape too (still requires status:completed)', async () => {
@@ -391,12 +423,91 @@ describe('writeResult — sets result + status:completed in one update', () => {
     await writeResult(db, UID, 'exp-1', insufficientResult);
     const payload = mocks.updateDoc.mock.calls[0][1];
     expect(payload.status).toBe('completed');
-    expect(payload.result).toBe(insufficientResult);
+    expect(payload.result).toEqual({ original: insufficientResult, exclusionHistory: [] });
   });
 
   it('rejects a non-object result', async () => {
     await expect(writeResult(db, UID, 'exp-1', null)).rejects.toThrow();
     await expect(writeResult(db, UID, 'exp-1', 'not an object')).rejects.toThrow();
+  });
+});
+
+describe('buildAdjustedResultUpdate — pure helper (result integrity, item 3)', () => {
+  const ORIGINAL = { status: 'ok', estimate: { delta: 4 } };
+  const ADJUSTED = { status: 'ok', estimate: { delta: 6 } };
+
+  it('wraps a fresh {original, adjusted, exclusionHistory:[entry]} from an existing {original, exclusionHistory:[]} field', () => {
+    const existing = { original: ORIGINAL, exclusionHistory: [] };
+    const next = buildAdjustedResultUpdate(existing, {
+      adjusted: ADJUSTED, dateKey: '2026-07-01', excluded: true, reason: 'wrong_data', at: '2026-07-22T00:00:00.000Z',
+    });
+    expect(next.original).toBe(ORIGINAL);
+    expect(next.adjusted).toBe(ADJUSTED);
+    expect(next.exclusionHistory).toEqual([
+      { dateKey: '2026-07-01', excluded: true, reason: 'wrong_data', at: '2026-07-22T00:00:00.000Z' },
+    ]);
+  });
+
+  it('APPENDS to exclusionHistory across repeated calls — original is never disturbed', () => {
+    const existing = { original: ORIGINAL, adjusted: ADJUSTED, exclusionHistory: [
+      { dateKey: '2026-07-01', excluded: true, reason: 'wrong_data', at: 't1' },
+    ] };
+    const secondAdjusted = { status: 'ok', estimate: { delta: 8 } };
+    const next = buildAdjustedResultUpdate(existing, {
+      adjusted: secondAdjusted, dateKey: '2026-07-02', excluded: true, reason: 'wrong_date', at: 't2',
+    });
+    expect(next.original).toBe(ORIGINAL);
+    expect(next.adjusted).toBe(secondAdjusted);
+    expect(next.exclusionHistory).toEqual([
+      { dateKey: '2026-07-01', excluded: true, reason: 'wrong_data', at: 't1' },
+      { dateKey: '2026-07-02', excluded: true, reason: 'wrong_date', at: 't2' },
+    ]);
+  });
+
+  it('legacy bare-shape fallback: an existing field with no `original` key is treated as the original itself', () => {
+    const legacyBare = ORIGINAL; // pre-wrapping shape: the result itself, no wrapper
+    const next = buildAdjustedResultUpdate(legacyBare, {
+      adjusted: ADJUSTED, dateKey: '2026-07-01', excluded: true, reason: 'other', at: 't1',
+    });
+    expect(next.original).toBe(ORIGINAL);
+    expect(next.exclusionHistory).toEqual([{ dateKey: '2026-07-01', excluded: true, reason: 'other', at: 't1' }]);
+  });
+
+  it('un-excluding (excluded:false) is recorded the same way as excluding', () => {
+    const existing = { original: ORIGINAL, exclusionHistory: [] };
+    const next = buildAdjustedResultUpdate(existing, {
+      adjusted: ORIGINAL, dateKey: '2026-07-01', excluded: false, reason: 'wrong_data', at: 't1',
+    });
+    expect(next.exclusionHistory).toEqual([{ dateKey: '2026-07-01', excluded: false, reason: 'wrong_data', at: 't1' }]);
+  });
+
+  it('rejects an invalid reason', () => {
+    expect(() => buildAdjustedResultUpdate({ original: ORIGINAL, exclusionHistory: [] }, {
+      adjusted: ADJUSTED, dateKey: '2026-07-01', excluded: true, reason: 'not_a_real_reason', at: 't1',
+    })).toThrow();
+  });
+
+  it('EXCLUSION_REASONS is exactly [wrong_data, wrong_date, other]', () => {
+    expect(EXCLUSION_REASONS).toEqual(['wrong_data', 'wrong_date', 'other']);
+  });
+});
+
+describe('writeAdjustedResult — writes only {result, updatedAt} (status untouched, already completed)', () => {
+  it('writes exactly {result, updatedAt}', async () => {
+    const resultField = { original: { status: 'ok' }, adjusted: { status: 'ok' }, exclusionHistory: [] };
+    await writeAdjustedResult(db, UID, 'exp-1', resultField);
+    expect(mocks.doc).toHaveBeenCalledWith(db, EXPERIMENTS_PATH, 'exp-1');
+    const payload = mocks.updateDoc.mock.calls[0][1];
+    expect(Object.keys(payload).sort()).toEqual(['result', 'updatedAt']);
+    expect(payload.result).toBe(resultField);
+    for (const key of Object.keys(payload)) {
+      expect(UPDATE_ALLOWED_KEYS).toContain(key);
+    }
+  });
+
+  it('rejects a missing experimentId or non-object resultField', async () => {
+    await expect(writeAdjustedResult(db, UID, '', {})).rejects.toThrow();
+    await expect(writeAdjustedResult(db, UID, 'exp-1', null)).rejects.toThrow();
   });
 });
 

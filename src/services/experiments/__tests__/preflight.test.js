@@ -190,7 +190,7 @@ describe('preflightExperiment — tag-presence, zero occurrences', () => {
     expect(result.appropriate).toBe(true);
   });
 
-  it('treats an entry with no tags array as a known "tag absent" day, not a missing observation', () => {
+  it('treats an entry with no tags array as UNKNOWN (dropped), not a known "tag absent" day (Michael review hardening, item 4)', () => {
     const entries = fullyCoveredEntries(28, { tag: '@person:spencer' }).map((e, i) =>
       i % 2 === 0 ? { ...e, tags: undefined } : e,
     );
@@ -200,8 +200,12 @@ describe('preflightExperiment — tag-presence, zero occurrences', () => {
       params: { tag: '@person:spencer' },
       now: NOW,
     });
-    // Every day still counts toward exposure coverage (absence is known), just half the days carry the tag.
-    expect(result.expectedCoverage.exposure.covered).toBe(28);
+    // Only the half of days with an EXPLICIT tags array count toward
+    // exposure coverage — a missing `tags` array means the entry was never
+    // actually screened for tags at all, which is a genuinely unknown
+    // observation for this variable, not a known absence (item 4 reverses
+    // the pre-EX2 "no tags array -> known 0" behavior).
+    expect(result.expectedCoverage.exposure.covered).toBe(14);
   });
 
   it('is not appropriate when no tag param is supplied at all', () => {

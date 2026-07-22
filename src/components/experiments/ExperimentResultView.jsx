@@ -5,8 +5,22 @@ import { Button } from '../cloud';
 import SourceList from '../insights/SourceList';
 import { filterEntriesByScope } from '../../services/spaces/scopeFilter';
 import { pairObservations } from '../../services/experiments/estimator';
-import { exposureValueForEntry, outcomeValueForEntry, buildDaySeries, computeExperimentResult } from '../../services/experiments/computeResult';
-import { setObservationExcluded, writeResult } from '../../services/experiments/experimentsService';
+import {
+  exposureValueForEntry,
+  outcomeValueForEntry,
+  buildDaySeries,
+  computeExperimentResult,
+  localDateKeyForMs,
+  shiftLocalDateKey,
+  localMidnightUtcMs,
+} from '../../services/experiments/computeResult';
+import {
+  setObservationExcluded,
+  writeResult,
+  EXCLUSION_REASONS,
+  buildAdjustedResultUpdate,
+  writeAdjustedResult,
+} from '../../services/experiments/experimentsService';
 import { safeDate } from '../../utils/date';
 
 /**
@@ -14,12 +28,31 @@ import { safeDate } from '../../utils/date';
  * Experiment (R3 Task 6). Renders the STORED `experiment.result` (the
  * output of the REAL `computeExperimentResult`, written by
  * `experimentsService.writeResult` at completion) — this view never calls
- * `computeExperimentResult` on mount. The only path that recomputes is the
- * observation inspector's exclude/include toggle (`handleToggleExclude`
- * below): `setObservationExcluded` -> `computeExperimentResult` (real,
- * deterministic) -> `writeResult` -> local state updates so the change is
- * immediately visible, matching the eventual `subscribeExperiments` push
- * from the parent screen.
+ * `computeExperimentResult` on mount.
+ *
+ * RESULT INTEGRITY (Michael review hardening, EX2 item 3, binding): the
+ * stored `experiment.result` field is `{original, adjusted?,
+ * exclusionHistory}` (`writeResult`'s wrapping shape) — `original` is
+ * IMMUTABLE from this view's perspective; it is never re-derived or
+ * overwritten. The observation inspector's exclude/include toggle
+ * (`confirmToggle` below) now requires a REASON (`EXCLUSION_REASONS`:
+ * `wrong_data`/`wrong_date`/`other`, chosen via a small dialog — calm copy,
+ * no shaming) before it proceeds: `setObservationExcluded` (unchanged) ->
+ * `computeExperimentResult` (real, deterministic) ->
+ * `buildAdjustedResultUpdate` (pure — appends `{dateKey, excluded, reason,
+ * at}` to `exclusionHistory`, sets `adjusted` to the new computation,
+ * carries `original` through untouched) -> `writeAdjustedResult` -> local
+ * state updates. Whenever `adjusted` exists, this view shows the "Modified
+ * after seeing the result" label, a collapsible history list, and an
+ * always-visible toggle to view the ORIGINAL result instead (never hidden
+ * behind another click depth) — `showingOriginal` below.
+ *
+ * LEGACY BARE-SHAPE FALLBACK: a stored `result` written before this
+ * wrapping existed (bare `computeExperimentResult` output, no `original`
+ * key) is rendered as if it WERE the original, with an empty history — see
+ * `normalizeStoredResult` below. None exist in prod today
+ * (`personalExperiments` is flag-gated OFF), but this keeps the view
+ * correct for any pre-EX2 doc regardless.
  *
  * Insufficiency (`result.status === 'insufficient'`) renders ONLY the
  * plain-language `narrative.insufficiency` copy plus machine-readable
@@ -34,6 +67,17 @@ import { safeDate } from '../../utils/date';
  * insufficient), and the observation inspector stays available in both
  * states too — excluding/including an observation can push an insufficient
  * result over the threshold on rerun.
+ *
+ * SENSITIVE-DAY DISCLOSURE (Michael review hardening, item 5): whenever
+ * `result.sensitiveObservationCount > 0`, a calm disclosure sentence is
+ * shown ("N sensitive days contributed to the statistics; details are
+ * hidden.") — those entries are already folded into the estimate (the
+ * user's own data) but never appear in `receipt.sources` (unchanged
+ * invariant). The observation table (`buildObservationRows`) renders each
+ * such paired day as "Sensitive day — details hidden" instead of its raw
+ * exposure/outcome numbers — the dateKey stays visible and the
+ * Exclude/Include toggle stays available (the user may exclude their own
+ * sensitive day like any other).
  */
 
 // Shared token -> plain-language copy map (binding: "render both uniformly,
@@ -55,6 +99,21 @@ export const REASON_COPY = {
   insufficient_paired_observations: 'There are not enough matched days yet.',
   lag_mismatch: "The data doesn't line up with the expected day-to-day pattern.",
   degenerate_exposure_split: "There isn't enough variation in this variable to compare higher and lower days.",
+  // Michael review hardening (Task EX1 estimator guards; EX2 cross-checks
+  // every emitter against this map so no new reason ever renders as the
+  // generic fallback below by accident).
+  group_too_small: 'One of the groups being compared has too few days to trust yet.',
+  groups_too_imbalanced: 'The higher and lower days being compared are too lopsided to trust yet.',
+  exposure_contrast_too_small: "There isn't a clear enough difference between the higher and lower days being compared.",
+  split_unstable: 'The way days split into higher and lower was not stable enough to trust.',
+  unknown_outcome_unit: "This experiment's mood data isn't in a format Engram recognizes yet.",
+};
+
+/** Calm, non-judgmental copy for the post-result exclusion reason dialog (Michael review hardening, item 3). */
+export const EXCLUSION_REASON_COPY = {
+  wrong_data: 'The recorded data for this day looks wrong',
+  wrong_date: 'This is tied to the wrong day',
+  other: 'Something else',
 };
 
 export function reasonCopy(token) {
@@ -69,20 +128,51 @@ function entryTimestampMs(entry) {
   return Number.isNaN(t) ? null : t;
 }
 
+/** Group entries by (local, `timeZone`) calendar dateKey — mirrors `computeResult.js`'s private `groupEntriesByDateKey` (not exported), for the sensitive-day lookup below. */
+function groupEntriesByDateKey(entries, timeZone) {
+  const map = new Map();
+  for (const entry of entries || []) {
+    const dateKey = entryDateKeyLocal(entry, timeZone);
+    if (!dateKey) continue;
+    if (!map.has(dateKey)) map.set(dateKey, []);
+    map.get(dateKey).push(entry);
+  }
+  return map;
+}
+
+function entryDateKeyLocal(entry, timeZone) {
+  const raw = entry?.effectiveDate ?? entry?.createdAt;
+  if (!raw) return null;
+  const d = safeDate(raw);
+  if (Number.isNaN(d.getTime())) return null;
+  return localDateKeyForMs(d.getTime(), timeZone);
+}
+
 /**
  * Rebuild the FULL (pre-exclusion) paired-observations list for the
  * observation inspector table, using the exact same pure building blocks
- * `computeResult.js`'s own pipeline uses (`filterEntriesByScope` ->
- * date-window filter -> `buildDaySeries` -> `pairObservations`) — see that
- * module's "PIPELINE" doc comment. This is NOT a second implementation of
- * the estimator/statistics: every non-trivial step is the same exported,
- * independently-tested pure function `computeExperimentResult` itself
- * calls; only the thin date-window-filter glue (not exported, since
- * `computeResult.js` only exports its three named helpers) is duplicated
- * here, deliberately kept minimal and mirrored 1:1 from that module's
- * `entryTimestampMs`/windowed-filter step.
+ * `computeResult.js`'s own pipeline uses (`filterEntriesByScope` -> local
+ * calendar-day, partial-start-day window filter -> `buildDaySeries` ->
+ * `pairObservations`) — see that module's "PIPELINE" and "LOCAL CALENDAR
+ * DAYS + FROZEN TIMEZONE" doc comments. This is NOT a second implementation
+ * of the estimator/statistics: every non-trivial step is the same
+ * exported, independently-tested pure function `computeExperimentResult`
+ * itself calls (including the exact same `localDateKeyForMs`/
+ * `shiftLocalDateKey`/`localMidnightUtcMs` timezone helpers, imported
+ * rather than re-derived, per Michael review hardening item 2 — the two
+ * pipelines must never disagree about which local day a pair belongs to);
+ * only the thin date-window-filter glue (not exported, since
+ * `computeResult.js` only exports its named helpers, not the whole
+ * pipeline) is duplicated here, deliberately kept minimal.
  *
- * @returns {{dateKey:string, outcomeDateKey:string, exposure:number, outcome:number}[]}
+ * Each row also carries `sensitive: boolean` (Michael review hardening,
+ * item 5) — true when ANY entry dated on the pair's `dateKey` OR
+ * `outcomeDateKey` (same union `computeResult.js`'s receipt builder uses)
+ * is `safety_flagged`/`has_warning_indicators` — so the table can render
+ * "Sensitive day — details hidden" for that row instead of its raw
+ * exposure/outcome numbers.
+ *
+ * @returns {{dateKey:string, outcomeDateKey:string, exposure:number, outcome:number, sensitive:boolean}[]}
  */
 export function buildObservationRows(experiment, entries) {
   const plan = experiment?.analysisPlan;
@@ -91,30 +181,77 @@ export function buildObservationRows(experiment, entries) {
   const declaredEndMs = Date.parse(experiment.endAt);
   if (Number.isNaN(startMs) || Number.isNaN(declaredEndMs)) return [];
   const effectiveEndMs = Math.min(declaredEndMs, Date.now());
+  const timeZone = typeof plan.timezone === 'string' && plan.timezone ? plan.timezone : 'UTC';
+
+  // PARTIAL START DAY RULE (item 2) — mirrors computeResult.js exactly.
+  const startLocalKey = localDateKeyForMs(startMs, timeZone);
+  const day1LocalKey = shiftLocalDateKey(startLocalKey, 1);
+  const windowStartMs = localMidnightUtcMs(day1LocalKey, timeZone);
 
   const scoped = filterEntriesByScope(Array.isArray(entries) ? entries : [], experiment.scope ?? null);
   const windowed = scoped.filter((entry) => {
     const ts = entryTimestampMs(entry);
-    return ts !== null && ts >= startMs && ts < effectiveEndMs;
+    return ts !== null && ts >= windowStartMs && ts < effectiveEndMs;
   });
 
-  const exposureSeries = buildDaySeries(windowed, (entry) => exposureValueForEntry(entry, plan.exposure, plan.exposure?.tag));
-  const outcomeSeries = buildDaySeries(windowed, (entry) => outcomeValueForEntry(entry, plan.outcome));
+  const exposureSeries = buildDaySeries(windowed, (entry) => exposureValueForEntry(entry, plan.exposure, plan.exposure?.tag), timeZone);
+  const outcomeSeries = buildDaySeries(windowed, (entry) => outcomeValueForEntry(entry, plan.outcome), timeZone);
 
-  return pairObservations({ exposureSeries, outcomeSeries, lag: plan.lag });
+  const pairs = pairObservations({ exposureSeries, outcomeSeries, lag: plan.lag });
+  const entriesByDateKey = groupEntriesByDateKey(windowed, timeZone);
+  return pairs.map((pair) => {
+    const dayEntries = [
+      ...(entriesByDateKey.get(pair.dateKey) || []),
+      ...(entriesByDateKey.get(pair.outcomeDateKey) || []),
+    ];
+    const sensitive = dayEntries.some((entry) => entry && (entry.safety_flagged || entry.has_warning_indicators));
+    return { ...pair, sensitive };
+  });
 }
 
 function roundToOneDecimal(n) {
   return Math.round(n * 10) / 10;
 }
 
+/**
+ * Normalize `experiment.result` (as currently stored) into
+ * `{original, adjusted, exclusionHistory}` — see module doc comment's
+ * "LEGACY BARE-SHAPE FALLBACK" for why a stored value with no `original`
+ * key is treated as the original itself, with empty history.
+ */
+export function normalizeStoredResult(storedField) {
+  if (!storedField) return null;
+  if (typeof storedField === 'object' && 'original' in storedField) {
+    return {
+      original: storedField.original,
+      adjusted: storedField.adjusted || null,
+      exclusionHistory: Array.isArray(storedField.exclusionHistory) ? storedField.exclusionHistory : [],
+    };
+  }
+  return { original: storedField, adjusted: null, exclusionHistory: [] };
+}
+
+function formatHistoryTimestamp(iso) {
+  const d = safeDate(iso);
+  if (Number.isNaN(d.getTime())) return iso || '';
+  return d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+}
+
 const ExperimentResultView = ({ uid, entries = [], experiment, onClose }) => {
-  const [result, setResult] = useState(experiment.result || null);
+  const [storedField, setStoredField] = useState(experiment.result || null);
   const [excludedObservations, setExcludedObservations] = useState(
     Array.isArray(experiment.excludedObservations) ? experiment.excludedObservations : [],
   );
   const [busyDateKey, setBusyDateKey] = useState(null);
   const [error, setError] = useState(null);
+  const [showingOriginal, setShowingOriginal] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
+
+  // Post-result exclusion reason dialog (Michael review hardening, item 3).
+  const [pendingToggle, setPendingToggle] = useState(null); // {dateKey, nextExcluded} | null
+  const [reasonChoice, setReasonChoice] = useState('');
+  const [reasonNote, setReasonNote] = useState('');
+  const [confirmBusy, setConfirmBusy] = useState(false);
 
   const entriesById = useMemo(() => {
     const map = {};
@@ -130,22 +267,55 @@ const ExperimentResultView = ({ uid, entries = [], experiment, onClose }) => {
   const exposureLabel = experiment.analysisPlan?.exposure?.label || 'this variable';
   const outcomeLabel = experiment.analysisPlan?.outcome?.label || 'mood';
 
-  const handleToggleExclude = async (dateKey, nextExcluded) => {
+  const normalized = useMemo(() => normalizeStoredResult(storedField), [storedField]);
+  const hasAdjusted = Boolean(normalized?.adjusted);
+  const result = normalized ? (showingOriginal ? normalized.original : (normalized.adjusted || normalized.original)) : null;
+
+  const openReasonDialog = (dateKey, nextExcluded) => {
     setError(null);
+    setReasonChoice('');
+    setReasonNote('');
+    setPendingToggle({ dateKey, nextExcluded });
+  };
+
+  const cancelReasonDialog = () => {
+    if (confirmBusy) return;
+    setPendingToggle(null);
+  };
+
+  const confirmToggle = async () => {
+    if (!pendingToggle || !reasonChoice) return;
+    const { dateKey, nextExcluded } = pendingToggle;
+    setError(null);
+    setConfirmBusy(true);
     setBusyDateKey(dateKey);
     try {
       const updatedExcluded = await setObservationExcluded(db, uid, experiment.id, dateKey, nextExcluded);
       const updatedExperiment = { ...experiment, excludedObservations: updatedExcluded };
       const nextResult = computeExperimentResult({ experiment: updatedExperiment, entries, now: new Date() });
-      await writeResult(db, uid, experiment.id, nextResult);
+      const at = new Date().toISOString();
+      const nextField = buildAdjustedResultUpdate(storedField, {
+        adjusted: nextResult,
+        dateKey,
+        excluded: nextExcluded,
+        reason: reasonChoice,
+        at,
+        note: reasonNote,
+      });
+      await writeAdjustedResult(db, uid, experiment.id, nextField);
       setExcludedObservations(updatedExcluded);
-      setResult(nextResult);
+      setStoredField(nextField);
+      setShowingOriginal(false);
+      setPendingToggle(null);
     } catch (err) {
       setError(err?.message || 'Could not update that observation. Please try again.');
     } finally {
       setBusyDateKey(null);
+      setConfirmBusy(false);
     }
   };
+
+  const nestedOverlayOpen = Boolean(pendingToggle);
 
   if (!result) {
     return (
@@ -166,12 +336,16 @@ const ExperimentResultView = ({ uid, entries = [], experiment, onClose }) => {
   }
 
   const isOk = result.status === 'ok';
+  const sensitiveCount = result.sensitiveObservationCount || 0;
 
   return (
+    <>
     <div
       className="fixed inset-0 z-[90] overflow-y-auto bg-[var(--background)] p-4 pb-[calc(env(safe-area-inset-bottom)+24px)] pt-[calc(env(safe-area-inset-top)+16px)]"
       role="dialog"
-      aria-modal="true"
+      aria-modal={nestedOverlayOpen ? undefined : 'true'}
+      aria-hidden={nestedOverlayOpen ? 'true' : undefined}
+      inert={nestedOverlayOpen ? 'true' : undefined}
       aria-labelledby="experiment-result-title"
     >
       <div className="mx-auto max-w-xl space-y-5">
@@ -191,12 +365,53 @@ const ExperimentResultView = ({ uid, entries = [], experiment, onClose }) => {
           </div>
         )}
 
+        {hasAdjusted && (
+          <section className="cloud-sheet space-y-2 rounded-2xl border border-[var(--accent-deep)] p-4 shadow-sm">
+            <p className="text-sm font-medium text-[var(--accent-deep)]">Modified after seeing the result</p>
+            <p className="text-xs text-secondary-foreground">
+              You excluded or included a day after this result was first computed. The numbers below reflect that change.
+            </p>
+            <div className="flex flex-wrap gap-2 pt-1">
+              <button
+                type="button"
+                onClick={() => setShowingOriginal((prev) => !prev)}
+                className="min-h-[44px] rounded-full border border-border px-3 text-xs font-medium text-accent-deep"
+              >
+                {showingOriginal ? 'View latest result' : 'View original result'}
+              </button>
+              <button
+                type="button"
+                onClick={() => setHistoryOpen((prev) => !prev)}
+                aria-expanded={historyOpen}
+                className="min-h-[44px] rounded-full border border-border px-3 text-xs font-medium text-accent-deep"
+              >
+                {historyOpen ? 'Hide history' : 'Show history'}
+              </button>
+            </div>
+            {historyOpen && (
+              <ul className="mt-1 space-y-1 text-xs text-secondary-foreground">
+                {normalized.exclusionHistory.map((entry, idx) => (
+                  <li key={`${entry.dateKey}-${entry.at}-${idx}`}>
+                    {entry.dateKey} — {entry.excluded ? 'excluded' : 'included'} ({EXCLUSION_REASON_COPY[entry.reason] || entry.reason}
+                    {entry.note ? `: ${entry.note}` : ''}) on {formatHistoryTimestamp(entry.at)}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+        )}
+
         <section className="cloud-sheet space-y-2 rounded-2xl border p-4 shadow-sm">
           <p className="font-semibold">Coverage</p>
           <ul className="space-y-0.5 text-sm text-secondary-foreground">
             <li>{result.coverage?.exposure?.covered} of {result.coverage?.exposure?.total} days have {exposureLabel} data</li>
             <li>{result.coverage?.outcome?.covered} of {result.coverage?.outcome?.total} days have {outcomeLabel} data</li>
           </ul>
+          {sensitiveCount > 0 && (
+            <p className="text-xs text-[var(--muted-foreground)]">
+              {sensitiveCount} sensitive {sensitiveCount === 1 ? 'day' : 'days'} contributed to the statistics; details are hidden.
+            </p>
+          )}
         </section>
 
         {!isOk && (
@@ -222,7 +437,7 @@ const ExperimentResultView = ({ uid, entries = [], experiment, onClose }) => {
               <p className="font-semibold">What this shows</p>
               <p className="text-sm text-secondary-foreground">{result.narrative?.summary}</p>
               <p className="text-xs text-[var(--muted-foreground)]">
-                Difference: {roundToOneDecimal(result.estimate.delta)} points (95% range: {roundToOneDecimal(result.estimate.ci[0])} to {roundToOneDecimal(result.estimate.ci[1])})
+                Difference: {roundToOneDecimal(result.estimate.delta)} points (0-100) (95% range: {roundToOneDecimal(result.estimate.ci[0])} to {roundToOneDecimal(result.estimate.ci[1])})
               </p>
             </section>
 
@@ -284,13 +499,21 @@ const ExperimentResultView = ({ uid, entries = [], experiment, onClose }) => {
                   return (
                     <tr key={pair.dateKey} className="border-t border-divider">
                       <td className="py-1.5 pr-2">{pair.dateKey}</td>
-                      <td className="py-1.5 pr-2">{pair.exposure}</td>
-                      <td className="py-1.5 pr-2">{pair.outcome}</td>
+                      {pair.sensitive ? (
+                        <td className="py-1.5 pr-2 text-[var(--muted-foreground)]" colSpan={2}>
+                          Sensitive day — details hidden
+                        </td>
+                      ) : (
+                        <>
+                          <td className="py-1.5 pr-2">{pair.exposure}</td>
+                          <td className="py-1.5 pr-2">{pair.outcome}</td>
+                        </>
+                      )}
                       <td className="py-1.5 pr-2">
                         <button
                           type="button"
                           disabled={busy}
-                          onClick={() => handleToggleExclude(pair.dateKey, !isExcluded)}
+                          onClick={() => openReasonDialog(pair.dateKey, !isExcluded)}
                           className="relative inline-flex min-h-[28px] items-center text-xs font-medium text-accent-deep before:absolute before:-inset-2 before:content-['']"
                           aria-label={`${isExcluded ? 'Include' : 'Exclude'} ${pair.dateKey}`}
                         >
@@ -313,6 +536,62 @@ const ExperimentResultView = ({ uid, entries = [], experiment, onClose }) => {
         <Button variant="ghost" onClick={onClose}>Back to experiments</Button>
       </div>
     </div>
+
+    {pendingToggle && (
+        <div
+          className="fixed inset-0 z-[95] flex items-end justify-center bg-[var(--overlay)] p-4 sm:items-center"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="exclusion-reason-title"
+        >
+          <div className="w-full max-w-sm rounded-2xl border border-border bg-card p-5 shadow-xl">
+            <h3 id="exclusion-reason-title" className="mb-1 font-display font-bold text-lg text-foreground">
+              {pendingToggle.nextExcluded ? 'Why exclude this day?' : 'Why include this day?'}
+            </h3>
+            <p className="mb-3 text-sm text-secondary-foreground">
+              This helps keep the record honest — there's no wrong answer.
+            </p>
+            {error && (
+              <div role="alert" className="mb-3 rounded-xl bg-[var(--destructive-wash)] p-3 text-sm text-destructive">
+                {error}
+              </div>
+            )}
+            <fieldset className="space-y-2">
+              <legend className="sr-only">Reason</legend>
+              {EXCLUSION_REASONS.map((token) => (
+                <label key={token} className="flex min-h-[44px] items-center gap-2 text-sm text-foreground">
+                  <input
+                    type="radio"
+                    name="exclusion-reason"
+                    value={token}
+                    checked={reasonChoice === token}
+                    onChange={() => setReasonChoice(token)}
+                  />
+                  {EXCLUSION_REASON_COPY[token]}
+                </label>
+              ))}
+            </fieldset>
+            {reasonChoice === 'other' && (
+              <textarea
+                value={reasonNote}
+                onChange={(e) => setReasonNote(e.target.value)}
+                placeholder="Optional: say more"
+                rows={2}
+                className="mt-2 w-full rounded-lg border border-border bg-card px-3 py-2 text-sm"
+              />
+            )}
+            <div className="mt-4 flex gap-2">
+              <Button variant="ghost" onClick={cancelReasonDialog} disabled={confirmBusy} className="flex-1">
+                Cancel
+              </Button>
+              <Button onClick={confirmToggle} disabled={!reasonChoice || confirmBusy} className="flex-1">
+                {confirmBusy ? 'Saving…' : 'Continue'}
+              </Button>
+            </div>
+          </div>
+        </div>
+    )}
+    </>
   );
 };
 

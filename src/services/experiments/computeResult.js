@@ -167,7 +167,7 @@
  * now)`. Tests that assert rerun determinism compare results with that one
  * field normalized out.
  */
-import { pairObservations, runAnalysisPlan, computeCoverage, MIN_PAIRED_OBSERVATIONS, COVERAGE_FLOOR } from './estimator';
+import { pairObservations, runAnalysisPlan, computeCoverage, MIN_PAIRED_OBSERVATIONS, COVERAGE_FLOOR, SMALL_EFFECT_DELTA } from './estimator';
 import { getTemplateById } from './templates';
 import { filterEntriesByScope } from '../spaces/scopeFilter';
 import { buildReceipt, sourceFromEntry } from '../insights/receipts';
@@ -190,9 +190,26 @@ export const NON_CAUSAL_FRAMING = 'This is an association, not proof that one ca
 export const INSUFFICIENCY_COPY =
   "There isn't enough data yet to say anything about this. Keep going, or check back once you have more days recorded.";
 
-/** Shown when `ci[0] <= 0 <= ci[1]`, replacing the "X points higher/lower" language for that result. */
+/**
+ * Shown when `ci[0] <= 0 <= ci[1]`, replacing the "X points higher/lower"
+ * language for that result. VALUE REPLACED 2026-07-22 (Michael review
+ * hardening, Task EX1 correction, action item for EX2): the constant NAME
+ * stays `CI_SPANS_ZERO_COPY` per EX1's instruction — only the string
+ * literal changes, to the data-method spec's new fixed wording (see
+ * "Fixed strings" section, "REPLACED 2026-07-22").
+ */
 export const CI_SPANS_ZERO_COPY =
-  "The difference could be real or could be chance — this data doesn't show a clear association either way.";
+  'These recorded days are compatible with both higher and lower mood; no consistent direction appears.';
+
+/**
+ * Practical-significance framing (Michael review hardening, EX1 item 5/H5,
+ * wired by EX2): appended alongside a directional (non-CI-spans-zero)
+ * headline whenever `|delta| < SMALL_EFFECT_DELTA` (estimator.js's single
+ * source-of-truth constant, 0-100 display-scale points) — see
+ * `buildSummary`'s doc comment for exactly when/how this is appended.
+ */
+export const SMALL_EFFECT_COPY =
+  'This difference is small — worth noticing, not worth reorganizing your life around.';
 
 // ---------------------------------------------------------------------------
 // Shared series-builder helper (the carry-forward fix from Task 3's review).
@@ -273,42 +290,204 @@ export function exposureValueForEntry(entry, exposure, tag) {
   }
   if (source === 'tags') {
     if (typeof tag !== 'string' || !tag) return null; // no tag chosen -> can't evaluate at all
-    if (!Array.isArray(entry?.tags)) return 0; // day was journaled; tag is known absent
-    return entry.tags.includes(tag) ? 1 : 0;
+    // MISSING TAGS = UNKNOWN (Michael review hardening, EX2 item 4): a day
+    // contributes to the tag-presence series ONLY when the entry carries an
+    // EXPLICIT `tags` array — that is the signal that this entry was
+    // actually analyzed for tags at all. A legacy entry, or one whose
+    // analysis failed before tags were ever attached, has NO `tags` field —
+    // that is a genuinely UNKNOWN observation for this variable (dropped,
+    // like any other missing value), not a known "tag absent" day. This is
+    // a deliberate REVERSAL of this module's pre-EX2 behavior (which
+    // treated a missing `tags` array as a known 0/absent) — the old
+    // behavior silently manufactured false "absent" data points out of
+    // entries that were never actually screened for the tag at all,
+    // biasing the LOW group with observations that don't actually tell you
+    // anything about tag presence.
+    if (!Array.isArray(entry?.tags)) return null; // no explicit tags array -> unknown, dropped
+    return entry.tags.includes(tag) ? 1 : 0; // explicit array, tag absent -> a REAL known 0
   }
   return null;
 }
 
 /**
+ * Mood normalization (Michael review hardening, EX2 item 1 — launch
+ * blocker): `analysis.mood_score` is captured on a 0-1 scale, but every
+ * estimate/CI/narrative in this pipeline is on a 0-100 "points" display
+ * scale — rendering a raw 0-1 delta as "points" made ordinary differences
+ * look 100x smaller than they are. This function is the ONE place that
+ * conversion happens (the "series-builder boundary" the plan names): a
+ * value in `[0, 1]` is multiplied by 100; a value ALREADY greater than 1
+ * (defensive — some future/legacy writer storing an already-0-100 number)
+ * passes through WITHOUT being multiplied again, then either way the
+ * result is clamped to `[0, 100]`.
+ *
+ * PINNED EDGE CASE (documented, not a bug): a raw value marginally above 1
+ * (e.g. `1.2`) is treated as "already on the 0-100 scale" per the rule
+ * above, NOT multiplied — it passes through clamped, landing at `1.2`, not
+ * `100`. This looks discontinuous right at the `1` boundary, but the
+ * alternative (multiplying every value, including already-100-scale
+ * legacy data, by 100 again) is worse: it would silently produce a
+ * uniformly-clamped-to-100 value for any legacy record already near the
+ * top of a 0-100 scale, indistinguishable from a real ceiling effect. No
+ * current writer in this codebase produces mood_score outside `[0, 1]`;
+ * this branch exists purely as a defensive fallback for that hypothetical
+ * legacy/future case, per the plan's explicit instruction, and is called
+ * out here so it is never "discovered" later as an oversight.
+ *
+ * @param {number} raw
+ * @returns {number|null} null when `raw` is not finite.
+ */
+export function normalizeMoodTo100(raw) {
+  if (!Number.isFinite(raw)) return null;
+  const scaled = raw > 1 ? raw : raw * 100;
+  return Math.min(100, Math.max(0, scaled));
+}
+
+/**
  * The outcome value for one entry given a FROZEN plan/template `outcome`
- * descriptor. v1 templates always declare `{field: 'analysis.mood_score'}`
- * (`templates.js`'s fixed `MOOD_OUTCOME`); the dotted-path lookup below is a
- * small forward-compat allowance, not a sign this ever varies today.
+ * descriptor. v1 templates always declare `{field: 'analysis.mood_score',
+ * unit: 'mood_0_100'}` (`templates.js`'s fixed `MOOD_OUTCOME`); the
+ * dotted-path lookup below is a small forward-compat allowance, not a sign
+ * the field path ever varies today.
+ *
+ * UNIT HANDLING: when `outcome.unit === 'mood_0_100'` (the only value any
+ * v1 template ever declares), the raw value is normalized via
+ * `normalizeMoodTo100` above. `computeExperimentResult` is the caller that
+ * enforces the unit is RECOGNIZED before ever reaching this function for
+ * real work (an unrecognized/absent unit fails the whole result closed
+ * with `unknown_outcome_unit` — see that function's doc comment) — this
+ * function itself stays a pure, direct pass-through for any other unit
+ * value, since by the time it's called in the real pipeline the unit has
+ * already been validated.
  *
  * @param {object} entry
- * @param {{field:string}} outcome
+ * @param {{field:string, unit?:string}} outcome
  * @returns {number|null}
  */
 export function outcomeValueForEntry(entry, outcome) {
   const path = outcome?.field || 'analysis.mood_score';
   const raw = path.split('.').reduce((acc, key) => (acc == null ? undefined : acc[key]), entry);
-  return Number.isFinite(raw) ? raw : null;
+  if (!Number.isFinite(raw)) return null;
+  if (outcome?.unit === 'mood_0_100') return normalizeMoodTo100(raw);
+  return raw;
 }
 
 // ---------------------------------------------------------------------------
-// Date-key helpers (mirrors preflight.js's own minimal, intentionally
-// duplicated UTC dateKey parsing — see task-3-report.md's self-review note
-// on why these small helpers aren't shared/exported from estimator.js,
-// which only exports its three public functions and two constants).
+// Local-timezone date-key helpers (Michael review hardening, EX2 item 2).
+//
+// Pre-EX2, every dateKey in this pipeline was a UTC calendar day. That's
+// wrong for a journaling app: a user in America/Los_Angeles writing an
+// entry at 9pm local time is, in UTC, already on the NEXT calendar day —
+// their entry would silently get grouped/paired under tomorrow's date. Every
+// dateKey this module produces is now derived in the experiment's FROZEN
+// `analysisPlan.timezone` (an IANA zone string, snapshotted once at create
+// time by `experimentsService.buildAnalysisPlan` from the device's timezone
+// at that moment — see that function's doc comment) via `Intl` parts only
+// (no date library). `preflight.js` mirrors this exact helper for its own
+// (plan-less, device-tz) window, and mirrors the "minimal, intentionally
+// duplicated" convention this module's date helpers have always followed
+// (see task-3-report.md's self-review note on why these aren't shared/
+// exported from estimator.js).
+//
+// TWO DISTINCT NUMBER SPACES are used deliberately, and must never be
+// confused:
+//   - "REAL ms": a true UTC epoch instant (e.g. an entry's actual
+//     timestamp, or the true wall-clock instant of local midnight) — used
+//     to decide whether a specific entry TIMESTAMP falls inside the
+//     experiment's window.
+//   - "PSEUDO ms" (`pseudoMsFromDateKey`): `Date.UTC(y, m-1, d)` for a
+//     dateKey STRING, treating the label as if it were UTC midnight. This
+//     is NOT a real instant — it's a pure label->number mapping used only
+//     for comparing/day-counting dateKeys against each other, matching
+//     EXACTLY how `estimator.js`'s own (private, unchanged) dateKey parsing
+//     works internally. `computeCoverage` (estimator.js) is UNCHANGED and
+//     still does its own pseudo-ms parsing of whatever dateKeys it's
+//     handed — so the start/end bounds THIS module passes to it must also
+//     be in pseudo-ms space (built the same way), not real wall-clock ms,
+//     or the two would silently disagree at zone-offset boundaries.
 // ---------------------------------------------------------------------------
 
-/** The entry's calendar day, as a 'YYYY-MM-DD' UTC dateKey, or null if undated. */
-function entryDateKey(entry) {
+const DAY_MS = 24 * 60 * 60 * 1000;
+const DATE_KEY_RE = /^(\d{4})-(\d{2})-(\d{2})$/;
+
+/** Resolve the device's IANA timezone (never throws), falling back to 'UTC'. Used only where no frozen plan timezone exists (preflight.js's own window). */
+export function resolveDeviceTimezone() {
+  try {
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    return typeof tz === 'string' && tz ? tz : 'UTC';
+  } catch {
+    return 'UTC';
+  }
+}
+
+/** The local ('YYYY-MM-DD') calendar dateKey for a UTC epoch ms instant, in `timeZone`. `en-CA` formats as `YYYY-MM-DD` directly — no manual part-reassembly needed for this direction. */
+export function localDateKeyForMs(ms, timeZone) {
+  const dtf = new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' });
+  return dtf.format(new Date(ms));
+}
+
+/** Parse a 'YYYY-MM-DD' dateKey into its PSEUDO UTC-midnight epoch ms (`Date.UTC(y,m-1,d)`) — a label->number mapping for day-counting/ordering, NOT a real instant. See module doc comment. */
+export function pseudoMsFromDateKey(dateKey) {
+  const m = DATE_KEY_RE.exec(dateKey);
+  if (!m) return null;
+  return Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+}
+
+/** Shift a 'YYYY-MM-DD' dateKey by `days` (may be negative) — pure calendar-day arithmetic on the label, timezone-independent once you have the key. */
+export function shiftLocalDateKey(dateKey, days) {
+  const ms = pseudoMsFromDateKey(dateKey);
+  if (ms === null) return null;
+  const shifted = new Date(ms + days * DAY_MS);
+  const yyyy = shifted.getUTCFullYear();
+  const mm = String(shifted.getUTCMonth() + 1).padStart(2, '0');
+  const dd = String(shifted.getUTCDate()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}`;
+}
+
+/** The tz offset (ms, positive when `timeZone` is ahead of UTC) in effect at real instant `ms`. */
+function tzOffsetMsAt(ms, timeZone) {
+  const dtf = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    hourCycle: 'h23',
+    year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit',
+  });
+  const parts = dtf.formatToParts(new Date(ms));
+  const map = {};
+  for (const p of parts) map[p.type] = p.value;
+  const hour = map.hour === '24' ? '00' : map.hour;
+  const asUtc = Date.UTC(Number(map.year), Number(map.month) - 1, Number(map.day), Number(hour), Number(map.minute), Number(map.second));
+  return asUtc - ms;
+}
+
+/**
+ * The REAL (true wall-clock) UTC epoch ms of LOCAL midnight for a given
+ * local 'YYYY-MM-DD' dateKey in `timeZone`. Documented approximation: this
+ * evaluates the zone's UTC offset AT the first guess (treating the key as
+ * UTC midnight) rather than iterating to a fixed point — for the ~24h
+ * window this is used over, a DST transition landing exactly at that one
+ * evaluation instant could misplace the boundary by the transition's
+ * delta (typically 1h); acceptable for a v1 day-boundary computation and
+ * called out here rather than silently assumed exact.
+ *
+ * Exported so `ExperimentResultView.jsx`'s `buildObservationRows` (a UI-side
+ * duplicate of this module's window-boundary logic, for the live
+ * observation table — see that file's own doc comment) can reproduce
+ * EXACTLY the same partial-start-day window boundary this module uses,
+ * rather than re-deriving the DST-approximation trick a second time.
+ */
+export function localMidnightUtcMs(dateKey, timeZone) {
+  const guessPseudoMs = pseudoMsFromDateKey(dateKey);
+  const offset = tzOffsetMsAt(guessPseudoMs, timeZone);
+  return guessPseudoMs - offset;
+}
+
+/** The entry's calendar day, as a local 'YYYY-MM-DD' dateKey in `timeZone` (default 'UTC' for back-compat with direct/unit-test callers), or null if undated. */
+function entryDateKey(entry, timeZone = 'UTC') {
   const raw = entry?.effectiveDate ?? entry?.createdAt;
   if (!raw) return null;
   const d = safeDate(raw);
   if (Number.isNaN(d.getTime())) return null;
-  return d.toISOString().split('T')[0];
+  return localDateKeyForMs(d.getTime(), timeZone);
 }
 
 function entryTimestampMs(entry) {
@@ -331,12 +510,15 @@ function entryTimestampMs(entry) {
 /**
  * @param {Array} entries
  * @param {(entry:object) => number|null} valueForEntry
+ * @param {string} [timeZone='UTC'] - IANA zone dateKeys are grouped in
+ *   (Michael review hardening, item 2). Defaults to 'UTC' for back-compat
+ *   with pre-EX2 direct callers/unit tests that don't pass one.
  * @returns {{dateKey:string, value:number}[]}
  */
-export function buildDaySeries(entries, valueForEntry) {
+export function buildDaySeries(entries, valueForEntry, timeZone = 'UTC') {
   const byDate = new Map();
   for (const entry of entries || []) {
-    const dateKey = entryDateKey(entry);
+    const dateKey = entryDateKey(entry, timeZone);
     if (!dateKey) continue;
     const value = valueForEntry(entry);
     if (value === null || !Number.isFinite(value)) continue;
@@ -350,11 +532,11 @@ export function buildDaySeries(entries, valueForEntry) {
   });
 }
 
-/** Group entries by calendar dateKey (for receipt-source lookups — every entry on the day, not just ones with a usable value). */
-function groupEntriesByDateKey(entries) {
+/** Group entries by (local, `timeZone`) calendar dateKey (for receipt-source lookups — every entry on the day, not just ones with a usable value). */
+function groupEntriesByDateKey(entries, timeZone = 'UTC') {
   const map = new Map();
   for (const entry of entries || []) {
-    const dateKey = entryDateKey(entry);
+    const dateKey = entryDateKey(entry, timeZone);
     if (!dateKey) continue;
     if (!map.has(dateKey)) map.set(dateKey, []);
     map.get(dateKey).push(entry);
@@ -385,9 +567,21 @@ function coverageRatio(coverage) {
  * SCAFFOLD (which numbers get slotted where) is this module's own — the
  * data-method spec's "Fixed strings" section explicitly leaves this
  * template-specific slotting to Task 5 ("the sentences above are the fixed
- * scaffolding those numbers get slotted into"). The two clauses that ARE
- * spec-fixed (`NON_CAUSAL_FRAMING`, and `CI_SPANS_ZERO_COPY` when the CI
- * spans zero) are always appended/substituted verbatim, never paraphrased.
+ * scaffolding those numbers get slotted into"). The clauses that ARE
+ * spec-fixed (`NON_CAUSAL_FRAMING`; `CI_SPANS_ZERO_COPY` when the CI spans
+ * zero; `SMALL_EFFECT_COPY` per the practical-significance rule below) are
+ * always appended/substituted verbatim, never paraphrased.
+ *
+ * PRACTICAL SIGNIFICANCE (Michael review hardening, EX1 item 5 / H5, wired
+ * by EX2): when the CI does NOT span zero (a directional headline is being
+ * shown) AND `|delta| < SMALL_EFFECT_DELTA` (the estimator's single
+ * source-of-truth constant, display-scale 0-100 points), `SMALL_EFFECT_COPY`
+ * is appended AFTER the headline sentence — in ADDITION to, never instead
+ * of, the normal "X points higher/lower" language. When the CI spans zero,
+ * no small-effect classification is shown at all: `CI_SPANS_ZERO_COPY`
+ * already communicates "no clear direction," and layering a second
+ * "...and it's small" caveat on top of that would be redundant/confusing
+ * (there is no direction for a magnitude judgment to attach to).
  */
 function buildSummary({ exposureLabel, outcomeLabel, estimate, ciSpansZero }) {
   const { delta, n } = estimate;
@@ -399,10 +593,37 @@ function buildSummary({ exposureLabel, outcomeLabel, estimate, ciSpansZero }) {
   }
   const direction = delta >= 0 ? 'higher' : 'lower';
   const magnitude = roundToOneDecimal(Math.abs(delta));
+  const smallEffectSuffix = Math.abs(delta) < SMALL_EFFECT_DELTA ? ` ${SMALL_EFFECT_COPY}` : '';
   return (
-    `On days with more ${exposureLabel} than usual, ${outcomeLabel} averaged ${magnitude} points ` +
-    `${direction} than on days with less (based on ${n} paired days). ${NON_CAUSAL_FRAMING}`
+    `On days with more ${exposureLabel} than usual, ${outcomeLabel} averaged ${magnitude} points (0-100) ` +
+    `${direction} than on days with less (based on ${n} paired days). ${NON_CAUSAL_FRAMING}${smallEffectSuffix}`
   );
+}
+
+/**
+ * Sensitive-day disclosure (Michael review hardening, EX2 item 5): count
+ * how many of the given (post-exclusion) `pairs` have at least one
+ * contributing entry (on the pair's `dateKey` OR `outcomeDateKey`, same
+ * union `buildExperimentReceipt` uses) that is `safety_flagged` or
+ * `has_warning_indicators`. This count is PER PAIR, not per raw entry —
+ * "N sensitive days contributed to the statistics" is meant to describe
+ * paired observations, matching the unit the rest of the result narrative
+ * already uses (`estimate.n`, coverage). The underlying entries themselves
+ * are NEVER exposed here (no text/excerpt) — only a count.
+ */
+function countSensitivePairs(windowed, pairs, timeZone) {
+  const entriesByDateKey = groupEntriesByDateKey(windowed, timeZone);
+  let count = 0;
+  for (const pair of pairs) {
+    const dayEntries = [
+      ...(entriesByDateKey.get(pair.dateKey) || []),
+      ...(entriesByDateKey.get(pair.outcomeDateKey) || []),
+    ];
+    if (dayEntries.some((entry) => entry && (entry.safety_flagged || entry.has_warning_indicators))) {
+      count += 1;
+    }
+  }
+  return count;
 }
 
 /**
@@ -413,8 +634,8 @@ function buildSummary({ exposureLabel, outcomeLabel, estimate, ciSpansZero }) {
  * mapped via `sourceFromEntry`. Shared by both the `ok` and `insufficient`
  * paths — every result carries a receipt (receipt invariant).
  */
-function buildExperimentReceipt({ windowed, pairs, experiment, effectiveEndMs, exposureCoverage, outcomeCoverage }) {
-  const entriesByDateKey = groupEntriesByDateKey(windowed);
+function buildExperimentReceipt({ windowed, pairs, experiment, effectiveEndMs, exposureCoverage, outcomeCoverage, timeZone }) {
+  const entriesByDateKey = groupEntriesByDateKey(windowed, timeZone);
   const contributing = [];
   const seenIds = new Set();
   for (const pair of pairs) {
@@ -433,7 +654,11 @@ function buildExperimentReceipt({ windowed, pairs, experiment, effectiveEndMs, e
   // (they're the user's own data; excluding them would bias the mood
   // estimate) but NEVER appear in receipt source excerpts — id and excerpt
   // both, matching Session Prep export's posture
-  // (`src/services/reflections/sessionPrep.js`'s `safeDates` filter).
+  // (`src/services/reflections/sessionPrep.js`'s `safeDates` filter). This
+  // is also the sensitive-day disclosure's invariant (item 5): the COUNT is
+  // surfaced elsewhere on the result (`sensitiveObservationCount`), but
+  // `receipt.sources` continues to exclude these entries entirely, same as
+  // before.
   const safeContributing = contributing.filter(
     (entry) => entry && !entry.safety_flagged && !entry.has_warning_indicators,
   );
@@ -455,14 +680,18 @@ function buildExperimentReceipt({ windowed, pairs, experiment, effectiveEndMs, e
  * the module doc comment's "COVERAGE FLOOR ENFORCEMENT" section. `estimate`
  * and `narrative.summary` are never assigned (true key absence, not
  * `undefined`), matching the payload-exactness contract.
+ * `sensitiveObservationCount` is always present (item 5), even here — the
+ * observation table renders in both states, so its hidden-row count must
+ * be available regardless of status.
  */
-function buildInsufficientResult({ coverage, reasons, windowed, pairs, experiment, effectiveEndMs, exposureCoverage, outcomeCoverage }) {
-  const receipt = buildExperimentReceipt({ windowed, pairs, experiment, effectiveEndMs, exposureCoverage, outcomeCoverage });
+function buildInsufficientResult({ coverage, reasons, windowed, pairs, experiment, effectiveEndMs, exposureCoverage, outcomeCoverage, timeZone }) {
+  const receipt = buildExperimentReceipt({ windowed, pairs, experiment, effectiveEndMs, exposureCoverage, outcomeCoverage, timeZone });
   return {
     status: 'insufficient',
     coverage,
     receipt,
     reasons,
+    sensitiveObservationCount: countSensitivePairs(windowed, pairs, timeZone),
     narrative: {
       alternatives: [],
       whatThisDoesNotProve: [],
@@ -509,25 +738,80 @@ export function computeExperimentResult({ experiment, entries = [], now } = {}) 
   }
   const effectiveEndMs = Math.min(declaredEndMs, nowDate.getTime());
 
-  // --- scopeFilter -> date-window filter --------------------------------
+  // --- LOCAL CALENDAR DAYS + FROZEN TIMEZONE (Michael review hardening,
+  // EX2 item 2) ------------------------------------------------------------
+  // `plan.timezone` is the IANA zone frozen at create time
+  // (`experimentsService.buildAnalysisPlan`); 'UTC' for a legacy plan
+  // written before this field existed.
+  const timeZone = typeof plan.timezone === 'string' && plan.timezone ? plan.timezone : 'UTC';
+
+  // PARTIAL START DAY RULE (plan-pinned, binding): the experiment window is
+  // whole LOCAL calendar days starting the day AFTER `startAt` — day 1 is
+  // the first FULL local day. `startAt` can fall at any time of day (the
+  // moment the user tapped Start), so the calendar day it falls on is only
+  // ever partially observed and is excluded entirely, never partially
+  // counted. `day1LocalKey` is that first full day's local dateKey;
+  // `windowStartMs` is the TRUE (real, wall-clock) UTC instant of that
+  // day's local midnight, used to filter actual entry TIMESTAMPS below.
+  const startLocalKey = localDateKeyForMs(startMs, timeZone);
+  const day1LocalKey = shiftLocalDateKey(startLocalKey, 1);
+  const windowStartMs = localMidnightUtcMs(day1LocalKey, timeZone);
+
+  // --- scopeFilter -> date-window filter (day1 local midnight .. effectiveEnd) --
   const scoped = filterEntriesByScope(Array.isArray(entries) ? entries : [], experiment.scope ?? null);
   const windowed = scoped.filter((entry) => {
     const ts = entryTimestampMs(entry);
-    return ts !== null && ts >= startMs && ts < effectiveEndMs;
+    return ts !== null && ts >= windowStartMs && ts < effectiveEndMs;
   });
 
-  // --- build exposure/outcome day-series (shared series-builder) --------
-  const exposureSeries = buildDaySeries(windowed, (entry) =>
-    exposureValueForEntry(entry, plan.exposure, plan.exposure?.tag),
+  // --- build exposure/outcome day-series (shared series-builder, LOCAL
+  // dateKeys in the frozen timezone) --------------------------------------
+  const exposureSeries = buildDaySeries(
+    windowed,
+    (entry) => exposureValueForEntry(entry, plan.exposure, plan.exposure?.tag),
+    timeZone,
   );
-  const outcomeSeries = buildDaySeries(windowed, (entry) => outcomeValueForEntry(entry, plan.outcome));
+
+  // --- OUTCOME UNIT GATE (Michael review hardening, item 1): the frozen
+  // plan MUST declare the recognized 0-100 mood unit before its outcome
+  // series is trusted at all. An absent/unrecognized unit fails the WHOLE
+  // result closed with a single, unambiguous reason — no coverage/pair-count
+  // reason is layered on top, since without a known unit nothing downstream
+  // can be trusted enough to report a "why" beyond this. See
+  // `outcomeValueForEntry`'s doc comment for the normalization rule itself.
+  const unitOk = plan.outcome?.unit === 'mood_0_100';
+  const outcomeSeries = unitOk
+    ? buildDaySeries(windowed, (entry) => outcomeValueForEntry(entry, plan.outcome), timeZone)
+    : [];
 
   // --- coverage over the EXPERIMENT window (not preflight's 28d window) --
-  const exposureCoverage = computeCoverage(exposureSeries, startMs, effectiveEndMs);
-  const outcomeCoverage = computeCoverage(outcomeSeries, startMs, effectiveEndMs);
+  // Bounds are in PSEUDO-ms (dateKey-label space, see module doc comment)
+  // so they compare consistently against `computeCoverage`'s own (private,
+  // unchanged) dateKey parsing of the LOCAL series dateKeys above.
+  const windowStartPseudoMs = pseudoMsFromDateKey(day1LocalKey);
+  const windowEndPseudoMs = pseudoMsFromDateKey(localDateKeyForMs(effectiveEndMs, timeZone));
+  const exposureCoverage = computeCoverage(exposureSeries, windowStartPseudoMs, windowEndPseudoMs);
+  const outcomeCoverage = computeCoverage(outcomeSeries, windowStartPseudoMs, windowEndPseudoMs);
   const coverage = { exposure: exposureCoverage, outcome: outcomeCoverage };
 
+  if (!unitOk) {
+    return buildInsufficientResult({
+      coverage,
+      reasons: ['unknown_outcome_unit'],
+      windowed,
+      pairs: [],
+      experiment,
+      effectiveEndMs,
+      exposureCoverage,
+      outcomeCoverage,
+      timeZone,
+    });
+  }
+
   // --- pair, then drop excludedObservations dateKeys (per-pair, see doc) -
+  // Pairing/lag arithmetic operates on the dateKey STRINGS only (pure
+  // calendar-day math) — tz-agnostic and unchanged from pre-EX2, per the
+  // plan's own framing (see module doc comment above and estimator.js).
   const allPairs = pairObservations({ exposureSeries, outcomeSeries, lag: plan.lag });
   const excludedSet = new Set(Array.isArray(experiment.excludedObservations) ? experiment.excludedObservations : []);
   const pairs = allPairs.filter((p) => !excludedSet.has(p.dateKey));
@@ -580,6 +864,7 @@ export function computeExperimentResult({ experiment, entries = [], now } = {}) 
       effectiveEndMs,
       exposureCoverage,
       outcomeCoverage,
+      timeZone,
     });
   }
 
@@ -600,6 +885,7 @@ export function computeExperimentResult({ experiment, entries = [], now } = {}) 
       effectiveEndMs,
       exposureCoverage,
       outcomeCoverage,
+      timeZone,
     });
   }
 
@@ -618,11 +904,12 @@ export function computeExperimentResult({ experiment, entries = [], now } = {}) 
       effectiveEndMs,
       exposureCoverage,
       outcomeCoverage,
+      timeZone,
     });
   }
 
   // --- receipt: contributing PAIRED entries, safety-filtered -------------
-  const receipt = buildExperimentReceipt({ windowed, pairs, experiment, effectiveEndMs, exposureCoverage, outcomeCoverage });
+  const receipt = buildExperimentReceipt({ windowed, pairs, experiment, effectiveEndMs, exposureCoverage, outcomeCoverage, timeZone });
 
   const { estimate } = analysis;
   const ciSpansZero = estimate.ci[0] <= 0 && 0 <= estimate.ci[1];
@@ -633,6 +920,7 @@ export function computeExperimentResult({ experiment, entries = [], now } = {}) 
     estimate,
     coverage,
     receipt,
+    sensitiveObservationCount: countSensitivePairs(windowed, pairs, timeZone),
     narrative: {
       summary,
       alternatives,
@@ -645,6 +933,13 @@ export default {
   NON_CAUSAL_FRAMING,
   INSUFFICIENCY_COPY,
   CI_SPANS_ZERO_COPY,
+  SMALL_EFFECT_COPY,
+  resolveDeviceTimezone,
+  localDateKeyForMs,
+  pseudoMsFromDateKey,
+  shiftLocalDateKey,
+  localMidnightUtcMs,
+  normalizeMoodTo100,
   exposureValueForEntry,
   outcomeValueForEntry,
   buildDaySeries,

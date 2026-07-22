@@ -401,7 +401,9 @@ const ExperimentsScreen = ({ uid, entries = [], entriesLoaded, onClose, onShowSa
   // the caller already knows which tag was picked.
   const handleTagTemplateAsk = () => {
     if (!selectedTagInput || !tagTemplate) return;
-    const composed = `Does ${tagLabel(selectedTagInput)} affect my mood?`;
+    // Co-movement framing (Michael review hardening, item 7) — matches the
+    // catalog's own tag-presence template.title pattern.
+    const composed = `How does ${tagLabel(selectedTagInput)} move together with my mood?`;
     screenAndProceed(composed, (trimmed) => {
       selectTemplateAndAdvance(tagTemplate, { tag: selectedTagInput }, trimmed);
     });
@@ -664,7 +666,7 @@ const ExperimentsScreen = ({ uid, entries = [], entriesLoaded, onClose, onShowSa
                       disabled={!selectedTagInput}
                       className="px-4 text-xs"
                     >
-                      Does this affect my mood?
+                      See how this moves with my mood
                     </Button>
                   </div>
                 )}
@@ -680,7 +682,7 @@ const ExperimentsScreen = ({ uid, entries = [], entriesLoaded, onClose, onShowSa
                   onChange={(e) => setQuestionText(e.target.value)}
                   maxLength={200}
                   rows={3}
-                  placeholder="e.g. Does exercise affect my mood?"
+                  placeholder="e.g. How does exercise move together with my mood?"
                   className="w-full rounded-lg border border-border bg-card px-3 py-2 text-sm"
                 />
                 <Button onClick={handleFreeTextAsk} disabled={!questionText.trim()} className="px-4 text-xs">
