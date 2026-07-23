@@ -67,6 +67,8 @@ import {
 import { APP_COLLECTION_ID } from '../../config/constants';
 import { MIN_PAIRED_OBSERVATIONS, COVERAGE_FLOOR } from './estimator';
 import { familyIdForExperiment, registerCandidates, readLedgerCounts, bonferroniCiLevel } from '../insights/testingLedger';
+import { buildExperimentResultClaim } from './experimentClaim';
+import { writeClaim, supersedeClaim, listAllClaims } from '../insights/claims/claimsService';
 
 const MAX_QUESTION_LENGTH = 200;
 const VALID_DURATIONS = [14, 28];
@@ -516,11 +518,28 @@ export async function writeResult(db, uid, experimentId, result) {
     throw new Error('writeResult: result (a plain object) is required.');
   }
   const ref = doc(db, experimentsPath(uid), experimentId);
+  const completedAt = nowIso();
   await updateDoc(ref, {
     result: { original: result, exclusionHistory: [] },
     status: 'completed',
-    updatedAt: nowIso(),
+    updatedAt: completedAt,
   });
+
+  // Single post-write read-back (contained), reused by BOTH the idempotent
+  // testing-ledger re-registration retry below AND the experiment_result
+  // claim write further below — both need the just-completed experiment's
+  // frozen analysisPlan, and both are containment-only: a failure here must
+  // never fail the result save that already committed above.
+  let experimentData = null;
+  try {
+    const snap = await getDoc(ref);
+    experimentData = snap.exists() ? snap.data() : null;
+  } catch (err) {
+    console.warn(
+      `writeResult: post-write read-back failed for experiment ${experimentId}; testing-ledger re-registration and the experiment_result claim write were both skipped.`,
+      err,
+    );
+  }
 
   // IDEMPOTENT RETRY for start-time testing-ledger registration (Important
   // review finding, fix wave 1 — see `startExperiment`'s containment
@@ -542,24 +561,48 @@ export async function writeResult(db, uid, experimentId, result) {
   // rethrow) — the result write above has already committed, so a throw
   // here would be the same "lies to the UI, provokes a retry/duplicate"
   // problem this whole fix wave exists to avoid.
-  try {
-    const snap = await getDoc(ref);
-    const hypothesisFamilyId = snap.exists() ? snap.data()?.analysisPlan?.hypothesisFamilyId : null;
-    if (typeof hypothesisFamilyId === 'string' && hypothesisFamilyId) {
-      try {
-        await registerCandidates(db, uid, hypothesisFamilyId, [hypothesisFamilyId], { now: nowIso() });
-      } catch (err) {
-        console.warn(
-          `writeResult: testing-ledger re-registration failed for experiment ${experimentId} (family ${hypothesisFamilyId}); family tested-count may remain undercounted.`,
-          err,
-        );
-      }
+  const hypothesisFamilyId = experimentData?.analysisPlan?.hypothesisFamilyId ?? null;
+  if (typeof hypothesisFamilyId === 'string' && hypothesisFamilyId) {
+    try {
+      await registerCandidates(db, uid, hypothesisFamilyId, [hypothesisFamilyId], { now: nowIso() });
+    } catch (err) {
+      console.warn(
+        `writeResult: testing-ledger re-registration failed for experiment ${experimentId} (family ${hypothesisFamilyId}); family tested-count may remain undercounted.`,
+        err,
+      );
     }
-  } catch (err) {
-    console.warn(
-      `writeResult: testing-ledger re-registration read-back failed for experiment ${experimentId}; family tested-count may remain undercounted.`,
-      err,
-    );
+  }
+
+  // EXPERIMENT_RESULT CLAIM (R4 Phase 2, Task 4): the third claim type
+  // (`experimentClaim.js`'s `buildExperimentResultClaim`), built from PURE
+  // deterministic prose only — no LLM. CONTAINED the same way as the
+  // ledger retry above: the result save already committed above, so a
+  // claim-write failure must never surface as a failed `writeResult` call
+  // (that would falsely tell the caller the result wasn't saved, and a
+  // well-meaning retry would just re-attempt the same idempotent claim
+  // write). `buildExperimentResultClaim` returns `null` for an insufficient
+  // result, a zero-delta result, or a legacy plan with no
+  // `hypothesisFamilyId` — no claim is written in any of those cases.
+  // `writeClaim`'s doc id is deterministic (hypothesisFamilyId +
+  // candidateId + version), so re-running `writeResult` for the same
+  // experiment/result is an idempotent upsert, never a duplicate.
+  if (experimentData) {
+    try {
+      const claimInput = buildExperimentResultClaim({
+        experiment: { id: experimentId, ...experimentData },
+        experimentId,
+        result,
+        now: completedAt,
+      });
+      if (claimInput) {
+        await writeClaim(db, uid, claimInput);
+      }
+    } catch (err) {
+      console.warn(
+        `writeResult: experiment_result claim write failed for experiment ${experimentId}; the result was still saved.`,
+        err,
+      );
+    }
   }
 }
 
@@ -649,10 +692,57 @@ export async function writeAdjustedResult(db, uid, experimentId, resultField) {
   if (!resultField || typeof resultField !== 'object' || Array.isArray(resultField)) {
     throw new Error('writeAdjustedResult: resultField (a plain object) is required.');
   }
-  await updateDoc(doc(db, experimentsPath(uid), experimentId), {
+  const ref = doc(db, experimentsPath(uid), experimentId);
+  const updatedAt = nowIso();
+  await updateDoc(ref, {
     result: resultField,
-    updatedAt: nowIso(),
+    updatedAt,
   });
+
+  // EXPERIMENT_RESULT CLAIM SUPERSEDE (R4 Phase 2, Task 4): an adjusted
+  // (post-result exclusion toggle) recomputation supersedes the
+  // experiment's existing, current (non-superseded) `experiment_result`
+  // claim, if one exists, with a new version built from the ADJUSTED
+  // estimate — this module's own original/adjusted result lineage,
+  // projected onto claims' version/parentClaimId lineage. When no prior
+  // claim exists for this candidate (e.g. the original result was
+  // insufficient or zero-delta and never produced one), a fresh v1 is
+  // written instead of superseding nothing. CONTAINED the same way as
+  // `writeResult`'s claim write above: the adjusted result save already
+  // committed, so a failure here must never surface as a failed
+  // `writeAdjustedResult` call.
+  try {
+    const snap = await getDoc(ref);
+    const experimentData = snap.exists() ? snap.data() : null;
+    if (experimentData) {
+      const claimInput = buildExperimentResultClaim({
+        experiment: { id: experimentId, ...experimentData },
+        experimentId,
+        result: resultField.adjusted,
+        now: updatedAt,
+      });
+      if (claimInput) {
+        const existingClaims = await listAllClaims(db, uid);
+        const existing = existingClaims.find((c) => c.claimType === 'experiment_result'
+          && c.analysisPlan?.candidateId === claimInput.analysisPlan.candidateId
+          && c.supersededByClaimId == null);
+        if (existing) {
+          await supersedeClaim(db, uid, existing, {
+            ...claimInput,
+            version: existing.version + 1,
+            parentClaimId: existing.id,
+          });
+        } else {
+          await writeClaim(db, uid, claimInput);
+        }
+      }
+    }
+  } catch (err) {
+    console.warn(
+      `writeAdjustedResult: experiment_result claim write failed for experiment ${experimentId}; the adjusted result was still saved.`,
+      err,
+    );
+  }
 }
 
 /**

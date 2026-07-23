@@ -12,6 +12,9 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 // for `experimentsService.js` itself.
 import { computeExperimentResult } from '../computeResult';
 import { getTemplateById } from '../templates';
+// Pure, no-Firebase module — used only to independently verify the
+// deterministic claim doc id in the idempotency test below.
+import { claimDocId } from '../../insights/claims/claimSchema';
 
 const mocks = {
   collection: vi.fn((_db, path) => ({ __col: path })),
@@ -49,6 +52,19 @@ const ledgerMocks = {
   readLedgerCounts: vi.fn(async () => new Map()),
 };
 vi.mock('../../insights/testingLedger', () => ledgerMocks);
+
+// experiment_result claims (R4 Phase 2, Task 4): claimsService.js is mocked
+// the same way testingLedger.js is above — `writeResult`/`writeAdjustedResult`
+// tests assert ON these calls (claimType, direction, version/parentClaimId
+// lineage) without touching real Firestore. `experimentClaim.js` itself is
+// NOT mocked — it's pure, so letting the real mapping run end-to-end here is
+// a genuine (not just unit-isolated) integration check of the wiring.
+const claimsServiceMocks = {
+  writeClaim: vi.fn(async (_db, _uid, claim) => claim),
+  supersedeClaim: vi.fn(async (_db, _uid, _oldClaim, newClaim) => newClaim),
+  listAllClaims: vi.fn(async () => []),
+};
+vi.mock('../../insights/claims/claimsService', () => claimsServiceMocks);
 
 const {
   resolveDeviceTimezone,
@@ -113,6 +129,82 @@ beforeEach(() => {
   mocks.addDoc.mockResolvedValue({ id: 'exp-1' });
   mocks.getDoc.mockResolvedValue({ exists: () => false, data: () => undefined });
 });
+
+// ---------------------------------------------------------------------------
+// experiment_result claim fixtures (R4 Phase 2, Task 4) — a real frozen plan
+// (hypothesisFamilyId present, post-Phase-1) and a real `status:'ok'`
+// computeResult.js-shaped result, reused by the writeResult/
+// writeAdjustedResult claim-write describe blocks below.
+// ---------------------------------------------------------------------------
+
+const CLAIM_PLAN = {
+  templateId: 'sleep-hours-mood-same-day',
+  lag: 0,
+  exposure: { source: 'health', field: 'sleepHours', label: 'sleep hours' },
+  outcome: { field: 'analysis.mood_score', label: 'mood', unit: 'mood_0_100' },
+  minPairedObservations: 10,
+  coverageFloor: 0.5,
+  confounders: [],
+  whatThisDoesNotProve: [
+    'This does not show that sleep hours caused the change in mood.',
+    'Other things that changed around the same time could explain some or all of this difference.',
+  ],
+  timezone: 'UTC',
+  hypothesisFamilyId: 'experiment:sleep-hours-mood-same-day',
+};
+
+const CLAIM_EXPERIMENT_DATA = {
+  question: 'Does how much I sleep affect my mood?',
+  analysisPlan: CLAIM_PLAN,
+  durationDays: 14,
+  createdAt: '2026-07-01T00:00:00.000Z',
+};
+
+function claimOkResult(overrides = {}) {
+  return {
+    status: 'ok',
+    estimate: {
+      meanHigh: 70,
+      meanLow: 60,
+      delta: 10,
+      ci: [4, 16],
+      n: 20,
+      pearsonR: 0.3,
+      nHigh: 10,
+      nLow: 10,
+      splitThreshold: 7,
+      exposureContrast: 2.5,
+      resampleDiscardCount: 0,
+      stability: { signConsistent: true },
+    },
+    coverage: {
+      exposure: { covered: 20, total: 20, label: '20 of 20 days' },
+      outcome: { covered: 20, total: 20, label: '20 of 20 days' },
+    },
+    receipt: {
+      sources: [{ entryId: 'e1', date: '2026-07-10T00:00:00.000Z', excerpt: 'slept well' }],
+      scope: null,
+      timeWindow: { start: '2026-07-01T00:00:00.000Z', end: '2026-07-20T00:00:00.000Z' },
+      sampleSize: 20,
+      missingness: 'Exposure: 20 of 20 days. Outcome: 20 of 20 days.',
+      versions: {
+        generator: 'experiment_v1', computationVersion: 1, generatedAt: '2026-07-20T00:00:00.000Z', model: null, promptVersion: null,
+      },
+      computation: {
+        nHigh: 10, nLow: 10, splitThreshold: 7, exposureContrast: 2.5,
+      },
+    },
+    sensitiveObservationCount: 0,
+    invalidObservationCount: 0,
+    narrative: {
+      summary: 'On days with more sleep hours than usual, mood averaged 10.0 points (0-100) higher than on '
+        + 'days with less (based on 20 paired days). This is an association, not proof that one caused the other.',
+      alternatives: [],
+      whatThisDoesNotProve: [],
+    },
+    ...overrides,
+  };
+}
 
 describe('buildAnalysisPlan', () => {
   it('snapshots template id, lag, exposure, outcome, the estimator constants, the frozen device timezone, and the narrative caveat strings', () => {
@@ -704,6 +796,68 @@ describe('writeResult — idempotent ledger re-registration retry (Important rev
   });
 });
 
+describe('writeResult — experiment_result claim write (R4 Phase 2, Task 4)', () => {
+  it('writes an experiment_result claim (via claimsService.writeClaim) AFTER the result write commits', async () => {
+    mocks.getDoc.mockResolvedValue({ exists: () => true, data: () => CLAIM_EXPERIMENT_DATA });
+    const result = claimOkResult();
+    await writeResult(db, UID, 'exp-1', result);
+
+    expect(claimsServiceMocks.writeClaim).toHaveBeenCalledTimes(1);
+    const [claimDb, claimUid, claimInput] = claimsServiceMocks.writeClaim.mock.calls[0];
+    expect(claimDb).toBe(db);
+    expect(claimUid).toBe(UID);
+    expect(claimInput.claimType).toBe('experiment_result');
+    expect(claimInput.direction).toBe('positive');
+    expect(claimInput.version).toBe(1);
+    expect(claimInput.parentClaimId).toBeNull();
+
+    const updateOrder = mocks.updateDoc.mock.invocationCallOrder[0];
+    const claimOrder = claimsServiceMocks.writeClaim.mock.invocationCallOrder[0];
+    expect(updateOrder).toBeLessThan(claimOrder);
+  });
+
+  it('does not write a claim for an insufficient result — insufficiency is not a claim', async () => {
+    mocks.getDoc.mockResolvedValue({ exists: () => true, data: () => CLAIM_EXPERIMENT_DATA });
+    await writeResult(db, UID, 'exp-1', { status: 'insufficient', reasons: ['insufficient_paired_observations'] });
+    expect(claimsServiceMocks.writeClaim).not.toHaveBeenCalled();
+  });
+
+  it('does NOT reject writeResult when the claim write rejects — the result save already committed; warns instead', async () => {
+    mocks.getDoc.mockResolvedValue({ exists: () => true, data: () => CLAIM_EXPERIMENT_DATA });
+    claimsServiceMocks.writeClaim.mockRejectedValueOnce(new Error('claim write failed'));
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const result = claimOkResult();
+      await expect(writeResult(db, UID, 'exp-1', result)).resolves.toBeUndefined();
+      expect(mocks.updateDoc).toHaveBeenCalledTimes(1);
+      expect(mocks.updateDoc.mock.calls[0][1].status).toBe('completed');
+      expect(warnSpy).toHaveBeenCalledTimes(1);
+      expect(warnSpy.mock.calls[0][0]).toContain('exp-1');
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
+  it('is idempotent — re-writing the same result twice builds the SAME deterministic claim doc id both times', async () => {
+    mocks.getDoc.mockResolvedValue({ exists: () => true, data: () => CLAIM_EXPERIMENT_DATA });
+    const result = claimOkResult();
+    await writeResult(db, UID, 'exp-1', result);
+    await writeResult(db, UID, 'exp-1', result);
+    expect(claimsServiceMocks.writeClaim).toHaveBeenCalledTimes(2);
+    const input1 = claimsServiceMocks.writeClaim.mock.calls[0][2];
+    const input2 = claimsServiceMocks.writeClaim.mock.calls[1][2];
+    const id1 = claimDocId({ familyId: input1.analysisPlan.hypothesisFamilyId, candidateId: input1.analysisPlan.candidateId, version: input1.version });
+    const id2 = claimDocId({ familyId: input2.analysisPlan.hypothesisFamilyId, candidateId: input2.analysisPlan.candidateId, version: input2.version });
+    expect(id1).toBe(id2);
+  });
+
+  it('does not write a claim for a legacy experiment doc whose frozen plan has no hypothesisFamilyId', async () => {
+    mocks.getDoc.mockResolvedValue({ exists: () => true, data: () => ({ ...CLAIM_EXPERIMENT_DATA, analysisPlan: { ...CLAIM_PLAN, hypothesisFamilyId: undefined } }) });
+    await writeResult(db, UID, 'exp-1', claimOkResult());
+    expect(claimsServiceMocks.writeClaim).not.toHaveBeenCalled();
+  });
+});
+
 describe('buildAdjustedResultUpdate — pure helper (result integrity, item 3)', () => {
   const ORIGINAL = { status: 'ok', estimate: { delta: 4 } };
   const ADJUSTED = { status: 'ok', estimate: { delta: 6 } };
@@ -780,6 +934,95 @@ describe('writeAdjustedResult — writes only {result, updatedAt} (status untouc
   it('rejects a missing experimentId or non-object resultField', async () => {
     await expect(writeAdjustedResult(db, UID, '', {})).rejects.toThrow();
     await expect(writeAdjustedResult(db, UID, 'exp-1', null)).rejects.toThrow();
+  });
+});
+
+describe('writeAdjustedResult — experiment_result claim supersede (R4 Phase 2, Task 4)', () => {
+  it('writes a fresh v1 claim when no prior experiment_result claim exists for this candidate', async () => {
+    mocks.getDoc.mockResolvedValue({ exists: () => true, data: () => CLAIM_EXPERIMENT_DATA });
+    claimsServiceMocks.listAllClaims.mockResolvedValueOnce([]);
+    const adjusted = claimOkResult({ estimate: { ...claimOkResult().estimate, delta: 12 } });
+    const resultField = {
+      original: claimOkResult(),
+      adjusted,
+      exclusionHistory: [{ dateKey: '2026-07-05', excluded: true, reason: 'wrong_data', at: 't1' }],
+    };
+    await writeAdjustedResult(db, UID, 'exp-1', resultField);
+
+    expect(claimsServiceMocks.writeClaim).toHaveBeenCalledTimes(1);
+    expect(claimsServiceMocks.supersedeClaim).not.toHaveBeenCalled();
+    const claimInput = claimsServiceMocks.writeClaim.mock.calls[0][2];
+    expect(claimInput.claimType).toBe('experiment_result');
+    expect(claimInput.version).toBe(1);
+    expect(claimInput.parentClaimId).toBeNull();
+  });
+
+  it('supersedes the existing non-superseded experiment_result claim, linking parentClaimId and bumping version', async () => {
+    mocks.getDoc.mockResolvedValue({ exists: () => true, data: () => CLAIM_EXPERIMENT_DATA });
+    const existingClaim = {
+      id: 'claim_experiment-sleep-hours-mood-same-day_abcd1234_v1',
+      version: 1,
+      claimType: 'experiment_result',
+      supersededByClaimId: null,
+      analysisPlan: { candidateId: 'experiment:sleep-hours-mood-same-day', hypothesisFamilyId: 'experiment:sleep-hours-mood-same-day' },
+    };
+    claimsServiceMocks.listAllClaims.mockResolvedValueOnce([existingClaim]);
+    const adjusted = claimOkResult({ estimate: { ...claimOkResult().estimate, delta: 12 } });
+    const resultField = { original: claimOkResult(), adjusted, exclusionHistory: [] };
+    await writeAdjustedResult(db, UID, 'exp-1', resultField);
+
+    expect(claimsServiceMocks.supersedeClaim).toHaveBeenCalledTimes(1);
+    expect(claimsServiceMocks.writeClaim).not.toHaveBeenCalled();
+    const [supDb, supUid, oldClaimArg, newClaimArg] = claimsServiceMocks.supersedeClaim.mock.calls[0];
+    expect(supDb).toBe(db);
+    expect(supUid).toBe(UID);
+    expect(oldClaimArg).toBe(existingClaim);
+    expect(newClaimArg.claimType).toBe('experiment_result');
+    expect(newClaimArg.version).toBe(2);
+    expect(newClaimArg.parentClaimId).toBe(existingClaim.id);
+  });
+
+  it('picks only the CURRENT (non-superseded) claim version to supersede, ignoring an already-superseded ancestor', async () => {
+    mocks.getDoc.mockResolvedValue({ exists: () => true, data: () => CLAIM_EXPERIMENT_DATA });
+    const supersededV1 = {
+      id: 'claim-v1', version: 1, claimType: 'experiment_result', supersededByClaimId: 'claim-v2',
+      analysisPlan: { candidateId: 'experiment:sleep-hours-mood-same-day' },
+    };
+    const currentV2 = {
+      id: 'claim-v2', version: 2, claimType: 'experiment_result', supersededByClaimId: null,
+      analysisPlan: { candidateId: 'experiment:sleep-hours-mood-same-day' },
+    };
+    claimsServiceMocks.listAllClaims.mockResolvedValueOnce([supersededV1, currentV2]);
+    await writeAdjustedResult(db, UID, 'exp-1', { original: claimOkResult(), adjusted: claimOkResult(), exclusionHistory: [] });
+
+    const [, , oldClaimArg, newClaimArg] = claimsServiceMocks.supersedeClaim.mock.calls[0];
+    expect(oldClaimArg).toBe(currentV2);
+    expect(newClaimArg.version).toBe(3);
+    expect(newClaimArg.parentClaimId).toBe('claim-v2');
+  });
+
+  it('does not write or supersede a claim when the adjusted result is insufficient', async () => {
+    mocks.getDoc.mockResolvedValue({ exists: () => true, data: () => CLAIM_EXPERIMENT_DATA });
+    await writeAdjustedResult(db, UID, 'exp-1', {
+      original: claimOkResult(), adjusted: { status: 'insufficient', reasons: ['x'] }, exclusionHistory: [],
+    });
+    expect(claimsServiceMocks.writeClaim).not.toHaveBeenCalled();
+    expect(claimsServiceMocks.supersedeClaim).not.toHaveBeenCalled();
+  });
+
+  it('does NOT reject writeAdjustedResult when the claim supersede/read fails — the adjusted result save already committed; warns instead', async () => {
+    mocks.getDoc.mockResolvedValue({ exists: () => true, data: () => CLAIM_EXPERIMENT_DATA });
+    claimsServiceMocks.listAllClaims.mockRejectedValueOnce(new Error('read failed'));
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const resultField = { original: claimOkResult(), adjusted: claimOkResult(), exclusionHistory: [] };
+      await expect(writeAdjustedResult(db, UID, 'exp-1', resultField)).resolves.toBeUndefined();
+      expect(mocks.updateDoc).toHaveBeenCalledTimes(1);
+      expect(warnSpy).toHaveBeenCalledTimes(1);
+      expect(warnSpy.mock.calls[0][0]).toContain('exp-1');
+    } finally {
+      warnSpy.mockRestore();
+    }
   });
 });
 
