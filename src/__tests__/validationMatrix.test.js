@@ -200,11 +200,11 @@ vi.mock('../config/firebase', () => ({
 }));
 // Row 8's getSmartChatContext import graph pulls in ai/gemini.js (unused by
 // the function actually under test) — stub it so importing analysis/index.js
-// never touches a real provider callable.
-// R4 row (c) needs `callGemini` too (counterfactual.js/beliefDissonance.js's
-// real, unmocked modules call it) — returns null so tests exercise the
-// threshold gate itself, not any generated content past the gate (mirrors
-// counterfactual.test.js/beliefDissonance.test.js's own dedicated mocks).
+// never touches a real provider callable. (counterfactual.js/
+// beliefDissonance.js, this comment's original reason for row (c) needing
+// `callGemini` here, were deleted R4-P3 per P3-D1 — this mock is retained
+// because row (b) below still needs it for the real synthesizer prompt
+// capture.)
 vi.mock('../services/ai/gemini', () => ({ analyzeJournalEntryCloud: vi.fn(), callGemini: vi.fn(async () => null) }));
 
 // R2 rows (a)/(b) need the REAL `generateInsights`/`fetchRecentEntries` (the
@@ -297,19 +297,9 @@ vi.mock('../services/nexus/layer3/crossThreadDetector', () => ({
   detectMetaPatterns: vi.fn(async () => []),
   generateMetaPatternInsight: vi.fn(async () => null),
 }));
-vi.mock('../services/nexus/layer3/beliefDissonance', () => ({
-  extractBeliefsFromEntry: vi.fn(() => []),
-  refineBeliefsWithLLM: vi.fn(async () => []),
-  validateBeliefAgainstData: vi.fn(async () => ({ dissonanceScore: 0 })),
-  generateDissonanceInsight: vi.fn(async () => null),
-  saveBeliefs: vi.fn(async () => {}),
-  getBeliefs: vi.fn(async () => []),
-}));
-vi.mock('../services/nexus/layer3/counterfactual', () => ({
-  identifyMissingInterventions: vi.fn(() => []),
-  generateCounterfactualInsight: vi.fn(async () => null),
-  findGoodDayActivities: vi.fn(() => []),
-}));
+// beliefDissonance.js / counterfactual.js mocks deleted R4-P3 per P3-D1
+// (superseded by claims+experiments; legacy Firestore belief docs may
+// remain, harmless).
 vi.mock('../services/nexus/layer4/interventionTracker', () => ({
   updateInterventionData: vi.fn(async () => {}),
   getInterventionData: vi.fn(async () => ({})),
@@ -2529,41 +2519,20 @@ describe('R4 Matrix row (b): no-personal-literals — GENERIC_TRIGGERS denylist 
   });
 });
 
-describe('R4 Matrix row (c): Mood01 threshold invariance — counterfactual + beliefDissonance behave correctly on native 0-1 fixtures (real modules, gated-suppression-seam-only-at-orchestrator so direct unit access stays real)', () => {
-  it('findGoodDayActivities treats 0.60+ (not 60+) as the good-day mood threshold — real counterfactual.js', async () => {
-    // vi.importActual bypasses this file's own layer3/counterfactual stub
-    // (needed for orchestrator rows) to reach the real threshold logic.
-    const { findGoodDayActivities } = await vi.importActual('../services/nexus/layer3/counterfactual');
-    const entries = [
-      ...Array.from({ length: 4 }, (_, i) => ({ id: `yoga-${i}`, text: 'Did yoga this morning', mood: 0.65 })),
-      ...Array.from({ length: 6 }, (_, i) => ({ id: `neutral-${i}`, text: 'A regular day.', mood: 0.5 })),
-    ];
-    const result = findGoodDayActivities(entries, 3);
-    expect(result.some((a) => a.activity === 'yoga')).toBe(true);
-  });
-
-  it('mutation-check control: a below-threshold Mood01 value (0.55) is NOT treated as a good day — proves the 0.60 gate is real, not always-true', async () => {
-    const { findGoodDayActivities } = await vi.importActual('../services/nexus/layer3/counterfactual');
-    const entries = [
-      ...Array.from({ length: 4 }, (_, i) => ({ id: `yoga-${i}`, text: 'Did yoga this morning', mood: 0.55 })),
-      ...Array.from({ length: 6 }, (_, i) => ({ id: `neutral-${i}`, text: 'A regular day.', mood: 0.5 })),
-    ];
-    const result = findGoodDayActivities(entries, 3);
-    expect(result.some((a) => a.activity === 'yoga')).toBe(false);
-  });
-
-  it('generateDissonanceInsight mood gate uses 0.50 (not 50): 0.6 clears it, 0.3 is gated (queued, not generated) — real beliefDissonance.js', async () => {
-    const { generateDissonanceInsight } = await vi.importActual('../services/nexus/layer3/beliefDissonance');
-    const belief = { id: 'b1', statement: 'test belief' };
-    const validation = { dissonanceScore: 0.9, contradictingData: [{ interpretation: 'x' }] };
-
-    const cleared = await generateDissonanceInsight(belief, validation, 0.6);
-    expect(cleared).not.toEqual(expect.objectContaining({ queued: true }));
-
-    const gated = await generateDissonanceInsight(belief, { ...validation, contradictingData: [] }, 0.3);
-    expect(gated).toEqual(expect.objectContaining({ queued: true, reason: 'mood_gate' }));
-  });
-});
+// R4 Matrix row (c) ("Mood01 threshold invariance — counterfactual +
+// beliefDissonance") deleted R4-P3 per P3-D1
+// (docs/superpowers/plans/2026-07-23-r4-phase3-action-loop.md):
+// counterfactual.js/beliefDissonance.js, the two modules this row pinned
+// its real-module-import assertions against, were deleted whole (superseded
+// by claims+experiments; legacy Firestore belief docs may remain,
+// harmless). Not re-pinned on a surviving module: orchestrator.js's own
+// LOW_MOOD_THRESHOLD was that block's only consumer and was deleted
+// alongside it (no longer "exercises meaningfully" post-deletion), and
+// functions/src/revisit/selectRevisits.js's MOOD_FLOOR/LOW_MOOD_THRESHOLD
+// (the other live Mood01-threshold module in this codebase) already has its
+// own thorough dedicated boundary-condition coverage in
+// functions/src/revisit/__tests__/selectRevisits.test.js — re-pinning here
+// would be redundant duplicate coverage, not a meaningful addition.
 
 describe('R4 Matrix row (d): complement baseline — a hand-computed activityCorrelations fixture through the REAL basicInsights orchestrator path', () => {
   const dayIso = (day) => `2026-07-${String(day).padStart(2, '0')}T12:00:00.000Z`;

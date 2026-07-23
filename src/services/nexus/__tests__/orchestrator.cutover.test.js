@@ -63,20 +63,9 @@ vi.mock('../layer3/crossThreadDetector', () => ({
   generateMetaPatternInsight: vi.fn(async () => null),
 }));
 
-vi.mock('../layer3/beliefDissonance', () => ({
-  extractBeliefsFromEntry: vi.fn(() => []),
-  refineBeliefsWithLLM: vi.fn(async () => []),
-  validateBeliefAgainstData: vi.fn(async () => ({ dissonanceScore: 0 })),
-  generateDissonanceInsight: vi.fn(async () => null),
-  saveBeliefs: vi.fn(async () => {}),
-  getBeliefs: vi.fn(async () => []),
-}));
-
-vi.mock('../layer3/counterfactual', () => ({
-  identifyMissingInterventions: vi.fn(() => []),
-  generateCounterfactualInsight: vi.fn(async () => null),
-  findGoodDayActivities: vi.fn(() => []),
-}));
+// beliefDissonance.js / counterfactual.js mocks deleted R4-P3 per P3-D1
+// (superseded by claims+experiments; legacy Firestore belief docs may
+// remain, harmless).
 
 vi.mock('../layer4/interventionTracker', () => ({
   updateInterventionData: vi.fn(async () => {}),

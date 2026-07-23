@@ -7,5 +7,6 @@
 
 export * from './synthesizer';
 export * from './crossThreadDetector';
-export * from './beliefDissonance';
-export * from './counterfactual';
+// beliefDissonance.js / counterfactual.js deleted R4-P3 per P3-D1
+// (superseded by claims+experiments; legacy Firestore belief docs may
+// remain, harmless).

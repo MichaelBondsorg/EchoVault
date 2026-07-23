@@ -22,8 +22,9 @@ import { getBaselines, calculateAndSaveBaselines, compareToBaseline } from './la
 // Layer 3
 import { generateCausalSynthesis, generateNarrativeArcInsight, INSIGHT_TYPES } from './layer3/synthesizer';
 import { detectMetaPatterns, generateMetaPatternInsight } from './layer3/crossThreadDetector';
-import { extractBeliefsFromEntry, refineBeliefsWithLLM, validateBeliefAgainstData, generateDissonanceInsight, saveBeliefs, getBeliefs } from './layer3/beliefDissonance';
-import { identifyMissingInterventions, generateCounterfactualInsight, findGoodDayActivities } from './layer3/counterfactual';
+// beliefDissonance.js / counterfactual.js imports deleted R4-P3 per P3-D1
+// (superseded by claims+experiments; legacy Firestore belief docs may
+// remain, harmless).
 
 // Layer 4
 import { updateInterventionData, getInterventionData } from './layer4/interventionTracker';
@@ -70,10 +71,9 @@ const displayMood100 = (raw) => {
   return Math.round(raw * 100);
 };
 
-// Below this Mood01 value, an entry counts as "low mood" for counterfactual
-// candidate selection (was `< 40`, comparing a 0-1 value against a
-// 0-100-scale threshold — always true, since 0-1 values are always < 40).
-const LOW_MOOD_THRESHOLD = 0.40;
+// LOW_MOOD_THRESHOLD (counterfactual candidate selection) deleted R4-P3 per
+// P3-D1 along with the counterfactual block below that was its only
+// consumer.
 
 // ============================================================
 // RISKY CLAIM SUPPRESSION (R4 Task 3 / ratified decision 4)
@@ -461,7 +461,6 @@ export const generateInsights = async (userId, options = {}) => {
       whoopToday,
       whoopHistory,
       interventionData,
-      beliefs,
       settings
     ] = await Promise.all([
       fetchRecentEntries(userId, 30, scope, excludedIds),
@@ -470,7 +469,9 @@ export const generateInsights = async (userId, options = {}) => {
       whoopConnected ? getWhoopSummary().catch(() => null) : Promise.resolve(null),
       whoopConnected ? getWhoopHistory(30).catch(() => ({ available: false, days: [] })) : Promise.resolve({ available: false, days: [] }),
       getInterventionData(userId),
-      getBeliefs(userId),
+      // getBeliefs(userId) deleted R4-P3 per P3-D1 (superseded by
+      // claims+experiments; legacy Firestore belief docs may remain,
+      // harmless).
       getUserSettings(userId)
     ]);
 
@@ -522,7 +523,9 @@ export const generateInsights = async (userId, options = {}) => {
       baselines,
       whoopToday,
       whoopHistory,
-      beliefData: beliefs,
+      // beliefData: beliefs deleted R4-P3 per P3-D1 (superseded by
+      // claims+experiments; legacy Firestore belief docs may remain,
+      // harmless).
       // Ratified decision 4 (R4 T3): interventionTracker's effectiveness
       // stats double as "this specific activity boosted your mood/HRV by
       // X" OUTCOME claims once they reach a rendered insight — and this is
@@ -600,52 +603,16 @@ export const generateInsights = async (userId, options = {}) => {
       console.warn('[Orchestrator] Meta-pattern detection failed:', error.message);
     }
 
-    // Generate belief dissonance insight (if enabled)
-    if (settings.features.beliefDissonanceInsights?.enabled !== false && entries.length >= 10) {
-      try {
-        // Extract new beliefs from recent entries
-        for (const entry of entries.slice(0, 5)) {
-          const rawBeliefs = extractBeliefsFromEntry(entry.content || entry.text || '', entry.id);
-          if (rawBeliefs.length > 0) {
-            const refined = await refineBeliefsWithLLM(rawBeliefs, entry.content || entry.text);
-            await saveBeliefs(userId, refined);
-          }
-        }
-
-        // Validate existing beliefs and generate insights. Ratified
-        // decision 4 (R4 T3): belief-dissonance CLAIMS are suppressed
-        // until Phase 1-2 evidence rails exist — extraction/save above
-        // still runs (it builds the corpus Phase 1 will need), but
-        // validating beliefs against data and generating a dissonance
-        // INSIGHT is gated off.
-        if (riskyClaimsEnabled) {
-          const allBeliefs = await getBeliefs(userId);
-          const recentMood = entries[0]?.mood ?? entries[0]?.analysis?.mood_score;
-
-          for (const belief of allBeliefs.slice(0, 3)) {
-            const validation = await validateBeliefAgainstData(belief, { entries, baselines, threads });
-
-            if (validation.dissonanceScore > 0.5) {
-              const dissonanceInsight = await generateDissonanceInsight(
-                belief,
-                validation,
-                recentMood
-              );
-
-              if (dissonanceInsight && !dissonanceInsight.queued) {
-                insights.push({
-                  ...dissonanceInsight,
-                  priority: 3
-                });
-                break;  // Only one dissonance insight per generation
-              }
-            }
-          }
-        }
-      } catch (error) {
-        console.warn('[Orchestrator] Belief dissonance failed:', error.message);
-      }
-    }
+    // Belief dissonance block deleted R4-P3 per P3-D1 (superseded by
+    // claims+experiments; legacy Firestore belief docs may remain,
+    // harmless). This removed an UNCONDITIONAL per-generation LLM call
+    // (refineBeliefsWithLLM, via callGemini) that ran whenever entries.length
+    // >= 10 and the beliefDissonanceInsights setting was on (the default) —
+    // it ran regardless of riskyClaimsEnabled/RISKY_CLAIMS_ENABLED, so in
+    // production it fired on every generateInsights() call with zero
+    // downstream consumer (validateBeliefAgainstData/generateDissonanceInsight
+    // were gated off, so the refined beliefs were only ever saved, never
+    // read back into a surfaced insight). Real waste removed.
 
     // ========== LAYER 4: INTERVENTION OPTIMIZATION ==========
 
@@ -686,38 +653,12 @@ export const generateInsights = async (userId, options = {}) => {
       }
     }
 
-    // Generate counterfactual insight for recent low mood days. Ratified
-    // decision 4 (R4 T3): counterfactual claims are suppressed until Phase
-    // 1-2 evidence rails exist.
-    if (settings.features.counterfactualInsights?.enabled !== false && riskyClaimsEnabled) {
-      try {
-        const lowMoodEntry = entries.find(e => {
-          // Mood01: was `mood < 40` against a native 0-1 value — always
-          // true, so this ran (and errored/no-opped downstream) on every
-          // entry rather than genuinely selecting a low-mood day.
-          const mood = e.mood ?? e.analysis?.mood_score;
-          return mood != null && mood < LOW_MOOD_THRESHOLD;
-        });
-
-        if (lowMoodEntry && interventionData) {
-          const goodDayActivities = findGoodDayActivities(entries);
-          const activityNames = goodDayActivities.map(a => a.activity);
-          const missing = identifyMissingInterventions(lowMoodEntry, interventionData, activityNames);
-
-          if (missing.length > 0) {
-            const counterfactual = await generateCounterfactualInsight(lowMoodEntry, missing, {});
-            if (counterfactual) {
-              insights.push({
-                ...counterfactual,
-                priority: 3
-              });
-            }
-          }
-        }
-      } catch (error) {
-        console.warn('[Orchestrator] Counterfactual insight failed:', error.message);
-      }
-    }
+    // Counterfactual block deleted R4-P3 per P3-D1 (superseded by
+    // claims+experiments; legacy Firestore belief docs may remain,
+    // harmless). This block was already fully suppressed in production
+    // (gated on riskyClaimsEnabled, false by default) so this deletion is a
+    // flag-OFF no-op — no behavior change, no LLM-call waste removed here
+    // (unlike the belief block above).
 
     // ========== CALIBRATION STATE ==========
 
@@ -898,11 +839,15 @@ export const updateInsightsForNewEntry = async (userId, entryId, entryText, entr
     // Extract somatic signals
     const somaticSignals = extractSomaticSignals(entryText);
 
-    // Extract beliefs (Phase 2)
-    const rawBeliefs = extractBeliefsFromEntry(entryText, entryId);
-    if (rawBeliefs.length > 0) {
-      await saveBeliefs(userId, rawBeliefs);
-    }
+    // Belief extraction ("Extract beliefs (Phase 2)") deleted R4-P3 per
+    // P3-D1 (superseded by claims+experiments; legacy Firestore belief docs
+    // may remain, harmless). This call site was NOT in the brief's stated
+    // line ranges (~L604-648, ~L692-720) — found on a full-file read of
+    // orchestrator.js: it was a second, fully unconditional
+    // extractBeliefsFromEntry+saveBeliefs pair firing on every single new
+    // entry via updateInsightsForNewEntry (no LLM call itself, since
+    // extractBeliefsFromEntry is pure regex — but it wrote to the same
+    // orphaned `nexus/beliefs` Firestore doc with zero downstream reader).
 
     // Mark insights as stale (will regenerate on next dashboard load)
     await markInsightsStale(userId);

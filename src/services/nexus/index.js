@@ -63,13 +63,8 @@ export {
   META_PATTERNS
 } from './layer3/crossThreadDetector';
 
-export {
-  extractBeliefsFromEntry,
-  validateBeliefAgainstData,
-  generateDissonanceInsight,
-  saveBeliefs,
-  getBeliefs
-} from './layer3/beliefDissonance';
+// beliefDissonance.js deleted R4-P3 per P3-D1 (superseded by
+// claims+experiments; legacy Firestore belief docs may remain, harmless).
 
 // Layer 4: Intervention Optimizer
 export {

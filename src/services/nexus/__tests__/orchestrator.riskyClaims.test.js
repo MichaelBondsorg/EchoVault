@@ -5,11 +5,15 @@
  *
  * Two things this file proves that layer3/layer4 unit tests can't:
  *  1. With the internal RISKY_CLAIMS_ENABLED gate at its production value
- *     (false), none of the four risky claim types (counterfactual,
- *     belief_dissonance, an interventionData-fed causal_synthesis, and
- *     personalized recommendation wording) reach the persisted insight
- *     set — even though the underlying Mood01 scale fixes would otherwise
- *     make them fire.
+ *     (false), none of the remaining risky claim types (an
+ *     interventionData-fed causal_synthesis, and personalized
+ *     recommendation wording) reach the persisted insight set — even
+ *     though the underlying Mood01 scale fixes would otherwise make them
+ *     fire. (Two of the original four risky claim types — counterfactual,
+ *     belief_dissonance — were deleted whole-module R4-P3 per P3-D1;
+ *     their suppression assertions here were removed with them, superseded
+ *     by claims+experiments. Legacy Firestore belief docs may remain,
+ *     harmless.)
  *  2. `generateInsights(userId, { riskyClaimsEnabled: true })` (test-only
  *     override) exercises the corrected code end to end, including the
  *     REAL `detectMetaPatterns`/`generateMetaPatternInsight` call chain
@@ -76,35 +80,15 @@ vi.mock('../layer2/baselineManager', () => ({
   compareToBaseline: vi.fn(() => ({})),
 }));
 
-// Layer 3 synthesis / belief-dissonance / counterfactual are mocked so this
-// file stays focused on (a) the suppression gate and (b) the REAL
-// crossThreadDetector call chain (deliberately NOT mocked below).
+// Layer 3 synthesis is mocked so this file stays focused on (a) the
+// suppression gate and (b) the REAL crossThreadDetector call chain
+// (deliberately NOT mocked below). beliefDissonance.js / counterfactual.js
+// mocks deleted R4-P3 per P3-D1 (superseded by claims+experiments; legacy
+// Firestore belief docs may remain, harmless).
 vi.mock('../layer3/synthesizer', () => ({
   INSIGHT_TYPES: {},
   generateCausalSynthesis: vi.fn(async () => ({ success: false })),
   generateNarrativeArcInsight: vi.fn(async () => null),
-}));
-
-vi.mock('../layer3/beliefDissonance', () => ({
-  extractBeliefsFromEntry: vi.fn(() => []),
-  refineBeliefsWithLLM: vi.fn(async () => []),
-  validateBeliefAgainstData: vi.fn(async () => ({ dissonanceScore: 1 })),
-  generateDissonanceInsight: vi.fn(async () => ({
-    type: 'belief_dissonance',
-    title: 'A Pattern Worth Noticing',
-    confidence: 0.9,
-  })),
-  saveBeliefs: vi.fn(async () => {}),
-  getBeliefs: vi.fn(async () => ([{ id: 'b1', category: 'self_worth', statement: 'test' }])),
-}));
-
-vi.mock('../layer3/counterfactual', () => ({
-  identifyMissingInterventions: vi.fn(() => ([{ activity: 'yoga', effectivenessScore: 0.9 }])),
-  generateCounterfactualInsight: vi.fn(async () => ({
-    type: 'counterfactual',
-    title: 'A Pattern to Note',
-  })),
-  findGoodDayActivities: vi.fn(() => ([{ activity: 'yoga', averageMood: 0.8, occurrences: 5 }])),
 }));
 
 vi.mock('../layer4/interventionTracker', () => ({
@@ -158,16 +142,11 @@ describe('generateInsights — risky-claim suppression seam (R4 T3, ratified dec
     setDoc.mockClear();
   });
 
-  it('gate OFF (production default): no counterfactual or belief_dissonance insight reaches `active`, even though the mocked generators would happily produce one', async () => {
-    getDocs.mockResolvedValueOnce(mockEntriesSnapshot(buildEntries()));
-
-    const result = await generateInsights('user-1');
-
-    expect(result.success).toBe(true);
-    const types = result.insights.map((i) => i.type);
-    expect(types).not.toContain('counterfactual');
-    expect(types).not.toContain('belief_dissonance');
-  });
+  // The "gate OFF: no counterfactual or belief_dissonance insight reaches
+  // `active`" test was deleted here (R4-P3 per P3-D1) — those two insight
+  // types no longer exist at all post-deletion, so the assertion is moot;
+  // superseded by claims+experiments. Legacy Firestore belief docs may
+  // remain, harmless.
 
   it('gate OFF: a surfaced recommendation is relabeled as a generic idea — no score, no personalized reasoning', async () => {
     getDocs.mockResolvedValueOnce(mockEntriesSnapshot(buildEntries()));
@@ -181,14 +160,13 @@ describe('generateInsights — risky-claim suppression seam (R4 T3, ratified dec
     expect(idea.reasoning).not.toMatch(/historically|your mood|your HRV/i);
   });
 
-  it('gate ON (test-only override): counterfactual and belief_dissonance insights DO surface, proving the scale-corrected code works underneath the gate', async () => {
+  it('gate ON (test-only override): a surfaced recommendation is fully personalized ("Recommended Action"), proving the scale-corrected code works underneath the gate', async () => {
     getDocs.mockResolvedValueOnce(mockEntriesSnapshot(buildEntries()));
 
     const result = await generateInsights('user-1', { riskyClaimsEnabled: true });
 
-    const types = result.insights.map((i) => i.type);
-    expect(types).toContain('counterfactual');
-    expect(types).toContain('belief_dissonance');
+    // (counterfactual/belief_dissonance surfacing assertions removed here —
+    // R4-P3 per P3-D1, see file header.)
     const idea = result.insights.find((i) => i.type === 'intervention');
     expect(idea.title).toBe('Recommended Action');
   });
