@@ -34,6 +34,7 @@ import { shouldWatchdogSkipEditedEntry } from './src/triggers/watchdogGuards.js'
 import { callGemini, classifyEntry, analyzeEntry, extractEnhancedContext, generateInsight } from './src/analysis/analysisHelpers.js';
 import { getServerFlag } from './src/shared/flags.js';
 import { getModel, getModelSync, getModelFlag } from './src/models/registry.js';
+import { handleWriteClaimWording } from './src/insights/writeClaimWordingHandler.js';
 import { runEntryAnalysis } from './src/analysis/orchestrator.js';
 import { issueCaptureUploadTicketCore } from './src/capture/uploadTicket.js';
 import { processCaptureAudioObject, sweepCaptureUploads } from './src/capture/onAudioUploaded.js';
@@ -76,7 +77,8 @@ const DAILY_QUOTA = {
   analyze: 200,       // analyzeJournalEntry
   executePrompt: 200, // executePrompt
   ask: 200,           // askJournalAI
-  transcribe: 100     // transcribeAudio / transcribeWithTone
+  transcribe: 100,    // transcribeAudio / transcribeWithTone
+  claimWriter: 100    // writeClaimWording (R4 Phase 2)
 };
 
 // AI Model Configuration.
@@ -921,6 +923,46 @@ export const executePrompt = onCall(
       });
       throw new HttpsError('internal', 'Prompt execution failed');
     }
+  }
+);
+
+/**
+ * Cloud Function: writeClaimWording (R4 Phase 2, plan task P2-T3).
+ *
+ * Composes the claim wording writer (T2) and verifier (T1) server-side: the
+ * writer proposes wording from a deterministic evidence bundle, the verifier
+ * polices it, and one rewrite is attempted before failing closed. This
+ * wrapper owns ONLY the guards (auth/consent/size-cap/quota, matching
+ * executePrompt/askJournalAI's established order) — all composition and
+ * bundle-shape validation lives in the injectable, unit-tested handler.
+ */
+export const writeClaimWording = onCall(
+  {
+    secrets: [geminiApiKey],
+    cors: true,
+    maxInstances: 10
+  },
+  async (request) => {
+    if (!request.auth) {
+      throw new HttpsError('unauthenticated', 'User must be authenticated');
+    }
+
+    const userId = request.auth.uid;
+    await assertAiConsent(db, userId);
+    const { bundle } = request.data || {};
+
+    // Cap payload size before quota so an oversized bundle can't burn quota
+    // on a request the handler would reject anyway.
+    assertWithinLimit(JSON.stringify(bundle ?? {}), 'bundle');
+
+    await enforceDailyQuota(userId, { key: 'claimWriter', limit: DAILY_QUOTA.claimWriter });
+
+    const apiKey = geminiApiKey.value();
+
+    return handleWriteClaimWording(
+      { bundle },
+      { db, apiKeys: { gemini: apiKey }, callGeminiImpl: callGemini, getModelImpl: getModel }
+    );
   }
 );
 

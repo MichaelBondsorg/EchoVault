@@ -67,6 +67,7 @@ export const transcribeWithToneFn = httpsCallable(functions, 'transcribeWithTone
 export const transcribeEntryFn = httpsCallable(functions, 'transcribeEntry', { timeout: 540000 }); // 9 min - fused Gemini transcription + tone
 export const askJournalAIFn = httpsCallable(functions, 'askJournalAI', { timeout: 120000 }); // 2 min
 export const executePromptFn = httpsCallable(functions, 'executePrompt', { timeout: 120000 }); // 2 min
+export const writeClaimWordingFn = httpsCallable(functions, 'writeClaimWording', { timeout: 60000 }); // 1 min - R4 Phase 2 claim wording writer+verifier
 export const exchangeGoogleTokenFn = httpsCallable(functions, 'exchangeGoogleToken', { timeout: 30000 }); // 30s - auth should be fast
 export const exchangeAppleTokenFn = httpsCallable(functions, 'exchangeAppleToken', { timeout: 30000 }); // 30s - auth should be fast
 export const reprocessEntriesForGoalsFn = httpsCallable(functions, 'reprocessEntriesForGoals', { timeout: 540000 }); // 9 min
