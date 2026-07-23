@@ -88,6 +88,7 @@ const {
   clearConfirmation,
   listConfirmations,
   listFamilyRuns,
+  writeOrSupersedeExperimentResultClaim,
 } = await import('../experimentsService.js');
 
 const { MIN_PAIRED_OBSERVATIONS, COVERAGE_FLOOR } = await import('../estimator.js');
@@ -1088,6 +1089,171 @@ describe('writeResult — repeat-run claim lineage fix (R4 Phase 3 Task 6)', () 
     expect(oldClaimArg).toBe(expiredClaim);
     expect(newClaimArg.version).toBe(2);
     expect(newClaimArg.parentClaimId).toBe(expiredClaim.id);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Final review Important 1 (closure wave) — the RUN-IDENTITY FIX. Before
+// this fix, `writeOrSupersedeExperimentResultClaim` had no way to tell WHICH
+// run produced the currently-live claim, so a post-completion exclusion
+// adjustment on an OLD run (allowed any time — `setObservationExcluded` only
+// forbids a `stopped` experiment) would unconditionally supersede whatever
+// was currently live, even a since-completed SECOND run's already-current
+// claim — silently making stale data look like the family's latest result.
+// These tests pin the exact artifact sequence from the fix sketch: run1
+// completes -> run2 completes (supersedes) -> run1 gets exclusion-adjusted
+// -> the adjustment must NOT touch run2's live claim.
+// ---------------------------------------------------------------------------
+describe('writeOrSupersedeExperimentResultClaim — run-identity fix (final review Important 1, closure wave)', () => {
+  const RUN1_ID = 'exp-1';
+  const RUN2_ID = 'exp-2';
+  const RUN1_CREATED = '2026-07-01T00:00:00.000Z';
+  const RUN2_CREATED = '2026-07-10T00:00:00.000Z';
+
+  function experimentDataWithCreatedAt(createdAt) {
+    return { ...CLAIM_EXPERIMENT_DATA, createdAt };
+  }
+
+  it('full sequence: run1 completes (v1) -> run2 completes (supersedes, v2) -> run1 exclusion-adjusted -> NO new claim is written, run2 stays latest', async () => {
+    // --- Step 1: run1 completes. No prior claim for this candidate -> plain v1. ---
+    mocks.getDoc.mockResolvedValue({ exists: () => true, data: () => experimentDataWithCreatedAt(RUN1_CREATED) });
+    claimsServiceMocks.listAllClaims.mockResolvedValueOnce([]);
+    const run1Result = claimOkResult();
+    await writeResult(db, UID, RUN1_ID, run1Result);
+
+    expect(claimsServiceMocks.writeClaim).toHaveBeenCalledTimes(1);
+    const run1ClaimInput = claimsServiceMocks.writeClaim.mock.calls[0][2];
+    expect(run1ClaimInput.analysisPlan.sourceExperimentId).toBe(RUN1_ID);
+    expect(run1ClaimInput.analysisPlan.sourceCompletedAt).toBe(RUN1_CREATED);
+    const run1Claim = {
+      id: 'claim-run1-v1', version: 1, claimType: 'experiment_result', status: 'verified', supersededByClaimId: null,
+      analysisPlan: run1ClaimInput.analysisPlan,
+    };
+
+    // --- Step 2: run2 completes. run1's claim is the live prior -> supersede to v2. ---
+    mocks.getDoc.mockResolvedValue({ exists: () => true, data: () => experimentDataWithCreatedAt(RUN2_CREATED) });
+    claimsServiceMocks.listAllClaims.mockResolvedValueOnce([run1Claim]);
+    const run2Result = claimOkResult({ estimate: { ...claimOkResult().estimate, delta: 14 } });
+    await writeResult(db, UID, RUN2_ID, run2Result);
+
+    expect(claimsServiceMocks.supersedeClaim).toHaveBeenCalledTimes(1);
+    const [, , run2OldClaimArg, run2ClaimInput] = claimsServiceMocks.supersedeClaim.mock.calls[0];
+    expect(run2OldClaimArg).toBe(run1Claim);
+    expect(run2ClaimInput.version).toBe(2);
+    expect(run2ClaimInput.analysisPlan.sourceExperimentId).toBe(RUN2_ID);
+    expect(run2ClaimInput.analysisPlan.sourceCompletedAt).toBe(RUN2_CREATED);
+    const run2LiveClaim = {
+      id: 'claim-run2-v2', version: 2, claimType: 'experiment_result', status: 'verified', supersededByClaimId: null,
+      analysisPlan: run2ClaimInput.analysisPlan,
+    };
+
+    // --- Step 3: run1 (the OLD run) gets a post-completion exclusion adjustment. ---
+    claimsServiceMocks.writeClaim.mockClear();
+    claimsServiceMocks.supersedeClaim.mockClear();
+    mocks.updateDoc.mockClear();
+    mocks.getDoc.mockResolvedValue({ exists: () => true, data: () => experimentDataWithCreatedAt(RUN1_CREATED) });
+    claimsServiceMocks.listAllClaims.mockResolvedValueOnce([run2LiveClaim]); // run2's claim is the only live one now
+    const run1Adjusted = claimOkResult({ estimate: { ...claimOkResult().estimate, delta: 9 } });
+    const resultField = {
+      original: run1Result,
+      adjusted: run1Adjusted,
+      exclusionHistory: [{ dateKey: '2026-07-02', excluded: true, reason: 'wrong_data', at: 't1' }],
+    };
+    await writeAdjustedResult(db, UID, RUN1_ID, resultField);
+
+    // The run-identity guard must skip the claim write entirely.
+    expect(claimsServiceMocks.writeClaim).not.toHaveBeenCalled();
+    expect(claimsServiceMocks.supersedeClaim).not.toHaveBeenCalled();
+    // run2's live claim object is completely untouched.
+    expect(run2LiveClaim.status).toBe('verified');
+    expect(run2LiveClaim.supersededByClaimId).toBeNull();
+    // The adjusted result itself still saves on run1's own experiment doc —
+    // only the derivative claim write is skipped, not the result.
+    expect(mocks.updateDoc).toHaveBeenCalledTimes(1);
+    expect(mocks.updateDoc.mock.calls[0][1].result).toBe(resultField);
+  });
+
+  it('a same-run adjustment (matching sourceExperimentId) always supersedes, even given an (artificial) incoming sourceCompletedAt that looks older than the existing claim\'s', async () => {
+    mocks.getDoc.mockResolvedValue({ exists: () => true, data: () => experimentDataWithCreatedAt(RUN1_CREATED) });
+    const existingClaim = {
+      id: 'claim-run1-v1', version: 1, claimType: 'experiment_result', status: 'verified', supersededByClaimId: null,
+      analysisPlan: {
+        candidateId: 'experiment:sleep-hours-mood-same-day',
+        hypothesisFamilyId: 'experiment:sleep-hours-mood-same-day',
+        sourceExperimentId: RUN1_ID,
+        // Artificially LATER than the incoming build's own frozen createdAt
+        // (RUN1_CREATED) — proves the same-run bypass wins over the raw
+        // timestamp comparison, not merely that the comparison happens to
+        // favor supersede here.
+        sourceCompletedAt: '2026-07-15T00:00:00.000Z',
+      },
+    };
+    claimsServiceMocks.listAllClaims.mockResolvedValueOnce([existingClaim]);
+    const resultField = {
+      original: claimOkResult(),
+      adjusted: claimOkResult({ estimate: { ...claimOkResult().estimate, delta: 7 } }),
+      exclusionHistory: [],
+    };
+
+    await writeAdjustedResult(db, UID, RUN1_ID, resultField);
+
+    expect(claimsServiceMocks.supersedeClaim).toHaveBeenCalledTimes(1);
+    expect(claimsServiceMocks.writeClaim).not.toHaveBeenCalled();
+    const [, , oldClaimArg, newClaimArg] = claimsServiceMocks.supersedeClaim.mock.calls[0];
+    expect(oldClaimArg).toBe(existingClaim);
+    expect(newClaimArg.version).toBe(2);
+    expect(newClaimArg.analysisPlan.sourceExperimentId).toBe(RUN1_ID);
+  });
+
+  it('a legacy live claim with neither sourceExperimentId nor sourceCompletedAt is still superseded as before (no ordering info -> preserves pre-fix behavior; self-heals once this write lands)', async () => {
+    mocks.getDoc.mockResolvedValue({ exists: () => true, data: () => CLAIM_EXPERIMENT_DATA });
+    const legacyClaim = {
+      id: 'claim-legacy-v1', version: 1, claimType: 'experiment_result', status: 'verified', supersededByClaimId: null,
+      analysisPlan: { candidateId: 'experiment:sleep-hours-mood-same-day', hypothesisFamilyId: 'experiment:sleep-hours-mood-same-day' },
+    };
+    claimsServiceMocks.listAllClaims.mockResolvedValueOnce([legacyClaim]);
+
+    await writeResult(db, UID, 'exp-9', claimOkResult());
+
+    expect(claimsServiceMocks.supersedeClaim).toHaveBeenCalledTimes(1);
+    expect(claimsServiceMocks.writeClaim).not.toHaveBeenCalled();
+    const [, , oldClaimArg, newClaimArg] = claimsServiceMocks.supersedeClaim.mock.calls[0];
+    expect(oldClaimArg).toBe(legacyClaim);
+    expect(newClaimArg.version).toBe(2);
+    // The new write DOES carry real stamps — the gap self-heals going forward.
+    expect(newClaimArg.analysisPlan.sourceExperimentId).toBe('exp-9');
+    expect(typeof newClaimArg.analysisPlan.sourceCompletedAt).toBe('string');
+  });
+
+  it('an incoming claim missing sourceCompletedAt (defensive edge case — a hand-built caller with no experimentId) against a live claim that HAS one still supersedes (no ordering info on the incoming side -> preserves pre-fix behavior)', async () => {
+    // Reachable only by calling the exported helper directly with no
+    // experimentId — every real writeResult/writeAdjustedResult call always
+    // passes a real one, so buildExperimentResultClaim always stamps both
+    // keys together in practice (see the "full sequence" test above).
+    const existingClaim = {
+      id: 'claim-run2-v1', version: 1, claimType: 'experiment_result', status: 'verified', supersededByClaimId: null,
+      analysisPlan: {
+        candidateId: 'experiment:sleep-hours-mood-same-day',
+        hypothesisFamilyId: 'experiment:sleep-hours-mood-same-day',
+        sourceExperimentId: RUN2_ID,
+        sourceCompletedAt: RUN2_CREATED,
+      },
+    };
+    claimsServiceMocks.listAllClaims.mockResolvedValueOnce([existingClaim]);
+
+    await writeOrSupersedeExperimentResultClaim(db, UID, {
+      experiment: experimentDataWithCreatedAt(RUN1_CREATED),
+      experimentId: undefined,
+      result: claimOkResult(),
+      now: '2026-07-20T00:00:00.000Z',
+    });
+
+    expect(claimsServiceMocks.supersedeClaim).toHaveBeenCalledTimes(1);
+    expect(claimsServiceMocks.writeClaim).not.toHaveBeenCalled();
+    const [, , oldClaimArg, newClaimArg] = claimsServiceMocks.supersedeClaim.mock.calls[0];
+    expect(oldClaimArg).toBe(existingClaim);
+    expect(newClaimArg.analysisPlan).not.toHaveProperty('sourceExperimentId');
+    expect(newClaimArg.analysisPlan).not.toHaveProperty('sourceCompletedAt');
   });
 });
 

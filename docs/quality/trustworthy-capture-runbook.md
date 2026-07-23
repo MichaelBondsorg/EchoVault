@@ -1341,6 +1341,46 @@ verified/expired -> SUPERSEDE (`version: prior.version + 1, parentClaimId:
 prior.id`, both docs persist, old one gets `supersededByClaimId`).
 Validation matrix row R4P3-e proves both branches against the real module.
 
+**Run-identity fix (final review, closure wave — Important 1, RESOLVED).**
+The repeat-run lineage fix above closed the doc-id COLLISION defect (a
+fresh repeat completion silently vanishing), but left a separate ORDERING
+gap: `experiment_result` claims carried no run identity at all, so a
+post-completion exclusion adjustment on an OLD run (allowed any time —
+`setObservationExcluded` only forbids a `stopped` experiment, not an old
+completed one) would unconditionally supersede whatever claim was currently
+live — even a SECOND run's already-current claim — silently making stale,
+re-excluded data look like the family's latest result, with no way for a
+reader to tell. Fixed via two additions: `experimentClaim.js`'s
+`buildExperimentResultClaim` now stamps `analysisPlan.sourceExperimentId`
+(the producing experiment's id) and `analysisPlan.sourceCompletedAt` onto
+every claim it builds; `sourceCompletedAt` deliberately reuses the run's own
+immutable `frozenAt`/`createdAt` (plan-frozen the instant the experiment
+leaves `draft`), NOT this function's ambient `now` argument — `now` is the
+wall-clock MOMENT THE CLAIM WAS BUILT, which for a `writeAdjustedResult`
+call on an old run is whenever the user happens to open it and toggle an
+exclusion, easily well after a second run has already completed; using it
+directly would have made the old run's adjustment look "newer" purely
+because it happened later in wall-clock time. `writeOrSupersedeExperiment
+ResultClaim` (`experimentsService.js`) now compares the incoming claim's run
+identity against the currently-live claim's: an incoming claim from a
+DIFFERENT, chronologically OLDER run (`sourceCompletedAt` earlier, per real
+`createdAt` ordering) is SKIPPED entirely — no write, no supersede; the
+newer run's claim stays exactly as-is, and the adjusted old result remains
+fully visible on its own experiment doc regardless (only the derivative
+claim declines to overwrite). A same-run adjustment (matching
+`sourceExperimentId`) always supersedes, unconditionally, same as before. A
+legacy live claim written before this fix (neither stamp present) is also
+superseded unconditionally — there is no ordering information to compare,
+so this preserves the pre-fix behavior rather than guessing, and the gap
+self-heals the moment a real stamped claim is written for that candidate.
+Both keys are OPTIONAL in `claimSchema.js` (present only on `experiment_
+result` claims going forward; absent on every `pattern_to_watch`/
+`observation` pipeline claim and on any pre-fix legacy experiment claim).
+Full TDD evidence: `.superpowers/sdd/task-p3-6-report.md`'s "Closure wave"
+addendum. **PROJECT_STATUS checklist item (11) was never blocked on this**
+— `insightClaims` flip readiness is unaffected either way — but the gap is
+now closed regardless of when it flips.
+
 **Repeat-of-suppressed hint (review addition, post-ship).** Because a
 suppressed prior means the repeat run's claim is silently skipped (by
 design, above), a user who repeats a hypothesis they've already muted would

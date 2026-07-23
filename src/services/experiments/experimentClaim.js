@@ -139,10 +139,11 @@ function fallbackWording({
  * @param {Object} args.experiment - the experiment doc (`question`,
  *   `analysisPlan` (frozen, with `hypothesisFamilyId`), `durationDays`,
  *   `createdAt`).
- * @param {string} args.experimentId - unused in the mapping itself (no
- *   experiment-id-keyed field in a claim — claims key on
- *   family/candidate, not on which experiment produced them) but accepted
- *   per the brief's signature for forward-compat/caller symmetry.
+ * @param {string} args.experimentId - stamped onto
+ *   `analysisPlan.sourceExperimentId` (see the RUN IDENTITY note below;
+ *   final review Important 1, closure wave) — WHEN a non-empty string, a
+ *   hand-built/legacy caller that omits it simply gets no stamp, matching
+ *   this field's optional status in `claimSchema.js`.
  * @param {Object} args.result - a single `computeExperimentResult` output
  *   (`result.original` or `result.adjusted` — the caller unwraps the
  *   storage-layer `{original, adjusted, exclusionHistory}` wrapper; this
@@ -242,6 +243,45 @@ export function buildExperimentResultClaim({
   };
   if (Number.isFinite(plan.minExposureContrast)) {
     analysisPlan.minExposureContrast = plan.minExposureContrast;
+  }
+
+  // RUN IDENTITY (final review Important 1, closure wave): every
+  // experiment_result claim now carries WHICH RUN produced it
+  // (`sourceExperimentId`) and an ORDERING marker (`sourceCompletedAt`), so
+  // `experimentsService.js`'s `writeOrSupersedeExperimentResultClaim` can
+  // tell a genuinely NEWER run's completion apart from a post-hoc exclusion
+  // adjustment on an OLDER, already-superseded run — without this, adjusting
+  // an old run's exclusions (allowed any time post-completion) could
+  // overwrite a since-completed second run's claim as the family's
+  // "latest," with no way to tell the two apart.
+  //
+  // `sourceCompletedAt` deliberately reuses `frozenAt` (== `experiment.
+  // createdAt`, IMMUTABLE the instant the experiment leaves `draft` —
+  // plan-freeze) rather than this function's own `now` argument.  `now` is
+  // the WALL-CLOCK MOMENT THIS PARTICULAR CLAIM BUILD RAN — for a fresh
+  // `writeResult` call that happens to equal the run's real completion
+  // instant, but for a `writeAdjustedResult` call on an OLD run it is
+  // whatever much-LATER moment the user happened to open that old result and
+  // toggle an exclusion, which can easily be after a second run has already
+  // completed. Using it directly would make an old run's adjusted claim look
+  // "newer" than the second run's claim purely because the adjustment
+  // happened later in wall-clock time — exactly the defect this fix closes.
+  // `frozenAt` is stamped once per run and NEVER changes across any later
+  // adjustment of that SAME run, so two claims for the SAME run always
+  // compare equal and two claims for DIFFERENT runs compare in true run
+  // order — mirrors `experimentsService.js`'s `listFamilyRuns` "SORT KEY
+  // FIX" precedent (`createdAt`, not `updatedAt`, is the immutable ORDER
+  // key), for the identical reason.
+  //
+  // Guarded on `experimentId` being a real, non-empty string (defensive —
+  // every real caller always passes one; see this function's own JSDoc) so
+  // a hand-built/legacy call simply omits both keys rather than writing a
+  // malformed `sourceExperimentId`. Both keys are OPTIONAL in
+  // `claimSchema.js` (never required) precisely so an absent pair here is a
+  // valid claim, not a validation failure.
+  if (typeof experimentId === 'string' && experimentId) {
+    analysisPlan.sourceExperimentId = experimentId;
+    analysisPlan.sourceCompletedAt = frozenAt;
   }
 
   const sourceEntryIds = Array.isArray(result.receipt?.sources)

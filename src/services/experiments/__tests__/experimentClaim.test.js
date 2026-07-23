@@ -296,6 +296,56 @@ describe('buildExperimentResultClaim — determinism (idempotent doc id)', () =>
   });
 });
 
+describe('buildExperimentResultClaim — sourceExperimentId/sourceCompletedAt (final review Important 1, closure wave: run-identity fix)', () => {
+  it('stamps sourceExperimentId (the given experimentId) and sourceCompletedAt (the experiment\'s own immutable createdAt, not the ambient `now`)', () => {
+    const result = okResult();
+    const input = buildExperimentResultClaim({
+      experiment: experimentFor(SLEEP_PLAN, { createdAt: '2026-07-01T00:00:00.000Z' }),
+      experimentId: 'exp-1',
+      result,
+      now: NOW, // deliberately a LATER wall-clock moment than createdAt, to prove sourceCompletedAt != now
+    });
+    expect(input.analysisPlan.sourceExperimentId).toBe('exp-1');
+    expect(input.analysisPlan.sourceCompletedAt).toBe('2026-07-01T00:00:00.000Z');
+    expect(input.analysisPlan.sourceCompletedAt).not.toBe(NOW);
+    expect(() => buildClaim(input)).not.toThrow();
+  });
+
+  it('a repeat run of the same hypothesis, adjusted long after a second run has completed, still carries its OWN run\'s original createdAt as sourceCompletedAt — never the adjustment\'s wall-clock moment', () => {
+    // Simulates writeAdjustedResult's call shape: `now` is the CURRENT
+    // (much later) adjustment instant, but the experiment doc's createdAt is
+    // still this run's own original, immutable creation time.
+    const result = okResult();
+    const input = buildExperimentResultClaim({
+      experiment: experimentFor(SLEEP_PLAN, { createdAt: '2026-07-01T00:00:00.000Z' }),
+      experimentId: 'exp-1',
+      result,
+      now: '2026-09-01T00:00:00.000Z', // adjustment happens two months later
+    });
+    expect(input.analysisPlan.sourceCompletedAt).toBe('2026-07-01T00:00:00.000Z');
+  });
+
+  it('omits both keys when experimentId is not a real string (defensive — every real caller always passes one)', () => {
+    const result = okResult();
+    const input = buildExperimentResultClaim({ experiment: experimentFor(SLEEP_PLAN), experimentId: undefined, result, now: NOW });
+    expect(input.analysisPlan).not.toHaveProperty('sourceExperimentId');
+    expect(input.analysisPlan).not.toHaveProperty('sourceCompletedAt');
+    expect(() => buildClaim(input)).not.toThrow();
+  });
+
+  it('sourceCompletedAt falls back to `now` when the experiment has no valid createdAt (mirrors frozenAt\'s own fallback)', () => {
+    const result = okResult();
+    const input = buildExperimentResultClaim({
+      experiment: experimentFor(SLEEP_PLAN, { createdAt: undefined }),
+      experimentId: 'exp-1',
+      result,
+      now: NOW,
+    });
+    expect(input.analysisPlan.frozenAt).toBe(NOW);
+    expect(input.analysisPlan.sourceCompletedAt).toBe(NOW);
+  });
+});
+
 describe('buildExperimentResultClaim — plan.ciLevel and minExposureContrast passthrough', () => {
   it('uses the plan\'s actual ciLevel when present', () => {
     const plan = { ...SLEEP_PLAN, ciLevel: 0.975 };

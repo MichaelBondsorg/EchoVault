@@ -132,6 +132,36 @@ describe('buildClaim', () => {
   });
 });
 
+describe('buildClaim — sourceExperimentId/sourceCompletedAt (final review Important 1, closure wave: run-identity fix)', () => {
+  it('a plan with neither key still builds fine (optional — pipeline/basic: claims and legacy experiment claims never carry them)', () => {
+    const claim = buildClaim(valid());
+    expect(claim.analysisPlan).not.toHaveProperty('sourceExperimentId');
+    expect(claim.analysisPlan).not.toHaveProperty('sourceCompletedAt');
+  });
+
+  it('accepts both keys as non-empty strings', () => {
+    const plan = { ...validPlan, sourceExperimentId: 'exp-1', sourceCompletedAt: '2026-07-01T00:00:00.000Z' };
+    const claim = buildClaim({ ...valid(), analysisPlan: plan });
+    expect(claim.analysisPlan.sourceExperimentId).toBe('exp-1');
+    expect(claim.analysisPlan.sourceCompletedAt).toBe('2026-07-01T00:00:00.000Z');
+  });
+
+  it('rejects a non-string/empty sourceExperimentId when present', () => {
+    expect(() => buildClaim({ ...valid(), analysisPlan: { ...validPlan, sourceExperimentId: '' } })).toThrow(/sourceExperimentId/);
+    expect(() => buildClaim({ ...valid(), analysisPlan: { ...validPlan, sourceExperimentId: 42 } })).toThrow(/sourceExperimentId/);
+  });
+
+  it('rejects a non-string/empty sourceCompletedAt when present', () => {
+    expect(() => buildClaim({ ...valid(), analysisPlan: { ...validPlan, sourceCompletedAt: '' } })).toThrow(/sourceCompletedAt/);
+    expect(() => buildClaim({ ...valid(), analysisPlan: { ...validPlan, sourceCompletedAt: 42 } })).toThrow(/sourceCompletedAt/);
+  });
+
+  it('accepts one key present without the other (independently optional)', () => {
+    expect(() => buildClaim({ ...valid(), analysisPlan: { ...validPlan, sourceExperimentId: 'exp-1' } })).not.toThrow();
+    expect(() => buildClaim({ ...valid(), analysisPlan: { ...validPlan, sourceCompletedAt: '2026-07-01T00:00:00.000Z' } })).not.toThrow();
+  });
+});
+
 describe('CAUSAL_RE export', () => {
   it('is exported for reuse by other claim-producing modules (e.g. experimentClaim.js)', () => {
     expect(CAUSAL_RE.test('this causes better mood')).toBe(true);

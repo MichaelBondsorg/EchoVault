@@ -70,12 +70,23 @@ const EVIDENCE_NON_NUMBER_KEYS = ['sourceEntryIds', 'stabilityInterval',
   'leaveOneDayOutDirectionStable', 'representativeness'];
 const EVIDENCE_ALLOWED_KEYS = new Set([...EVIDENCE_NUMBER_KEYS, ...EVIDENCE_NON_NUMBER_KEYS]);
 
-// analysisPlan may carry every REQUIRED_PLAN_KEYS field plus the one
-// optional key the plan legitimately produces but does not require:
-// minExposureContrast (present on real plans, not gated by buildClaim
-// because a zero-contrast plan is still a valid frozen plan). Do not add
-// keys here beyond what the module already documents/requires.
-const ANALYSIS_PLAN_ALLOWED_KEYS = new Set([...REQUIRED_PLAN_KEYS, 'minExposureContrast']);
+// analysisPlan may carry every REQUIRED_PLAN_KEYS field plus a small set of
+// optional keys the plan legitimately produces but does not require:
+//   - minExposureContrast (present on real plans, not gated by buildClaim
+//     because a zero-contrast plan is still a valid frozen plan).
+//   - sourceExperimentId / sourceCompletedAt (final review Important 1,
+//     closure wave — the run-identity fix): stamped ONLY by
+//     `experimentClaim.js`'s `buildExperimentResultClaim` onto every
+//     `experiment_result` claim it builds going forward; ABSENT on every
+//     pipeline (`basic:`-family) claim from `evidenceBuilder.js` and on any
+//     `experiment_result` claim already written before this fix shipped
+//     (a "legacy" claim in the sense used by
+//     `experimentsService.js`'s `writeOrSupersedeExperimentResultClaim` doc
+//     comment). Optional here (not in REQUIRED_PLAN_KEYS) precisely because
+//     both call sites are real and permanent, not a migration in progress.
+// Do not add keys here beyond what the module already documents/requires.
+const OPTIONAL_PLAN_KEYS = ['minExposureContrast', 'sourceExperimentId', 'sourceCompletedAt'];
+const ANALYSIS_PLAN_ALLOWED_KEYS = new Set([...REQUIRED_PLAN_KEYS, ...OPTIONAL_PLAN_KEYS]);
 
 function req(cond, msg) { if (!cond) throw new Error(`claim: ${msg}`); }
 const isStr = (v) => typeof v === 'string' && v.trim() !== '';
@@ -141,6 +152,13 @@ export function buildClaim(input) {
   req(analysisPlan && typeof analysisPlan === 'object', 'analysisPlan required');
   for (const k of REQUIRED_PLAN_KEYS) req(analysisPlan[k] !== undefined && analysisPlan[k] !== null, `analysisPlan.${k} required (frozen before analysis)`);
   req(isFin(analysisPlan.ciLevel) && analysisPlan.ciLevel > 0 && analysisPlan.ciLevel < 1, 'analysisPlan.ciLevel in (0,1)');
+  // sourceExperimentId / sourceCompletedAt (run-identity fix, closure wave):
+  // OPTIONAL — absent on a pipeline claim and on any pre-fix legacy
+  // experiment_result claim — but a non-empty string WHEN present, same
+  // "when present" posture as minExposureContrast's finite-number check
+  // just below/elsewhere in this module never applying to an absent key.
+  if (analysisPlan.sourceExperimentId !== undefined) req(isStr(analysisPlan.sourceExperimentId), 'analysisPlan.sourceExperimentId must be a non-empty string when present');
+  if (analysisPlan.sourceCompletedAt !== undefined) req(isStr(analysisPlan.sourceCompletedAt), 'analysisPlan.sourceCompletedAt must be a non-empty string when present');
   for (const k of Object.keys(analysisPlan)) req(ANALYSIS_PLAN_ALLOWED_KEYS.has(k), `analysisPlan.${k} is not a recognized key`);
 
   req(evidence && typeof evidence === 'object', 'evidence required');

@@ -542,6 +542,14 @@ export async function setObservationExcluded(db, uid, experimentId, dateKey, exc
  *   - the live claim is `'verified'` or `'expired'` -> supersede:
  *     `version: existing.version + 1`, `parentClaimId: existing.id`
  *     (expired -> verified-again is the documented revival path)
+ *   - EXCEPT (final review Important 1, closure wave — the RUN-IDENTITY
+ *     FIX): if the incoming claim's run is OLDER than the live claim's run
+ *     (both carry `analysisPlan.sourceCompletedAt` and the incoming's is the
+ *     smaller/earlier value, per a DIFFERENT `sourceExperimentId`) -> SKIP
+ *     entirely instead of superseding. See the function body's own comment
+ *     block for the full reasoning and `experimentClaim.js`'s "RUN IDENTITY"
+ *     doc comment for why the ordering field is the run's immutable
+ *     `frozenAt`, not a wall-clock timestamp.
  *
  * THE REPEAT-RUN LINEAGE FIX (the load-bearing defect this task closes):
  * `writeClaim`'s doc id is DETERMINISTIC — `hypothesisFamilyId +
@@ -595,6 +603,50 @@ export async function writeOrSupersedeExperimentResultClaim(db, uid, {
     // no-op: prior stays exactly as-is, no new claim is written (invariant
     // above — suppression is never auto-touched by a fresh computation).
   } else if (existing) {
+    // RUN-IDENTITY GUARD (final review Important 1, closure wave): before
+    // superseding, check whether `existing` was produced by a genuinely
+    // NEWER run than the one `claimInput` describes. Without this, a
+    // post-completion exclusion adjustment on an OLD run (allowed any time —
+    // `setObservationExcluded` only forbids a `stopped` experiment, not an
+    // old completed one) would unconditionally supersede whatever is
+    // currently live, even a SECOND run's already-current claim — silently
+    // making stale data look like the family's latest result, with no way
+    // for a reader to tell.
+    //
+    // `sourceExperimentId`/`sourceCompletedAt` are the run-identity/ordering
+    // stamps `experimentClaim.js`'s `buildExperimentResultClaim` puts on
+    // `analysisPlan` (see that function's own "RUN IDENTITY" doc comment for
+    // why `sourceCompletedAt` is the run's immutable `frozenAt`, not a
+    // wall-clock "now" that would drift on every later adjustment).
+    const incomingRunId = claimInput.analysisPlan?.sourceExperimentId;
+    const incomingCompletedAt = claimInput.analysisPlan?.sourceCompletedAt;
+    const existingRunId = existing.analysisPlan?.sourceExperimentId;
+    const existingCompletedAt = existing.analysisPlan?.sourceCompletedAt;
+
+    // SAME-RUN ADJUSTMENT ALWAYS SUPERSEDES: a claim being rebuilt for the
+    // SAME experiment that produced the currently-live claim is just this
+    // run's own recomputation (a fresh completion re-run, or an exclusion
+    // toggle on the run that IS the live claim) — never gated on ordering.
+    const sameRun = typeof incomingRunId === 'string' && incomingRunId && incomingRunId === existingRunId;
+
+    // LEGACY (no stamps) SELF-HEALS: a claim written before this fix carries
+    // neither key. With no ordering information to compare, this preserves
+    // the pre-fix behavior (always supersede) rather than guessing — the
+    // very next write for this candidate (this one) stamps real run-identity
+    // fields going forward, so the gap closes itself on first touch.
+    const bothHaveOrderingStamps = typeof incomingCompletedAt === 'string' && incomingCompletedAt
+      && typeof existingCompletedAt === 'string' && existingCompletedAt;
+
+    const incomingIsFromAnOlderRun = !sameRun && bothHaveOrderingStamps && incomingCompletedAt < existingCompletedAt;
+    if (incomingIsFromAnOlderRun) {
+      // SKIP entirely: no write, no supersede. The newer run's claim stays
+      // exactly as-is and remains the family's latest. The adjusted old
+      // result itself is NOT lost — it's still fully visible on its own
+      // experiment doc (`writeAdjustedResult`'s `result.adjusted` /
+      // `exclusionHistory`); only the derivative claim declines to overwrite
+      // a newer run's already-current claim.
+      return;
+    }
     await supersedeClaim(db, uid, existing, {
       ...claimInput,
       version: existing.version + 1,
