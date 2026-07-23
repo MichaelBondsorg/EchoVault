@@ -401,6 +401,124 @@ describe('InsightsPage — R4 Phase 2 Task 6: unified feed replaces Quick Insigh
   });
 });
 
+// ---------------------------------------------------------------------------
+// R4 Phase 3 Task 2: RecommendationsSection idea→experiment CTAs
+// ---------------------------------------------------------------------------
+//
+// Idea→template map (Shared contracts): recovery -> 'recovery-score-mood',
+// activity -> 'exercise-minutes-mood', environment -> 'sunshine-percent-mood';
+// self_care/other -> no button. Buttons only render when BOTH
+// `personalExperiments` is on AND the parent supplied a real
+// `onTryExperiment` handler — same "mapped && handler present" gate as
+// ClaimCard's own "Try as an experiment" (F4).
+describe('InsightsPage — R4 Phase 3 Task 2: RecommendationsSection "Try as an experiment"', () => {
+  const IDEA_RECS = {
+    recommendations: [
+      { action: 'Prioritize recovery tonight', priority: 'medium', type: 'recovery' },
+      { action: 'Take a short walk', priority: 'medium', type: 'activity' },
+      { action: 'Get some sunshine', priority: 'low', type: 'environment' },
+      { action: 'Try a self-care ritual', priority: 'low', type: 'self_care' },
+      { action: 'Something unmapped', priority: 'low', type: 'other' },
+    ],
+    basedOn: { entriesAnalyzed: 10, interventionsTracked: 0 },
+  };
+
+  beforeEach(() => {
+    // insightClaims OFF (legacy tree, where RecommendationsSection lives).
+    getTodayRecommendations.mockResolvedValue(IDEA_RECS);
+  });
+
+  it('renders "Try as an experiment" only for mapped idea types when personalExperiments is on and a handler is supplied', async () => {
+    getFlag.mockImplementation((name) => name === 'personalExperiments');
+    const onTryExperiment = vi.fn();
+    render(
+      <InsightsPage
+        entries={ENTRIES}
+        userId="user-1"
+        user={{ uid: 'user-1' }}
+        todayHealth={{ sleepHours: 7 }}
+        onTryExperiment={onTryExperiment}
+      />,
+    );
+
+    await screen.findByText("Today's Recommendations");
+    const buttons = screen.getAllByText('Try as an experiment');
+    expect(buttons).toHaveLength(3); // recovery, activity, environment — not self_care/other.
+  });
+
+  it('clicking each mapped idea button calls onTryExperiment with the correct template id', async () => {
+    getFlag.mockImplementation((name) => name === 'personalExperiments');
+    const onTryExperiment = vi.fn();
+    render(
+      <InsightsPage
+        entries={ENTRIES}
+        userId="user-1"
+        user={{ uid: 'user-1' }}
+        todayHealth={{ sleepHours: 7 }}
+        onTryExperiment={onTryExperiment}
+      />,
+    );
+
+    await screen.findByText("Today's Recommendations");
+    const buttons = screen.getAllByText('Try as an experiment');
+    fireEvent.click(buttons[0]);
+    fireEvent.click(buttons[1]);
+    fireEvent.click(buttons[2]);
+
+    expect(onTryExperiment).toHaveBeenNthCalledWith(1, 'recovery-score-mood', undefined);
+    expect(onTryExperiment).toHaveBeenNthCalledWith(2, 'exercise-minutes-mood', undefined);
+    expect(onTryExperiment).toHaveBeenNthCalledWith(3, 'sunshine-percent-mood', undefined);
+  });
+
+  it('renders no idea buttons when personalExperiments is off, even with a real handler supplied', async () => {
+    getFlag.mockImplementation(() => false);
+    const onTryExperiment = vi.fn();
+    render(
+      <InsightsPage
+        entries={ENTRIES}
+        userId="user-1"
+        user={{ uid: 'user-1' }}
+        todayHealth={{ sleepHours: 7 }}
+        onTryExperiment={onTryExperiment}
+      />,
+    );
+
+    await screen.findByText("Today's Recommendations");
+    expect(screen.queryByText('Try as an experiment')).toBeNull();
+  });
+
+  it('renders no idea buttons when personalExperiments is on but no onTryExperiment handler is supplied', async () => {
+    getFlag.mockImplementation((name) => name === 'personalExperiments');
+    render(
+      <InsightsPage
+        entries={ENTRIES}
+        userId="user-1"
+        user={{ uid: 'user-1' }}
+        todayHealth={{ sleepHours: 7 }}
+      />,
+    );
+
+    await screen.findByText("Today's Recommendations");
+    expect(screen.queryByText('Try as an experiment')).toBeNull();
+  });
+
+  it('flag-OFF page (insightClaims off, personalExperiments off): zero "Try as an experiment" buttons anywhere, including ClaimCard\'s (which never renders in this mode anyway)', async () => {
+    getFlag.mockImplementation(() => false);
+    render(
+      <InsightsPage
+        entries={ENTRIES}
+        userId="user-1"
+        user={{ uid: 'user-1' }}
+        todayHealth={{ sleepHours: 7 }}
+        onTryExperiment={vi.fn()}
+      />,
+    );
+
+    await screen.findByText("Today's Recommendations");
+    expect(screen.queryAllByText('Try as an experiment')).toHaveLength(0);
+  });
+});
+
 describe('InsightsPage — R4 Phase 2 Task 6: flag OFF stays on the legacy tree', () => {
   beforeEach(() => {
     getFlag.mockImplementation(() => false);

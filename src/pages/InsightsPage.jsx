@@ -476,7 +476,7 @@ const InsightsPage = ({
           superseded by the unified feed's experiment_result/pattern claims
           over the same families. */}
       {!getFlag('insightClaims') && recommendations?.recommendations?.length > 0 && (
-        <RecommendationsSection recommendations={recommendations} />
+        <RecommendationsSection recommendations={recommendations} onTryExperiment={handleTryExperiment} />
       )}
 
       {/* AI Insights (Nexus) list + its empty state — hidden when
@@ -1275,10 +1275,21 @@ const CorrelationsSection = ({ correlations, isExpanded, onToggle }) => {
   );
 };
 
+// Idea type -> v1 experiment template id (Shared contracts, R4 Phase 3 Task
+// 2 plan). Only these three idea types have a v1 template; self_care/other
+// (and anything unrecognized) map to no button rather than a guess — same
+// "never guess, hide instead" convention ClaimCard's own
+// `experimentTemplateFor` uses for claim exposures.
+const IDEA_TEMPLATE_BY_TYPE = Object.freeze({
+  recovery: 'recovery-score-mood',
+  activity: 'exercise-minutes-mood',
+  environment: 'sunshine-percent-mood',
+});
+
 /**
  * RecommendationsSection - Shows today's personalized recommendations
  */
-const RecommendationsSection = ({ recommendations }) => {
+const RecommendationsSection = ({ recommendations, onTryExperiment }) => {
   const getPriorityStyle = (priority) => {
     switch (priority) {
       case 'high':
@@ -1330,6 +1341,7 @@ const RecommendationsSection = ({ recommendations }) => {
         {recommendations.recommendations.map((rec, i) => {
           const style = getPriorityStyle(rec.priority);
           const Icon = getTypeIcon(rec.type);
+          const experimentTemplateId = IDEA_TEMPLATE_BY_TYPE[rec.type];
 
           return (
             <motion.div
@@ -1349,6 +1361,21 @@ const RecommendationsSection = ({ recommendations }) => {
                     <p className="text-xs text-muted-foreground mt-1">
                       {rec.reasoning}
                     </p>
+                  )}
+                  {/* "Try as an experiment" (R4 Phase 3 Task 2) — only for a
+                      mapped idea type, only when personalExperiments is on,
+                      and only when the parent actually wired a handler.
+                      Mirrors ClaimCard's own "mapped && handler present"
+                      gate (F4) so this can never be a guaranteed no-op
+                      button either. */}
+                  {experimentTemplateId && getFlag('personalExperiments') && typeof onTryExperiment === 'function' && (
+                    <button
+                      type="button"
+                      onClick={() => onTryExperiment(experimentTemplateId)}
+                      className="relative mt-1.5 inline-flex min-h-[28px] items-center text-xs font-medium text-accent-deep before:absolute before:-inset-2 before:content-['']"
+                    >
+                      Try as an experiment
+                    </button>
                   )}
                 </div>
                 <span className={`text-xs px-2 py-0.5 rounded-full ${style.bg} ${style.text} font-medium`}>

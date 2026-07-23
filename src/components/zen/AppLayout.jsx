@@ -109,6 +109,12 @@ const AppLayout = ({
   const [showRecipes, setShowRecipes] = useState(false);
   const [showSessionPrep, setShowSessionPrep] = useState(false);
   const [showExperiments, setShowExperiments] = useState(false);
+  // Try-as-experiment prefill (R4 Phase 3 Task 2): set by handleTryExperiment
+  // below, consumed once by ExperimentsScreen's own `prefill` prop (a fresh
+  // mount per open — see the flag-gated mount site), cleared on every close
+  // path so a later plain "New experiment" open never inherits a stale
+  // prefill.
+  const [experimentPrefill, setExperimentPrefill] = useState(null);
   const [entryMode, setEntryMode] = useState('text'); // 'voice' or 'text'
   const [isFreshEntry, setIsFreshEntry] = useState(true); // true = FAB entry, false = responding to prompt
   const [currentPrompt, setCurrentPrompt] = useState(null); // Track prompt being answered for auto-dismiss
@@ -309,6 +315,17 @@ const AppLayout = ({
     setShowEntryModal(true);
   }, [setReplyContext]);
 
+  // Try-as-experiment (R4 Phase 3 Task 2): the single handler both
+  // InsightsPage's ClaimCard seam (onTryExperiment) and RecommendationsSection's
+  // idea-card CTAs are wired to — sets the prefill ExperimentsScreen reads
+  // on mount, then opens it. Never passed to InsightsPage when
+  // `personalExperiments` is off (see the render-site gate below) so a
+  // button can never open a flag-hidden screen.
+  const handleTryExperiment = useCallback((templateId, tag) => {
+    setExperimentPrefill({ templateId, tag });
+    setShowExperiments(true);
+  }, []);
+
   // Handler for Quick Mood - also clears any stale replyContext
   const handleOpenQuickMood = () => {
     setReplyContext?.(null); // Clear any stale context
@@ -422,6 +439,7 @@ const AppLayout = ({
                 category={category}
                 userId={user?.uid}
                 user={user}
+                onTryExperiment={getFlag('personalExperiments') ? handleTryExperiment : undefined}
               />
             }
           />
@@ -441,7 +459,7 @@ const AppLayout = ({
                 onOpenControlCenter={() => setShowControlCenter(true)}
                 onOpenRecipes={() => setShowRecipes(true)}
                 onOpenSessionPrep={() => setShowSessionPrep(true)}
-                onOpenExperiments={() => setShowExperiments(true)}
+                onOpenExperiments={() => { setExperimentPrefill(null); setShowExperiments(true); }}
                 onOpenSafetyPlan={onShowSafetyPlan}
                 onOpenExport={onShowExport}
                 onRequestNotifications={onRequestNotifications}
@@ -630,9 +648,10 @@ const AppLayout = ({
         <ExperimentsScreen
           uid={user?.uid}
           entries={entries}
-          onClose={() => setShowExperiments(false)}
-          onShowSafetyPlan={() => { setShowExperiments(false); onShowSafetyPlan?.(); }}
-          onOpenRecipes={() => { setShowExperiments(false); setShowRecipes(true); }}
+          prefill={experimentPrefill}
+          onClose={() => { setShowExperiments(false); setExperimentPrefill(null); }}
+          onShowSafetyPlan={() => { setShowExperiments(false); setExperimentPrefill(null); onShowSafetyPlan?.(); }}
+          onOpenRecipes={() => { setShowExperiments(false); setExperimentPrefill(null); setShowRecipes(true); }}
         />
       )}
 
