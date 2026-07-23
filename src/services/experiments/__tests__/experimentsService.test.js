@@ -87,6 +87,7 @@ const {
   setConfirmation,
   clearConfirmation,
   listConfirmations,
+  listFamilyRuns,
 } = await import('../experimentsService.js');
 
 const { MIN_PAIRED_OBSERVATIONS, COVERAGE_FLOOR } = await import('../estimator.js');
@@ -984,6 +985,112 @@ describe('writeResult — experiment_result claim write (R4 Phase 2, Task 4)', (
   });
 });
 
+// ---------------------------------------------------------------------------
+// R4 Phase 3 Task 6 — the repeat-run claim lineage fix. Before this task,
+// `writeResult` called `claimsService.writeClaim` directly (bare) — a second
+// completed run of the SAME hypothesis (same candidateId) produced the exact
+// same deterministic claim doc id as the first run's already-existing claim,
+// `writeClaim`'s create-only `setDoc` got rules-denied against it, and the
+// denial was silently warned away by the containing catch: the repeat run's
+// claim NEVER landed. These tests pin the fix — `writeResult` now routes
+// through the SAME find-live-prior-and-decide helper `writeAdjustedResult`
+// already used, so it supersedes instead of colliding.
+// ---------------------------------------------------------------------------
+describe('writeResult — repeat-run claim lineage fix (R4 Phase 3 Task 6)', () => {
+  it('a repeat run SUPERSEDES the prior VERIFIED experiment_result claim for the same candidate — new claim v2/parentClaimId, prior linked (both docs)', async () => {
+    mocks.getDoc.mockResolvedValue({ exists: () => true, data: () => CLAIM_EXPERIMENT_DATA });
+    const priorClaim = {
+      id: 'claim_experiment-sleep-hours-mood-same-day_abcd1234_v1',
+      version: 1,
+      claimType: 'experiment_result',
+      status: 'verified',
+      supersededByClaimId: null,
+      analysisPlan: { candidateId: 'experiment:sleep-hours-mood-same-day', hypothesisFamilyId: 'experiment:sleep-hours-mood-same-day' },
+    };
+    claimsServiceMocks.listAllClaims.mockResolvedValueOnce([priorClaim]);
+
+    // A repeat run's result: same candidate/plan (frozen at re-create), a
+    // fresh estimate.
+    const repeatResult = claimOkResult({ estimate: { ...claimOkResult().estimate, delta: 14 } });
+    await writeResult(db, UID, 'exp-2', repeatResult);
+
+    // NOT the pre-fix bare-writeClaim path — the second run supersedes.
+    expect(claimsServiceMocks.writeClaim).not.toHaveBeenCalled();
+    expect(claimsServiceMocks.supersedeClaim).toHaveBeenCalledTimes(1);
+    const [supDb, supUid, oldClaimArg, newClaimArg] = claimsServiceMocks.supersedeClaim.mock.calls[0];
+    expect(supDb).toBe(db);
+    expect(supUid).toBe(UID);
+    // Both docs are present in the call: the OLD claim being linked from...
+    expect(oldClaimArg).toBe(priorClaim);
+    // ...and the NEW claim doc, with real lineage.
+    expect(newClaimArg.claimType).toBe('experiment_result');
+    expect(newClaimArg.version).toBe(2);
+    expect(newClaimArg.parentClaimId).toBe(priorClaim.id);
+    expect(newClaimArg.direction).toBe('positive');
+    // The experiment doc's own result save still committed first, as always.
+    expect(mocks.updateDoc).toHaveBeenCalledTimes(1);
+    expect(mocks.updateDoc.mock.calls[0][1].status).toBe('completed');
+  });
+
+  it('does NOT resurrect a SUPPRESSED prior claim on a repeat run: skips the write/supersede entirely, prior untouched, result still saves', async () => {
+    mocks.getDoc.mockResolvedValue({ exists: () => true, data: () => CLAIM_EXPERIMENT_DATA });
+    const suppressedClaim = {
+      id: 'claim_experiment-sleep-hours-mood-same-day_abcd1234_v1',
+      version: 1,
+      claimType: 'experiment_result',
+      status: 'suppressed',
+      supersededByClaimId: null,
+      analysisPlan: { candidateId: 'experiment:sleep-hours-mood-same-day', hypothesisFamilyId: 'experiment:sleep-hours-mood-same-day' },
+    };
+    claimsServiceMocks.listAllClaims.mockResolvedValueOnce([suppressedClaim]);
+
+    await writeResult(db, UID, 'exp-2', claimOkResult());
+
+    expect(claimsServiceMocks.writeClaim).not.toHaveBeenCalled();
+    expect(claimsServiceMocks.supersedeClaim).not.toHaveBeenCalled();
+    expect(suppressedClaim.status).toBe('suppressed');
+    expect(suppressedClaim.supersededByClaimId).toBeNull();
+    // The result save itself is unaffected by the suppressed-skip.
+    expect(mocks.updateDoc).toHaveBeenCalledTimes(1);
+    expect(mocks.updateDoc.mock.calls[0][1].status).toBe('completed');
+  });
+
+  it('a FIRST run (no prior claim for this candidate) still writes a plain v1 — unchanged from before this task', async () => {
+    mocks.getDoc.mockResolvedValue({ exists: () => true, data: () => CLAIM_EXPERIMENT_DATA });
+    claimsServiceMocks.listAllClaims.mockResolvedValueOnce([]);
+
+    await writeResult(db, UID, 'exp-1', claimOkResult());
+
+    expect(claimsServiceMocks.supersedeClaim).not.toHaveBeenCalled();
+    expect(claimsServiceMocks.writeClaim).toHaveBeenCalledTimes(1);
+    const claimInput = claimsServiceMocks.writeClaim.mock.calls[0][2];
+    expect(claimInput.version).toBe(1);
+    expect(claimInput.parentClaimId).toBeNull();
+  });
+
+  it('supersedes an EXPIRED prior claim on a repeat run too (documented revival path, same as writeAdjustedResult)', async () => {
+    mocks.getDoc.mockResolvedValue({ exists: () => true, data: () => CLAIM_EXPERIMENT_DATA });
+    const expiredClaim = {
+      id: 'claim_experiment-sleep-hours-mood-same-day_abcd1234_v1',
+      version: 1,
+      claimType: 'experiment_result',
+      status: 'expired',
+      supersededByClaimId: null,
+      analysisPlan: { candidateId: 'experiment:sleep-hours-mood-same-day', hypothesisFamilyId: 'experiment:sleep-hours-mood-same-day' },
+    };
+    claimsServiceMocks.listAllClaims.mockResolvedValueOnce([expiredClaim]);
+
+    await writeResult(db, UID, 'exp-2', claimOkResult());
+
+    expect(claimsServiceMocks.supersedeClaim).toHaveBeenCalledTimes(1);
+    expect(claimsServiceMocks.writeClaim).not.toHaveBeenCalled();
+    const [, , oldClaimArg, newClaimArg] = claimsServiceMocks.supersedeClaim.mock.calls[0];
+    expect(oldClaimArg).toBe(expiredClaim);
+    expect(newClaimArg.version).toBe(2);
+    expect(newClaimArg.parentClaimId).toBe(expiredClaim.id);
+  });
+});
+
 describe('buildAdjustedResultUpdate — pure helper (result integrity, item 3)', () => {
   const ORIGINAL = { status: 'ok', estimate: { delta: 4 } };
   const ADJUSTED = { status: 'ok', estimate: { delta: 6 } };
@@ -1236,6 +1343,75 @@ describe('getExperimentPrefs / markExplainerSeen — settings/experimentPrefs (r
     const payload = mocks.setDoc.mock.calls[0][1];
     expect(Object.keys(payload).sort()).toEqual(['enabled', 'updatedAt']);
     expect(payload.optInAt).toBeUndefined();
+  });
+});
+
+describe('listFamilyRuns — family history (R4 Phase 3 Task 6, repeated trials)', () => {
+  const FAMILY_ID = 'experiment:sleep-hours-mood-same-day';
+
+  function experimentDoc(id, overrides = {}) {
+    return {
+      id,
+      status: 'completed',
+      analysisPlan: { hypothesisFamilyId: FAMILY_ID },
+      updatedAt: '2026-07-10T00:00:00.000Z',
+      result: { original: { status: 'ok', estimate: { delta: 5 } } },
+      ...overrides,
+    };
+  }
+
+  function mockDocs(docs) {
+    mocks.getDocs.mockResolvedValue({
+      forEach: (cb) => docs.forEach((d) => cb({ id: d.id, data: () => d })),
+    });
+  }
+
+  it('reads over the SAME collection/ordering subscribeExperiments uses (no new query shape)', async () => {
+    mockDocs([]);
+    await listFamilyRuns(db, UID, FAMILY_ID);
+    expect(mocks.collection).toHaveBeenCalledWith(db, EXPERIMENTS_PATH);
+    expect(mocks.orderBy).toHaveBeenCalledWith('createdAt', 'desc');
+  });
+
+  it('includes only COMPLETED experiments sharing the exact hypothesisFamilyId, mapped to {id, completedAt, delta, status}', async () => {
+    mockDocs([
+      experimentDoc('exp-a'),
+      experimentDoc('exp-b', { analysisPlan: { hypothesisFamilyId: 'experiment:some-other-family' } }),
+      experimentDoc('exp-c', { status: 'running' }),
+    ]);
+    const runs = await listFamilyRuns(db, UID, FAMILY_ID);
+    expect(runs).toHaveLength(1);
+    expect(runs[0]).toEqual({
+      id: 'exp-a', completedAt: '2026-07-10T00:00:00.000Z', delta: 5, status: 'ok',
+    });
+  });
+
+  it('sorts by completion time, oldest first', async () => {
+    mockDocs([
+      experimentDoc('exp-newest', { updatedAt: '2026-07-20T00:00:00.000Z' }),
+      experimentDoc('exp-oldest', { updatedAt: '2026-07-01T00:00:00.000Z' }),
+      experimentDoc('exp-middle', { updatedAt: '2026-07-10T00:00:00.000Z' }),
+    ]);
+    const runs = await listFamilyRuns(db, UID, FAMILY_ID);
+    expect(runs.map((r) => r.id)).toEqual(['exp-oldest', 'exp-middle', 'exp-newest']);
+  });
+
+  it('an insufficient original result reports its real status ("insufficient") with delta:null (no estimate to read)', async () => {
+    mockDocs([experimentDoc('exp-a', { result: { original: { status: 'insufficient' } } })]);
+    const runs = await listFamilyRuns(db, UID, FAMILY_ID);
+    expect(runs[0]).toMatchObject({ delta: null, status: 'insufficient' });
+  });
+
+  it('a malformed/missing original (no status field at all) falls back to delta:null, status:"unknown"', async () => {
+    mockDocs([experimentDoc('exp-a', { result: { original: {} } })]);
+    const runs = await listFamilyRuns(db, UID, FAMILY_ID);
+    expect(runs[0]).toMatchObject({ delta: null, status: 'unknown' });
+  });
+
+  it('returns [] for an empty/invalid hypothesisFamilyId without reading Firestore', async () => {
+    await expect(listFamilyRuns(db, UID, '')).resolves.toEqual([]);
+    await expect(listFamilyRuns(db, UID, null)).resolves.toEqual([]);
+    expect(mocks.getDocs).not.toHaveBeenCalled();
   });
 });
 

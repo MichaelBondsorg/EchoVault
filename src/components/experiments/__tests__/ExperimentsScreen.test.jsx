@@ -762,6 +762,82 @@ describe('ExperimentsScreen — result view', () => {
 });
 
 // ---------------------------------------------------------------------------
+// "Repeat this experiment" (R4 Phase 3 Task 6, repeated trials) — reuses the
+// T2 prefill mechanism INTERNALLY (`enterPrefillFlow`, shared with the
+// prefill effect): screenQuestion runs again, the SAME template/tag is
+// resolved from the completed experiment's own stored fields, and
+// exposureMode is chosen FRESH (never inherited from the prior frozen plan).
+// ---------------------------------------------------------------------------
+
+describe('ExperimentsScreen — Repeat this experiment (R4 Phase 3 Task 6)', () => {
+  it('re-enters the create flow via screenAndProceed for a plain (non-tag) completed experiment, screening the template\'s own title and landing on duration with it selected', async () => {
+    withExperiments([runningExperiment({ status: 'completed', result: { status: 'ok' } })]);
+    render(<ExperimentsScreen uid={UID} entries={sleepEntries(28)} onClose={vi.fn()} />);
+
+    fireEvent.click(await screen.findByText('Repeat this experiment'));
+
+    expect(await screen.findByText('How long should this run?')).toBeTruthy();
+    expect(screenQuestionSpy).toHaveBeenCalledWith('How does my sleep move together with my mood?');
+    // Never opened the result view instead of the create flow.
+    expect(screen.queryByTestId('result-view')).toBeNull();
+  });
+
+  it('a repeat of a tag-template experiment composes the SAME co-movement question from the stored analysisPlan.exposure.tag, and shows a FRESH exposureMode toggle defaulting unchecked — never inherited from the prior run\'s frozen "confirmed" plan', async () => {
+    const tagExperiment = runningExperiment({
+      id: 'exp-tag',
+      status: 'completed',
+      question: 'How does gym move together with my mood?',
+      template: 'tag-presence-mood',
+      analysisPlan: {
+        templateId: 'tag-presence-mood',
+        lag: 0,
+        exposure: { source: 'tags', label: 'this tag', tag: '@habit:gym' },
+        outcome: { field: 'analysis.mood_score', label: 'mood' },
+        exposureMode: 'confirmed', // the PRIOR run's frozen choice — must not carry forward
+        minPairedObservations: 10,
+        coverageFloor: 0.5,
+        confounders: [],
+        whatThisDoesNotProve: [],
+      },
+      result: { status: 'ok' },
+    });
+    withExperiments([tagExperiment]);
+    render(<ExperimentsScreen uid={UID} entries={sleepEntries(28)} onClose={vi.fn()} />);
+
+    fireEvent.click(await screen.findByText('Repeat this experiment'));
+
+    expect(await screen.findByText('How long should this run?')).toBeTruthy();
+    expect(screenQuestionSpy).toHaveBeenCalledWith('How does gym move together with my mood?');
+    const toggle = await screen.findByRole('checkbox', { name: /track this with a daily check-in/i });
+    expect(toggle.checked).toBe(false);
+  });
+
+  it('screenQuestion still runs FIRST on a repeat: a forced decline verdict blocks the advance entirely (no shortcut past the safety gate for a "known-safe" repeat)', async () => {
+    screenQuestionSpy.mockReturnValueOnce({ verdict: 'medical' });
+    withExperiments([runningExperiment({ status: 'completed', result: { status: 'ok' } })]);
+    render(<ExperimentsScreen uid={UID} entries={sleepEntries(28)} onClose={vi.fn()} />);
+
+    fireEvent.click(await screen.findByText('Repeat this experiment'));
+
+    expect(await screen.findByText(/medication or diagnosis/i)).toBeTruthy();
+    expect(screen.queryByText('How long should this run?')).toBeNull();
+  });
+
+  it('an unresolvable stored templateId is ignored — console.warn, the list view stays put — rather than crashing', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    withExperiments([runningExperiment({ status: 'completed', template: 'not-a-real-template', result: { status: 'ok' } })]);
+    render(<ExperimentsScreen uid={UID} entries={sleepEntries(28)} onClose={vi.fn()} />);
+
+    fireEvent.click(await screen.findByText('Repeat this experiment'));
+
+    expect(screen.queryByText('How long should this run?')).toBeNull();
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    expect(warnSpy.mock.calls[0][0]).toMatch(/not-a-real-template/);
+    warnSpy.mockRestore();
+  });
+});
+
+// ---------------------------------------------------------------------------
 // SpacePicker gated behind contextSpaces
 // ---------------------------------------------------------------------------
 

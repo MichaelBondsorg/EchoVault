@@ -60,6 +60,18 @@
  *   other plan field). See `setConfirmation`/`clearConfirmation`/
  *   `listConfirmations` below and `computeResult.js`'s confirmed-mode series
  *   builder.
+ *
+ * R4 Phase 3 Task 6 (repeated trials) adds two things:
+ *   - `listFamilyRuns` — a read-only client-side filter over the SAME
+ *     `subscribeExperiments` collection/ordering (no new query, no new
+ *     index) that surfaces every COMPLETED experiment sharing a
+ *     `hypothesisFamilyId`, for the result view's family-history section.
+ *   - `writeOrSupersedeExperimentResultClaim` — the shared find-live-prior-
+ *     and-decide helper both `writeResult` and `writeAdjustedResult` now
+ *     call for their `experiment_result` claim write. This is the REPEAT-RUN
+ *     LINEAGE FIX: see that function's own doc comment for the defect it
+ *     closes (a repeat run's claim used to collide on a deterministic doc
+ *     id, get rules-denied, and silently vanish).
  */
 import {
   collection,
@@ -511,11 +523,99 @@ export async function setObservationExcluded(db, uid, experimentId, dateKey, exc
 }
 
 /**
+ * Shared find-live-prior-and-decide helper (R4 Phase 3 Task 6) used by BOTH
+ * `writeResult` (every completion — first run AND every repeat run of the
+ * same hypothesis) and `writeAdjustedResult` (a post-result exclusion-toggle
+ * recompute) for their `experiment_result` claim write. Before this task,
+ * each writer independently decided what to do with a freshly built claim
+ * input; `writeAdjustedResult` already found-and-decided correctly (R4
+ * Phase 2, Task 4 / F1 hardening) while `writeResult` called `writeClaim`
+ * directly, bare — the two now have IDENTICAL semantics, so there is exactly
+ * one implementation:
+ *   - no live claim exists yet for this candidate -> write `claimInput`
+ *     as-is (v1, `parentClaimId: null`)
+ *   - the live claim is `'suppressed'` -> SKIP entirely, no write, no
+ *     supersede (system-wide invariant, `claimsPipeline.js`/matrix row
+ *     R4P1-j: suppression is a user decision — do_not_analyze feedback —
+ *     that outlives evidence drift and is lifted only through the explicit
+ *     user path; a fresh computation must never auto-resurrect it)
+ *   - the live claim is `'verified'` or `'expired'` -> supersede:
+ *     `version: existing.version + 1`, `parentClaimId: existing.id`
+ *     (expired -> verified-again is the documented revival path)
+ *
+ * THE REPEAT-RUN LINEAGE FIX (the load-bearing defect this task closes):
+ * `writeClaim`'s doc id is DETERMINISTIC — `hypothesisFamilyId +
+ * candidateId + version` (`claimSchema.js`'s `claimDocId`). Before this
+ * helper existed, `writeResult` called `writeClaim` directly with a
+ * claimInput that always has `version: 1` (`buildExperimentResultClaim`
+ * always produces a first-version shape) — so a SECOND completed run of the
+ * SAME hypothesis (same template+tag, hence the same `candidateId`, per
+ * `experimentClaim.js`'s "candidateId: hypothesisFamilyId" convention)
+ * produced the exact SAME doc id as the first run's already-existing claim.
+ * `writeClaim`'s `setDoc` has no `merge`, and firestore.rules' create-only
+ * `affectedKeys` allow-list denies a write against an already-existing doc
+ * id as an illegal update -> the write was rules-denied -> `writeResult`'s
+ * containing try/catch swallowed it as a `console.warn` -> the repeat run's
+ * claim was silently NEVER written, with no visible error to the user.
+ * Routing `writeResult` through this SAME find-prior-and-decide logic
+ * `writeAdjustedResult` already used closes that gap: a second (or Nth)
+ * run's claim now SUPERSEDES the prior run's, with real, inspectable
+ * lineage (`version: N, parentClaimId`), instead of silently vanishing.
+ *
+ * CONTAINMENT IS THE CALLER'S JOB: this function is allowed to throw. Both
+ * `writeResult` and `writeAdjustedResult` already wrap their own call site
+ * in a try/catch that warns rather than rethrows — by the time either calls
+ * this, the experiment doc's own `result` field has already committed, so a
+ * throw out of this function must never surface as a failed `writeResult`/
+ * `writeAdjustedResult` call (that would falsely tell the caller the result
+ * wasn't saved, and a well-meaning retry would just re-attempt the same
+ * idempotent claim decision).
+ *
+ * @param {object} db
+ * @param {string} uid
+ * @param {{experiment:object, experimentId:string, result:object, now:string|Date}} args
+ *   `result` is a SINGLE bare `computeExperimentResult` output — the caller
+ *   unwraps the storage-layer `{original, adjusted, exclusionHistory}`
+ *   wrapper before calling (`writeResult` passes the bare result it was
+ *   given; `writeAdjustedResult` passes `resultField.adjusted`).
+ * @returns {Promise<void>}
+ */
+export async function writeOrSupersedeExperimentResultClaim(db, uid, {
+  experiment, experimentId, result, now,
+}) {
+  const claimInput = buildExperimentResultClaim({
+    experiment, experimentId, result, now,
+  });
+  if (!claimInput) return;
+  const existingClaims = await listAllClaims(db, uid);
+  const existing = existingClaims.find((c) => c.claimType === 'experiment_result'
+    && c.analysisPlan?.candidateId === claimInput.analysisPlan.candidateId
+    && c.supersededByClaimId == null);
+  if (existing?.status === 'suppressed') {
+    // no-op: prior stays exactly as-is, no new claim is written (invariant
+    // above — suppression is never auto-touched by a fresh computation).
+  } else if (existing) {
+    await supersedeClaim(db, uid, existing, {
+      ...claimInput,
+      version: existing.version + 1,
+      parentClaimId: existing.id,
+    });
+  } else {
+    await writeClaim(db, uid, claimInput);
+  }
+}
+
+/**
  * Write a FIRST-completion result and mark the experiment `completed` in ONE
  * update (running/paused -> completed). Only ever called for a fresh
  * completion (auto-completion, `ExperimentsScreen.jsx`) — a result that
  * has never been shown to the user yet, so there is no "adjusted after
- * seeing the result" concern for this path.
+ * seeing the result" concern for this path. **Also the ONLY completion
+ * writer for a REPEAT run of the same hypothesis** — a repeat run is, from
+ * this function's perspective, just another fresh completion (a new
+ * experiment doc, `draft -> running -> completed` all over again); the
+ * REPEAT-RUN LINEAGE FIX below is what makes its claim actually land instead
+ * of silently colliding with the prior run's.
  *
  * RESULT INTEGRITY (Michael review hardening, item 3): the stored `result`
  * field is NOT the bare `computeExperimentResult` output — it is wrapped as
@@ -598,37 +698,30 @@ export async function writeResult(db, uid, experimentId, result) {
     }
   }
 
-  // EXPERIMENT_RESULT CLAIM (R4 Phase 2, Task 4): the third claim type
-  // (`experimentClaim.js`'s `buildExperimentResultClaim`), built from PURE
-  // deterministic prose only — no LLM. CONTAINED the same way as the
-  // ledger retry above: the result save already committed above, so a
-  // claim-write failure must never surface as a failed `writeResult` call
-  // (that would falsely tell the caller the result wasn't saved, and a
-  // well-meaning retry would just re-attempt the same idempotent claim
-  // write). `buildExperimentResultClaim` returns `null` for an insufficient
-  // result, a zero-delta result, or a legacy plan with no
-  // `hypothesisFamilyId` — no claim is written in any of those cases.
-  // `writeClaim`'s doc id is deterministic (hypothesisFamilyId +
-  // candidateId + version), so re-running `writeResult` for the same
-  // experiment/result targets the SAME doc id — but this is NOT a silent
-  // upsert: `writeClaim` calls `setDoc` with no `merge`, and against a
-  // doc that already exists, firestore.rules' create-only `affectedKeys`
-  // allow-list denies the write as an illegal update. That denial is
-  // caught by this same try/catch and only warned on — harmless in
-  // outcome (the claim already exists, nothing needs to change), but the
-  // mechanism is rules-denial hitting the contained catch below, not an
-  // upsert.
+  // EXPERIMENT_RESULT CLAIM (R4 Phase 2, Task 4; lineage fixed R4 Phase 3,
+  // Task 6): the third claim type (`experimentClaim.js`'s
+  // `buildExperimentResultClaim`), built from PURE deterministic prose only
+  // — no LLM. Routed through the SAME find-live-prior-and-decide helper
+  // `writeAdjustedResult` uses below (`writeOrSupersedeExperimentResultClaim`
+  // — see its doc comment for the repeat-run lineage defect this closes: a
+  // bare `writeClaim` here used to collide on a deterministic doc id for
+  // every repeat run of the same hypothesis, get rules-denied, and silently
+  // lose the claim). CONTAINED the same way as the ledger retry above: the
+  // result save already committed above, so a claim-write failure must
+  // never surface as a failed `writeResult` call (that would falsely tell
+  // the caller the result wasn't saved, and a well-meaning retry would just
+  // re-attempt the same idempotent claim decision).
+  // `buildExperimentResultClaim` (called inside the helper) returns `null`
+  // for an insufficient result, a zero-delta result, or a legacy plan with
+  // no `hypothesisFamilyId` — no claim is written in any of those cases.
   if (experimentData) {
     try {
-      const claimInput = buildExperimentResultClaim({
+      await writeOrSupersedeExperimentResultClaim(db, uid, {
         experiment: { id: experimentId, ...experimentData },
         experimentId,
         result,
         now: completedAt,
       });
-      if (claimInput) {
-        await writeClaim(db, uid, claimInput);
-      }
     } catch (err) {
       console.warn(
         `writeResult: experiment_result claim write failed for experiment ${experimentId}; the result was still saved.`,
@@ -731,7 +824,10 @@ export async function writeAdjustedResult(db, uid, experimentId, resultField) {
     updatedAt,
   });
 
-  // EXPERIMENT_RESULT CLAIM SUPERSEDE (R4 Phase 2, Task 4): an adjusted
+  // EXPERIMENT_RESULT CLAIM SUPERSEDE (R4 Phase 2, Task 4; extracted into
+  // the shared `writeOrSupersedeExperimentResultClaim` helper R4 Phase 3
+  // Task 6, `writeResult` now uses the SAME helper for its own — previously
+  // buggy — claim write, see that function's doc comment): an adjusted
   // (post-result exclusion toggle) recomputation supersedes the
   // experiment's existing, current (non-superseded) `experiment_result`
   // claim, if one exists, with a new version built from the ADJUSTED
@@ -739,7 +835,9 @@ export async function writeAdjustedResult(db, uid, experimentId, resultField) {
   // projected onto claims' version/parentClaimId lineage. When no prior
   // claim exists for this candidate (e.g. the original result was
   // insufficient or zero-delta and never produced one), a fresh v1 is
-  // written instead of superseding nothing. CONTAINED the same way as
+  // written instead of superseding nothing. A SUPPRESSED prior is never
+  // auto-touched (system-wide invariant, `claimsPipeline.js`/matrix row
+  // R4P1-j — see the helper's doc comment). CONTAINED the same way as
   // `writeResult`'s claim write above: the adjusted result save already
   // committed, so a failure here must never surface as a failed
   // `writeAdjustedResult` call.
@@ -747,40 +845,12 @@ export async function writeAdjustedResult(db, uid, experimentId, resultField) {
     const snap = await getDoc(ref);
     const experimentData = snap.exists() ? snap.data() : null;
     if (experimentData) {
-      const claimInput = buildExperimentResultClaim({
+      await writeOrSupersedeExperimentResultClaim(db, uid, {
         experiment: { id: experimentId, ...experimentData },
         experimentId,
         result: resultField.adjusted,
         now: updatedAt,
       });
-      if (claimInput) {
-        const existingClaims = await listAllClaims(db, uid);
-        const existing = existingClaims.find((c) => c.claimType === 'experiment_result'
-          && c.analysisPlan?.candidateId === claimInput.analysisPlan.candidateId
-          && c.supersededByClaimId == null);
-        // System-wide invariant (pipeline `claimsPipeline.js`, matrix row
-        // R4P1-j, PROJECT_STATUS ratified correction): a SUPPRESSED claim
-        // is never auto-touched by any pipeline path — suppression is a
-        // user decision (do_not_analyze feedback) that outlives evidence
-        // drift and is lifted only through the explicit user path. If
-        // Michael suppressed this candidate's prior claim, an adjusted
-        // (post-exclusion-toggle) recompute must NOT resurrect it via
-        // supersede — skip the claim write/supersede entirely, before
-        // touching `existing` at all. The experiment doc's own adjusted
-        // result has already saved above regardless. Superseding an
-        // EXPIRED prior remains allowed (documented revival path).
-        if (existing?.status === 'suppressed') {
-          // no-op: prior stays exactly as-is, no new claim is written
-        } else if (existing) {
-          await supersedeClaim(db, uid, existing, {
-            ...claimInput,
-            version: existing.version + 1,
-            parentClaimId: existing.id,
-          });
-        } else {
-          await writeClaim(db, uid, claimInput);
-        }
-      }
     }
   } catch (err) {
     console.warn(
@@ -903,6 +973,60 @@ export async function listConfirmations(db, uid, experimentId) {
 }
 
 /**
+ * Family history (R4 Phase 3 Task 6, repeated trials): every COMPLETED
+ * experiment sharing the given `hypothesisFamilyId`, sorted OLDEST-first by
+ * completion (so "run N of M" numbering reads chronologically, the current/
+ * most-recent run last). A pure client-side filter over the exact same
+ * collection/ordering `subscribeExperiments` already reads (`orderBy
+ * 'createdAt'`) — deliberately NO new query shape and NO new Firestore
+ * index, per the brief. `completedAt` has no dedicated stored field on the
+ * experiment doc; `updatedAt` is used as the documented best-available proxy
+ * — it is stamped to the completion instant by `writeResult` at first
+ * completion, though a LATER post-result exclusion toggle
+ * (`writeAdjustedResult`) also bumps it, so for an experiment with
+ * exclusion-adjusted history this is "last touched," not strictly "first
+ * completed." `delta`/`status` are read from `result.original` (never
+ * `result.adjusted`) — the family-history line is about what each ORIGINAL
+ * run found, matching the brief's exact field mapping.
+ *
+ * Never throws on a malformed doc (a missing/non-object `result` simply
+ * yields `delta: null, status: 'unknown'` for that run) — the caller
+ * (`ExperimentResultView`) treats an outright read failure (network/
+ * permissions) as "hide the section silently," per the brief; this function
+ * itself only guards against a shape surprise within an otherwise-successful
+ * read.
+ *
+ * @param {object} db
+ * @param {string} uid
+ * @param {string} hypothesisFamilyId
+ * @returns {Promise<Array<{id:string, completedAt:string|null, delta:number|null, status:string}>>}
+ */
+export async function listFamilyRuns(db, uid, hypothesisFamilyId) {
+  if (typeof hypothesisFamilyId !== 'string' || !hypothesisFamilyId) return [];
+  const q = query(collection(db, experimentsPath(uid)), orderBy('createdAt', 'desc'));
+  const snap = await getDocs(q);
+  const runs = [];
+  snap.forEach((d) => {
+    const data = d.data() || {};
+    if (data.status !== 'completed') return;
+    if (data.analysisPlan?.hypothesisFamilyId !== hypothesisFamilyId) return;
+    const original = data.result && typeof data.result === 'object' ? data.result.original : null;
+    runs.push({
+      id: d.id,
+      completedAt: typeof data.updatedAt === 'string' ? data.updatedAt : null,
+      delta: Number.isFinite(original?.estimate?.delta) ? original.estimate.delta : null,
+      status: typeof original?.status === 'string' ? original.status : 'unknown',
+    });
+  });
+  runs.sort((a, b) => {
+    if (!a.completedAt) return 1;
+    if (!b.completedAt) return -1;
+    return a.completedAt < b.completedAt ? -1 : a.completedAt > b.completedAt ? 1 : 0;
+  });
+  return runs;
+}
+
+/**
  * Read `settings/experimentPrefs` (the revisitPrefs twin — see
  * firestore.rules' `settingId != 'experimentPrefs'` clause comment): records
  * only whether the user has seen the one-time "associations, not proof"
@@ -958,6 +1082,8 @@ export default {
   EXCLUSION_REASONS,
   buildAdjustedResultUpdate,
   writeAdjustedResult,
+  writeOrSupersedeExperimentResultClaim,
+  listFamilyRuns,
   getExperimentPrefs,
   markExplainerSeen,
   setConfirmation,

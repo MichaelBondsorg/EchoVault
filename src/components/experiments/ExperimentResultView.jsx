@@ -24,7 +24,9 @@ import {
   buildAdjustedResultUpdate,
   writeAdjustedResult,
   listConfirmations,
+  listFamilyRuns,
 } from '../../services/experiments/experimentsService';
+import { readLedgerCounts } from '../../services/insights/testingLedger';
 import { safeDate } from '../../utils/date';
 
 /**
@@ -117,6 +119,23 @@ import { safeDate } from '../../utils/date';
  * bootstrap actually assumes" section) is known to understate the true
  * uncertainty for sequentially-dependent daily data — "rough range" is the
  * honest headline, not "95% confident."
+ *
+ * FAMILY HISTORY (R4 Phase 3 Task 6, repeated trials): a "This hypothesis"
+ * section, display-only, loaded once on mount via
+ * `experimentsService.listFamilyRuns` (a client-side filter over every
+ * COMPLETED experiment sharing this one's `analysisPlan.hypothesisFamilyId`
+ * — no new query/index) and rendered as "Run N of M" plus each prior run's
+ * own delta, sorted oldest-first. NO POOLING, NO COMBINED STATISTICS — this
+ * is deliberately NOT a meta-analysis (the plan's own rationale: "cross-run
+ * meta-analysis needs statistics we deliberately don't have"); a one-line
+ * note says every run stands on its own. A `readLedgerCounts` read
+ * (`testingLedger.js`) supplements this with the family's own testing-ledger
+ * count when cheaply available. BOTH reads are read-only and best-effort:
+ * either failing hides its own piece silently (no error surfaced, no retry
+ * UI) — `familyRuns` failing hides the WHOLE section (there is nothing
+ * honest to show without it); `ledgerCount` failing just omits that one
+ * supplementary line. Only ever attempted for a `hypothesisFamilyId`-bearing
+ * plan (a legacy pre-Phase-1 plan has none — section never renders for it).
  */
 
 // Shared token -> plain-language copy map (binding: "render both uniformly,
@@ -357,6 +376,47 @@ const ExperimentResultView = ({ uid, entries = [], experiment, onClose }) => {
     [experiment, entries, tableConfirmations],
   );
 
+  // FAMILY HISTORY (R4 Phase 3 Task 6) — see module doc comment. Two
+  // independent, best-effort reads: `familyRuns` (null = not loaded yet OR
+  // the read failed — either way the section stays hidden, since "Run N of
+  // M" has nothing honest to show without it) and `ledgerCount` (null = not
+  // loaded/failed — omits only its own supplementary line, never hides the
+  // whole section). Both keyed off `analysisPlan.hypothesisFamilyId`; a
+  // legacy plan with none never triggers either read.
+  const [familyRuns, setFamilyRuns] = useState(null);
+  const [ledgerCount, setLedgerCount] = useState(null);
+  const hypothesisFamilyId = experiment.analysisPlan?.hypothesisFamilyId;
+  useEffect(() => {
+    if (typeof hypothesisFamilyId !== 'string' || !hypothesisFamilyId) {
+      setFamilyRuns(null);
+      return undefined;
+    }
+    let cancelled = false;
+    listFamilyRuns(db, uid, hypothesisFamilyId)
+      .then((runs) => { if (!cancelled) setFamilyRuns(Array.isArray(runs) ? runs : null); })
+      .catch(() => { if (!cancelled) setFamilyRuns(null); });
+    return () => { cancelled = true; };
+  }, [uid, hypothesisFamilyId]);
+  useEffect(() => {
+    if (typeof hypothesisFamilyId !== 'string' || !hypothesisFamilyId) {
+      setLedgerCount(null);
+      return undefined;
+    }
+    let cancelled = false;
+    readLedgerCounts(db, uid, [hypothesisFamilyId])
+      .then((counts) => { if (!cancelled) setLedgerCount(counts.get(hypothesisFamilyId) ?? null); })
+      .catch(() => { if (!cancelled) setLedgerCount(null); });
+    return () => { cancelled = true; };
+  }, [uid, hypothesisFamilyId]);
+
+  // `familyRuns` is oldest-first (listFamilyRuns' own contract); "Run N of
+  // M" numbers this result's own position in that order. A race where this
+  // experiment hasn't shown up in `familyRuns` yet (e.g. a stale read)
+  // falls back to the last position rather than "Run 0 of M".
+  const runIndex = familyRuns
+    ? (familyRuns.findIndex((r) => r.id === experiment.id) + 1 || familyRuns.length)
+    : 0;
+
   const exposureLabel = experiment.analysisPlan?.exposure?.label || 'this variable';
   const outcomeLabel = experiment.analysisPlan?.outcome?.label || 'mood';
 
@@ -537,6 +597,38 @@ const ExperimentResultView = ({ uid, entries = [], experiment, onClose }) => {
             </p>
           )}
         </section>
+
+        {/* FAMILY HISTORY (R4 Phase 3 Task 6, repeated trials) — see module
+            doc comment. Hidden entirely when `familyRuns` failed to load or
+            this hypothesis has never been run more than once yet (M <= 1 —
+            a bare "Run 1 of 1" tells the user nothing a repeat run wouldn't
+            already make obvious once it exists). */}
+        {familyRuns && familyRuns.length > 1 && (
+          <section className="cloud-sheet space-y-2 rounded-2xl border p-4 shadow-sm">
+            <p className="font-semibold">This hypothesis</p>
+            <p className="text-sm text-secondary-foreground">
+              Run {runIndex} of {familyRuns.length}
+              {ledgerCount != null
+                ? ` — this family's testing ledger has ${ledgerCount} candidate hypothesis${ledgerCount === 1 ? '' : 'es'} on record`
+                : ''}
+            </p>
+            <ul className="space-y-0.5 text-sm text-secondary-foreground">
+              {familyRuns.map((run, idx) => (
+                <li key={run.id}>
+                  Run {idx + 1}
+                  {run.id === experiment.id ? ' (this result)' : ''}
+                  {': '}
+                  {run.status === 'ok' && Number.isFinite(run.delta)
+                    ? `${run.delta > 0 ? '+' : ''}${roundToOneDecimal(run.delta)} points (0-100)`
+                    : 'not enough data for a result'}
+                </li>
+              ))}
+            </ul>
+            <p className="text-xs text-[var(--muted-foreground)]">
+              Each run stands on its own — these are not combined or averaged together.
+            </p>
+          </section>
+        )}
 
         {!isOk && (
           <section role="alert" className="cloud-sheet space-y-2 rounded-2xl border p-4 shadow-sm">

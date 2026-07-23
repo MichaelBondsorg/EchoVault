@@ -16,7 +16,10 @@ import { render, screen, fireEvent, waitFor, within } from '@testing-library/rea
 import ExperimentResultView, { buildObservationRows, reasonCopy, normalizeStoredResult } from '../ExperimentResultView';
 import { computeExperimentResult, NON_CAUSAL_FRAMING } from '../../../services/experiments/computeResult';
 import { getTemplateById } from '../../../services/experiments/templates';
-import { setObservationExcluded, writeResult, writeAdjustedResult, listConfirmations } from '../../../services/experiments/experimentsService';
+import {
+  setObservationExcluded, writeResult, writeAdjustedResult, listConfirmations, listFamilyRuns,
+} from '../../../services/experiments/experimentsService';
+import { readLedgerCounts } from '../../../services/insights/testingLedger';
 
 vi.mock('../../../config/firebase', () => ({ db: { __db: true } }));
 
@@ -28,8 +31,24 @@ vi.mock('../../../services/experiments/experimentsService', async (importOrigina
     writeResult: vi.fn().mockResolvedValue(undefined),
     writeAdjustedResult: vi.fn().mockResolvedValue(undefined),
     listConfirmations: vi.fn().mockResolvedValue([]),
+    // R4 Phase 3 Task 6 (repeated trials, family history) — Firestore-
+    // touching, mocked like every other write/read this module makes here.
+    // Defaults to [] (no family history) so every PRE-EXISTING test in this
+    // file — none of which stamp `analysisPlan.hypothesisFamilyId` on their
+    // fixtures — never renders the section at all (the component's own
+    // `typeof hypothesisFamilyId !== 'string'` guard skips the call
+    // entirely in that case; this default only matters for tests below that
+    // DO set a hypothesisFamilyId).
+    listFamilyRuns: vi.fn().mockResolvedValue([]),
   };
 });
+
+// `readLedgerCounts` lives in a DIFFERENT module (`testingLedger.js`, real
+// `firebase/firestore` imports, no app `config/firebase` wrapper) — mocked
+// separately, same reasoning as `listFamilyRuns` above.
+vi.mock('../../../services/insights/testingLedger', () => ({
+  readLedgerCounts: vi.fn().mockResolvedValue(new Map()),
+}));
 
 const UID = 'user-a';
 const SLEEP_TEMPLATE = getTemplateById('sleep-hours-mood-same-day');
@@ -220,6 +239,127 @@ describe('ExperimentResultView — confirmed-exposure source disclosure (R4 Phas
     render(<ExperimentResultView uid={UID} entries={entries} experiment={experiment} onClose={vi.fn()} />);
 
     expect(screen.queryByText(/daily check-ins/i)).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Family history (R4 Phase 3 Task 6, repeated trials) — "Run N of M", prior
+// runs' deltas, the ledger's supplementary candidate count, and the
+// no-pooling note. Display-only: no combined/pooled statistics anywhere.
+// ---------------------------------------------------------------------------
+
+const FAMILY_ID = 'experiment:sleep-hours-mood-same-day';
+
+// A minimal real `status:'ok'` result — the family-history section only
+// ever renders past ExperimentResultView's own `!result` early return, so
+// every test below needs a genuine stored result, not the golden fixture's
+// default (unset) `result`.
+const FAMILY_OK_RESULT = {
+  status: 'ok',
+  estimate: {
+    meanHigh: 70, meanLow: 60, delta: 10, ci: [4, 16], n: 20, pearsonR: 0.3,
+    nHigh: 10, nLow: 10, splitThreshold: 7, exposureContrast: 2.5,
+    resampleDiscardCount: 0, stability: { signConsistent: true, deltaMin: 8, deltaMax: 12 },
+  },
+  coverage: {
+    exposure: { covered: 20, total: 20, label: '20 of 20 days' },
+    outcome: { covered: 20, total: 20, label: '20 of 20 days' },
+  },
+  receipt: { sources: [], scope: null, timeWindow: { start: GOLDEN_START, end: GOLDEN_END }, sampleSize: 20, missingness: null },
+  sensitiveObservationCount: 0,
+  invalidObservationCount: 0,
+  narrative: { summary: 'summary text', alternatives: [], whatThisDoesNotProve: [] },
+};
+
+function goldenExperimentWithFamily(overrides = {}) {
+  const base = goldenExperiment();
+  return goldenExperiment({
+    analysisPlan: { ...base.analysisPlan, hypothesisFamilyId: FAMILY_ID },
+    result: FAMILY_OK_RESULT,
+    ...overrides,
+  });
+}
+
+describe('ExperimentResultView — family history (R4 Phase 3 Task 6, repeated trials)', () => {
+  it('renders nothing (no section) for a hypothesis that has only ever run once (M<=1)', async () => {
+    listFamilyRuns.mockResolvedValueOnce([{ id: 'exp-1', completedAt: 't1', delta: 5, status: 'ok' }]);
+    const experiment = goldenExperimentWithFamily();
+    render(<ExperimentResultView uid={UID} entries={[]} experiment={experiment} onClose={vi.fn()} />);
+
+    await waitFor(() => expect(listFamilyRuns).toHaveBeenCalledWith({ __db: true }, UID, FAMILY_ID));
+    expect(screen.queryByText('This hypothesis')).toBeNull();
+  });
+
+  it('renders "Run N of M" (this result correctly positioned) plus every prior run\'s delta, oldest first, with the no-pooling note', async () => {
+    listFamilyRuns.mockResolvedValueOnce([
+      { id: 'exp-0', completedAt: 't0', delta: -3, status: 'ok' },
+      { id: 'exp-1', completedAt: 't1', delta: 8.4, status: 'ok' },
+    ]);
+    const experiment = goldenExperimentWithFamily({ id: 'exp-1' });
+    render(<ExperimentResultView uid={UID} entries={[]} experiment={experiment} onClose={vi.fn()} />);
+
+    expect(await screen.findByText('This hypothesis')).toBeTruthy();
+    expect(screen.getByText(/^Run 2 of 2/)).toBeTruthy();
+    expect(screen.getByText(/Run 1: -3(\.0)? points \(0-100\)/)).toBeTruthy();
+    expect(screen.getByText(/Run 2 \(this result\): \+8\.4 points \(0-100\)/)).toBeTruthy();
+    expect(screen.getByText('Each run stands on its own — these are not combined or averaged together.')).toBeTruthy();
+  });
+
+  it('a run with no result (insufficient/unknown) shows "not enough data for a result" rather than a fabricated number', async () => {
+    listFamilyRuns.mockResolvedValueOnce([
+      { id: 'exp-0', completedAt: 't0', delta: null, status: 'insufficient' },
+      { id: 'exp-1', completedAt: 't1', delta: 4, status: 'ok' },
+    ]);
+    const experiment = goldenExperimentWithFamily({ id: 'exp-1' });
+    render(<ExperimentResultView uid={UID} entries={[]} experiment={experiment} onClose={vi.fn()} />);
+
+    expect(await screen.findByText(/Run 1: not enough data for a result/)).toBeTruthy();
+  });
+
+  it('supplements with the ledger\'s candidate count when readLedgerCounts resolves', async () => {
+    listFamilyRuns.mockResolvedValueOnce([
+      { id: 'exp-0', completedAt: 't0', delta: 1, status: 'ok' },
+      { id: 'exp-1', completedAt: 't1', delta: 2, status: 'ok' },
+    ]);
+    readLedgerCounts.mockResolvedValueOnce(new Map([[FAMILY_ID, 1]]));
+    const experiment = goldenExperimentWithFamily({ id: 'exp-1' });
+    render(<ExperimentResultView uid={UID} entries={[]} experiment={experiment} onClose={vi.fn()} />);
+
+    expect(await screen.findByText(/this family's testing ledger has 1 candidate hypothesis on record/)).toBeTruthy();
+  });
+
+  it('hides the WHOLE section (never a partial/broken render) when listFamilyRuns rejects', async () => {
+    listFamilyRuns.mockRejectedValueOnce(new Error('read failed'));
+    const experiment = goldenExperimentWithFamily();
+    render(<ExperimentResultView uid={UID} entries={[]} experiment={experiment} onClose={vi.fn()} />);
+
+    await waitFor(() => expect(listFamilyRuns).toHaveBeenCalled());
+    expect(screen.queryByText('This hypothesis')).toBeNull();
+  });
+
+  it('still renders the section (minus the ledger line) when readLedgerCounts rejects — a failed supplementary read never hides the whole section', async () => {
+    listFamilyRuns.mockResolvedValueOnce([
+      { id: 'exp-0', completedAt: 't0', delta: 1, status: 'ok' },
+      { id: 'exp-1', completedAt: 't1', delta: 2, status: 'ok' },
+    ]);
+    readLedgerCounts.mockRejectedValueOnce(new Error('ledger read failed'));
+    const experiment = goldenExperimentWithFamily({ id: 'exp-1' });
+    render(<ExperimentResultView uid={UID} entries={[]} experiment={experiment} onClose={vi.fn()} />);
+
+    expect(await screen.findByText('This hypothesis')).toBeTruthy();
+    expect(screen.queryByText(/testing ledger/)).toBeNull();
+  });
+
+  it('never calls listFamilyRuns/readLedgerCounts for a legacy plan with no hypothesisFamilyId', async () => {
+    // A real stored result, but the fixture's plan never carries
+    // hypothesisFamilyId (this file's local `buildAnalysisPlan` helper
+    // never sets it) — the pre-Phase-1 legacy case.
+    const experiment = goldenExperiment({ result: FAMILY_OK_RESULT });
+    render(<ExperimentResultView uid={UID} entries={[]} experiment={experiment} onClose={vi.fn()} />);
+    // Flush a tick so any (incorrect) call would have fired.
+    await waitFor(() => expect(screen.getByText('Coverage')).toBeTruthy());
+    expect(listFamilyRuns).not.toHaveBeenCalled();
+    expect(readLedgerCounts).not.toHaveBeenCalled();
   });
 });
 

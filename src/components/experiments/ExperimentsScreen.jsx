@@ -139,6 +139,25 @@ import ExperimentResultView, { reasonCopy } from './ExperimentResultView';
  * path's existing default (untouched), stays keyless until the user actively
  * checks the box.
  *
+ * REPEAT THIS EXPERIMENT (R4 Phase 3 Task 6, repeated trials): a completed
+ * experiment's row gets a "Repeat this experiment" button that re-enters the
+ * create flow through the EXACT SAME internal path the PREFILL SEAM above
+ * uses (`enterPrefillFlow`, extracted from that effect's body so both share
+ * one implementation) — `{templateId: experiment.template, tag:
+ * experiment.analysisPlan?.exposure?.tag}` (the frozen template id lives at
+ * the experiment doc's own top-level `template` field, per
+ * `createExperiment`'s payload shape; the tag — tag-presence templates only
+ * — lives nested at `analysisPlan.exposure.tag`, per `buildAnalysisPlan`,
+ * NOT at any top-level field). `screenQuestion` runs again on every repeat
+ * (never skipped — the binding ordering requirement applies identically to
+ * this entry point), and `exposureMode` is chosen FRESH via the same
+ * duration-step `ExposureModeToggle` a tag prefill shows (never carried over
+ * from the prior, now-frozen, run's plan) — a fresh freeze, a fresh
+ * `createExperiment`/`startExperiment`, the testing ledger's `timesTested`
+ * increments naturally, and the repeat run's own eventual result claim
+ * SUPERSEDES the prior run's claim through the normal lineage (the
+ * `experimentsService.js` fix this same task makes).
+ *
  * Nested-overlay a11y (RecipesScreen/RevisitControls precedent): only one
  * `aria-modal` dialog is ever active. The one-time explainer is a real
  * Radix `Dialog` (its own portal); the stop/delete confirms are hand-rolled
@@ -425,6 +444,36 @@ const ExperimentsScreen = ({ uid, entries = [], entriesLoaded, prefill = null, o
     setCreateStep(contextSpacesOn ? 'space' : 'duration');
   };
 
+  // Shared "jump straight into the create flow for a known template (+
+  // optional tag)" logic — originally the R4 Phase 3 Task 2 prefill effect's
+  // body, extracted in Task 6 so the "Repeat this experiment" button below
+  // can drive the EXACT same path internally (same `getTemplateById`
+  // resolution, same `screenAndProceed` choke point — screenQuestion always
+  // runs FIRST — same tag-vs-plain branching) rather than duplicating it. An
+  // unknown/stale templateId is never a crash: console.warn + the screen
+  // opens/stays on its normal list view, the attempt silently ignored.
+  const enterPrefillFlow = (templateId, tag) => {
+    const template = getTemplateById(templateId);
+    if (!template) {
+      console.warn(
+        `ExperimentsScreen: unknown prefill templateId "${templateId}" — opening normally.`,
+      );
+      return;
+    }
+    setCreating(true);
+    if (tag) {
+      const composed = `How does ${tagLabel(tag)} move together with my mood?`;
+      screenAndProceed(composed, (trimmed) => {
+        setPrefillTagFlow(true);
+        selectTemplateAndAdvance(template, { tag }, trimmed);
+      });
+    } else {
+      screenAndProceed(template.title, (trimmed) => {
+        selectTemplateAndAdvance(template, null, trimmed);
+      });
+    }
+  };
+
   // Prefill seam (R4 Phase 3 Task 2) — see module doc comment's "PREFILL
   // SEAM" section. Runs once per mount (this screen is freshly mounted on
   // every open — see AppLayout's flag-gated mount site — so an empty dep
@@ -432,26 +481,16 @@ const ExperimentsScreen = ({ uid, entries = [], entriesLoaded, prefill = null, o
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (!prefill?.templateId) return;
-    const template = getTemplateById(prefill.templateId);
-    if (!template) {
-      console.warn(
-        `ExperimentsScreen: unknown prefill templateId "${prefill.templateId}" — opening normally.`,
-      );
-      return;
-    }
-    setCreating(true);
-    if (prefill.tag) {
-      const composed = `How does ${tagLabel(prefill.tag)} move together with my mood?`;
-      screenAndProceed(composed, (trimmed) => {
-        setPrefillTagFlow(true);
-        selectTemplateAndAdvance(template, { tag: prefill.tag }, trimmed);
-      });
-    } else {
-      screenAndProceed(template.title, (trimmed) => {
-        selectTemplateAndAdvance(template, null, trimmed);
-      });
-    }
+    enterPrefillFlow(prefill.templateId, prefill.tag);
   }, []);
+
+  // "Repeat this experiment" (R4 Phase 3 Task 6) — see module doc comment's
+  // "REPEAT THIS EXPERIMENT" section for the exact field provenance
+  // (`experiment.template` top-level; the tag, tag-presence templates only,
+  // nested at `analysisPlan.exposure.tag`).
+  const handleRepeat = (experiment) => {
+    enterPrefillFlow(experiment.template, experiment.analysisPlan?.exposure?.tag);
+  };
 
   // Free-text path: screenQuestion, THEN matchQuestionToTemplate — this is
   // the only path that has to guess a template from arbitrary text, so it's
@@ -709,6 +748,7 @@ const ExperimentsScreen = ({ uid, entries = [], entriesLoaded, prefill = null, o
                         onStop={openStopConfirm}
                         onDelete={openDeleteConfirm}
                         onViewResult={() => setResultExperimentId(experiment.id)}
+                        onRepeat={handleRepeat}
                       />
                     ))}
                   </div>
@@ -1130,7 +1170,7 @@ function PreflightReview({ preflight, durationDays, exposureLabel, startBusy, cr
 // Running / completed / stopped row
 // ---------------------------------------------------------------------------
 
-function ExperimentRow({ uid, experiment, entries, onPause, onResume, onStop, onDelete, onViewResult }) {
+function ExperimentRow({ uid, experiment, entries, onPause, onResume, onStop, onDelete, onViewResult, onRepeat }) {
   const confirmedMode = (experiment.status === 'running' || experiment.status === 'paused')
     && experiment.analysisPlan?.exposureMode === 'confirmed';
 
@@ -1240,9 +1280,14 @@ function ExperimentRow({ uid, experiment, entries, onPause, onResume, onStop, on
       )}
 
       {experiment.status === 'completed' && (
-        <div className="mt-2">
+        <div className="mt-2 flex gap-2">
           <Button variant="outline" onClick={onViewResult} className="px-4 text-xs">
             View result
+          </Button>
+          {/* Repeat this experiment (R4 Phase 3 Task 6) — see module doc
+              comment's "REPEAT THIS EXPERIMENT" section. */}
+          <Button variant="outline" onClick={() => onRepeat(experiment)} className="px-4 text-xs">
+            Repeat this experiment
           </Button>
         </div>
       )}
