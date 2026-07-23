@@ -464,6 +464,21 @@ service cloud.firestore {
           && request.resource.data.testedCount is int
           && request.resource.data.testedCount >= resource.data.testedCount;
       }
+
+      // R4 Phase 1: canonical InsightClaim store. Claims are immutable facts —
+      // after create, only supersede-pointer, status, and updatedAt may change.
+      // Corrections create a NEW claim version; history is never rewritten.
+      match /insight_claims/{claimId} {
+        allow read, delete: if isOwner(userId);
+        allow create: if isOwner(userId)
+          && request.resource.data.keys().hasOnly(['id', 'version', 'parentClaimId', 'supersededByClaimId', 'claimType', 'subject', 'outcome', 'direction', 'questionWording', 'wording', 'limitations', 'analysisPlan', 'evidence', 'receipt', 'status', 'provenance', 'createdAt', 'updatedAt'])
+          && request.resource.data.status in ['candidate', 'verified', 'suppressed', 'expired']
+          && request.resource.data.version is int
+          && request.resource.data.version >= 1;
+        allow update: if isOwner(userId)
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'supersededByClaimId', 'updatedAt'])
+          && request.resource.data.status in ['candidate', 'verified', 'suppressed', 'expired'];
+      }
     }
 
     // Top-level runtime feature-flag doc, written only by the Admin

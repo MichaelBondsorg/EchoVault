@@ -1726,3 +1726,108 @@ describe('testing_ledger collection rules (owner isolation)', () => {
     await assertFails(deleteDoc(ref));
   });
 });
+
+// --- insight_claims collection rules (R4 Phase 1: canonical InsightClaim ---
+// store) -----------------------------------------------------------------
+
+const validClaim = {
+  id: 'claim_basic-activity-tag-gym-mood_tag-gym_v1',
+  version: 1,
+  parentClaimId: null,
+  supersededByClaimId: null,
+  claimType: 'pattern_to_watch',
+  subject: 'gym',
+  outcome: 'mood',
+  direction: 'positive',
+  questionWording: 'How did gym days and mood move together in your recorded days?',
+  wording: 'On days you logged gym, recorded mood averaged 7 points higher (9 vs 15 days).',
+  limitations: ['Same-day association only.'],
+  analysisPlan: { frozenAt: 'now', hypothesisFamilyId: 'basic:activity:tag:gym:mood', candidateId: 'tag:gym' },
+  evidence: { sourceEntryIds: ['e1'], effectMoodPoints: 7.2 },
+  receipt: { sources: [], scope: null, timeWindow: { start: 'now', end: 'now' }, sampleSize: 24, missingness: null, versions: {} },
+  status: 'verified',
+  provenance: { generatorVersion: 2, evidenceBuilderVersion: 1, wordingSource: 'deterministic_template_v1' },
+  createdAt: 'now',
+  updatedAt: 'now',
+};
+
+// Seed an insight_claims doc directly (bypassing rules, as the Admin SDK
+// would for a server-authored fixture) so update-contract tests can start
+// from an arbitrary claim without going through the owner-create path.
+async function seedClaim(id, extra = {}) {
+  await testEnv.withSecurityRulesDisabled(async (context) => {
+    const db = context.firestore();
+    await setDoc(doc(db, userPath(USER_ID), 'insight_claims', id), {
+      ...validClaim, id, ...extra,
+    });
+  });
+}
+
+describe('insight_claims collection rules (create shape)', () => {
+  it('allows the owner to create a well-formed claim with the exact allowed keys', async () => {
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    const ref = doc(db, userPath(USER_ID), 'insight_claims', validClaim.id);
+    await assertSucceeds(setDoc(ref, validClaim));
+  });
+
+  it('denies an unexpected extra key', async () => {
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    const ref = doc(db, userPath(USER_ID), 'insight_claims', 'claim-junk');
+    await assertFails(setDoc(ref, { ...validClaim, id: 'claim-junk', hacked: true }));
+  });
+});
+
+describe('insight_claims collection rules (update contract)', () => {
+  it('denies an update that touches wording', async () => {
+    await seedClaim('claim-freeze-wording');
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    const ref = doc(db, userPath(USER_ID), 'insight_claims', 'claim-freeze-wording');
+    await assertFails(updateDoc(ref, { wording: 'rewritten claim text', updatedAt: 'now' }));
+  });
+
+  it('denies an update that touches evidence', async () => {
+    await seedClaim('claim-freeze-evidence');
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    const ref = doc(db, userPath(USER_ID), 'insight_claims', 'claim-freeze-evidence');
+    await assertFails(updateDoc(ref, { evidence: { sourceEntryIds: [], effectMoodPoints: 99 }, updatedAt: 'now' }));
+  });
+
+  it('denies an update that touches analysisPlan', async () => {
+    await seedClaim('claim-freeze-plan');
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    const ref = doc(db, userPath(USER_ID), 'insight_claims', 'claim-freeze-plan');
+    await assertFails(updateDoc(ref, { analysisPlan: { frozenAt: 'rewritten' }, updatedAt: 'now' }));
+  });
+
+  it('allows an update to status + updatedAt only', async () => {
+    await seedClaim('claim-status-ok');
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    const ref = doc(db, userPath(USER_ID), 'insight_claims', 'claim-status-ok');
+    await assertSucceeds(updateDoc(ref, { status: 'suppressed', updatedAt: 'now' }));
+  });
+
+  it('allows an update to supersededByClaimId + updatedAt only', async () => {
+    await seedClaim('claim-supersede-ok');
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    const ref = doc(db, userPath(USER_ID), 'insight_claims', 'claim-supersede-ok');
+    await assertSucceeds(updateDoc(ref, { supersededByClaimId: 'claim_other_v2', updatedAt: 'now' }));
+  });
+});
+
+describe('insight_claims collection rules (owner isolation)', () => {
+  it('denies another user reading a claim', async () => {
+    await seedClaim('claim-cross');
+    const db = testEnv.authenticatedContext(OTHER_USER_ID).firestore();
+    const ref = doc(db, userPath(USER_ID), 'insight_claims', 'claim-cross');
+    await assertFails(getDoc(ref));
+  });
+
+  it('denies another user creating, updating, or deleting a claim', async () => {
+    await seedClaim('claim-cross2');
+    const db = testEnv.authenticatedContext(OTHER_USER_ID).firestore();
+    const ref = doc(db, userPath(USER_ID), 'insight_claims', 'claim-cross2');
+    await assertFails(setDoc(ref, { ...validClaim, id: 'claim-cross2' }));
+    await assertFails(updateDoc(ref, { status: 'suppressed', updatedAt: 'now' }));
+    await assertFails(deleteDoc(ref));
+  });
+});
