@@ -41,29 +41,36 @@ export function buildDailyObservations(entries, { timeZone } = {}) {
     if (!byDay.has(n.dateKey)) byDay.set(n.dateKey, []);
     byDay.get(n.dateKey).push(n);
   }
-  const rawById = new Map((entries || []).filter((e) => e && e.id).map((e) => [e.id, e]));
+  const rawById = new Map((entries || []).filter((e) => e && (e.id || e.entryId)).map((e) => [(e.id || e.entryId), e]));
   const rows = [];
   for (const [dateKey, dayEntries] of byDay.entries()) {
-    const moods = dayEntries.map((e) => e.mood01).filter((m) => Number.isFinite(m));
+    // Sort entries by timestamp for deterministic order (chronological + order-independent)
+    const sortedDayEntries = [...dayEntries].sort((a, b) => {
+      const aTs = a.timestampMs ?? Number.MAX_SAFE_INTEGER;
+      const bTs = b.timestampMs ?? Number.MAX_SAFE_INTEGER;
+      return aTs - bTs;
+    });
+
+    const moods = sortedDayEntries.map((e) => e.mood01).filter((m) => Number.isFinite(m));
     const healthNumeric = {};
     for (const field of HEALTH_EXPOSURE_FIELDS) {
-      const vals = dayEntries
+      const vals = sortedDayEntries
         .map((e) => e.healthSignals?.[field])
         .filter((v) => Number.isFinite(v));
       if (vals.length) healthNumeric[field] = round6(mean(vals));
     }
-    const sensitive = dayEntries.some((e) => {
+    const sensitive = sortedDayEntries.some((e) => {
       const raw = rawById.get(e.id);
       return raw?.safety_flagged === true || raw?.has_warning_indicators === true;
     });
     rows.push({
       dateKey,
-      entryIds: dayEntries.map((e) => e.id),
+      entryIds: sortedDayEntries.map((e) => e.id),
       mood100: moods.length ? round6(mean(moods) * 100) : null,
-      tags: mergeArrayField(dayEntries.map((e) => e.tags)),
-      entities: mergeArrayField(dayEntries.map((e) => e.entities)),
+      tags: mergeArrayField(sortedDayEntries.map((e) => e.tags)),
+      entities: mergeArrayField(sortedDayEntries.map((e) => e.entities)),
       category: (() => {
-        const known = dayEntries.map((e) => e.category).filter((c) => !isUnknown(c));
+        const known = sortedDayEntries.map((e) => e.category).filter((c) => !isUnknown(c));
         return known.length ? String(known[0]).toLowerCase() : UNKNOWN;
       })(),
       healthSignals: Object.keys(healthNumeric).length ? healthNumeric : null,

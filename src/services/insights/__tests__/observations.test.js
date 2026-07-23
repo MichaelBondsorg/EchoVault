@@ -56,6 +56,47 @@ describe('buildDailyObservations', () => {
     expect(obs[0].sensitive).toBe(true);
     expect(obs[1].sensitive).toBe(false);
   });
+
+  it('entry with only entryId (no id) and safety_flagged still marks day sensitive', () => {
+    const obs = buildDailyObservations([
+      {
+        entryId: 'uuid-123',
+        createdAt: '2026-07-01T09:00:00Z',
+        text: 'unsafe text',
+        analysis: { mood_score: 0.5 },
+        tags: ['gym'],
+        entry_type: 'reflection',
+        safety_flagged: true,
+      },
+    ], { timeZone: 'UTC' });
+    expect(obs).toHaveLength(1);
+    expect(obs[0].sensitive).toBe(true);
+  });
+
+  it('buildDailyObservations is order-independent (same entries shuffled produce identical results)', () => {
+    const entries = [
+      entry('a', '2026-07-01T14:30:00Z', { tags: ['run'] }),
+      entry('b', '2026-07-01T09:15:00Z', { tags: ['gym'] }),
+      entry('c', '2026-07-02T10:00:00Z', { tags: ['swim'] }),
+    ];
+
+    const obs1 = buildDailyObservations(entries, { timeZone: 'UTC' });
+    const obs2 = buildDailyObservations([entries[2], entries[0], entries[1]], { timeZone: 'UTC' });
+
+    expect(obs1).toEqual(obs2);
+    expect(obs1[0].entryIds).toEqual(obs2[0].entryIds);
+    expect(obs1[0].category).toBe(obs2[0].category);
+  });
+
+  it('day tags merge (union) across multiple entries on same day', () => {
+    const obs = buildDailyObservations([
+      entry('a', '2026-07-01T09:00:00Z', { tags: ['gym'] }),
+      entry('b', '2026-07-01T14:00:00Z', { tags: ['run'] }),
+    ], { timeZone: 'UTC' });
+
+    expect(obs).toHaveLength(1);
+    expect(obs[0].tags).toEqual(['gym', 'run']);
+  });
 });
 
 describe('observationSeriesFor', () => {
