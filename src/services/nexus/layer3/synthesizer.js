@@ -62,7 +62,6 @@ export const INSIGHT_TYPES = {
   NARRATIVE_ARC: 'narrative_arc',
   INTERVENTION: 'intervention',
   COUNTERFACTUAL: 'counterfactual',
-  STATE_COMPARISON: 'state_comparison',
   PATTERN_ALERT: 'pattern_alert'
 };
 

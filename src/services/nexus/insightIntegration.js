@@ -11,14 +11,10 @@
  * - Intervention effectiveness tracking
  */
 
-import { computeHealthMoodCorrelations, getTopHealthInsights, checkHealthDataSufficiency } from '../health/healthCorrelations';
-import { computeEnvironmentMoodCorrelations, getTopEnvironmentInsights, checkEnvironmentDataSufficiency } from '../environment/environmentCorrelations';
-import { generateContextAwarePrompts, getTopContextPrompt, hasHighPriorityContext } from '../prompts/contextPrompts';
-import { detectPatternsInPeriod } from './layer1/patternDetector';
-import { calculateAndSaveBaselines, getBaselines } from './layer2/baselineManager';
-import { generateCausalSynthesis } from './layer3/synthesizer';
-import { updateInterventionData, getInterventionData } from './layer4/interventionTracker';
-import { getWhoopHistory } from '../health/whoop';
+import { computeEnvironmentMoodCorrelations } from '../environment/environmentCorrelations';
+import { getTopContextPrompt, hasHighPriorityContext } from '../prompts/contextPrompts';
+import { getBaselines } from './layer2/baselineManager';
+import { getInterventionData } from './layer4/interventionTracker';
 import { RISKY_CLAIMS_ENABLED } from './orchestrator';
 // R4 T-p0closure (Important 1): these were previously loaded via require()
 // inside getTodayRecommendations — an ESM module using CommonJS require()
