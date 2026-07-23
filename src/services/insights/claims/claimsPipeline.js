@@ -11,15 +11,72 @@ import {
   writeClaim, supersedeClaim, listAllClaims, evidenceEquivalent, setClaimStatus,
 } from './claimsService';
 import { buildClaim } from './claimSchema';
+import { listSourceExclusions } from '../sourceExclusions';
 
 const ENGINE_BY_KIND = { tag: 'activity', entity: 'people', category: 'category', health: 'health' };
 export const engineKeyFor = (spec) => ENGINE_BY_KIND[spec.kind] || spec.kind;
 
+/**
+ * Entry ids to drop from a claims run (adjacent gap fix, R4 Phase 1 Task 9
+ * review: "claims pipeline ignores source_exclusions"). `getExcludedEntryIds`
+ * (sourceExclusions.js) only ever returns `appliesTo === 'all'` exclusions —
+ * it deliberately does NOT surface family-scoped ones. But a claim's
+ * 'wrong_source' correction (`claimFeedback.js`) writes exactly a
+ * family-scoped exclusion: `appliesTo: claim.analysisPlan.hypothesisFamilyId`,
+ * which for every candidate this pipeline enumerates is `basic:<engine>:mood`
+ * (see `familyIdForBasic`). Using `getExcludedEntryIds` alone would make
+ * every 'wrong_source' correction a permanent no-op for claims generation —
+ * exactly the routing promise `claimFeedback.js`'s header comment describes
+ * as the point of that option.
+ *
+ * A precise per-family filter (excluding an entry only from the ONE family
+ * it was flagged wrong-source for) would require building day-rollups
+ * separately per family, which conflicts with `buildDailyObservations` being
+ * built once for the whole run below. Deliberate, documented, conservative
+ * choice instead: exclude an entry from the WHOLE run (every family, not
+ * just the one it was flagged for) whenever ANY exclusion names it — either
+ * unscoped (`appliesTo: 'all'`) or family-scoped (`appliesTo` starting with
+ * `'basic:'`, this pipeline's only family-id shape). Over-exclusion errs
+ * toward the user's correction, never against it.
+ *
+ * @param {object} db
+ * @param {string} uid
+ * @returns {Promise<Set<string>>}
+ */
+async function excludedEntryIdsForClaims(db, uid) {
+  const exclusions = await listSourceExclusions(db, uid);
+  const ids = new Set();
+  for (const exclusion of exclusions) {
+    const appliesTo = exclusion?.appliesTo;
+    if (exclusion?.entryId && (appliesTo === 'all' || String(appliesTo).startsWith('basic:'))) {
+      ids.add(exclusion.entryId);
+    }
+  }
+  return ids;
+}
+
 export async function generateClaims(db, uid, entries, { timeZone, now } = {}) {
   const at = now || new Date().toISOString();
   const tz = timeZone || resolveDeviceTimezone();
-  const observations = buildDailyObservations(entries, { timeZone: tz });
-  const entriesById = new Map((entries || []).filter((e) => e && e.id).map((e) => [e.id, e]));
+
+  // Source Exclusions (adjacent gap fix): read and filter BEFORE anything
+  // derives from `entries`. FAIL-CLOSED, deliberately NOT wrapped in a
+  // try/catch that degrades to an empty set — mirrors the precedent set by
+  // Nexus's own exclusions read (`src/services/nexus/orchestrator.js`): a
+  // failed exclusions read must never silently run generation as if no
+  // exclusions existed, since that could resurface evidence the user
+  // explicitly flagged wrong-source. A failure here propagates to
+  // `generateClaims`'s caller; the digest/report orchestration hook that
+  // invokes this already wraps its own call in a try/catch, so a read
+  // failure correctly skips this run rather than crashing the app.
+  const excludedIds = await excludedEntryIdsForClaims(db, uid);
+  const filteredEntries = (entries || []).filter((e) => {
+    const id = e?.id || e?.entryId;
+    return !id || !excludedIds.has(id);
+  });
+
+  const observations = buildDailyObservations(filteredEntries, { timeZone: tz });
+  const entriesById = new Map(filteredEntries.filter((e) => e && e.id).map((e) => [e.id, e]));
   const specs = enumerateExposures(observations);
 
   // 1) Register EVERY candidate before any analysis, grouped by engine-level

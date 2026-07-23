@@ -244,6 +244,15 @@ const RECOMPUTE_COPY = 'This will recompute affected insights.';
 // its confirm dialog (below), unchanged.
 const WRONG_SOURCE_COPY = "This source won't be used for this kind of insight in the future.";
 
+// Finding 3 (R4 Phase 1 Task 9 review, minor): the id the "use Wrong source
+// under a specific entry" hint carries, and that the wrong_source radio
+// input + the (then-disabled) Submit button reference via aria-describedby
+// — so a screen-reader user selecting that option, or tabbing to the
+// disabled Submit, hears WHY it's disabled instead of just "dimmed". Only
+// wired while the hint is actually rendered (selectedClaimOption ===
+// 'wrong_source') — no dangling id reference when it isn't in the DOM.
+const CLAIM_WRONG_SOURCE_HINT_ID = 'claim-wrong-source-hint';
+
 /**
  * Builds the `feedback` object `recordFeedbackAndLearn` actually expects
  * (`src/services/basicInsights/feedbackLearning.js`, which destructures its
@@ -537,6 +546,11 @@ const ReceiptSheet = ({
                           checked={selectedClaimOption === option.id}
                           onChange={() => setSelectedClaimOption(option.id)}
                           disabled={busy}
+                          aria-describedby={
+                            option.id === 'wrong_source' && selectedClaimOption === 'wrong_source'
+                              ? CLAIM_WRONG_SOURCE_HINT_ID
+                              : undefined
+                          }
                           className="h-4 w-4 shrink-0"
                         />
                         {option.label}
@@ -544,7 +558,7 @@ const ReceiptSheet = ({
                     ))}
                   </div>
                   {selectedClaimOption === 'wrong_source' && (
-                    <p className="mt-1 text-xs text-muted-foreground">
+                    <p id={CLAIM_WRONG_SOURCE_HINT_ID} className="mt-1 text-xs text-muted-foreground">
                       Use “Wrong source” under a specific entry in Sources above instead.
                     </p>
                   )}
@@ -552,6 +566,7 @@ const ReceiptSheet = ({
                     type="button"
                     onClick={handleClaimFeedbackSubmit}
                     disabled={busy || !selectedClaimOption || selectedClaimOption === 'wrong_source'}
+                    aria-describedby={selectedClaimOption === 'wrong_source' ? CLAIM_WRONG_SOURCE_HINT_ID : undefined}
                     className="mt-3 min-h-[44px] w-full rounded-full bg-accent-deep text-sm font-medium text-background transition-opacity hover:opacity-90 disabled:opacity-50"
                   >
                     Submit feedback

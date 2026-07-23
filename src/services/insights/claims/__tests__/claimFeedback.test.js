@@ -79,15 +79,15 @@ describe('FEEDBACK_OPTIONS', () => {
 });
 
 describe('recordClaimFeedback — routing', () => {
-  it('"accurate" calls ONLY recordFeedbackAndLearn, with feedback:"accurate" and the claim feedback shape', async () => {
+  it('"accurate" calls ONLY recordFeedbackAndLearn, with feedback:"accurate" and the claim feedback shape (activityKey from candidateId "tag:gym", no insightId, claimId carries the audit id)', async () => {
     await recordClaimFeedback(DB, UID, baseClaim, 'accurate', { entriesCount: 40 });
 
     expect(recordFeedbackAndLearnMock).toHaveBeenCalledTimes(1);
     expect(recordFeedbackAndLearnMock).toHaveBeenCalledWith(
       UID,
       {
-        insightId: baseClaim.id,
-        category: 'activity',
+        claimId: baseClaim.id,
+        activityKey: 'gym',
         insightText: baseClaim.wording,
         moodDelta: 7.2,
         sampleSize: 24,
@@ -97,6 +97,9 @@ describe('recordClaimFeedback — routing', () => {
       [{ id: 'e1', entryId: 'e1' }, { id: 'e2', entryId: 'e2' }],
       40,
     );
+    const shape = recordFeedbackAndLearnMock.mock.calls[0][1];
+    expect(shape.insightId).toBeUndefined();
+    expect(shape.category).toBeUndefined();
     expect(excludeSourceMock).not.toHaveBeenCalled();
     expect(recordInsightEngagementMock).not.toHaveBeenCalled();
     expect(setClaimStatusMock).not.toHaveBeenCalled();
@@ -152,17 +155,17 @@ describe('recordClaimFeedback — routing', () => {
     expect(recordFeedbackAndLearnMock).toHaveBeenCalledTimes(1);
     expect(recordFeedbackAndLearnMock).toHaveBeenCalledWith(
       UID,
-      expect.objectContaining({ insightId: baseClaim.id, feedback: 'inaccurate' }),
+      expect.objectContaining({ claimId: baseClaim.id, activityKey: 'gym', feedback: 'inaccurate' }),
       expect.any(Array),
       12,
     );
-    expect(recordFeedbackAndLearnMock.mock.calls[0][1].suppressTopic).toBeUndefined();
+    expect(recordFeedbackAndLearnMock.mock.calls[0][1].insightId).toBeUndefined();
     expect(excludeSourceMock).not.toHaveBeenCalled();
     expect(recordInsightEngagementMock).not.toHaveBeenCalled();
     expect(setClaimStatusMock).not.toHaveBeenCalled();
   });
 
-  it('"do_not_analyze" calls BOTH setClaimStatus(suppressed) AND recordFeedbackAndLearn(suppressTopic:true)', async () => {
+  it('"do_not_analyze" calls BOTH setClaimStatus(suppressed) AND recordFeedbackAndLearn (no suppressTopic field — nothing downstream reads it)', async () => {
     await recordClaimFeedback(DB, UID, baseClaim, 'do_not_analyze', { now: NOW });
 
     expect(setClaimStatusMock).toHaveBeenCalledTimes(1);
@@ -171,10 +174,11 @@ describe('recordClaimFeedback — routing', () => {
     expect(recordFeedbackAndLearnMock).toHaveBeenCalledTimes(1);
     expect(recordFeedbackAndLearnMock).toHaveBeenCalledWith(
       UID,
-      expect.objectContaining({ insightId: baseClaim.id, feedback: 'inaccurate', suppressTopic: true }),
+      expect.objectContaining({ claimId: baseClaim.id, activityKey: 'gym', feedback: 'inaccurate' }),
       expect.any(Array),
       0,
     );
+    expect(recordFeedbackAndLearnMock.mock.calls[0][1].suppressTopic).toBeUndefined();
     expect(excludeSourceMock).not.toHaveBeenCalled();
     expect(recordInsightEngagementMock).not.toHaveBeenCalled();
   });
@@ -182,6 +186,37 @@ describe('recordClaimFeedback — routing', () => {
   it('throws on an unknown optionId and calls no consumer or audit write', async () => {
     await expect(recordClaimFeedback(DB, UID, baseClaim, 'bogus_option')).rejects.toThrow(/unknown option/);
     allMocks().forEach((m) => expect(m).not.toHaveBeenCalled());
+  });
+});
+
+describe('recordClaimFeedback — audit write is best-effort (Finding 2)', () => {
+  it('consumer succeeds but addDoc rejects -> recordClaimFeedback still RESOLVES, and console.warn fires with claimId/optionId', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    addDocMock.mockRejectedValueOnce(new Error('firestore unavailable'));
+
+    await expect(recordClaimFeedback(DB, UID, baseClaim, 'accurate')).resolves.toBeUndefined();
+
+    expect(recordFeedbackAndLearnMock).toHaveBeenCalledTimes(1); // consumer call stands
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    const [message] = warnSpy.mock.calls[0];
+    expect(message).toContain(baseClaim.id);
+    expect(message).toContain('accurate');
+    warnSpy.mockRestore();
+  });
+
+  it('guard: unknown optionId throws BEFORE any consumer call or audit write', async () => {
+    await expect(recordClaimFeedback(DB, UID, baseClaim, 'bogus_option')).rejects.toThrow(/unknown option/);
+    expect(recordFeedbackAndLearnMock).not.toHaveBeenCalled();
+    expect(excludeSourceMock).not.toHaveBeenCalled();
+    expect(recordInsightEngagementMock).not.toHaveBeenCalled();
+    expect(setClaimStatusMock).not.toHaveBeenCalled();
+    expect(addDocMock).not.toHaveBeenCalled();
+  });
+
+  it('guard: wrong_source without entryId throws BEFORE any consumer call or audit write', async () => {
+    await expect(recordClaimFeedback(DB, UID, baseClaim, 'wrong_source')).rejects.toThrow(/entryId/);
+    expect(excludeSourceMock).not.toHaveBeenCalled();
+    expect(addDocMock).not.toHaveBeenCalled();
   });
 });
 
@@ -213,16 +248,70 @@ describe('recordClaimFeedback — audit event', () => {
   });
 });
 
-describe('recordClaimFeedback — engine key derivation from hypothesisFamilyId', () => {
-  it("parses 'basic:activity:mood' -> category 'activity' in the feedback shape", async () => {
-    const claim = { ...baseClaim, analysisPlan: { hypothesisFamilyId: 'basic:activity:mood', candidateId: 'x' } };
+describe('recordClaimFeedback — stable patternType routing from analysisPlan.candidateId (Finding 1)', () => {
+  it("candidateId 'tag:gym' -> activityKey:'gym', no peopleKey/category/insightId", async () => {
+    const claim = { ...baseClaim, analysisPlan: { ...baseClaim.analysisPlan, candidateId: 'tag:gym' } };
     await recordClaimFeedback(DB, UID, claim, 'accurate');
-    expect(recordFeedbackAndLearnMock.mock.calls[0][1].category).toBe('activity');
+    const shape = recordFeedbackAndLearnMock.mock.calls[0][1];
+    expect(shape.activityKey).toBe('gym');
+    expect(shape.peopleKey).toBeUndefined();
+    expect(shape.category).toBeUndefined();
+    expect(shape.insightId).toBeUndefined();
   });
 
-  it('routes an experiment familyId\'s second segment (templateId) as category', async () => {
-    const claim = { ...baseClaim, analysisPlan: { hypothesisFamilyId: 'experiment:sleep_wind_down:mood', candidateId: 'x' } };
+  it("candidateId 'entity:partner' -> peopleKey:'partner', no activityKey/category/insightId", async () => {
+    const claim = { ...baseClaim, analysisPlan: { ...baseClaim.analysisPlan, candidateId: 'entity:partner' } };
     await recordClaimFeedback(DB, UID, claim, 'accurate');
-    expect(recordFeedbackAndLearnMock.mock.calls[0][1].category).toBe('sleep_wind_down');
+    const shape = recordFeedbackAndLearnMock.mock.calls[0][1];
+    expect(shape.peopleKey).toBe('partner');
+    expect(shape.activityKey).toBeUndefined();
+    expect(shape.category).toBeUndefined();
+    expect(shape.insightId).toBeUndefined();
+  });
+
+  it("candidateId 'health:sleepHours' -> category:'claim_health_sleepHours', no activityKey/peopleKey/insightId", async () => {
+    const claim = { ...baseClaim, analysisPlan: { ...baseClaim.analysisPlan, candidateId: 'health:sleepHours' } };
+    await recordClaimFeedback(DB, UID, claim, 'accurate');
+    const shape = recordFeedbackAndLearnMock.mock.calls[0][1];
+    expect(shape.category).toBe('claim_health_sleepHours');
+    expect(shape.activityKey).toBeUndefined();
+    expect(shape.peopleKey).toBeUndefined();
+    expect(shape.insightId).toBeUndefined();
+  });
+
+  it("candidateId 'category:work' -> category:'claim_category_work', no activityKey/peopleKey/insightId", async () => {
+    const claim = { ...baseClaim, analysisPlan: { ...baseClaim.analysisPlan, candidateId: 'category:work' } };
+    await recordClaimFeedback(DB, UID, claim, 'accurate');
+    const shape = recordFeedbackAndLearnMock.mock.calls[0][1];
+    expect(shape.category).toBe('claim_category_work');
+    expect(shape.activityKey).toBeUndefined();
+    expect(shape.peopleKey).toBeUndefined();
+    expect(shape.insightId).toBeUndefined();
+  });
+
+  it('supersede simulation: SAME candidateId, DIFFERENT claim.id across two calls -> identical activityKey/category routing fields (learning accumulates, not resets)', async () => {
+    const v1 = {
+      ...baseClaim,
+      id: 'claim_basic-activity-tag-gym-mood_aaaa1111_v1',
+      analysisPlan: { ...baseClaim.analysisPlan, candidateId: 'tag:gym' },
+    };
+    const v2 = {
+      ...baseClaim,
+      id: 'claim_basic-activity-tag-gym-mood_bbbb2222_v2',
+      analysisPlan: { ...baseClaim.analysisPlan, candidateId: 'tag:gym' },
+    };
+    expect(v1.id).not.toBe(v2.id); // ids differ across a supersede, as they do in production
+
+    await recordClaimFeedback(DB, UID, v1, 'misunderstood');
+    await recordClaimFeedback(DB, UID, v2, 'misunderstood');
+
+    const shape1 = recordFeedbackAndLearnMock.mock.calls[0][1];
+    const shape2 = recordFeedbackAndLearnMock.mock.calls[1][1];
+    expect(shape1.activityKey).toBe('gym');
+    expect(shape2.activityKey).toBe('gym');
+    expect(shape1.category).toBe(shape2.category); // both undefined
+    // The only thing that legitimately differs between the two calls is the
+    // audit-only claimId — the patternType-relevant routing is identical.
+    expect(shape1.claimId).not.toBe(shape2.claimId);
   });
 });

@@ -24,18 +24,59 @@
  *                     signal for the Phase-2 gate, so only the raw audit
  *                     event below is written for it.
  *   misunderstood  -> recordFeedbackAndLearn (false-positive pattern signal)
- *   do_not_analyze -> setClaimStatus('suppressed') AND recordFeedbackAndLearn
- *                     with suppressTopic:true (drives the existing
- *                     patternType suppression machinery; liftable in
- *                     InsightControlCenter per D7)
+ *   do_not_analyze -> setClaimStatus('suppressed') AND recordFeedbackAndLearn.
+ *                     Suppressing THIS specific claim is setClaimStatus's
+ *                     job (it flips the claim doc's own status, done
+ *                     unconditionally above regardless of what
+ *                     recordFeedbackAndLearn does). The recordFeedbackAndLearn
+ *                     call alongside it accumulates an 'inaccurate' data
+ *                     point against this candidate's stable patternType
+ *                     (see the routing note below) — enough repeated
+ *                     'inaccurate' feedback for that patternType can ALSO
+ *                     trip the legacy basicInsights engine's own
+ *                     accuracy-threshold suppression for its equivalent
+ *                     pattern, since the two share one learning doc by
+ *                     design. That is a side effect of accumulation, not a
+ *                     dedicated suppression flag — there never was one:
+ *                     `suppressTopic` was a field nothing downstream read.
  *
  * Every option, including the two that only ever write one thing, ALSO
  * appends a raw structured event to the `insightFeedback` collection — the
  * durable audit trail the DR requires ("record a structured reason for
- * every correction"). This happens unconditionally, after the routed
- * consumer call(s) succeed, so a write failure in the consumer call
- * surfaces as a thrown error rather than a silently-recorded-but-not-acted-
- * on event.
+ * every correction"). This happens after the routed consumer call(s)
+ * succeed, but is itself best-effort: an audit-write failure is logged and
+ * swallowed rather than rejecting the whole call, so a Firestore hiccup on
+ * the audit trail can never undo (or appear to undo) a consumer action that
+ * already committed. See `recordClaimFeedback`'s own comment for why.
+ *
+ * Patternized-learning routing (Finding 1, R4 Phase 1 Task 9 review): the
+ * `feedback` shape handed to `recordFeedbackAndLearn` must resolve to a
+ * `patternType` that is STABLE across a claim's supersede chain — claim ids
+ * change every time a claim is superseded (see `claimSchema.js#claimDocId`),
+ * so keying learning off `claim.id` (via `insightId`) would silently reset
+ * accuracy/suppression accumulation on every regeneration. Instead the
+ * candidate's OWN identity — `analysisPlan.candidateId`, which does NOT
+ * change across supersedes for the same candidate — drives it:
+ *   candidateId 'tag:X'      -> activityKey: X  (patternType 'activity_X',
+ *                                the same convention the legacy activity
+ *                                engine already uses — intentionally shared,
+ *                                so claim feedback and legacy feedback about
+ *                                the same tag accumulate in ONE learning doc)
+ *   candidateId 'entity:X'   -> peopleKey: X     (patternType 'people_X')
+ *   candidateId 'health:F' /
+ *   candidateId 'category:C' -> no activityKey/themeKey/peopleKey; `category`
+ *                                is set to the stable string
+ *                                `claim_<kind>_<rest>` (e.g.
+ *                                'claim_health_sleepHours'), so
+ *                                `recordFeedbackAndLearn`'s
+ *                                activityKey->themeKey->peopleKey->insightId
+ *                                ->category fallback chain lands on this
+ *                                stable string rather than a per-claim id.
+ * No shape built here ever sets `insightId` — the claim's id is carried
+ * instead in `claimId`, a field `recordFeedbackAndLearn` doesn't read (audit
+ * richness only; confirmed by reading that function before this change:
+ * `insightId` there is destructured for exactly one purpose, the
+ * patternType fallback, so dropping it has no other effect).
  */
 import { collection, addDoc } from 'firebase/firestore';
 import { APP_COLLECTION_ID } from '../../../config/constants';
@@ -56,21 +97,26 @@ export const FEEDBACK_OPTIONS = Object.freeze([
 const VALID_OPTION_IDS = new Set(FEEDBACK_OPTIONS.map((o) => o.id));
 
 /**
- * Engine key from a hypothesisFamilyId: 'basic:activity:mood' -> 'activity'.
- * Family ids are colon-delimited `<origin>:<category>[:...]`; segment index
- * 1 is always the category/engine key, no matter how many segments follow
- * it — this holds for experiment families too, where segment 1 is the
- * experiment's templateId (the category its own engine tracks feedback
- * under). A familyId with no colon at all (not emitted by any generator
- * today, but not assumed impossible) falls back to the whole string rather
- * than throwing.
+ * Stable patternType routing fields, derived from `analysisPlan.candidateId`
+ * (NOT `claim.id`, which is ephemeral across supersedes — see this module's
+ * header comment, Finding 1). candidateId is colon-delimited `<kind>:<rest>`
+ * (`enumerateExposures` in `observations.js` is the source of this shape:
+ * `tag:X`, `entity:X`, `category:X`, `health:field`); `rest` is everything
+ * after the first colon (rejoined, in case it itself contains one).
  *
- * @param {string} familyId
- * @returns {string}
+ * @param {string} candidateId
+ * @returns {{activityKey: string}|{peopleKey: string}|{category: string}}
  */
-function engineKeyFromFamilyId(familyId) {
-  const parts = String(familyId).split(':');
-  return parts.length > 1 ? parts[1] : familyId;
+function patternRoutingFor(candidateId) {
+  const [kind, ...restParts] = String(candidateId).split(':');
+  const rest = restParts.join(':');
+  if (kind === 'tag') return { activityKey: rest };
+  if (kind === 'entity') return { peopleKey: rest };
+  // health / category (and any future kind not yet enumerated): no
+  // activityKey/themeKey/peopleKey to key off, so hand recordFeedbackAndLearn
+  // a stable category string instead of falling through to insightId (which
+  // this module never sets — see header comment).
+  return { category: `claim_${kind}_${rest}` };
 }
 
 /**
@@ -89,16 +135,18 @@ function citedEntriesFor(claim) {
 
 /**
  * The `feedback` object shape `recordFeedbackAndLearn` expects (R4 Task 5
- * brief, step 2), built from the claim's own evidence.
+ * brief, step 2), built from the claim's own evidence. `claimId` (not
+ * `insightId`) carries the claim's id — audit richness only, see header
+ * comment for why `insightId` is never set here.
  *
  * @param {object} claim
  * @param {'accurate'|'inaccurate'} feedback
- * @param {object} [extra] - additional keys merged in (e.g. suppressTopic)
+ * @param {object} [extra] - additional keys merged in
  */
 function claimFeedbackShape(claim, feedback, extra = {}) {
   return {
-    insightId: claim.id,
-    category: engineKeyFromFamilyId(claim.analysisPlan.hypothesisFamilyId),
+    claimId: claim.id,
+    ...patternRoutingFor(claim.analysisPlan.candidateId),
     insightText: claim.wording,
     moodDelta: claim.evidence.effectMoodPoints,
     sampleSize: claim.evidence.totalCandidateDayCount,
@@ -184,10 +232,7 @@ export async function recordClaimFeedback(db, uid, claim, optionId, {
     case 'do_not_analyze':
       await setClaimStatus(db, uid, claim.id, 'suppressed', { now: nowIso });
       await recordFeedbackAndLearn(
-        uid,
-        claimFeedbackShape(claim, 'inaccurate', { suppressTopic: true }),
-        citedEntries,
-        entriesCount,
+        uid, claimFeedbackShape(claim, 'inaccurate'), citedEntries, entriesCount,
       );
       break;
 
@@ -196,13 +241,31 @@ export async function recordClaimFeedback(db, uid, claim, optionId, {
       throw new Error(`recordClaimFeedback: unknown option "${optionId}"`);
   }
 
-  await addDoc(collection(db, feedbackEventsPath(uid)), {
-    claimId: claim.id,
-    familyId,
-    optionId,
-    entryId,
-    createdAt: nowIso,
-  });
+  // Best-effort audit write (Finding 2, R4 Phase 1 Task 9 review): the
+  // consumer call(s) above have already committed by this point, so an
+  // addDoc failure here must NOT reject the whole call — doing so would
+  // leave the consumer's effect standing while reporting failure to the
+  // caller, and (per the retry pattern that would follow from an apparent
+  // failure) risks calling the consumer a second time for one user action.
+  // Losing the audit row on a Firestore hiccup is an acceptable trade-off
+  // the DR's "record a structured reason for every correction" requirement
+  // doesn't extend to guaranteeing on write failure; a console.warn keeps it
+  // visible without escalating to a user-facing error for what is, from the
+  // user's perspective, a successfully-recorded correction.
+  try {
+    await addDoc(collection(db, feedbackEventsPath(uid)), {
+      claimId: claim.id,
+      familyId,
+      optionId,
+      entryId,
+      createdAt: nowIso,
+    });
+  } catch (error) {
+    console.warn(
+      `[claimFeedback] audit event write failed for claimId=${claim.id} optionId=${optionId}:`,
+      error,
+    );
+  }
 }
 
 export default { FEEDBACK_OPTIONS, recordClaimFeedback };

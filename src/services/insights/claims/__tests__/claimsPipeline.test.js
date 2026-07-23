@@ -67,6 +67,18 @@ vi.mock('../evidenceBuilder', async () => {
   };
 });
 
+// Adjacent gap fix (R4 Phase 1 Task 9 review): generateClaims must read
+// source_exclusions and drop excluded entries before analysis. Mocked
+// directly (rather than routed through the Firestore-mock `store` above)
+// because `sourceExclusions.js` imports its Firestore primitives from
+// `../../config/firebase` (the app's Firebase bootstrap module), not from
+// `firebase/firestore` directly — importing the real module here would pull
+// in Firebase app initialization this test suite has no need for.
+const listSourceExclusionsMock = vi.fn(async () => []);
+vi.mock('../../sourceExclusions', () => ({
+  listSourceExclusions: (...args) => listSourceExclusionsMock(...args),
+}));
+
 const { generateClaims } = await import('../claimsPipeline');
 const { registerCandidates } = await import('../../testingLedger');
 const { freezeCandidatePlan } = await import('../evidenceBuilder');
@@ -79,6 +91,8 @@ beforeEach(() => {
   callOrder.length = 0;
   registerCandidates.mockClear();
   freezeCandidatePlan.mockClear();
+  listSourceExclusionsMock.mockClear();
+  listSourceExclusionsMock.mockImplementation(async () => []);
 });
 
 const NOW = '2026-07-22T10:00:00.000Z';
@@ -340,5 +354,52 @@ describe('generateClaims — two-engine fixture (tag + health) in one run', () =
       const matchingRegister = registerOps.find((r) => r.familyId === freeze.familyId);
       expect(freeze.candidateTestsCount).toBe(matchingRegister.testedCount);
     }
+  });
+});
+
+describe('generateClaims — source_exclusions (adjacent gap fix)', () => {
+  it("an entry excluded appliesTo:'all' is dropped from analysis — absent from the written claim's sourceEntryIds", async () => {
+    const baseline = await generateClaims(DB, UID, fixtures(STRONG), { timeZone: 'UTC', now: NOW });
+    expect(baseline.written).toBe(1);
+    // Confirm the baseline (un-excluded) run actually cites e0, so the
+    // exclusion test below is proving something, not vacuously true.
+    expect(allClaimDocs()[0].evidence.sourceEntryIds).toContain('e0');
+    store.clear();
+
+    listSourceExclusionsMock.mockImplementation(async () => [
+      { entryId: 'e0', appliesTo: 'all', reason: 'excluded_by_user' },
+    ]);
+    const result = await generateClaims(DB, UID, fixtures(STRONG), { timeZone: 'UTC', now: NOW });
+    expect(result.written).toBe(1);
+    expect(allClaimDocs()[0].evidence.sourceEntryIds).not.toContain('e0');
+  });
+
+  it("an entry excluded appliesTo:'basic:activity:mood' (family-scoped, as claimFeedback's wrong_source writes) is ALSO dropped, whole-run", async () => {
+    listSourceExclusionsMock.mockImplementation(async () => [
+      { entryId: 'e0', appliesTo: 'basic:activity:mood', reason: 'wrong_source' },
+    ]);
+    const result = await generateClaims(DB, UID, fixtures(STRONG), { timeZone: 'UTC', now: NOW });
+    expect(result.written).toBe(1);
+    expect(allClaimDocs()[0].evidence.sourceEntryIds).not.toContain('e0');
+  });
+
+  it('an exclusion whose appliesTo is unrelated (neither "all" nor "basic:"-prefixed) is left alone', async () => {
+    listSourceExclusionsMock.mockImplementation(async () => [
+      { entryId: 'e0', appliesTo: 'activity_gym', reason: 'wrong_source' }, // legacy pattern-type shape
+    ]);
+    const result = await generateClaims(DB, UID, fixtures(STRONG), { timeZone: 'UTC', now: NOW });
+    expect(result.written).toBe(1);
+    expect(allClaimDocs()[0].evidence.sourceEntryIds).toContain('e0');
+  });
+
+  it('exclusions read failure -> generateClaims rejects (fail-closed, never runs on unknown exclusions)', async () => {
+    listSourceExclusionsMock.mockImplementation(async () => {
+      throw new Error('firestore unavailable');
+    });
+    await expect(
+      generateClaims(DB, UID, fixtures(STRONG), { timeZone: 'UTC', now: NOW }),
+    ).rejects.toThrow('firestore unavailable');
+    expect(allClaimDocs()).toHaveLength(0);
+    expect(registerCandidates).not.toHaveBeenCalled(); // failed before any analysis started
   });
 });

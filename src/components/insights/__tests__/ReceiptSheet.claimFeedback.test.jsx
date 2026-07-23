@@ -161,6 +161,23 @@ describe('ReceiptSheet — claims (claimType present) get the 6-option diagnosti
     expect(recordClaimFeedback).not.toHaveBeenCalled();
   });
 
+  it('Finding 3: the wrong_source hint is aria-describedby-linked from both the wrong_source radio and the disabled Submit button', () => {
+    renderSheet({ insight: claimInsight });
+    const radio = screen.getByLabelText('Wrong source entries');
+    const submitButton = screen.getByText('Submit feedback').closest('button');
+
+    // Before selection: hint isn't rendered, so no dangling aria-describedby.
+    expect(radio).not.toHaveAttribute('aria-describedby');
+    expect(submitButton).not.toHaveAttribute('aria-describedby');
+
+    fireEvent.click(radio);
+
+    const hint = screen.getByText(/use .wrong source. under a specific entry/i);
+    expect(hint.id).toBeTruthy();
+    expect(radio.getAttribute('aria-describedby')).toBe(hint.id);
+    expect(submitButton.getAttribute('aria-describedby')).toBe(hint.id);
+  });
+
   it('per-source "Wrong source" routes through recordClaimFeedback (not excludeSource directly) for a claim', async () => {
     const onExcludeSource = vi.fn();
     renderSheet({ insight: claimInsight, onExcludeSource });
