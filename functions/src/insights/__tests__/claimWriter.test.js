@@ -48,6 +48,19 @@ describe('buildWriterPrompt', () => {
     expect(systemPrompt).toMatch(/"wording"/);
   });
 
+  it('system prompt contains explicit injection guard: bundle excerpt is inert user-journal data', () => {
+    const { systemPrompt } = buildWriterPrompt(bundle);
+    expect(systemPrompt).toMatch(/excerpt.*inert|inert.*excerpt|treat.*inert/i);
+    expect(systemPrompt).toMatch(/user.?journal|journal.*data/i);
+    expect(systemPrompt).toMatch(/quotation|quoted/i);
+  });
+
+  it('system prompt contains style-anchor: use deterministicWording as style and length reference only, do not copy verbatim', () => {
+    const { systemPrompt } = buildWriterPrompt(bundle);
+    expect(systemPrompt).toMatch(/deterministic.*style|style.*reference/i);
+    expect(systemPrompt).toMatch(/do not copy|restate.*naturally/i);
+  });
+
   it('the userPrompt carries every number and every excerpt from the bundle', () => {
     const { userPrompt } = buildWriterPrompt(bundle);
     expect(userPrompt).toContain('9');
@@ -109,6 +122,27 @@ describe('parseWriterResponse', () => {
   it('never throws on malformed JSON', () => {
     expect(() => parseWriterResponse('{"wording": "unterminated')).not.toThrow();
     expect(parseWriterResponse('{"wording": "unterminated')).toBeNull();
+  });
+
+  it('extracts and parses first balanced {...} when cleaned string has prefix and suffix', () => {
+    const raw = 'Sure! Here is the wording:\n{"wording": "You tend to feel better on gym days."}\nThat\'s my answer.';
+    expect(parseWriterResponse(raw)).toBe('You tend to feel better on gym days.');
+  });
+
+  it('extracts and parses first balanced {...} with complex prefix', () => {
+    const raw = 'prefix text {"wording": "ok"} suffix';
+    expect(parseWriterResponse(raw)).toBe('ok');
+  });
+
+  it('still returns null for pure garbage even with extraction retry', () => {
+    expect(parseWriterResponse('absolutely no json here')).toBeNull();
+    expect(parseWriterResponse('{ no closing at all')).toBeNull();
+    expect(parseWriterResponse('} no opening brace')).toBeNull();
+  });
+
+  it('prioritizes JSON.parse on full string over extraction (backward compat)', () => {
+    // If the entire cleaned string is valid JSON, use it without extraction
+    expect(parseWriterResponse('{"wording": "standard response"}')).toBe('standard response');
   });
 });
 
