@@ -37,6 +37,28 @@ describe('verifyDeterministic', () => {
     const r = verifyDeterministic('On gym days your recorded mood averaged 7.2 points lower — 9 vs 15 days.', bundle);
     expect(r.reasons).toContain('direction_mismatch');
   });
+  // I1: Detect better/worse direction words
+  it('rejects "worse" when direction is positive (I1 hardening)', () => {
+    const r = verifyDeterministic('On gym days your recorded mood was worse — 9 gym days vs 15 comparison days across 34 days.', bundle);
+    expect(r.reasons).toContain('direction_mismatch');
+  });
+  it('passes "better" when direction is positive (I1 hardening)', () => {
+    const r = verifyDeterministic('On gym days your recorded mood was better — 9 gym days vs 15 comparison days across 34 days.', bundle);
+    expect(r.pass).toBe(true);
+  });
+  // M3: Fullwidth numerals after NFKC normalization
+  it('rejects fullwidth numerals after NFKC normalization (M3 hardening)', () => {
+    const r = verifyDeterministic('On gym days your mood averaged １２ points higher — 9 vs 15 days.', bundle);
+    expect(r.reasons).toContain('unentailed_numeral');
+  });
+  // I2: Pin documented limitation (word-numerals pass deterministic)
+  it('passes word-numerals in deterministic layer (I2 limitation: LLM layer is backstop)', () => {
+    // This is a documented limitation: spoken/written "twelve points higher"
+    // bypasses the digit-regex check. The LLM entailment layer is the
+    // fail-closed backstop for spelled-out magnitudes.
+    const r = verifyDeterministic('On gym days your mood was twelve points higher — 9 vs 15 days.', bundle);
+    expect(r.pass).toBe(true);
+  });
   it('rejects missing subject, over-length, banned phrases, and invented sensitivity', () => {
     expect(verifyDeterministic('Recorded mood averaged 7.2 points higher — 9 vs 15 days.', bundle).reasons).toContain('subject_missing');
     expect(verifyDeterministic(`${'x'.repeat(MAX_WORDING_CHARS)} gym 9`, bundle).reasons).toContain('too_long');

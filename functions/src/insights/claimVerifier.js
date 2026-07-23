@@ -90,6 +90,10 @@ function checkBannedPhrase(wording, reasons) {
 }
 
 function checkUnentailedNumeral(wording, bundle, reasons) {
+  // I2: Known limitation — word-numerals ('twelve points higher') bypass
+  // this digit-regex check by design. The fail-closed LLM entailment layer
+  // is the backstop for spelled-out magnitudes. DO NOT silently expand this
+  // regex without updating the Task-9 parity/matrix rows.
   const found = wording.match(NUMERAL_RE) || [];
   if (found.length === 0) return;
   const allowed = entailedNumbers(bundle);
@@ -110,8 +114,9 @@ function checkSubjectMissing(wording, bundle, reasons) {
 
 function checkDirectionMismatch(wording, bundle, reasons) {
   const lower = wording.toLowerCase();
-  const mentionsHigher = /\bhigher\b/.test(lower) || /\bmore\b(?=[^.!?]*\bmood\b)|\bmood\b[^.!?]*\bmore\b/.test(lower);
-  const mentionsLower = /\blower\b/.test(lower) || /\bless\b(?=[^.!?]*\bmood\b)|\bmood\b[^.!?]*\bless\b/.test(lower);
+  // I1: Detect better/worse in addition to higher/lower
+  const mentionsHigher = /\b(higher|better)\b/.test(lower) || /\b(more|better)\b(?=[^.!?]*\bmood\b)|\bmood\b[^.!?]*\b(more|better)\b/.test(lower);
+  const mentionsLower = /\b(lower|worse)\b/.test(lower) || /\b(less|worse)\b(?=[^.!?]*\bmood\b)|\bmood\b[^.!?]*\b(less|worse)\b/.test(lower);
   if (!mentionsHigher && !mentionsLower) return;
   const wantsPositive = bundle?.direction === 'positive';
   if (mentionsHigher && !wantsPositive) reasons.push('direction_mismatch');
@@ -145,7 +150,9 @@ function checkSensitiveReference(wording, bundle, reasons) {
  */
 export function verifyDeterministic(wording, bundle) {
   const reasons = [];
-  const text = String(wording || '');
+  // M3: NFKC-normalize once at the top so fullwidth digits (e.g. １２)
+  // hit the numeral extractor and homoglyph tricks lose cheap cover.
+  const text = String(wording || '').normalize('NFKC');
   checkCausalLanguage(text, reasons);
   checkBannedPhrase(text, reasons);
   checkUnentailedNumeral(text, bundle, reasons);
