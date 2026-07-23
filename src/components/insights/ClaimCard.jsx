@@ -152,7 +152,9 @@ const ClaimCard = ({ claim, onShowReceipt, onFeedback, onTryExperiment }) => {
 
       {/* 4. Limitation */}
       {limitation && (
-        <p className="text-xs text-muted-foreground italic">{limitation}</p>
+        // P2-D7: the non-causal microcopy prefix is a plan-mandated fixed
+        // literal, not part of the claim's own (already causal-checked) text.
+        <p className="text-xs text-muted-foreground italic">{`Association, not cause — ${limitation}`}</p>
       )}
 
       {/* 5. Actions */}

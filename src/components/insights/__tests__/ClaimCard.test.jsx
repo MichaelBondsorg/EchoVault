@@ -49,9 +49,10 @@ describe('ClaimCard — five-question layout', () => {
 
     expect(screen.getByText(claim.wording)).toBeTruthy();
     expect(screen.getByText('12 gym days vs 40 comparison days · 60-day span · 7 mood-point difference')).toBeTruthy();
-    expect(screen.getByText(claim.limitations[0])).toBeTruthy();
+    // P2-D7: the limitation line carries the fixed non-causal microcopy prefix.
+    expect(screen.getByText(`Association, not cause — ${claim.limitations[0]}`)).toBeTruthy();
     // Only the FIRST limitation renders, not the second.
-    expect(screen.queryByText(claim.limitations[1])).toBeNull();
+    expect(screen.queryByText(new RegExp(claim.limitations[1]))).toBeNull();
   });
 
   it('renders "Pattern to watch" badge for a pattern_to_watch claim', () => {
@@ -107,12 +108,18 @@ describe('ClaimCard — five-question layout', () => {
     expect(screen.getByText(/1 contributing day hidden from preview \(sensitive\)/i)).toBeTruthy();
   });
 
-  it('no causal words appear anywhere in rendered copy', () => {
+  it('no causal words appear anywhere in rendered copy (outside the fixed anti-causal microcopy)', () => {
     const claim = baseClaim({
       evidence: { ...baseClaim().evidence, hiddenSensitiveSourceCount: 3 },
     });
     const { container } = render(<ClaimCard claim={claim} />);
-    expect(CAUSAL_RE.test(container.textContent)).toBe(false);
+    // The P2-D7 microcopy literally contains "cause" ("Association, not
+    // cause —") — it is the mandated ANTI-causal disclaimer, so assert it is
+    // present, then scan everything OUTSIDE that fixed literal.
+    const text = container.textContent;
+    expect(text).toContain('Association, not cause — ');
+    const outsideMicrocopy = text.replaceAll('Association, not cause — ', '');
+    expect(CAUSAL_RE.test(outsideMicrocopy)).toBe(false);
   });
 
   // F4 (closure-wave final review): the button now requires BOTH a template
