@@ -225,10 +225,21 @@ vi.mock('firebase/firestore', () => ({
   setDoc: vi.fn(async () => {}),
   collection: vi.fn(() => ({})),
   query: vi.fn((...args) => ({ __args: args })),
+  where: vi.fn((...args) => ({ __where: args })),
   orderBy: vi.fn(),
   limit: vi.fn(),
   getDocs: vi.fn(),
   deleteField: vi.fn(() => ({ __op: 'deleteField' })),
+  // R4 Phase 1 rows (a)-(i), bottom of file: claimsService.js/testingLedger.js/
+  // claimFeedback.js need updateDoc/writeBatch/runTransaction/addDoc, none of
+  // which any row ABOVE this one calls — bare placeholders here, given a
+  // real path-keyed implementation via that section's own wireClaimsFirestore()
+  // helper (mirrors claimsPipeline.test.js's/claimsService.test.js's own
+  // dedicated Firestore fakes). Adding them is inert for every earlier row.
+  updateDoc: vi.fn(async () => {}),
+  writeBatch: vi.fn(() => ({ set: vi.fn(), update: vi.fn(), delete: vi.fn(), commit: vi.fn(async () => {}) })),
+  runTransaction: vi.fn(async (_db, fn) => fn({ get: async () => ({ exists: () => false, data: () => undefined }), set: () => {} })),
+  addDoc: vi.fn(async () => ({ id: 'auto-id' })),
   Timestamp: {
     now: vi.fn(() => ({ toMillis: () => Date.now() })),
     fromMillis: vi.fn((ms) => ({ toMillis: () => ms, toDate: () => new Date(ms) })),
@@ -299,10 +310,23 @@ vi.mock('../services/nexus/layer4/recommendationEngine', () => ({ generateRecomm
 // Row (a)/(b) also need a controllable `getExcludedEntryIds` (R2 Task 10) —
 // mirrors orchestrator.exclusions.test.js's approach: no exclusions by
 // default, overridden per-test via mockResolvedValueOnce.
+//
+// R4 Phase 1 rows (a)/(b)/(e)/(g)/(h), bottom of file, ALSO import this same
+// module: claimsPipeline.js calls `listSourceExclusions` (stubbed the same
+// way, empty by default) and claimFeedback.js calls `excludeSource` — kept
+// REAL via importOriginal, since row (h)'s whole point is asserting on the
+// actual write `excludeSource` produces (entryId/appliesTo/reason/permanent)
+// through this file's already-established `firestoreMocks.addDoc`.
 const getExcludedEntryIdsMock = vi.fn(async () => new Set());
-vi.mock('../services/insights/sourceExclusions', () => ({
-  getExcludedEntryIds: (...args) => getExcludedEntryIdsMock(...args),
-}));
+const listSourceExclusionsMock = vi.fn(async () => []);
+vi.mock('../services/insights/sourceExclusions', async (importOriginal) => {
+  const actual = await importOriginal();
+  return {
+    ...actual,
+    getExcludedEntryIds: (...args) => getExcludedEntryIdsMock(...args),
+    listSourceExclusions: (...args) => listSourceExclusionsMock(...args),
+  };
+});
 
 // Row (c) needs companionContext's Tier1/Tier2 deps controllable — mirrors
 // companionContext.tier1Tier2Scope.test.js's own mocks exactly.
@@ -2770,5 +2794,464 @@ describe('R4 Matrix row (i): versioned cutover — archives-not-deletes + stamps
     expect(archived).toBeTruthy();
     expect(archived.legacyVersion).toBe(true);
     expect(persistCall[1].active.find((i) => i.id === 'pattern_legacy_matrix')).toBeUndefined();
+  });
+});
+
+// ===========================================================================
+// R4 Phase 1 rows (a)-(i): claim store / testing ledger / evidence builder /
+// retraction / receipts / feedback taxonomy, covering
+// docs/superpowers/plans/2026-07-22-r4-phase1-insight-integrity.md (Task 11).
+//
+// Real modules under test: src/services/insights/claims/{claimsPipeline,
+// claimsService,claimSchema,evidenceBuilder,claimFeedback}.js,
+// src/services/insights/testingLedger.js, src/services/insights/
+// observations.js. Their own import graph (experiments/estimator.js,
+// experiments/computeResult.js, entryAdapter.js, receipts.js) is entirely
+// Firebase-free — verified by reading every file in it, the same precedent
+// already established for the R3 rows above — so it runs for real with zero
+// additional mocking.
+//
+// claimsService.js/testingLedger.js/claimFeedback.js import their Firestore
+// primitives directly from 'firebase/firestore' (already vi.mock'd at the
+// top of this file). That mock didn't previously export updateDoc/
+// writeBatch/runTransaction/addDoc/where — bare placeholders for those were
+// added to the top-of-file factory for this section; wireClaimsFirestore()
+// below gives doc/collection/getDoc/getDocs/setDoc/updateDoc/writeBatch/
+// runTransaction/addDoc a real path-keyed Map-store implementation, called
+// fresh from each row's own beforeEach (mirrors claimsPipeline.test.js's/
+// claimsService.test.js's own dedicated Firestore fakes verbatim). Nothing
+// in the file runs after this section, so overriding doc/collection's mock
+// implementation here cannot leak into any earlier row.
+let claimsStore;
+let claimsAutoId;
+async function wireClaimsFirestore() {
+  claimsStore = new Map();
+  claimsAutoId = 0;
+  const {
+    collection, doc, getDoc, getDocs, setDoc, updateDoc, writeBatch, runTransaction, addDoc,
+  } = await import('firebase/firestore');
+  const pathOf = (...segs) => segs.join('/');
+  collection.mockImplementation((_db, ...segs) => ({ path: pathOf(...segs) }));
+  doc.mockImplementation((_db, ...segs) => ({ path: pathOf(...segs) }));
+  getDoc.mockImplementation(async (ref) => ({
+    exists: () => claimsStore.has(ref.path), data: () => claimsStore.get(ref.path),
+  }));
+  getDocs.mockImplementation(async (colRef) => {
+    const docs = [...claimsStore.entries()]
+      .filter(([path]) => path.startsWith(`${colRef.path}/`))
+      .map(([path, data]) => ({ id: path.slice(colRef.path.length + 1), data: () => data }));
+    // Both shapes are needed: claimsService.js/testingLedger.js read `.docs`;
+    // feedbackLearning.js/sourceExclusions.js read `.forEach`/`.empty`.
+    return {
+      docs, forEach: (fn) => docs.forEach((d) => fn(d)), empty: docs.length === 0, size: docs.length,
+    };
+  });
+  setDoc.mockImplementation(async (ref, data) => { claimsStore.set(ref.path, data); });
+  updateDoc.mockImplementation(async (ref, patch) => {
+    if (!claimsStore.has(ref.path)) throw new Error(`no doc at ${ref.path}`);
+    claimsStore.set(ref.path, { ...claimsStore.get(ref.path), ...patch });
+  });
+  writeBatch.mockImplementation(() => {
+    const ops = [];
+    return {
+      set: (ref, data) => ops.push(() => claimsStore.set(ref.path, data)),
+      update: (ref, patch) => ops.push(() => {
+        if (!claimsStore.has(ref.path)) throw new Error(`no doc at ${ref.path}`);
+        claimsStore.set(ref.path, { ...claimsStore.get(ref.path), ...patch });
+      }),
+      commit: async () => { ops.forEach((fn) => fn()); },
+    };
+  });
+  runTransaction.mockImplementation(async (_db, fn) => fn({
+    get: async (ref) => ({ exists: () => claimsStore.has(ref.path), data: () => claimsStore.get(ref.path) }),
+    set: (ref, data) => claimsStore.set(ref.path, data),
+  }));
+  addDoc.mockImplementation(async (colRef, data) => {
+    claimsAutoId += 1;
+    const id = `auto-${claimsAutoId}`;
+    claimsStore.set(`${colRef.path}/${id}`, data);
+    return { id };
+  });
+}
+
+const R4P1_NOW = '2026-07-22T10:00:00.000Z';
+// Fixture builders mirror evidenceBuilder.test.js's/claimsPipeline.test.js's
+// own STRONG-set precedent verbatim (single entry per day; day-based gate-6
+// reconciliation coincides with the entry-based one).
+function r4p1Fixtures(days) {
+  return days.map((x, i) => {
+    const tags = [];
+    if (x.gym) tags.push('gym');
+    if (x.extraTag) tags.push(x.extraTag);
+    return {
+      id: `r4p1-e${i}`, createdAt: `${x.d}T12:00:00Z`, text: `entry ${i} text`,
+      analysis: { mood_score: x.mood }, tags,
+      safety_flagged: x.sensitive === true,
+    };
+  });
+}
+const r4p1Mk = (n, startDay, month, gym, mood) => Array.from({ length: n }, (_, i) => ({
+  d: `2026-${month}-${String(startDay + i).padStart(2, '0')}`, gym, mood,
+}));
+// 40 days spanning >3 weeks: 16 gym days mood 0.72, 24 non-gym mood 0.55 —
+// proven eligible (delta clears the practical floor, ci95 excludes zero) in
+// evidenceBuilder.test.js/claimsPipeline.test.js's own identical fixture.
+const R4P1_STRONG = [...r4p1Mk(16, 1, '06', true, 0.72), ...r4p1Mk(14, 17, '06', false, 0.55), ...r4p1Mk(10, 1, '07', false, 0.55)];
+
+const R4P1_SPEC = { key: 'tag:gym', kind: 'tag', label: 'gym', splitMode: 'binary' };
+
+/** A complete, valid buildClaim() input (version 1, no parent) derived from
+ * the real evidenceBuilder run over R4P1_STRONG at candidateTestsCount=1 —
+ * shared by the rows below that need a well-formed claim to mutate/inspect
+ * rather than re-deriving one via the full pipeline. */
+async function r4p1ValidClaimInput() {
+  const { buildDailyObservations } = await import('../services/insights/observations');
+  const { freezeCandidatePlan, buildEvidenceForCandidate } = await import('../services/insights/claims/evidenceBuilder');
+  const entries = r4p1Fixtures(R4P1_STRONG);
+  const observations = buildDailyObservations(entries, { timeZone: 'UTC' });
+  const entriesById = new Map(entries.map((e) => [e.id, e]));
+  const plan = freezeCandidatePlan({
+    familyId: 'basic:activity:mood', candidateId: 'tag:gym', exposureSpec: R4P1_SPEC,
+    candidateTestsCount: 1, timeZone: 'UTC', now: R4P1_NOW,
+  });
+  const result = buildEvidenceForCandidate({
+    observations, entriesById, exposureSpec: R4P1_SPEC, plan,
+  });
+  return { ...result.claimInput, version: 1, parentClaimId: null };
+}
+
+// ---------------------------------------------------------------------------
+describe('Matrix row: R4P1-a ledger-counts-inconclusive', () => {
+  beforeEach(wireClaimsFirestore);
+
+  it('a run where every enumerated candidate is ineligible still registers it in the testing ledger (testedCount > 0), while zero claims are written', async () => {
+    const { generateClaims } = await import('../services/insights/claims/claimsPipeline');
+    const { familyIdForBasic, readLedgerCounts } = await import('../services/insights/testingLedger');
+
+    // Same "too few total days" fixture evidenceBuilder.test.js proves
+    // ineligible: 5 gym days (clears enumerateExposures' minPresentDays=3,
+    // so it IS enumerated) but too few paired days to ever be estimable.
+    const tooFewDays = [...r4p1Mk(5, 1, '06', true, 0.8), ...r4p1Mk(5, 10, '06', false, 0.4)];
+    const result = await generateClaims({}, 'u-r4p1a', r4p1Fixtures(tooFewDays), { timeZone: 'UTC', now: R4P1_NOW });
+
+    expect(result.eligible).toBe(0);
+    expect(result.written).toBe(0);
+    expect(result.candidatesTested).toBeGreaterThan(0); // tag:gym WAS enumerated + registered
+
+    const activityFamily = familyIdForBasic('activity');
+    const counts = await readLedgerCounts({}, 'u-r4p1a', [activityFamily]);
+    expect(counts.get(activityFamily)).toBeGreaterThan(0); // count-before-analyze: ledgered regardless of the analysis outcome
+
+    const claimsPrefix = 'artifacts/echo-vault-v5-fresh/users/u-r4p1a/insight_claims/';
+    expect([...claimsStore.keys()].some((k) => k.startsWith(claimsPrefix))).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+describe('Matrix row: R4P1-b count-before-analyze', () => {
+  beforeEach(wireClaimsFirestore);
+
+  it("the written claim's frozen analysisPlan.candidateTestsCount is >= the number of candidates enumerated (and registered) THIS run — registration completes before any candidate is analyzed, never a stale/smaller count", async () => {
+    const { generateClaims } = await import('../services/insights/claims/claimsPipeline');
+
+    // Three candidates enumerated in ONE engine family (tag:gym/call/book —
+    // same mixed-eligibility shape claimsPipeline.test.js's own dedicated
+    // "count-before-analyze" test proves via call-order spies; this row pins
+    // the observable OUTCOME of that ordering instead of the call order).
+    const days = R4P1_STRONG.map((d, i) => {
+      if (i < 3) return { ...d, extraTag: 'call' };
+      if (i >= 3 && i < 6) return { ...d, extraTag: 'book' };
+      return d;
+    });
+    const result = await generateClaims({}, 'u-r4p1b', r4p1Fixtures(days), { timeZone: 'UTC', now: R4P1_NOW });
+
+    expect(result.candidatesTested).toBe(3); // tag:gym + tag:call + tag:book enumerated this run
+    const claimsPrefix = 'artifacts/echo-vault-v5-fresh/users/u-r4p1b/insight_claims/';
+    const claims = [...claimsStore.entries()].filter(([k]) => k.startsWith(claimsPrefix)).map(([, v]) => v);
+    expect(claims).toHaveLength(1);
+    expect(claims[0].analysisPlan.candidateId).toBe('tag:gym');
+    expect(claims[0].analysisPlan.candidateTestsCount).toBeGreaterThanOrEqual(result.candidatesTested);
+    expect(claims[0].analysisPlan.candidateTestsCount).toBe(3); // the pooled family count, not a singleton count of 1
+  });
+});
+
+// ---------------------------------------------------------------------------
+describe('Matrix row: R4P1-c bonferroni-widens', () => {
+  it('same fixture, m=1 vs m=50: the m=50 stability interval is never narrower than m=1\'s — it is wider, or the claim becomes ineligible (interval_includes_zero)', async () => {
+    const { buildDailyObservations } = await import('../services/insights/observations');
+    const { freezeCandidatePlan, buildEvidenceForCandidate } = await import('../services/insights/claims/evidenceBuilder');
+
+    // Borderline fixture from evidenceBuilder.test.js's own "Bonferroni
+    // bites" test (verified there: delta=7.375, ci95=[1.43,13.07] excludes
+    // zero, ci99.75=[-2.78,17] includes zero) — genuine within-group
+    // variance so the bootstrap CI has real width to widen.
+    const gymMoods = [0.50, 0.56, 0.62, 0.68, 0.74, 0.56, 0.62, 0.68, 0.50, 0.74, 0.56, 0.68, 0.62, 0.50, 0.74, 0.68];
+    const nonGymMoods = [0.40, 0.46, 0.52, 0.58, 0.64, 0.70, 0.46, 0.52, 0.58, 0.64, 0.40, 0.70, 0.46, 0.64, 0.52, 0.58, 0.40, 0.70, 0.46, 0.64, 0.52, 0.58, 0.40, 0.70];
+    const gymDays = Array.from({ length: 16 }, (_, i) => ({ d: `2026-06-${String(1 + i).padStart(2, '0')}`, gym: true, mood: gymMoods[i] }));
+    const nonGymDays = [
+      ...Array.from({ length: 14 }, (_, i) => ({ d: `2026-06-${String(17 + i).padStart(2, '0')}`, gym: false, mood: nonGymMoods[i] })),
+      ...Array.from({ length: 10 }, (_, i) => ({ d: `2026-07-${String(1 + i).padStart(2, '0')}`, gym: false, mood: nonGymMoods[14 + i] })),
+    ];
+    const entries = r4p1Fixtures([...gymDays, ...nonGymDays]);
+    const observations = buildDailyObservations(entries, { timeZone: 'UTC' });
+    const entriesById = new Map(entries.map((e) => [e.id, e]));
+
+    const run = (testedCount) => buildEvidenceForCandidate({
+      observations, entriesById, exposureSpec: R4P1_SPEC,
+      plan: freezeCandidatePlan({
+        familyId: 'basic:activity:mood', candidateId: 'tag:gym', exposureSpec: R4P1_SPEC,
+        candidateTestsCount: testedCount, timeZone: 'UTC', now: R4P1_NOW,
+      }),
+    });
+
+    const m1 = run(1);
+    const m50 = run(50);
+    expect(m1.eligible).toBe(true);
+
+    if (!m50.eligible) {
+      expect(m50.reasons).toContain('interval_includes_zero'); // Bonferroni bit
+    } else {
+      const widthOf = (r) => r.claimInput.evidence.stabilityInterval[1] - r.claimInput.evidence.stabilityInterval[0];
+      expect(widthOf(m50)).toBeGreaterThanOrEqual(widthOf(m1)); // never the reverse
+    }
+  });
+
+  it('mutation-check control: identical inputs at the SAME candidateTestsCount produce a deeply-equal result twice — proves the row above measures the Bonferroni correction, not bootstrap run-to-run noise', async () => {
+    const { buildDailyObservations } = await import('../services/insights/observations');
+    const { freezeCandidatePlan, buildEvidenceForCandidate } = await import('../services/insights/claims/evidenceBuilder');
+    const entries = r4p1Fixtures(R4P1_STRONG);
+    const observations = buildDailyObservations(entries, { timeZone: 'UTC' });
+    const entriesById = new Map(entries.map((e) => [e.id, e]));
+    const run = () => buildEvidenceForCandidate({
+      observations, entriesById, exposureSpec: R4P1_SPEC,
+      plan: freezeCandidatePlan({
+        familyId: 'basic:activity:mood', candidateId: 'tag:gym', exposureSpec: R4P1_SPEC,
+        candidateTestsCount: 1, timeZone: 'UTC', now: R4P1_NOW,
+      }),
+    });
+    expect(run()).toEqual(run());
+  });
+});
+
+// ---------------------------------------------------------------------------
+describe('Matrix row: R4P1-d claim-immutability', () => {
+  // Firestore-rules enforcement of immutability lives in
+  // functions/src/__tests__/firestoreRules.test.js, describe('insight_claims
+  // collection rules (update contract)'):
+  //   - "denies an update that touches wording"
+  //   - "denies an update that touches evidence"
+  //   - "denies an update that touches analysisPlan"
+  //   - "allows an update to status + updatedAt only"
+  //   - "allows an update to supersededByClaimId + updatedAt only" (the
+  //      supersede path — the ONLY way a claim's facts ever change)
+  //   - "denies a status regression to candidate"
+  // This row asserts the JS-SIDE seam those rules back up: buildClaim
+  // rejects a malformed/tampered claim before it can ever reach a write, and
+  // setClaimStatus's own allowlist matches the rules' status-only-update
+  // contract — an app bug that tried to write a disallowed status is caught
+  // here, one layer before the rules would also catch it.
+  it('buildClaim rejects an unrecognized evidence key (closes the nested-map smuggling seam) and rejects a claim missing analysisPlan', async () => {
+    const { buildClaim } = await import('../services/insights/claims/claimSchema');
+    const base = await r4p1ValidClaimInput();
+
+    expect(() => buildClaim(base)).not.toThrow(); // sanity: the base input IS valid
+    expect(() => buildClaim({ ...base, evidence: { ...base.evidence, note: 'smuggled freeform text' } }))
+      .toThrow(/not a recognized key/);
+    const { analysisPlan, ...withoutPlan } = base;
+    expect(() => buildClaim(withoutPlan)).toThrow(/analysisPlan required/);
+  });
+
+  it("setClaimStatus allows exactly {suppressed, verified, expired} from app code — the same three-state contract firestoreRules.test.js pins ('candidate' is create-only, per \"denies a status regression to candidate\")", async () => {
+    await wireClaimsFirestore();
+    const { setClaimStatus } = await import('../services/insights/claims/claimsService');
+    const claimsPrefix = 'artifacts/echo-vault-v5-fresh/users/u-r4p1d/insight_claims/';
+    claimsStore.set(`${claimsPrefix}c1`, { id: 'c1', status: 'verified', updatedAt: R4P1_NOW });
+
+    await expect(setClaimStatus({}, 'u-r4p1d', 'c1', 'candidate')).rejects.toThrow();
+    await expect(setClaimStatus({}, 'u-r4p1d', 'c1', 'bogus')).rejects.toThrow();
+    await setClaimStatus({}, 'u-r4p1d', 'c1', 'suppressed', { now: '2026-07-23T00:00:00.000Z' });
+    expect(claimsStore.get(`${claimsPrefix}c1`).status).toBe('suppressed');
+  });
+});
+
+// ---------------------------------------------------------------------------
+describe('Matrix row: R4P1-e receipt-reconciliation', () => {
+  beforeEach(wireClaimsFirestore);
+
+  it('every eligible claim written by the real pipeline reconciles: visible sourceEntryIds + hiddenSensitiveSourceCount === totalCandidateDayCount, and no sensitive entry ever appears in receipt.sources', async () => {
+    const { generateClaims } = await import('../services/insights/claims/claimsPipeline');
+    const days = R4P1_STRONG.map((d, i) => (i < 2 ? { ...d, sensitive: true } : d)); // first 2 (gym) days marked sensitive
+    const result = await generateClaims({}, 'u-r4p1e', r4p1Fixtures(days), { timeZone: 'UTC', now: R4P1_NOW });
+    expect(result.written).toBe(1);
+
+    const claimsPrefix = 'artifacts/echo-vault-v5-fresh/users/u-r4p1e/insight_claims/';
+    const [, claim] = [...claimsStore.entries()].find(([k]) => k.startsWith(claimsPrefix));
+
+    expect(claim.evidence.hiddenSensitiveSourceCount).toBe(2);
+    expect(claim.evidence.sourceEntryIds.length + claim.evidence.hiddenSensitiveSourceCount)
+      .toBe(claim.evidence.totalCandidateDayCount);
+
+    const sensitiveIds = new Set(['r4p1-e0', 'r4p1-e1']); // the two entries marked sensitive above
+    expect(sensitiveIds.size).toBeGreaterThan(0);
+    for (const source of claim.receipt.sources) {
+      expect(sensitiveIds.has(source.entryId)).toBe(false);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+describe('Matrix row: R4P1-f unknown-≠-absent', () => {
+  it('a day whose tags field is UNKNOWN (no tags array anywhere on the entry) is omitted from the tag exposure series entirely — neither the present(1) nor the known-absent(0) group — and removing that day changes no series counts', async () => {
+    const { buildDailyObservations, observationSeriesFor } = await import('../services/insights/observations');
+
+    const knownDays = [
+      ...r4p1Mk(5, 1, '06', true, 0.7),   // present days: tags ['gym']
+      ...r4p1Mk(5, 10, '06', false, 0.5), // known-absent days: tags []
+    ];
+    const knownEntries = r4p1Fixtures(knownDays);
+    // No `tags` key at all -> entryAdapter resolves tags to UNKNOWN (never a
+    // known-empty []) for this entry's day.
+    const unknownDayEntry = {
+      id: 'r4p1-unknown', createdAt: '2026-06-20T12:00:00Z', text: 'no tags field at all',
+      analysis: { mood_score: 0.6 },
+    };
+    expect('tags' in unknownDayEntry).toBe(false);
+
+    const withUnknown = buildDailyObservations([...knownEntries, unknownDayEntry], { timeZone: 'UTC' });
+    const withoutUnknown = buildDailyObservations(knownEntries, { timeZone: 'UTC' });
+
+    const seriesWith = observationSeriesFor(withUnknown, R4P1_SPEC);
+    const seriesWithout = observationSeriesFor(withoutUnknown, R4P1_SPEC);
+
+    expect(seriesWith.find((p) => p.dateKey === '2026-06-20')).toBeUndefined(); // never in NO series
+    expect(seriesWith.length).toBe(seriesWithout.length); // removing it changes no counts
+    expect(seriesWith.filter((p) => p.value === 1).length).toBe(seriesWithout.filter((p) => p.value === 1).length);
+    expect(seriesWith.filter((p) => p.value === 0).length).toBe(seriesWithout.filter((p) => p.value === 0).length);
+  });
+});
+
+// ---------------------------------------------------------------------------
+describe('Matrix row: R4P1-g supersede-not-overwrite', () => {
+  beforeEach(wireClaimsFirestore);
+
+  it('a meaningfully changed re-run supersedes: both claim doc versions persist, the old one carries supersededByClaimId, and listActiveClaims (the real read path) returns ONLY the new version', async () => {
+    const { generateClaims } = await import('../services/insights/claims/claimsPipeline');
+    const { listActiveClaims, listAllClaims } = await import('../services/insights/claims/claimsService');
+
+    const first = await generateClaims({}, 'u-r4p1g', r4p1Fixtures(R4P1_STRONG), { timeZone: 'UTC', now: R4P1_NOW });
+    expect(first.written).toBe(1);
+    const before = await listAllClaims({}, 'u-r4p1g');
+    const oldId = before[0].id;
+
+    const laterNow = '2026-07-30T10:00:00.000Z';
+    // 10 more gym days at LOW mood — meaningfully shrinks the gym effect
+    // (proven to trigger supersede, not dedup, in claimsPipeline.test.js's
+    // identical CONTRADICTING fixture).
+    const contradicting = r4p1Mk(10, 11, '07', true, 0.55);
+    const second = await generateClaims({}, 'u-r4p1g', r4p1Fixtures([...R4P1_STRONG, ...contradicting]), { timeZone: 'UTC', now: laterNow });
+    expect(second.superseded).toBe(1);
+
+    const all = await listAllClaims({}, 'u-r4p1g');
+    expect(all).toHaveLength(2); // never overwritten — both versions persist
+    const oldDoc = all.find((c) => c.id === oldId);
+    const newDoc = all.find((c) => c.id !== oldId);
+    expect(oldDoc.supersededByClaimId).toBe(newDoc.id);
+    expect(newDoc.version).toBe(2);
+    expect(newDoc.parentClaimId).toBe(oldId);
+
+    const active = await listActiveClaims({}, 'u-r4p1g');
+    expect(active.map((c) => c.id)).toEqual([newDoc.id]); // only the new version is "active"
+  });
+});
+
+// ---------------------------------------------------------------------------
+describe('Matrix row: R4P1-h feedback-routing', () => {
+  beforeEach(wireClaimsFirestore);
+
+  // recordFeedbackAndLearn/recordInsightEngagement (claimFeedback.js's two
+  // downstream consumers) are left REAL here — both are already independently
+  // unit-tested (feedbackLearning.test.js) and only need the Firestore
+  // primitives wireClaimsFirestore() already wires (both import doc/getDoc/
+  // setDoc/getDocs from the same 'firebase/firestore' specifier this section
+  // wires); this row's own contract is ROUTING (which consumer fires for
+  // which option, and whether the claim doc itself is touched), not their
+  // internal accuracy math.
+  async function liveClaim(uid) {
+    const { writeClaim } = await import('../services/insights/claims/claimsService');
+    return writeClaim({}, uid, await r4p1ValidClaimInput());
+  }
+
+  it("wrong_source writes a source_exclusion (appliesTo: the claim's own hypothesisFamilyId) via excludeSource, and never mutates the claim doc itself", async () => {
+    const { recordClaimFeedback } = await import('../services/insights/claims/claimFeedback');
+    const { listAllClaims } = await import('../services/insights/claims/claimsService');
+    const uid = 'u-r4p1h-wrong-source';
+    const claim = await liveClaim(uid);
+    firestoreMocks.addDoc.mockClear();
+
+    await recordClaimFeedback({}, uid, claim, 'wrong_source', { entryId: claim.evidence.sourceEntryIds[0] });
+
+    // excludeSource (sourceExclusions.js) writes via config/firebase's addDoc
+    // — this file's OTHER shared mock, `firestoreMocks` (not the
+    // 'firebase/firestore' one wireClaimsFirestore wires).
+    const exclusionCall = firestoreMocks.addDoc.mock.calls.find((call) => call[1]?.reason === 'wrong_source');
+    expect(exclusionCall).toBeTruthy();
+    expect(exclusionCall[1].appliesTo).toBe(claim.analysisPlan.hypothesisFamilyId);
+    expect(exclusionCall[1].entryId).toBe(claim.evidence.sourceEntryIds[0]);
+
+    const after = await listAllClaims({}, uid);
+    expect(after).toHaveLength(1);
+    expect(after[0]).toEqual(claim); // no claim mutation whatsoever
+  });
+
+  it("do_not_analyze flips the claim's own status to 'suppressed' via setClaimStatus, and never deletes it", async () => {
+    const { recordClaimFeedback } = await import('../services/insights/claims/claimFeedback');
+    const { listAllClaims } = await import('../services/insights/claims/claimsService');
+    const uid = 'u-r4p1h-do-not-analyze';
+    const claim = await liveClaim(uid);
+
+    await recordClaimFeedback({}, uid, claim, 'do_not_analyze');
+
+    const after = await listAllClaims({}, uid);
+    expect(after).toHaveLength(1); // never deleted
+    expect(after[0].id).toBe(claim.id);
+    expect(after[0].status).toBe('suppressed');
+  });
+});
+
+// ---------------------------------------------------------------------------
+describe('Matrix row: R4P1-i flag-off-inert', () => {
+  const dayIso = (day) => `2026-07-${String(day).padStart(2, '0')}T12:00:00.000Z`;
+
+  beforeEach(async () => {
+    // Real path-keyed store so the ledger/claim reads below are a genuine
+    // "nothing was ever written" proof, not a vacuous one.
+    await wireClaimsFirestore();
+    const { getFlag } = await import('../config/flags');
+    getFlag.mockReset();
+    getFlag.mockReturnValue(false); // insightClaims OFF — this row's whole point
+  });
+
+  it('with insightClaims OFF: generateBasicInsights writes zero testing_ledger docs and zero insight_claims docs, and its own legacy output is unchanged (matches the pinned pre-Phase-1 snapshot from R4 row (d) above)', async () => {
+    const entries = [];
+    for (let i = 1; i <= 5; i++) entries.push({ id: `yoga-${i}`, createdAt: dayIso(i), content: 'yoga class', analysis: { mood_score: 0.9 } });
+    for (let i = 1; i <= 5; i++) entries.push({ id: `plain-${i}`, createdAt: dayIso(i + 10), content: 'plain day', analysis: { mood_score: 0.5 } });
+
+    const { generateBasicInsights } = await import('../services/basicInsights/basicInsightsOrchestrator');
+    const result = await generateBasicInsights('user-matrix-r4p1i', entries);
+
+    expect(result.success).toBe(true);
+    const yoga = result.insights.find((i) => i.activityKey === 'yoga');
+    // Same fixture as R4 row (d)'s pinned legacy-orchestrator snapshot above
+    // — insightClaims is entirely orthogonal to this computation (the
+    // generateClaims hook runs, if at all, strictly AFTER these results are
+    // computed and saved), so flipping it OFF must reproduce it byte-for-byte.
+    expect({ baselineMood: yoga.baselineMood, activityMood: yoga.activityMood, moodDelta: yoga.moodDelta })
+      .toEqual({ baselineMood: 50, activityMood: 90, moodDelta: 40 });
+
+    const { readLedgerCounts, familyIdForBasic } = await import('../services/insights/testingLedger');
+    const { listAllClaims } = await import('../services/insights/claims/claimsService');
+    const counts = await readLedgerCounts({}, 'user-matrix-r4p1i', [familyIdForBasic('activity')]);
+    expect(counts.get(familyIdForBasic('activity'))).toBe(0); // no ledger doc was ever created
+    expect(await listAllClaims({}, 'user-matrix-r4p1i')).toEqual([]); // no claim doc was ever created
   });
 });

@@ -865,3 +865,164 @@ re-activate the four claim types.
 **Validation:** `src/__tests__/validationMatrix.test.js` R4 rows (a)-(i);
 dedicated per-area test files cited throughout the sections above and in
 `.superpowers/sdd/task-6-report.md`.
+
+## R4 Phase 1 (Insight Integrity — canonical claim store + evidence rails)
+
+Plan: `docs/superpowers/plans/2026-07-22-r4-phase1-insight-integrity.md`.
+Where Phase 0 above repaired the legacy engines' *statistics*, Phase 1 adds
+the evidence-integrity machinery the DR calls for on top of them: a daily
+observation rollup, a hypothesis-family multiple-testing ledger, an
+evidence builder implementing the DR's 8-gate integrity ladder, and a
+versioned, immutable-with-lineage `InsightClaim` store — all gated behind
+one new client flag, **`insightClaims`, default OFF**. Full task-by-task
+detail: `.superpowers/sdd/task-{1,2,3,4,5,6,7,8,9,10}-report.md`.
+
+**Flag: `insightClaims`.** Same mechanism as every flag in this doc —
+`config/flags` Firestore doc, `src/config/flags.js` `FLAG_DEFAULTS`, no
+deploy required. Flip with:
+
+```
+node scripts/flip-flag.mjs insightClaims true
+```
+
+**Prerequisites: none.** Unlike `gentleRevisit`/`personalExperiments`
+above, this flag has no memo-sign-off gate — Phase 1's claims are
+deterministic-wording-only (buildClaim rejects causal language outright;
+see below), so there is no LLM-authored content or novel statistical-design
+judgment call for a memo to adjudicate. **Independent of every other flag
+in this doc** — it does not need `personalExperiments`, `insightReceipts`,
+or any R1-R3 flag on or off first, and flipping it does not interact with
+their state. Recommended order is therefore "whenever Michael wants it,"
+not part of any sequence. Michael's own gate for this one is lighter-weight
+and tracked in `PROJECT_STATUS.md`'s checklist: eyeball claim cards on his
+own data before flipping (no written sign-off doc required, since the
+wording is deterministic and code-reviewed, not model-generated).
+
+**What flipping it on adds.** `basicInsightsOrchestrator.js`'s
+`generateBasicInsights` gains one best-effort, post-generation hook
+(`src/services/insights/claims/claimsPipeline.js`'s `generateClaims`) that
+runs strictly AFTER the legacy insights are computed and cached — any error
+inside it is caught and logged, never regresses or blocks legacy
+`basicInsights` output. With the flag OFF, `generateClaims` is never
+invoked at all (see validation matrix row R4P1-i) — legacy behavior is
+byte-identical either way.
+
+**Two new Firestore collections, both under `artifacts/{APP}/users/{uid}/`,
+owner-only (no cross-user or public access), no new composite index
+required** (every read against them is either a direct-doc-ref
+transaction/get or an unfiltered `getDocs` over the whole collection — see
+`firestore.rules` for the exact shape rules):
+
+- **`testing_ledger/{familyId}`** — one doc per *hypothesis family*, not per
+  candidate. Families pool at the ENGINE level
+  (`testingLedger.js#familyIdForBasic`: `basic:{activity|people|category|
+  health}:mood` — a plan correction from the original per-exposure-key
+  design, ratified by the controller; see PROJECT_STATUS decisions below).
+  A family's `candidates` map lists every exposure key ever tested inside
+  it (`tag:gym`, `entity:sarah`, `health:sleepHours`, ...); `testedCount` is
+  the map's size — the family's Bonferroni multiple-testing burden `m`.
+  Rules enforce `testedCount` can only ever stay the same or grow on
+  update, never shrink.
+- **`insight_claims/{claimId}`** — one doc per claim VERSION (never
+  overwritten in place). `claimId` is deterministic
+  (`claimSchema.js#claimDocId`: `claim_{slug}_{fnv1a8}_v{version}`) so the
+  same candidate always re-derives the same id at the same version. Rules
+  allow `create` only with the full frozen shape, and `update` only to
+  `{status, supersededByClaimId, updatedAt}` — see claim lineage semantics
+  below.
+
+**Ledger semantics — `m` never decreases; don't delete a ledger doc.**
+Every candidate hypothesis is registered in its family's ledger BEFORE any
+analysis runs (`generateClaims`: one `registerCandidates` call per engine
+family, covering every exposure key `enumerateExposures` found that run),
+so an inconclusive, ineligible, or later-suppressed candidate still counts
+toward the family's multiple-testing burden — this is what makes the
+Bonferroni correction (`bonferroniCiLevel`, frozen onto
+`analysisPlan.ciLevel` before the estimator ever runs) honest rather than
+gameable. **Deleting a `testing_ledger` doc resets that honesty** — the
+family's `m` would silently drop back toward 1, narrowing every subsequent
+candidate's confidence interval as if fewer hypotheses had ever been
+tested, even though the same candidates will be re-tested and re-counted
+going forward. There is no code path that deletes a ledger doc (rules allow
+owner `delete` only for the user's own data-rights request, same posture as
+every other owner-scoped collection in this app) — treat that as a
+one-way, "user explicitly asked to delete their data" action only, never a
+maintenance/reset step.
+
+**Claim lineage semantics.** A written claim is immutable at the fact
+level — `wording`/`evidence`/`analysisPlan`/`subject`/`direction` etc. can
+never change on an existing doc, enforced independently in
+`firestore.rules` (`insight_claims collection rules (update contract)`) AND
+in `claimSchema.js`/`claimsService.js` (`setClaimStatus`'s own allowlist:
+`['suppressed', 'verified', 'expired']` — see validation matrix row
+R4P1-d). When evidence for a still-eligible candidate meaningfully changes,
+the pipeline never edits the old doc — it writes a NEW claim doc at
+`version + 1` with `parentClaimId` pointing at the old claim, then stamps
+`supersededByClaimId` on the old doc pointing forward at the new one
+(`supersedeClaim`, one atomic batch). Both versions persist forever;
+`listActiveClaims` filters to only the non-superseded, non-suppressed/
+non-expired ones (validation matrix row R4P1-g).
+
+Two claim statuses a corrected/stale claim can land in, and they mean
+different things:
+- **`expired`** — the pipeline itself determined, from the current run's
+  data, that this claim's candidate is *currently not derivable*: either it
+  re-enumerated the candidate and it no longer clears the evidence gates
+  (retraction — see below), or the candidate vanished from enumeration
+  entirely (e.g. every backing entry got source-excluded). This is a
+  system judgment, not a user one, and it is **revivable** — if the
+  evidence strengthens again on a later run, the pipeline supersedes the
+  expired claim with a fresh verified one, same as any other evidence
+  change (validation matrix row R4P1-d's revival case in
+  `claimsPipeline.test.js`).
+- **`suppressed`** — the USER chose to hide this claim (`do_not_analyze`
+  feedback). This is a preference, not a data judgment, and the pipeline
+  **never auto-touches a suppressed claim** — not on retraction, not on
+  vanished-candidate sweep, not on re-eligibility. It only lifts via
+  explicit user action (a future "liftable" UI surface — not yet built;
+  `setClaimStatus` supports flipping it back to `verified` at the
+  primitive level today).
+
+**Retraction.** A live `verified` claim is moved to `expired` (never
+deleted) in exactly two cases, both handled inside `generateClaims`: (i)
+its candidate is still enumerated this run but no longer clears the
+evidence-builder's gates (interval now includes zero, effect fell below
+the practical floor, etc.); (ii) its candidate vanished from
+`enumerateExposures`'s output entirely (data drift, or every backing entry
+got excluded). A suppressed prior is never touched by either path — user
+suppression sticks regardless of what the gates say next run. See
+validation matrix rows R4P1-a/d and `claimsPipeline.test.js`'s own
+"retraction"/"vanished-candidate retraction" suites for the exhaustive
+case matrix.
+
+**`source_exclusions` consumption.** `generateClaims` reads
+`listSourceExclusions` ONCE per run and drops any entry named by an
+exclusion whose `appliesTo` is `'all'` OR starts with `'basic:'` (every
+family this pipeline can produce) — a documented, deliberately
+conservative over-exclusion: a `wrong_source` correction against ONE
+family excludes that entry from the WHOLE run (every family), not just the
+family it was flagged for, because building per-family day-rollups
+separately would conflict with `buildDailyObservations` running once for
+the whole batch. A read failure here is FAIL-CLOSED — `generateClaims`
+rejects rather than silently running as if no exclusions existed; the
+orchestrator's own hook already wraps this in try/catch, so a failure
+skips that run's claim generation without touching legacy `basicInsights`
+output. See `claimsPipeline.js`'s own header comment and validation matrix
+row R4P1-e.
+
+**Phase 2 pointers** (not yet built — tracked in the plan's own outline,
+not repeated here in full): an LLM writer/verifier pair authoring
+`wording` from a claim's already-deterministic `evidence` (never authoring
+facts), a single unified insight feed replacing the current
+Nexus/basicInsights split, and a comprehension gate (≥80% correct on a
+short in-app "what does this claim mean" check) before any claim surface
+is allowed to ship outside internal testing — mirrors DR integrity-ladder
+gate 8, explicitly deferred past Phase 1 in the plan's own gate mapping.
+
+**Validation:** `src/__tests__/validationMatrix.test.js` R4P1 rows (a)-(i);
+dedicated per-module test files:
+`src/services/insights/claims/__tests__/{claimsPipeline,claimsService,
+claimSchema,evidenceBuilder,claimFeedback}.test.js`,
+`src/services/insights/__tests__/testingLedger.test.js`; rules:
+`functions/src/__tests__/firestoreRules.test.js` (`testing_ledger
+collection rules`, `insight_claims collection rules`).

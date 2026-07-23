@@ -642,8 +642,17 @@ are now durably consumed rather than recorded-and-ignored. Four claim types
 the scale fix would otherwise reactivate (counterfactuals, belief
 dissonance, intervention outcomes, personalized recommendations) stay
 suppressed behind an internal `RISKY_CLAIMS_ENABLED = false` constant until
-Phase 1-2's evidence rails land. Full detail: runbook's "R2 flags"/"R3
-flag"/"R4" sections.
+Phase 1-2's evidence rails land. **R4 Phase 1** adds the claim store, the
+hypothesis-family testing ledger, and the evidence builder (`src/services/
+insights/{observations,testingLedger}.js`, `src/services/insights/claims/`)
+behind one new flag, `insightClaims` (default OFF, independent of every
+other flag) — plan:
+`docs/superpowers/plans/2026-07-22-r4-phase1-evidence-foundation.md`. Claims
+are immutable-with-lineage: a written claim's facts never change in place;
+a meaningfully changed re-derivation writes a new version and supersedes
+the old one, and a claim that stops clearing its evidence gates is
+`expired` (retracted, never deleted, revivable), never silently rewritten.
+Full detail: runbook's "R2 flags"/"R3 flag"/"R4"/"R4 Phase 1" sections.
 
 ## Crash Reporting
 
