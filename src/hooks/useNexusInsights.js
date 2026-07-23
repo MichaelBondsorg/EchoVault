@@ -76,7 +76,16 @@ export const extractPatternTypeFromInsight = (insight) => {
 export const useNexusInsights = (user, options = {}) => {
   const {
     autoRefresh = true,
-    refreshInterval = 30 * 60 * 1000  // 30 minutes
+    refreshInterval = 30 * 60 * 1000,  // 30 minutes
+    // R4 Phase 2 Task 6: the unified ClaimFeed replaces this hook's output
+    // when `insightClaims` is ON — callers pass `enabled: false` rather
+    // than skipping the hook call (rules of hooks forbid conditional
+    // hook calls). Every effect below early-returns when disabled: no
+    // Firestore reads (cached insights, learning data, insight-budget
+    // mode/log), no `generateInsights` calls, no shown-insight recording.
+    // State stays at its initial (empty/idle) shape, so a disabled mount
+    // is a true no-op, not a paused one.
+    enabled = true,
   } = options;
 
   const [activeInsights, setActiveInsights] = useState([]);
@@ -93,7 +102,7 @@ export const useNexusInsights = (user, options = {}) => {
 
   // Load feedback learning data
   useEffect(() => {
-    if (!user?.uid) return;
+    if (!enabled || !user?.uid) return;
 
     const loadLearning = async () => {
       try {
@@ -105,13 +114,13 @@ export const useNexusInsights = (user, options = {}) => {
     };
 
     loadLearning();
-  }, [user?.uid]);
+  }, [enabled, user?.uid]);
 
   // Load Insight Budget mode + shownLog once per mount (Task 12). Flag off
   // -> this never runs, and the hook's output is the untouched, pre-budget
   // path (see budgetedInsights below).
   useEffect(() => {
-    if (!user?.uid || !getFlag('insightBudget')) return;
+    if (!enabled || !user?.uid || !getFlag('insightBudget')) return;
 
     let cancelled = false;
 
@@ -132,10 +141,14 @@ export const useNexusInsights = (user, options = {}) => {
 
     loadBudget();
     return () => { cancelled = true; };
-  }, [user?.uid]);
+  }, [enabled, user?.uid]);
 
   // Load cached insights on mount
   useEffect(() => {
+    if (!enabled) {
+      setLoading(false);
+      return;
+    }
     if (!user?.uid) {
       setLoading(false);
       return;
@@ -167,22 +180,22 @@ export const useNexusInsights = (user, options = {}) => {
     };
 
     loadCached();
-  }, [user?.uid]);
+  }, [enabled, user?.uid]);
 
   // Auto-refresh timer
   useEffect(() => {
-    if (!autoRefresh || !user?.uid) return;
+    if (!enabled || !autoRefresh || !user?.uid) return;
 
     const timer = setInterval(() => {
       regenerateInsights();
     }, refreshInterval);
 
     return () => clearInterval(timer);
-  }, [autoRefresh, refreshInterval, user?.uid]);
+  }, [enabled, autoRefresh, refreshInterval, user?.uid]);
 
   // Regenerate insights
   const regenerateInsights = useCallback(async () => {
-    if (!user?.uid || refreshing) return;
+    if (!enabled || !user?.uid || refreshing) return;
 
     setRefreshing(true);
     setError(null);
@@ -219,7 +232,7 @@ export const useNexusInsights = (user, options = {}) => {
     } finally {
       setRefreshing(false);
     }
-  }, [user?.uid, refreshing]);
+  }, [enabled, user?.uid, refreshing]);
 
   // Combine active + history, dedupe, filter by confidence and learning.
   // Memoized (Task 12 follow-up) so the array reference is stable across
@@ -315,7 +328,7 @@ export const useNexusInsights = (user, options = {}) => {
   // otherwise a remount (fresh ref, empty Set) would re-record ids already
   // persisted from a previous session/mount.
   useEffect(() => {
-    if (!user?.uid || !getFlag('insightBudget')) return;
+    if (!enabled || !user?.uid || !getFlag('insightBudget')) return;
 
     const alreadyPersisted = new Set(
       (shownLog || []).map((entry) => entry?.id).filter(Boolean)
@@ -332,7 +345,7 @@ export const useNexusInsights = (user, options = {}) => {
     recordShownInsights(db, user.uid, toRecord).catch((err) => {
       console.warn('[useNexusInsights] Failed to record shown insights:', err);
     });
-  }, [budgetedInsights, shownLog, user?.uid]);
+  }, [enabled, budgetedInsights, shownLog, user?.uid]);
 
   // Get primary insight
   const primaryInsight = activeInsights.find(i => i.priority === 1) || activeInsights[0];

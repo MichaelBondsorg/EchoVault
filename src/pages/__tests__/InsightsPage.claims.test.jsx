@@ -1,5 +1,6 @@
 /**
- * InsightsPage — claim-backed Quick Insights (R4 Phase 1, Task 10).
+ * InsightsPage — claim-backed Quick Insights (R4 Phase 1, Task 10), extended
+ * for the unified ranked feed (R4 Phase 2, Task 6).
  *
  * Flag OFF: the legacy Quick Insights section renders untouched, and
  * `listActiveClaims` is NEVER called — proven by mocking the underlying
@@ -7,9 +8,16 @@
  * hook runs and its internal `getFlag('insightClaims')` gate is what's
  * actually under test.
  *
- * Flag ON: `ClaimCard`s render from the mocked claims, "See days"/
- * "Feedback" both open the ReceiptSheet mount site (`onShowReceipt`), and
- * "Try as an experiment" fires the page's stub handler.
+ * Flag ON: `ClaimCard`s render from the mocked claims (via `ClaimFeed`),
+ * "See days"/"Feedback" both open the ReceiptSheet mount site
+ * (`onShowReceipt`), and "Try as an experiment" fires the page's stub
+ * handler.
+ *
+ * Phase 2 Task 6 additions (bottom of file): flag ON replaces BOTH the
+ * Quick Insights block AND the AI Insights (Nexus) block with the single
+ * `ClaimFeed`, hides `RecommendationsSection`, disables `useNexusInsights`
+ * (`enabled: false` — proven via the mock's call args, not just its
+ * output), and leaves `CorrelationsSection` untouched.
  *
  * Mocking scaffold mirrors InsightsPage.dismissal.test.jsx (same file mocks
  * every hook/service InsightsPage touches, plus ReceiptSheet stubbed out).
@@ -38,20 +46,24 @@ vi.mock('../../services/insights/claims/claimsService', () => ({
   listActiveClaims: (...a) => listActiveClaims(...a),
 }));
 
-vi.mock('../../services/health/healthCorrelations', () => ({
-  computeHealthMoodCorrelations: vi.fn(() => null),
-  getTopHealthInsights: vi.fn(() => []),
-  checkHealthDataSufficiency: vi.fn(() => ({ hasEnoughData: false, message: '' })),
-}));
-
 vi.mock('../../services/environment/environmentCorrelations', () => ({
   computeEnvironmentMoodCorrelations: vi.fn(() => null),
   getTopEnvironmentInsights: vi.fn(() => []),
   checkEnvironmentDataSufficiency: vi.fn(() => ({ hasEnoughData: false, message: '' })),
 }));
 
+const getTodayRecommendations = vi.fn().mockResolvedValue(null);
 vi.mock('../../services/nexus/insightIntegration', () => ({
-  getTodayRecommendations: vi.fn().mockResolvedValue(null),
+  getTodayRecommendations: (...a) => getTodayRecommendations(...a),
+}));
+
+const checkHealthDataSufficiency = vi.fn(() => ({ hasEnoughData: false, message: '' }));
+const computeHealthMoodCorrelations = vi.fn(() => null);
+const getTopHealthInsights = vi.fn(() => []);
+vi.mock('../../services/health/healthCorrelations', () => ({
+  computeHealthMoodCorrelations: (...a) => computeHealthMoodCorrelations(...a),
+  getTopHealthInsights: (...a) => getTopHealthInsights(...a),
+  checkHealthDataSufficiency: (...a) => checkHealthDataSufficiency(...a),
 }));
 
 vi.mock('../../services/moderation/reportInsight', () => ({
@@ -281,5 +293,111 @@ describe('InsightsPage — F1 (closure-wave review): ReceiptSheet mounts on insi
     // now-suppressed claim from the list on its own (useClaims filters to
     // status === 'verified'), with no page remount required.
     await vi.waitFor(() => expect(listActiveClaims).toHaveBeenCalledTimes(2));
+  });
+});
+
+// R4 Phase 2, Task 6: the unified ranked feed. Flag ON swaps BOTH the Quick
+// Insights block AND the AI Insights (Nexus) block for one `ClaimFeed`,
+// hides `RecommendationsSection`, and disables `useNexusInsights` entirely
+// (no dark fetch/budget work for a section that never renders) — while
+// `CorrelationsSection` stays untouched. Flag OFF must remain byte-identical
+// to the legacy tree (already proven above and by the other InsightsPage.*
+// suites); this block only adds the flag-ON-specific assertions the earlier
+// Task 10 suite didn't need.
+const NEXUS_INSIGHT_WITH_QUALITY_CONTENT = {
+  id: 'nexus-1',
+  type: 'pattern',
+  title: 'Evening walks lift your mood',
+  body: 'On the days you mentioned an evening walk, your recorded mood ran noticeably higher than on other days in the same period.',
+  confidence: 0.8,
+};
+
+describe('InsightsPage — R4 Phase 2 Task 6: unified feed replaces Quick Insights + AI Insights', () => {
+  beforeEach(() => {
+    getFlag.mockImplementation((name) => name === 'insightClaims');
+    // Even if useNexusInsights (mocked) were to return real insights, the
+    // Nexus section must not render when insightClaims is ON — this proves
+    // the ternary hides the section rather than merely relying on the
+    // (real) hook happening to return nothing when disabled.
+    useNexusInsights.mockReturnValue(baseNexusReturn({
+      insights: [NEXUS_INSIGHT_WITH_QUALITY_CONTENT],
+      insightCount: 1,
+    }));
+    getTodayRecommendations.mockResolvedValue({
+      recommendations: [{ action: 'Take an evening walk', priority: 'medium', type: 'activity' }],
+      basedOn: { entriesAnalyzed: 10, interventionsTracked: 0 },
+    });
+  });
+
+  it('renders the ClaimFeed (group header + claim wording) in place of the legacy Quick Insights section', async () => {
+    render(<InsightsPage entries={ENTRIES} userId="user-1" user={{ uid: 'user-1' }} />);
+
+    await screen.findByText(VERIFIED_TAG_CLAIM.wording);
+    expect(screen.getByText('1 pattern to watch')).toBeTruthy();
+  });
+
+  it('does not render the AI Insights (Nexus) section even though useNexusInsights would return content', async () => {
+    render(<InsightsPage entries={ENTRIES} userId="user-1" user={{ uid: 'user-1' }} />);
+
+    await screen.findByText(VERIFIED_TAG_CLAIM.wording);
+    expect(screen.queryByText('AI Insights')).toBeNull();
+    expect(screen.queryByText(NEXUS_INSIGHT_WITH_QUALITY_CONTENT.title)).toBeNull();
+  });
+
+  it('does not render RecommendationsSection even though it would have content', async () => {
+    render(<InsightsPage entries={ENTRIES} userId="user-1" user={{ uid: 'user-1' }} />);
+
+    await screen.findByText(VERIFIED_TAG_CLAIM.wording);
+    expect(screen.queryByText("Today's Recommendations")).toBeNull();
+    expect(screen.queryByText('Take an evening walk')).toBeNull();
+  });
+
+  it('calls useNexusInsights with enabled:false (no dark fetch/budget work for a hidden section)', async () => {
+    render(<InsightsPage entries={ENTRIES} userId="user-1" user={{ uid: 'user-1' }} />);
+
+    await screen.findByText(VERIFIED_TAG_CLAIM.wording);
+    expect(useNexusInsights).toHaveBeenCalledWith(
+      { uid: 'user-1' },
+      expect.objectContaining({ enabled: false }),
+    );
+  });
+
+  it('still renders CorrelationsSection when there is enough health/environment data', async () => {
+    checkHealthDataSufficiency.mockReturnValueOnce({ hasEnoughData: true, message: '' });
+    computeHealthMoodCorrelations.mockReturnValueOnce({ someCorrelation: true });
+    getTopHealthInsights.mockReturnValueOnce([
+      { metric: 'sleep', insight: 'Better sleep, better mood.', strength: 'moderate', sampleSize: 12 },
+    ]);
+
+    const manyEntries = Array.from({ length: 6 }, (_, i) => ({
+      id: `e${i}`,
+      content: 'entry',
+      createdAt: '2026-07-18T10:00:00.000Z',
+    }));
+
+    render(<InsightsPage entries={manyEntries} userId="user-1" user={{ uid: 'user-1' }} />);
+
+    await screen.findByText(VERIFIED_TAG_CLAIM.wording);
+    expect(screen.getByText('Your Patterns')).toBeTruthy();
+  });
+});
+
+describe('InsightsPage — R4 Phase 2 Task 6: flag OFF stays on the legacy tree', () => {
+  beforeEach(() => {
+    getFlag.mockImplementation(() => false);
+  });
+
+  it('calls useNexusInsights with enabled:true (unchanged from pre-Task-6 behavior)', () => {
+    render(<InsightsPage entries={ENTRIES} userId="user-1" user={{ uid: 'user-1' }} />);
+
+    expect(useNexusInsights).toHaveBeenCalledWith(
+      { uid: 'user-1' },
+      expect.objectContaining({ enabled: true }),
+    );
+  });
+
+  it('never renders a ClaimFeed group-summary header', () => {
+    render(<InsightsPage entries={ENTRIES} userId="user-1" user={{ uid: 'user-1' }} />);
+    expect(screen.queryByText(/pattern to watch$/)).toBeNull();
   });
 });

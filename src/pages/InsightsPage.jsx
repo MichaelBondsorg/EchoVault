@@ -16,7 +16,7 @@ import { useState, useEffect, useMemo, useCallback } from 'react';
 import { recordFeedbackAndLearn } from '../services/basicInsights/feedbackLearning';
 import { getFlag } from '../config/flags';
 import ReceiptSheet from '../components/insights/ReceiptSheet';
-import ClaimCard from '../components/insights/ClaimCard';
+import ClaimFeed from '../components/insights/ClaimFeed';
 import { ownerStorageKey } from '../services/storage/ownerScopedStorage';
 import {
   computeHealthMoodCorrelations,
@@ -173,6 +173,11 @@ const InsightsPage = ({
   }, [entries]);
 
   // Nexus 2.0 insights (includes active + historical, filtered by confidence ≥50%)
+  // R4 Phase 2 Task 6: the unified ClaimFeed (below) replaces this hook's
+  // whole output when insightClaims is ON, so it's disabled in that case —
+  // called unconditionally (rules of hooks) but `enabled: false` short-
+  // circuits every internal fetch/generation effect, avoiding dark
+  // Firestore reads + Insight Budget work for a section that never renders.
   const {
     insights: allInsights,
     insightCount: totalInsightCount,
@@ -184,7 +189,7 @@ const InsightsPage = ({
     dataStatus,
     refresh,
     lastGenerated
-  } = useNexusInsights(user, { autoRefresh: true });
+  } = useNexusInsights(user, { autoRefresh: true, enabled: !getFlag('insightClaims') });
 
   // Basic Insights (statistical correlations - fast, no LLM)
   const {
@@ -222,7 +227,7 @@ const InsightsPage = ({
   // — ClaimCard now hides the button unless a real handler prop is present
   // (see ClaimCard.jsx), and this page only ever passes one through when
   // the PARENT actually supplied one; no dev stub, no fallback logging.
-  // `undefined` here means ClaimList/ClaimCard render no button at all.
+  // `undefined` here means ClaimFeed/ClaimCard render no button at all.
   const handleTryExperiment = typeof onTryExperiment === 'function'
     ? (templateId, tag) => onTryExperiment(templateId, tag)
     : undefined;
@@ -431,12 +436,14 @@ const InsightsPage = ({
         />
       )}
 
-      {/* Quick Insights: claim-backed cards (R4 Phase 1, Task 10) behind
-          insightClaims, legacy statistical-correlation cards otherwise.
+      {/* Unified ranked feed (R4 Phase 2, Task 6) replaces BOTH the Quick
+          Insights block AND the AI Insights (Nexus) block when
+          insightClaims is ON — one engine, one feed (plan decision P2-D5).
           Flag OFF renders the exact legacy tree byte-identical — no claims
-          data is read (see useClaims.js's own internal flag gate). */}
+          data is read (see useClaims.js's own internal flag gate), and the
+          legacy Nexus list + empty state below render exactly as before. */}
       {getFlag('insightClaims') ? (
-        <ClaimList
+        <ClaimFeed
           claims={claims}
           loading={claimsLoading}
           onRefresh={refreshClaims}
@@ -459,72 +466,85 @@ const InsightsPage = ({
         />
       )}
 
-      {/* Today's Recommendations */}
-      {recommendations?.recommendations?.length > 0 && (
+      {/* Today's Recommendations — hidden when insightClaims is ON (P2-D5):
+          superseded by the unified feed's experiment_result/pattern claims
+          over the same families. */}
+      {!getFlag('insightClaims') && recommendations?.recommendations?.length > 0 && (
         <RecommendationsSection recommendations={recommendations} />
       )}
 
-      {/* Insights List */}
-      {filteredInsights.length > 0 && (
-        <div className="space-y-3">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Sparkles size={16} className="text-accent-deep" />
-              <h3 className="text-xs font-bold text-muted-foreground uppercase tracking-wider">
-                AI Insights
-              </h3>
+      {/* AI Insights (Nexus) list + its empty state — hidden when
+          insightClaims is ON (P2-D5): the unified ClaimFeed above is the
+          single feed in that mode. useNexusInsights is disabled in that
+          case too (see the hook call above), so `filteredInsights` is
+          already empty and `loading`/`isCalibrating` are already false —
+          this guard just keeps the legacy chrome (headers, empty-state
+          copy) from rendering at all. */}
+      {!getFlag('insightClaims') && (
+        <>
+          {/* Insights List */}
+          {filteredInsights.length > 0 && (
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Sparkles size={16} className="text-accent-deep" />
+                  <h3 className="text-xs font-bold text-muted-foreground uppercase tracking-wider">
+                    AI Insights
+                  </h3>
+                </div>
+                <span className="text-xs text-muted-foreground">
+                  {filteredInsights.length} insight{filteredInsights.length !== 1 ? 's' : ''}
+                </span>
+              </div>
+
+              <AnimatePresence mode="popLayout">
+                {filteredInsights.map((insight, index) => (
+                  <NexusInsightCard
+                    key={insight.id || index}
+                    insight={insight}
+                    isExpanded={expandedInsight === (insight.id || index)}
+                    onToggleExpand={() => {
+                      const wasExpanded = expandedInsight === (insight.id || index);
+                      handleToggleExpand(insight.id || index);
+                      // Record 'explored' only on the collapse→expand transition.
+                      if (!wasExpanded) {
+                        recordInsightEngagement(userId, insight, 'explored');
+                      }
+                    }}
+                    onDismiss={(e) => handleDismissInsight(insight, e)}
+                    onReport={(e) => handleReportInsight(insight, e)}
+                    onWhyThis={(e) => handleShowReceipt(insight, e)}
+                  />
+                ))}
+              </AnimatePresence>
             </div>
-            <span className="text-xs text-muted-foreground">
-              {filteredInsights.length} insight{filteredInsights.length !== 1 ? 's' : ''}
-            </span>
-          </div>
+          )}
 
-          <AnimatePresence mode="popLayout">
-            {filteredInsights.map((insight, index) => (
-              <NexusInsightCard
-                key={insight.id || index}
-                insight={insight}
-                isExpanded={expandedInsight === (insight.id || index)}
-                onToggleExpand={() => {
-                  const wasExpanded = expandedInsight === (insight.id || index);
-                  handleToggleExpand(insight.id || index);
-                  // Record 'explored' only on the collapse→expand transition.
-                  if (!wasExpanded) {
-                    recordInsightEngagement(userId, insight, 'explored');
-                  }
-                }}
-                onDismiss={(e) => handleDismissInsight(insight, e)}
-                onReport={(e) => handleReportInsight(insight, e)}
-                onWhyThis={(e) => handleShowReceipt(insight, e)}
-              />
-            ))}
-          </AnimatePresence>
-        </div>
-      )}
-
-      {/* Empty state */}
-      {!loading && filteredInsights.length === 0 && !isCalibrating && (
-        <motion.div
-          className="
-            p-8 text-center
-            bg-card
-            border border-border
-            rounded-3xl
-          "
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-        >
-          <Brain size={40} className="mx-auto text-faint mb-3" />
-          <p className="text-secondary-foreground font-medium">
-            No insights yet
-          </p>
-          <p className="text-muted-foreground text-sm mt-2">
-            {entries.length < 5
-              ? `Add ${5 - entries.length} more entries to start generating insights`
-              : 'Tap refresh to generate new insights'
-            }
-          </p>
-        </motion.div>
+          {/* Empty state */}
+          {!loading && filteredInsights.length === 0 && !isCalibrating && (
+            <motion.div
+              className="
+                p-8 text-center
+                bg-card
+                border border-border
+                rounded-3xl
+              "
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+            >
+              <Brain size={40} className="mx-auto text-faint mb-3" />
+              <p className="text-secondary-foreground font-medium">
+                No insights yet
+              </p>
+              <p className="text-muted-foreground text-sm mt-2">
+                {entries.length < 5
+                  ? `Add ${5 - entries.length} more entries to start generating insights`
+                  : 'Tap refresh to generate new insights'
+                }
+              </p>
+            </motion.div>
+          )}
+        </>
       )}
 
       {/* F1 (closure-wave final review): must mount whenever EITHER
@@ -1342,84 +1362,6 @@ const RecommendationsSection = ({ recommendations }) => {
           )}
         </p>
       )}
-    </motion.div>
-  );
-};
-
-/**
- * ClaimList — Quick Insights render site under `insightClaims` (R4 Phase 1,
- * Task 10). Same outer "Quick Insights" card chrome as the legacy
- * `QuickInsightsSection` (a single bg-card rounded-2xl block with the same
- * header) so flipping the flag doesn't reshuffle the page's overall
- * rhythm — the row content is `ClaimCard` per claim instead of the legacy
- * stat row.
- */
-const ClaimList = ({ claims, loading, onRefresh, onShowReceipt, onFeedback, onTryExperiment }) => {
-  if (loading && (!claims || claims.length === 0)) {
-    return (
-      <motion.div
-        className="bg-card border border-border rounded-2xl p-4"
-        initial={{ opacity: 0, y: -10 }}
-        animate={{ opacity: 1, y: 0 }}
-      >
-        <div className="flex items-center gap-3">
-          <div className="p-2 bg-divider rounded-xl">
-            <Loader2 size={18} className="text-muted-foreground animate-spin" />
-          </div>
-          <div>
-            <h3 className="font-medium text-secondary-foreground">Quick Insights</h3>
-            <p className="text-xs text-muted-foreground">Checking your patterns...</p>
-          </div>
-        </div>
-      </motion.div>
-    );
-  }
-
-  if (!claims || claims.length === 0) return null;
-
-  return (
-    <motion.div
-      className="bg-card border border-border rounded-2xl overflow-hidden"
-      initial={{ opacity: 0, y: -10 }}
-      animate={{ opacity: 1, y: 0 }}
-    >
-      {/* Header */}
-      <div className="p-4 flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <div className="p-2 bg-accent-wash rounded-xl">
-            <Zap size={18} className="text-accent-deep" />
-          </div>
-          <div>
-            <h3 className="font-semibold text-foreground">Quick Insights</h3>
-            <p className="text-xs text-muted-foreground">Based on your patterns</p>
-          </div>
-        </div>
-        {onRefresh && (
-          <button
-            onClick={onRefresh}
-            disabled={loading}
-            className="cloud-icon-button disabled:opacity-50"
-          >
-            <RefreshCw
-              size={14}
-              className={`text-muted-foreground ${loading ? 'animate-spin' : ''}`}
-            />
-          </button>
-        )}
-      </div>
-
-      {/* Claim cards */}
-      <div className="px-4 pb-4 grid gap-2">
-        {claims.map((claim) => (
-          <ClaimCard
-            key={claim.id}
-            claim={claim}
-            onShowReceipt={onShowReceipt}
-            onFeedback={onFeedback}
-            onTryExperiment={onTryExperiment}
-          />
-        ))}
-      </div>
     </motion.div>
   );
 };
