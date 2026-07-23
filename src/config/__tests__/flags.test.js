@@ -54,6 +54,7 @@ describe('config/flags', () => {
         sessionPrep: false,
         gentleRevisit: false,
         personalExperiments: false,
+        insightClaims: false,
       });
     });
 

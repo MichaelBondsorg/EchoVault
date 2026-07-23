@@ -13,7 +13,7 @@ const [name, value] = process.argv.slice(2);
 const ALLOWED = [
   'intentExtraction', 'openLoops', 'contextSpaces', 'insightBudget',
   'insightReceipts', 'voiceChapters', 'reflectionRecipes', 'sessionPrep',
-  'gentleRevisit', 'personalExperiments',
+  'gentleRevisit', 'personalExperiments', 'insightClaims',
   'model.embeddingWriteV2', 'model.embeddingV2Read',
 ];
 if (!ALLOWED.includes(name) || !['true', 'false'].includes(value)) {

@@ -52,6 +52,11 @@ import { filterInsightsByLearning, filterFalsePositiveCandidates } from './feedb
 // rather than touching each correlations/*.js file.
 import { buildReceipt, applyReceiptDefaults, sourceFromEntry, computeTimeWindow } from '../insights/receipts';
 
+// Claims pipeline (R4 Phase 1, flag-gated) — a post-generation, best-effort
+// hook: never blocks or fails legacy basicInsights generation.
+import { getFlag } from '../../config/flags';
+import { generateClaims } from '../insights/claims/claimsPipeline';
+
 /**
  * Get Firestore document reference for basic insights
  * @param {string} userId - User ID
@@ -336,6 +341,18 @@ export const generateBasicInsights = async (userId, entries) => {
       delta: i.moodDelta,
       strength: i.strength
     })));
+
+    // R4 Phase 1: claim-backed evidence rails, behind insightClaims (default
+    // OFF). Runs after the legacy insights are computed and cached — never
+    // blocks or fails legacy generation; any pipeline error is swallowed
+    // (logged) so a claims-pipeline bug can never regress basicInsights.
+    if (getFlag('insightClaims')) {
+      try {
+        await generateClaims(db, userId, entries);
+      } catch (error) {
+        console.warn('[basicInsights] claim generation failed (legacy insights unaffected):', error?.message);
+      }
+    }
 
     return {
       success: true,

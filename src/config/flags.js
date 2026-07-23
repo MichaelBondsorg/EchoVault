@@ -34,6 +34,7 @@ export const FLAG_DEFAULTS = {
   sessionPrep: false,
   gentleRevisit: false,
   personalExperiments: false,   // R3 Personal Experiments: gated on Michael signing docs/quality/experiments-data-method.md
+  insightClaims: false,  // R4 Phase 1: claim-backed Quick Insights (evidence rails)
 };
 
 const LOCAL_OVERRIDE_PREFIX = 'engram:flag:';
