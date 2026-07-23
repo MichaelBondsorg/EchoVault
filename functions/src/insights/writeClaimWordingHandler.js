@@ -20,7 +20,6 @@
  * `{systemPrompt, wording, bundle} -> Promise<string>` — the shapes differ,
  * so one adapter cannot serve both.
  */
-import { callGemini as defaultCallGemini } from '../shared/gemini.js';
 import { getModel as defaultGetModel, WORKLOADS } from '../models/registry.js';
 import { writeWording } from './claimWriter.js';
 import { verifyWording } from './claimVerifier.js';
@@ -99,14 +98,25 @@ function buildVerifierCallModel({ apiKey, model, callGeminiImpl }) {
  * @param {{gemini: string}} deps.apiKeys - Provider API keys. Both writer and
  *   verifier call Gemini (per the registry's current defaults) so only the
  *   `gemini` key is used, but the model id differs per role.
- * @param {function} [deps.callGeminiImpl] - Injectable `callGemini` (test seam).
+ * @param {function} deps.callGeminiImpl - Injectable `callGemini` (test seam
+ *   in tests; the real `functions/src/shared/gemini.js#callGemini` in
+ *   production — see `functions/index.js`'s `writeClaimWording` callable).
+ *   REQUIRED, no default (R4 Phase 3 backlog burn-down, P3-D7): a silent
+ *   fallback to the real Gemini client here would let a caller that forgot
+ *   to inject it accidentally fire real, uncontrolled API calls from a test
+ *   or a future call site — a missing injection must throw clearly instead.
  * @param {function} [deps.getModelImpl] - Injectable `getModel` (test seam).
  * @returns {Promise<{verdict:'pass'|'fail', wording:string|null, reasons:string[], writerModel:string|null, verifierModel:string|null}>}
  */
 export async function handleWriteClaimWording(
   { bundle },
-  { db, apiKeys, callGeminiImpl = defaultCallGemini, getModelImpl = defaultGetModel } = {}
+  { db, apiKeys, callGeminiImpl, getModelImpl = defaultGetModel } = {}
 ) {
+  if (typeof callGeminiImpl !== 'function') {
+    throw new Error(
+      'handleWriteClaimWording: callGeminiImpl is required (no default — every caller must inject it explicitly).'
+    );
+  }
   if (!isValidBundle(bundle)) {
     return {
       verdict: 'fail',

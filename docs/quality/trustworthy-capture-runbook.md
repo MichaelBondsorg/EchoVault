@@ -1137,17 +1137,16 @@ invariant.
 **`model.insightWriter`/`model.insightVerifier` overrides** follow the same
 mechanism as every other workload in the "Model registry flip procedure"
 section above: set the `config/flags` doc field (Admin SDK/console only),
-takes effect within the 60s cache TTL, no deploy. **Caveat specific to this
-pair:** `scripts/flip-flag.mjs`'s `STRING_ALLOWED` allowlist — the CLI
-convenience wrapper around a raw Firestore field write — currently only
-carries `'model.fusedTranscription'`. `model.insightWriter`/
-`model.insightVerifier` are NOT yet in that list, so the CLI script will
-reject them today; **extending `STRING_ALLOWED` with those two keys (and
-their accepted model-id values) is the flip path** if this pair ever needs a
-console-free override — until then, use the Admin SDK/Firebase console
-directly, same as any other not-yet-CLI-wrapped `model.*` field. Whichever
-path is used, the writer/verifier model-difference invariant above still
-applies — don't override them to the same id.
+takes effect within the 60s cache TTL, no deploy. `scripts/flip-flag.mjs`'s
+`STRING_ALLOWED` allowlist now carries both keys (R4 Phase 3 backlog burn-
+down, P3-D7) — `node scripts/flip-flag.mjs model.insightWriter <model-id|
+default>` / `model.insightVerifier <model-id|default>` works from the CLI
+same as `model.fusedTranscription`; each accepts `'gemini-3.5-flash'`,
+`'gemini-3-flash-preview'`, or `'default'` (deletes the override, reverting
+to the registry default). The tool does not itself enforce the
+writer/verifier model-difference invariant above — its own inline comment
+warns not to set both to the same id without re-deriving why they differ
+first.
 
 **Unified ranked feed (single-feed-swap, plan decision P2-D5).**
 `InsightsPage.jsx`: when `insightClaims` is ON, the new `ClaimFeed`
@@ -1232,3 +1231,228 @@ writeClaimWordingHandler}.test.js`,
 `src/services/experiments/__tests__/experimentClaim.test.js`,
 `src/pages/__tests__/InsightsPage.claims.test.jsx`,
 `functions/src/reports/__tests__/narrative.test.js`.
+
+## R4 Phase 3 (Action Loop & Risky-Claim Retirement)
+
+Plan: `docs/superpowers/plans/2026-07-23-r4-phase3-action-loop.md`. Closes R4
+by replacing the four suppressed risky-claim modules with the evidence-
+railed action loop the deep review actually prescribed — idea -> try-as-
+experiment -> explicit confirmation -> outcome claim -> repeat — and
+deleting the mention-based machinery they were built on. **No new client
+flag; `RISKY_CLAIMS_ENABLED` (the internal code constant, not a flag) is
+RETIRED, not flipped** — there is nothing suppressible left for it to gate.
+Full task-by-task detail: `.superpowers/sdd/task-p3-{1..7}-report.md`.
+
+**Deletions and what replaced them (P3-D1).** Three modules are deleted
+whole (files absent, imports unresolvable — validation matrix row R4P3-b):
+`src/services/nexus/layer3/counterfactual.js`, `src/services/nexus/layer3/
+beliefDissonance.js` (its "corpus-building" half made an UNCONDITIONAL per-
+generation LLM call with zero downstream consumer — real waste, now gone),
+`src/services/nexus/layer4/interventionTracker.js` (the mention-based
+effectiveness tracker DR finding 7 condemned: "recommends without personal
+evidence"). `src/services/nexus/layer4/recommendationEngine.js` is REDUCED,
+not deleted — it keeps only the static state -> idea-category map and
+generic, no-evidence-claimed wording (`genericIdeaReasoning`); its personal-
+evidence scoring (`scoreRecommendation`), personalized reasoning
+(`generateReasoning`), outcome prediction (`predictOutcome`), and the
+`MIN_EVIDENCE_OCCURRENCES` floor that only ever fed that scoring are all
+gone. `orchestrator.js`'s `RISKY_CLAIMS_ENABLED` export and every
+`riskyClaimsEnabled`/`options.riskyClaimsEnabled` thread are removed with a
+tombstone comment at the old location, pointing here. Firestore belief/
+intervention docs from before this phase are left ORPHANED, never deleted —
+harmless, no code reads them anymore.
+
+**Idea-card behavior change (worth eyeballing live).** With the personal-
+evidence branches gone, every "Idea to Try" card is now a single generic
+suggestion per generation slot, with NO evidence floor (the old
+`MIN_EVIDENCE_OCCURRENCES` gate is gone along with the scoring it fed) —
+`insightIntegration.js`'s `getTodayRecommendations` and orchestrator's own
+idea-generation block both always title the card `'An Idea to Try'` and
+never emit a `score`/`expectedOutcome`/`confidence` field (validation matrix
+row R4P3-a). The live, ungated sunshine-recommendation percentage leak
+(`insightIntegration.js`, "...% higher on sunny days" — a Phase-0 decision-4
+leak that reached flag-OFF users today, P3-D8) is fixed in the same pass:
+replaced with a generic non-evidence line, no conditional. Check the actual
+generation frequency/variety live on your own data — this phase did not add
+a novelty/rotation mechanism beyond what `recommendationEngine.js`'s static
+state map already provided.
+
+**Action loop: Try-as-experiment, end-to-end (P3-D2).** Both ClaimCards
+(`insightClaims` ON) and idea cards (flag-OFF, mapped types only —
+recovery/activity/environment; self_care/other get no button) now carry a
+"Try as an experiment" affordance that prefills `ExperimentsScreen` via
+`AppLayout`'s `experimentPrefill` state and `onTryExperiment(templateId,
+tag)` — gated on `personalExperiments` (a hidden screen never gets a visible
+button pointing at it). The prefill flow runs through the EXACT SAME
+`screenAndProceed` choke point every other creation path uses:
+`screenQuestion` is invoked and must pass BEFORE any template/step state
+advances — a forced decline blocks the advance entirely, proven against the
+real component (validation matrix row R4P3-c; full surface in the dedicated
+`ExperimentsScreen.prefill.test.jsx`). There is exactly one experiment-
+creation path, one safety gate — no parallel route was added.
+
+**Confirmed-exposure experiments — action confirmation v1 (P3-D3).** Tag-
+template experiments only, opt-in at CREATE via a frozen
+`analysisPlan.exposureMode: 'passive' | 'confirmed'` (absent/legacy plan ===
+`'passive'`, unchanged behavior — byte-identical regression proof at
+validation matrix row R4P3-d). Confirmed mode replaces tag-scanning with a
+`confirmations` subcollection of daily check-ins
+(`artifacts/{APP}/users/{uid}/experiments/{id}/confirmations/{dateKey}`,
+`{dateKey, done: boolean, createdAt}`) the client only writes while the
+parent experiment is `running` (frozen history once it isn't). The exposure
+series is TRI-STATE, never binary: `done:true -> 1`, `done:false -> 0`
+(a real, counted "no," not a gap), a day with **no confirmation doc ->
+OMITTED entirely** — never assumed absent, never defaulted to 0 (validation
+matrix row R4P3-d). **Honesty copy, binding:** the create-flow's opt-in step
+says, in effect, "confirmed = you check in daily; missed days count as
+unknown, not no" — and the result view states its exposure source
+explicitly ("from your daily check-ins, N days answered") whenever
+`exposureMode === 'confirmed'`. Rules: `firestore.rules`' confirmations
+block enforces owner CRUD with an exact `hasOnly(['dateKey','done',
+'createdAt'])` shape, denies a mismatched doc-id/dateKey pair, denies cross-
+user access — exercised by the emulator-only suite
+`functions/src/__tests__/firestoreRules.test.js`'s "Experiment confirmations
+subcollection rules" describe block (`npm run test:rules`); the JS-side seam
+(that `setConfirmation`/`clearConfirmation` write/delete exactly that shape,
+and both refuse once the experiment leaves `running`) is validation matrix
+row R4P3-f.
+
+**Repeated trials — family history, repeat button, and the lineage fix
+(P3-D4).** `ExperimentResultView` gains a "This hypothesis" section (only
+when M > 1 prior completed runs share the same `hypothesisFamilyId`):
+"Run N of M" plus every prior run's own delta, sorted OLDEST-FIRST BY
+`createdAt` (immutable — see below), with an explicit no-pooling note.
+There is deliberately NO cross-run statistics — the plan's own rationale:
+"cross-run meta-analysis needs statistics we deliberately don't have." A
+completed experiment's row gets a "Repeat this experiment" button
+(`ExperimentsScreen.jsx`) that re-enters the SAME prefill/`screenAndProceed`
+path as the ideas seam above (fresh freeze, fresh `screenQuestion` call,
+ledger `timesTested` increments naturally). **The load-bearing part: the
+repeat-run claim lineage fix.** Before this phase, a repeat run's
+`experiment_result` claim collided on a deterministic doc id with the prior
+run's claim, got rules-denied, and silently vanished — repeat runs never
+got a claim at all. `writeOrSupersedeExperimentResultClaim`
+(`experimentsService.js`, shared by both `writeResult` and
+`writeAdjustedResult`) now finds the LIVE prior claim for the same
+`(claimType: 'experiment_result', candidateId: hypothesisFamilyId)`: none ->
+write v1; prior `suppressed` -> SKIP (the write never happens — suppression
+is never auto-touched by a fresh computation, invariant unchanged); prior
+verified/expired -> SUPERSEDE (`version: prior.version + 1, parentClaimId:
+prior.id`, both docs persist, old one gets `supersededByClaimId`).
+Validation matrix row R4P3-e proves both branches against the real module.
+
+**Repeat-of-suppressed hint (review addition, post-ship).** Because a
+suppressed prior means the repeat run's claim is silently skipped (by
+design, above), a user who repeats a hypothesis they've already muted would
+otherwise see no claim show up with no explanation. `ExperimentResultView`
+now computes, best-effort, whether this family's current LIVE
+`experiment_result` claim is `suppressed` (a `listAllClaims` read; a
+contained failure just omits the note, same posture as the family-history
+section's own failure mode) and shows one subtle line: "This hypothesis is
+muted in your feed — its new result won't appear there until you un-mute it
+in feedback settings." Renders independent of the M>1 family-history gate
+(it applies even to a first/only run whose claim is already muted).
+
+**Family-history sort-key fix (review addition, post-ship).**
+`listFamilyRuns` now sorts by `createdAt` (immutable, plan-frozen), NOT
+`updatedAt`. `updatedAt` is still what's DISPLAYED as `completedAt` —
+unchanged — but a later exclusion-adjustment on an earlier run bumps that
+run's `updatedAt` past a more-recent run's own completion, which used to
+silently reshuffle "Run N of M" labels. `createdAt` never moves after
+creation, so run order — and every label — stays fixed for the family's
+life.
+
+**Ledger line dropped from the family-history section (review addition,
+post-ship).** The section previously supplemented "Run N of M" with "this
+family's testing ledger has N candidate hypothesis(es) on record" via a
+`readLedgerCounts` read. Removed entirely: `candidateTestsCount` for an
+experiment family is invariantly 1 (each family has exactly one candidate —
+itself), so the line only ever said "1 candidate hypothesis," conveying
+nothing "Run N of M" didn't already say more plainly. Simplest honest fix
+— drop it, not caveat it. The `readLedgerCounts` read itself is gone from
+this view along with the line it fed.
+
+**Calibrated predictions — WONTFIX (P3-D5).** The deep review's integrity
+ladder calls for prospective, holdout-evaluated predictions (train on
+earlier data, score against later data the model never saw). This is
+deliberately NOT built in Phase 3, or scaffolded for later: it requires a
+broad-release, multi-user evaluation harness to mean anything, and at n=1
+(Michael) prospective holdout scoring is ceremony, not signal. Documented as
+a conscious gap, not silently dropped — revisit if/when Engram has enough
+users for held-out evaluation to be meaningful.
+
+**Nexus LLM synthesis generators stay running — NOT deleted this phase
+(P3-D6).** Causal synthesis, narrative arc, and meta-pattern generation
+(`layer3/synthesizer.js`, `layer3/crossThreadDetector.js`) are Michael's
+LIVE top-ranked content on the flag-OFF nexus surface today — deleting them
+before he's switched to the `ClaimFeed` surface would force his hand.
+Deletion is deferred to **PROJECT_STATUS checklist item (13)**: after
+Michael flips `insightClaims` and lives with the `ClaimFeed` for a while, he
+says the word and the nexus LLM synthesis generators get deleted. This
+reframes P2-D8's "Phase 3 cleanup" as "post-flip cleanup" — reversibility
+over tidiness, same posture as every other Phase 1-3 gate in this doc.
+
+**Flag-OFF visible diff, summarized.** Beyond the sunshine leak fix and the
+ideas-are-now-unconditionally-generic change above (both already visible
+today, not gated), NOTHING else changes flag-OFF: the deleted modules were
+already fully suppressed (belief/counterfactual insights never rendered),
+and Try-as-experiment/confirmed-exposure/repeat are all gated on
+`personalExperiments`, already OFF.
+
+**Backlog burn-down riding along with this phase (P3-D7 + review items
+A-D).** One-liners with existing review context, batched here rather than as
+separate sessions:
+- `src/config/flags.js`: vestigial `model.fusedTranscription35` removed from
+  `FLAG_DEFAULTS` (zero consumers — confirmed by repo-wide grep before
+  removal).
+- `scripts/flip-flag.mjs`: `STRING_ALLOWED` gained `model.insightWriter`/
+  `model.insightVerifier` — see the R4 Phase 2 section above (updated in
+  place; that section previously described this as a not-yet-done caveat).
+- `functions/src/insights/writeClaimWordingHandler.js`: the dead default
+  `callGeminiImpl = defaultCallGemini` parameter fallback is removed —
+  `callGeminiImpl` is now a REQUIRED injection; a caller that omits it gets
+  an immediate, clear thrown error instead of a silent fallback that could
+  fire a real, uncontrolled Gemini call from a test or a future call site
+  that forgot to inject it. The one production call site
+  (`functions/index.js`'s `writeClaimWording` callable) already always
+  injected it explicitly, so this is a zero-behavior-change hardening.
+- `src/hooks/useNexusInsights.js`: the `budgetedInsights` memo gained an
+  explicit `if (!enabled) return [];` — previously the disabled contract
+  only held BECAUSE every upstream effect happened to leave `allInsights`
+  empty when disabled; now it's a direct, one-line invariant of the memo
+  itself, and `applyInsightBudget` is provably never invoked while disabled
+  (even with `insightBudget` ON).
+- `src/components/settings/NexusSettings.jsx` / `src/services/nexus/
+  orchestrator.js`'s `getDefaultSettings` / `src/services/nexus/data/
+  schemas.js`: the `beliefDissonanceInsights` and `counterfactualInsights`
+  feature toggles/default-keys/schema-field-strings are removed — both
+  features were deleted whole above, so the toggles gated nothing.
+  `interventionRecommendations` and `narrativeArcTracking` are KEPT —
+  VERIFIED still read (the ideas-generation block and the narrative-arc
+  synthesis block, respectively) before touching this. An existing user's
+  settings doc may still carry the two dead keys from before this change —
+  harmless, never read again (tombstone, not a migration).
+
+**Validation:** `src/__tests__/validationMatrix.test.js` R4P3 rows (a)-(f)
+— (a) no-personal-evidence-in-ideas (real `getTodayRecommendations` +
+`generateRecommendations` + orchestrator ideas-wrapping, zero `%` literals,
+title always `'An Idea to Try'`); (b) risky-modules-gone (the three deleted
+modules unresolvable + a repo-wide fs-walk lint asserting zero LIVE
+`RISKY_CLAIMS_ENABLED` code references in `src/`+`functions/src/`, mirroring
+`src/utils/__tests__/hookImports.test.js`'s established pattern — historical
+tombstone comments and test-description strings are correctly NOT
+violations); (c) prefill-safety-order (real `ExperimentsScreen`,
+`screenQuestion` before any state advance); (d) confirmed-exposure-tri-state
+(real `computeExperimentResult` + `buildConfirmationSeries`, done:true/
+done:false/missing, passive-mode byte-identical regression); (e) repeat-run-
+lineage (real `writeOrSupersedeExperimentResultClaim`, both the supersede
+and suppressed-skip branches); (f) confirmations-rules (JS-side seam; the
+rules half is the emulator-only `firestoreRules.test.js` describe block
+named above). Dedicated per-module test files:
+`src/services/nexus/__tests__/{insightIntegration,orchestrator.ideas}.test.js`,
+`src/components/experiments/__tests__/{ExperimentsScreen.prefill,
+ExperimentResultView}.test.jsx`, `src/services/experiments/__tests__/
+{computeResult,experimentsService}.test.js`,
+`functions/src/insights/__tests__/writeClaimWordingHandler.test.js`,
+`src/hooks/__tests__/useNexusInsights.test.js`,
+`src/config/__tests__/flags.test.js`.

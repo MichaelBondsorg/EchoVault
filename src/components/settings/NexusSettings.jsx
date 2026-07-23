@@ -30,12 +30,19 @@ const NexusSettings = ({ user }) => {
           setSettings(settingsDoc.data());
         } else {
           // Set defaults
+          // R4 Phase 3 backlog (P3-D7/review item A): `beliefDissonanceInsights`
+          // and `counterfactualInsights` toggles removed — both features were
+          // deleted whole in R4-P3 Task 4 (P3-D1); their toggles no longer
+          // gate anything. `interventionRecommendations` and
+          // `narrativeArcTracking` are KEPT — verified still read by
+          // orchestrator.js (the ideas block and the narrative-arc block,
+          // respectively) before touching this. A user's existing settings
+          // doc may still carry the two dead keys from before this change;
+          // they're simply never read again — harmless.
           setSettings({
             features: {
-              beliefDissonanceInsights: { enabled: true },
               interventionRecommendations: { enabled: true },
-              narrativeArcTracking: { enabled: true },
-              counterfactualInsights: { enabled: true }
+              narrativeArcTracking: { enabled: true }
             },
             preferences: {
               insightDepth: 'comprehensive',
@@ -133,15 +140,11 @@ const NexusSettings = ({ user }) => {
           Insight Types
         </h3>
 
-        {/* Belief Dissonance */}
-        <FeatureToggle
-          title="Deep Pattern Insights"
-          description="Surface patterns that might challenge your self-perception. These insights are designed to promote growth, not judgment."
-          enabled={settings?.features?.beliefDissonanceInsights?.enabled}
-          onToggle={() => toggleFeature('beliefDissonanceInsights')}
-          badge="Recommended"
-          color="amber"
-        />
+        {/* R4 Phase 3 backlog (P3-D7/review item A): "Deep Pattern Insights"
+            (beliefDissonanceInsights) and "'What If' Insights"
+            (counterfactualInsights) toggles removed — both features were
+            deleted whole in R4-P3 Task 4 (P3-D1); there is nothing left for
+            them to gate. */}
 
         {/* Intervention Recommendations */}
         <FeatureToggle
@@ -159,15 +162,6 @@ const NexusSettings = ({ user }) => {
           enabled={settings?.features?.narrativeArcTracking?.enabled}
           onToggle={() => toggleFeature('narrativeArcTracking')}
           color="purple"
-        />
-
-        {/* Counterfactual */}
-        <FeatureToggle
-          title="'What If' Insights"
-          description="Learn from days that didn't go well by identifying what might have helped."
-          enabled={settings?.features?.counterfactualInsights?.enabled}
-          onToggle={() => toggleFeature('counterfactualInsights')}
-          color="blue"
         />
       </div>
 
@@ -217,11 +211,9 @@ const NexusSettings = ({ user }) => {
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
             <div className="text-sm text-lavender-200 dark:text-lavender-300">
-              <p className="font-medium mb-1">About Deep Pattern Insights</p>
+              <p className="font-medium mb-1">About these settings</p>
               <p className="text-lavender-300/80 dark:text-lavender-400/80">
-                These insights identify gaps between your stated beliefs and behavioral data.
-                They're framed as invitations to explore, not judgments. You can turn them off
-                anytime if they don't feel helpful.
+                Turn any of these off anytime if a type of insight doesn't feel helpful.
               </p>
             </div>
           </div>

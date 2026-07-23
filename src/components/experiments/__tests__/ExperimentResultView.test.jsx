@@ -19,7 +19,7 @@ import { getTemplateById } from '../../../services/experiments/templates';
 import {
   setObservationExcluded, writeResult, writeAdjustedResult, listConfirmations, listFamilyRuns,
 } from '../../../services/experiments/experimentsService';
-import { readLedgerCounts } from '../../../services/insights/testingLedger';
+import { listAllClaims } from '../../../services/insights/claims/claimsService';
 
 vi.mock('../../../config/firebase', () => ({ db: { __db: true } }));
 
@@ -43,11 +43,14 @@ vi.mock('../../../services/experiments/experimentsService', async (importOrigina
   };
 });
 
-// `readLedgerCounts` lives in a DIFFERENT module (`testingLedger.js`, real
+// `listAllClaims` (R4 Phase 3 backlog, review item D — repeat-of-suppressed
+// hint) lives in a DIFFERENT module (`claimsService.js`, real
 // `firebase/firestore` imports, no app `config/firebase` wrapper) — mocked
-// separately, same reasoning as `listFamilyRuns` above.
-vi.mock('../../../services/insights/testingLedger', () => ({
-  readLedgerCounts: vi.fn().mockResolvedValue(new Map()),
+// separately, same reasoning as `listFamilyRuns` above. Defaults to []
+// (no claims -> no hint) so every PRE-EXISTING test in this file never
+// renders the hint.
+vi.mock('../../../services/insights/claims/claimsService', () => ({
+  listAllClaims: vi.fn().mockResolvedValue([]),
 }));
 
 const UID = 'user-a';
@@ -244,8 +247,11 @@ describe('ExperimentResultView — confirmed-exposure source disclosure (R4 Phas
 
 // ---------------------------------------------------------------------------
 // Family history (R4 Phase 3 Task 6, repeated trials) — "Run N of M", prior
-// runs' deltas, the ledger's supplementary candidate count, and the
-// no-pooling note. Display-only: no combined/pooled statistics anywhere.
+// runs' deltas, and the no-pooling note. Display-only: no combined/pooled
+// statistics anywhere. The section previously also supplemented "Run N of M"
+// with the testing ledger's candidate count — REMOVED (R4 Phase 3 backlog,
+// review item C): that count is invariantly 1 for an experiment family, so
+// it conveyed nothing "Run N of M" didn't already say.
 // ---------------------------------------------------------------------------
 
 const FAMILY_ID = 'experiment:sleep-hours-mood-same-day';
@@ -316,18 +322,6 @@ describe('ExperimentResultView — family history (R4 Phase 3 Task 6, repeated t
     expect(await screen.findByText(/Run 1: not enough data for a result/)).toBeTruthy();
   });
 
-  it('supplements with the ledger\'s candidate count when readLedgerCounts resolves', async () => {
-    listFamilyRuns.mockResolvedValueOnce([
-      { id: 'exp-0', completedAt: 't0', delta: 1, status: 'ok' },
-      { id: 'exp-1', completedAt: 't1', delta: 2, status: 'ok' },
-    ]);
-    readLedgerCounts.mockResolvedValueOnce(new Map([[FAMILY_ID, 1]]));
-    const experiment = goldenExperimentWithFamily({ id: 'exp-1' });
-    render(<ExperimentResultView uid={UID} entries={[]} experiment={experiment} onClose={vi.fn()} />);
-
-    expect(await screen.findByText(/this family's testing ledger has 1 candidate hypothesis on record/)).toBeTruthy();
-  });
-
   it('hides the WHOLE section (never a partial/broken render) when listFamilyRuns rejects', async () => {
     listFamilyRuns.mockRejectedValueOnce(new Error('read failed'));
     const experiment = goldenExperimentWithFamily();
@@ -337,20 +331,7 @@ describe('ExperimentResultView — family history (R4 Phase 3 Task 6, repeated t
     expect(screen.queryByText('This hypothesis')).toBeNull();
   });
 
-  it('still renders the section (minus the ledger line) when readLedgerCounts rejects — a failed supplementary read never hides the whole section', async () => {
-    listFamilyRuns.mockResolvedValueOnce([
-      { id: 'exp-0', completedAt: 't0', delta: 1, status: 'ok' },
-      { id: 'exp-1', completedAt: 't1', delta: 2, status: 'ok' },
-    ]);
-    readLedgerCounts.mockRejectedValueOnce(new Error('ledger read failed'));
-    const experiment = goldenExperimentWithFamily({ id: 'exp-1' });
-    render(<ExperimentResultView uid={UID} entries={[]} experiment={experiment} onClose={vi.fn()} />);
-
-    expect(await screen.findByText('This hypothesis')).toBeTruthy();
-    expect(screen.queryByText(/testing ledger/)).toBeNull();
-  });
-
-  it('never calls listFamilyRuns/readLedgerCounts for a legacy plan with no hypothesisFamilyId', async () => {
+  it('never calls listFamilyRuns for a legacy plan with no hypothesisFamilyId', async () => {
     // A real stored result, but the fixture's plan never carries
     // hypothesisFamilyId (this file's local `buildAnalysisPlan` helper
     // never sets it) — the pre-Phase-1 legacy case.
@@ -359,7 +340,93 @@ describe('ExperimentResultView — family history (R4 Phase 3 Task 6, repeated t
     // Flush a tick so any (incorrect) call would have fired.
     await waitFor(() => expect(screen.getByText('Coverage')).toBeTruthy());
     expect(listFamilyRuns).not.toHaveBeenCalled();
-    expect(readLedgerCounts).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Repeat-of-suppressed hint (R4 Phase 3 backlog, review item D) — a subtle
+// note when this family's live experiment_result claim is suppressed, so a
+// user who repeats it understands why the new run's result won't show up
+// in their feed.
+// ---------------------------------------------------------------------------
+
+const HINT_TEXT = /muted in your feed/;
+
+function claimFor(hypothesisFamilyId, overrides = {}) {
+  return {
+    id: 'claim-1',
+    claimType: 'experiment_result',
+    status: 'suppressed',
+    supersededByClaimId: null,
+    analysisPlan: { candidateId: hypothesisFamilyId },
+    ...overrides,
+  };
+}
+
+describe('ExperimentResultView — repeat-of-suppressed hint (R4 Phase 3 backlog, review item D)', () => {
+  it('shows the hint when this family\'s live claim is suppressed', async () => {
+    listAllClaims.mockResolvedValueOnce([claimFor(FAMILY_ID)]);
+    const experiment = goldenExperimentWithFamily();
+    render(<ExperimentResultView uid={UID} entries={[]} experiment={experiment} onClose={vi.fn()} />);
+
+    expect(await screen.findByText(HINT_TEXT)).toBeTruthy();
+  });
+
+  it('does not show the hint when the live claim is verified (not suppressed)', async () => {
+    listAllClaims.mockResolvedValueOnce([claimFor(FAMILY_ID, { status: 'verified' })]);
+    const experiment = goldenExperimentWithFamily();
+    render(<ExperimentResultView uid={UID} entries={[]} experiment={experiment} onClose={vi.fn()} />);
+
+    await waitFor(() => expect(listAllClaims).toHaveBeenCalled());
+    expect(screen.queryByText(HINT_TEXT)).toBeNull();
+  });
+
+  it('does not show the hint for a suppressed claim belonging to a DIFFERENT family', async () => {
+    listAllClaims.mockResolvedValueOnce([claimFor('experiment:some-other-family')]);
+    const experiment = goldenExperimentWithFamily();
+    render(<ExperimentResultView uid={UID} entries={[]} experiment={experiment} onClose={vi.fn()} />);
+
+    await waitFor(() => expect(listAllClaims).toHaveBeenCalled());
+    expect(screen.queryByText(HINT_TEXT)).toBeNull();
+  });
+
+  it('does not show the hint for a suppressed claim that has already been SUPERSEDED (not the live one)', async () => {
+    listAllClaims.mockResolvedValueOnce([
+      claimFor(FAMILY_ID, { id: 'claim-old', supersededByClaimId: 'claim-new' }),
+      claimFor(FAMILY_ID, { id: 'claim-new', status: 'verified', supersededByClaimId: null }),
+    ]);
+    const experiment = goldenExperimentWithFamily();
+    render(<ExperimentResultView uid={UID} entries={[]} experiment={experiment} onClose={vi.fn()} />);
+
+    await waitFor(() => expect(listAllClaims).toHaveBeenCalled());
+    expect(screen.queryByText(HINT_TEXT)).toBeNull();
+  });
+
+  it('a contained listAllClaims failure hides just the hint, never breaks the rest of the view', async () => {
+    listAllClaims.mockRejectedValueOnce(new Error('read failed'));
+    const experiment = goldenExperimentWithFamily();
+    render(<ExperimentResultView uid={UID} entries={[]} experiment={experiment} onClose={vi.fn()} />);
+
+    await waitFor(() => expect(listAllClaims).toHaveBeenCalled());
+    expect(screen.queryByText(HINT_TEXT)).toBeNull();
+    expect(screen.getByText('Coverage')).toBeTruthy();
+  });
+
+  it('never calls listAllClaims for a legacy plan with no hypothesisFamilyId', async () => {
+    const experiment = goldenExperiment({ result: FAMILY_OK_RESULT });
+    render(<ExperimentResultView uid={UID} entries={[]} experiment={experiment} onClose={vi.fn()} />);
+    await waitFor(() => expect(screen.getByText('Coverage')).toBeTruthy());
+    expect(listAllClaims).not.toHaveBeenCalled();
+  });
+
+  it('the hint renders even for a FIRST/ONLY run (independent of the family-history section\'s M>1 gate)', async () => {
+    listFamilyRuns.mockResolvedValueOnce([{ id: 'exp-1', completedAt: 't1', delta: 5, status: 'ok' }]);
+    listAllClaims.mockResolvedValueOnce([claimFor(FAMILY_ID)]);
+    const experiment = goldenExperimentWithFamily({ id: 'exp-1' });
+    render(<ExperimentResultView uid={UID} entries={[]} experiment={experiment} onClose={vi.fn()} />);
+
+    expect(await screen.findByText(HINT_TEXT)).toBeTruthy();
+    expect(screen.queryByText('This hypothesis')).toBeNull();
   });
 });
 

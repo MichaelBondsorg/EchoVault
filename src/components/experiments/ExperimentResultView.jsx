@@ -26,7 +26,7 @@ import {
   listConfirmations,
   listFamilyRuns,
 } from '../../services/experiments/experimentsService';
-import { readLedgerCounts } from '../../services/insights/testingLedger';
+import { listAllClaims } from '../../services/insights/claims/claimsService';
 import { safeDate } from '../../utils/date';
 
 /**
@@ -128,14 +128,35 @@ import { safeDate } from '../../utils/date';
  * own delta, sorted oldest-first. NO POOLING, NO COMBINED STATISTICS — this
  * is deliberately NOT a meta-analysis (the plan's own rationale: "cross-run
  * meta-analysis needs statistics we deliberately don't have"); a one-line
- * note says every run stands on its own. A `readLedgerCounts` read
- * (`testingLedger.js`) supplements this with the family's own testing-ledger
- * count when cheaply available. BOTH reads are read-only and best-effort:
- * either failing hides its own piece silently (no error surfaced, no retry
- * UI) — `familyRuns` failing hides the WHOLE section (there is nothing
- * honest to show without it); `ledgerCount` failing just omits that one
- * supplementary line. Only ever attempted for a `hypothesisFamilyId`-bearing
- * plan (a legacy pre-Phase-1 plan has none — section never renders for it).
+ * note says every run stands on its own. `familyRuns` is read-only and
+ * best-effort: a failure hides the WHOLE section silently (no error
+ * surfaced, no retry UI) — there is nothing honest to show without it. Only
+ * ever attempted for a `hypothesisFamilyId`-bearing plan (a legacy
+ * pre-Phase-1 plan has none — section never renders for it).
+ *
+ * The section previously also supplemented "Run N of M" with a
+ * `readLedgerCounts` read ("this family's testing ledger has N candidate
+ * hypothesis(es) on record") — REMOVED (R4 Phase 3 backlog, review item C):
+ * `candidateTestsCount` for an experiment-family is invariantly 1 (each
+ * hypothesis-family here has exactly one candidate — itself), so the line
+ * only ever said "1 candidate hypothesis," conveying nothing "Run N of M"
+ * didn't already say more plainly. Simplest honest fix: drop it entirely
+ * rather than caveat or relabel a number that carries no information.
+ *
+ * REPEAT-OF-SUPPRESSED HINT (R4 Phase 3 backlog, review item D): if this
+ * family's current LIVE claim (`claimType: 'experiment_result'`,
+ * `candidateId: hypothesisFamilyId`) is `suppressed`, a subtle one-line note
+ * explains that a fresh run's result claim won't reach the feed either —
+ * `writeOrSupersedeExperimentResultClaim` (`experimentsService.js`) skips
+ * writing a new claim entirely when the live prior is suppressed (invariant:
+ * suppression is never auto-touched by a fresh computation), so without this
+ * note a user who repeats a muted hypothesis would see no claim show up and
+ * have no idea why. Computed here (not in `ExperimentsScreen`'s "Repeat this
+ * experiment" row) because this view already has `hypothesisFamilyId` in
+ * scope and can check the claim cheaply via `listAllClaims`; a contained
+ * read failure hides just this one note, same best-effort posture as
+ * `familyRuns` above's failure mode applied to a single line instead of a
+ * whole section.
  */
 
 // Shared token -> plain-language copy map (binding: "render both uniformly,
@@ -376,15 +397,12 @@ const ExperimentResultView = ({ uid, entries = [], experiment, onClose }) => {
     [experiment, entries, tableConfirmations],
   );
 
-  // FAMILY HISTORY (R4 Phase 3 Task 6) — see module doc comment. Two
-  // independent, best-effort reads: `familyRuns` (null = not loaded yet OR
-  // the read failed — either way the section stays hidden, since "Run N of
-  // M" has nothing honest to show without it) and `ledgerCount` (null = not
-  // loaded/failed — omits only its own supplementary line, never hides the
-  // whole section). Both keyed off `analysisPlan.hypothesisFamilyId`; a
-  // legacy plan with none never triggers either read.
+  // FAMILY HISTORY (R4 Phase 3 Task 6) — see module doc comment. `familyRuns`
+  // is null when not loaded yet OR the read failed — either way the section
+  // stays hidden, since "Run N of M" has nothing honest to show without it.
+  // Keyed off `analysisPlan.hypothesisFamilyId`; a legacy plan with none
+  // never triggers the read.
   const [familyRuns, setFamilyRuns] = useState(null);
-  const [ledgerCount, setLedgerCount] = useState(null);
   const hypothesisFamilyId = experiment.analysisPlan?.hypothesisFamilyId;
   useEffect(() => {
     if (typeof hypothesisFamilyId !== 'string' || !hypothesisFamilyId) {
@@ -397,15 +415,31 @@ const ExperimentResultView = ({ uid, entries = [], experiment, onClose }) => {
       .catch(() => { if (!cancelled) setFamilyRuns(null); });
     return () => { cancelled = true; };
   }, [uid, hypothesisFamilyId]);
+
+  // REPEAT-OF-SUPPRESSED HINT (R4 Phase 3 backlog, review item D) — see
+  // module doc comment. `repeatSuppressedHint` is null (nothing to show)
+  // unless this family's live `experiment_result` claim (supersededByClaimId
+  // absent, i.e. not yet replaced by a later version) is `status:
+  // 'suppressed'`. Best-effort: a read failure or no live claim yet leaves
+  // it null, same silent-omission posture as `familyRuns`' own failure mode.
+  const [repeatSuppressedHint, setRepeatSuppressedHint] = useState(false);
   useEffect(() => {
     if (typeof hypothesisFamilyId !== 'string' || !hypothesisFamilyId) {
-      setLedgerCount(null);
+      setRepeatSuppressedHint(false);
       return undefined;
     }
     let cancelled = false;
-    readLedgerCounts(db, uid, [hypothesisFamilyId])
-      .then((counts) => { if (!cancelled) setLedgerCount(counts.get(hypothesisFamilyId) ?? null); })
-      .catch(() => { if (!cancelled) setLedgerCount(null); });
+    listAllClaims(db, uid)
+      .then((claims) => {
+        if (cancelled) return;
+        const live = Array.isArray(claims)
+          ? claims.find((c) => c?.claimType === 'experiment_result'
+            && c?.analysisPlan?.candidateId === hypothesisFamilyId
+            && !c?.supersededByClaimId)
+          : null;
+        setRepeatSuppressedHint(live?.status === 'suppressed');
+      })
+      .catch(() => { if (!cancelled) setRepeatSuppressedHint(false); });
     return () => { cancelled = true; };
   }, [uid, hypothesisFamilyId]);
 
@@ -608,9 +642,6 @@ const ExperimentResultView = ({ uid, entries = [], experiment, onClose }) => {
             <p className="font-semibold">This hypothesis</p>
             <p className="text-sm text-secondary-foreground">
               Run {runIndex} of {familyRuns.length}
-              {ledgerCount != null
-                ? ` — this family's testing ledger has ${ledgerCount} candidate hypothesis${ledgerCount === 1 ? '' : 'es'} on record`
-                : ''}
             </p>
             <ul className="space-y-0.5 text-sm text-secondary-foreground">
               {familyRuns.map((run, idx) => (
@@ -628,6 +659,17 @@ const ExperimentResultView = ({ uid, entries = [], experiment, onClose }) => {
               Each run stands on its own — these are not combined or averaged together.
             </p>
           </section>
+        )}
+
+        {/* Repeat-of-suppressed hint (R4 Phase 3 backlog, review item D) —
+            see module doc comment. Deliberately subtle (a bare muted-tone
+            line, no icon/section chrome) and independent of the family
+            history section above (renders even for a first/only run whose
+            claim a user already muted). */}
+        {repeatSuppressedHint && (
+          <p className="text-xs text-[var(--muted-foreground)]">
+            This hypothesis is muted in your feed — its new result won't appear there until you un-mute it in feedback settings.
+          </p>
         )}
 
         {!isOk && (

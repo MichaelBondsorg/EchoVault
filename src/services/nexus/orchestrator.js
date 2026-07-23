@@ -385,12 +385,17 @@ const getUserSettings = async (userId) => {
   }
 };
 
+// R4 Phase 3 backlog (P3-D7/review item A): `beliefDissonanceInsights` and
+// `counterfactualInsights` removed — both features were deleted whole in
+// R4-P3 Task 4 (P3-D1); no code anywhere reads either key anymore.
+// `interventionRecommendations` is KEPT — verified still read below (the
+// ideas-generation block, L615-ish) to gate `generateRecommendations`.
+// `narrativeArcTracking` is KEPT too — still read (L557-ish) to gate the
+// narrative-arc synthesis block, which survives per P3-D6.
 const getDefaultSettings = () => ({
   features: {
-    beliefDissonanceInsights: { enabled: true },
     interventionRecommendations: { enabled: true },
-    narrativeArcTracking: { enabled: true },
-    counterfactualInsights: { enabled: true }
+    narrativeArcTracking: { enabled: true }
   },
   preferences: {
     insightDepth: 'comprehensive',

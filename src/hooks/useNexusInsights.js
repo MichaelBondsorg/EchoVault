@@ -317,10 +317,16 @@ export const useNexusInsights = (user, options = {}) => {
   // across re-renders that don't touch any dep here, matching the
   // reference-identity contract `allInsights` already provides.
   const budgetedInsights = useMemo(() => {
+    // R4 Phase 3 backlog (P3-D7): an explicit `enabled` gate, not just a
+    // consequence of allInsights already being empty when disabled — makes
+    // the disabled contract a direct, one-line invariant of this memo
+    // itself rather than something that merely happens to fall out of every
+    // upstream effect early-returning.
+    if (!enabled) return [];
     if (!getFlag('insightBudget')) return allInsights;
     return applyInsightBudget(allInsights, { mode: budgetMode, shownLog, now: Date.now() });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [allInsights, budgetMode, shownLog, nowTick]);
+  }, [enabled, allInsights, budgetMode, shownLog, nowTick]);
 
   // Record what's actually displayed. Guarded two ways: the ref dedupes
   // within this mount (budgetedInsights is a new array every render), and

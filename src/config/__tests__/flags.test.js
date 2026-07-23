@@ -44,7 +44,6 @@ describe('config/flags', () => {
         intentExtraction: false,
         'model.gemini35flash': false,
         'model.embeddingV2Read': false,
-        'model.fusedTranscription35': false,
         openLoops: false,
         contextSpaces: false,
         insightBudget: false,

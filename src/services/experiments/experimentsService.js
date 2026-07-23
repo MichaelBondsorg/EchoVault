@@ -975,7 +975,7 @@ export async function listConfirmations(db, uid, experimentId) {
 /**
  * Family history (R4 Phase 3 Task 6, repeated trials): every COMPLETED
  * experiment sharing the given `hypothesisFamilyId`, sorted OLDEST-first by
- * completion (so "run N of M" numbering reads chronologically, the current/
+ * `createdAt` (so "run N of M" numbering reads chronologically, the current/
  * most-recent run last). A pure client-side filter over the exact same
  * collection/ordering `subscribeExperiments` already reads (`orderBy
  * 'createdAt'`) — deliberately NO new query shape and NO new Firestore
@@ -988,6 +988,17 @@ export async function listConfirmations(db, uid, experimentId) {
  * completed." `delta`/`status` are read from `result.original` (never
  * `result.adjusted`) — the family-history line is about what each ORIGINAL
  * run found, matching the brief's exact field mapping.
+ *
+ * SORT KEY FIX (R4 Phase 3 backlog, review item B): the list is ordered by
+ * `createdAt` — immutable once an experiment leaves `draft` (plan-freeze) —
+ * NOT `updatedAt`. `updatedAt` is still what's SHOWN as `completedAt` above
+ * (the display value is unchanged), but it must never be the ORDER key: a
+ * later exclusion-adjustment on an EARLIER run bumps that run's `updatedAt`
+ * to a time after a more-recent run's own completion, which used to
+ * silently misorder "Run N of M" labels (an earlier run could reshuffle
+ * past a later one just because someone toggled an excluded day on it).
+ * `createdAt` never moves after creation, so the run order — and therefore
+ * every "Run N of M" label — stays fixed for the life of the family.
  *
  * Never throws on a malformed doc (a missing/non-object `result` simply
  * yields `delta: null, status: 'unknown'` for that run) — the caller
@@ -1013,17 +1024,21 @@ export async function listFamilyRuns(db, uid, hypothesisFamilyId) {
     const original = data.result && typeof data.result === 'object' ? data.result.original : null;
     runs.push({
       id: d.id,
+      // Sort key ONLY — immutable, never displayed directly; stripped from
+      // the returned shape below. `completedAt` (displayed) stays sourced
+      // from `updatedAt`, unchanged.
+      _createdAt: typeof data.createdAt === 'string' ? data.createdAt : null,
       completedAt: typeof data.updatedAt === 'string' ? data.updatedAt : null,
       delta: Number.isFinite(original?.estimate?.delta) ? original.estimate.delta : null,
       status: typeof original?.status === 'string' ? original.status : 'unknown',
     });
   });
   runs.sort((a, b) => {
-    if (!a.completedAt) return 1;
-    if (!b.completedAt) return -1;
-    return a.completedAt < b.completedAt ? -1 : a.completedAt > b.completedAt ? 1 : 0;
+    if (!a._createdAt) return 1;
+    if (!b._createdAt) return -1;
+    return a._createdAt < b._createdAt ? -1 : a._createdAt > b._createdAt ? 1 : 0;
   });
-  return runs;
+  return runs.map(({ _createdAt, ...run }) => run);
 }
 
 /**

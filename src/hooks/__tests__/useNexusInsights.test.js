@@ -221,13 +221,16 @@ describe('useNexusInsights - enabled option (R4 Phase 2 Task 6)', () => {
     expect(budgetMocks.readShownLog).not.toHaveBeenCalled();
 
     // No shown-recording effect (a real Firestore write) fires either — its
-    // own effect gates on `enabled` directly. `applyInsightBudget` itself is
-    // a pure, synchronous memo (not a Firestore read/write) that still runs
-    // over the empty allInsights array when the insightBudget flag is on
-    // regardless of `enabled` — harmless (produces `[]` from `[]`) and out
-    // of scope for this fix (useNexusInsights.js itself isn't touched here),
-    // so it's intentionally not asserted against.
+    // own effect gates on `enabled` directly.
     expect(budgetMocks.recordShownInsights).not.toHaveBeenCalled();
+
+    // R4 Phase 3 backlog (P3-D7): `budgetedInsights`'s memo now gates
+    // directly on `enabled` (an explicit `if (!enabled) return [];`), so
+    // `applyInsightBudget` is never invoked at all while disabled — even
+    // with the insightBudget flag ON (set above) — rather than merely
+    // happening to run over an already-empty array and produce the same
+    // `[]` result. Fixes what used to be an implicit/coincidental contract.
+    expect(budgetMocks.applyInsightBudget).not.toHaveBeenCalled();
 
     // Stable, empty return shape.
     expect(result.current.insights).toEqual([]);

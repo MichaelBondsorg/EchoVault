@@ -660,8 +660,18 @@ adds a two-pass server writer/verifier pair that may author a claim's
 itself, with an absolute fallback to Phase 1's deterministic template on any
 writer/verifier failure. It also collapses Quick Insights and AI Insights
 into one ranked `ClaimFeed`, and routes Ask Journal + reports through
-verified claims instead of Nexus prose. Full detail: runbook's "R2
-flags"/"R3 flag"/"R4"/"R4 Phase 1"/"R4 Phase 2" sections.
+verified claims instead of Nexus prose. **R4 Phase 3** (plan:
+`docs/superpowers/plans/2026-07-23-r4-phase3-action-loop.md`) closes R4 by
+replacing the four suppressed risky-claim modules (counterfactual, belief
+dissonance, intervention tracking, personalized recommendations) with the
+evidence-railed action loop the deep review actually prescribed — idea →
+try-as-experiment (wired end-to-end from ClaimCards and idea cards through
+the same `screenAndProceed` safety gate) → an optional confirmed-exposure
+daily check-in mode → an outcome claim → a repeat button whose result claim
+correctly supersedes the prior run's via lineage — and deletes the
+mention-based machinery those modules were built on (`RISKY_CLAIMS_ENABLED`
+retires with them; no new client flag). Full detail: runbook's "R2
+flags"/"R3 flag"/"R4"/"R4 Phase 1"/"R4 Phase 2"/"R4 Phase 3" sections.
 
 ## Crash Reporting
 

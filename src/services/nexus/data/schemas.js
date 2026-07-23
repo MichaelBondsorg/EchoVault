@@ -310,12 +310,15 @@ export const INSIGHTS_SCHEMA = {
  *
  * User settings for Nexus features.
  */
+// R4 Phase 3 backlog (P3-D7/review item A): `beliefDissonanceInsights` and
+// `counterfactualInsights` field strings removed — both features were
+// deleted whole in R4-P3 Task 4 (P3-D1). This module is documentation-only
+// (no runtime importer as of this task — verified by repo-wide grep), so
+// this is purely keeping the schema honest, not a behavior change.
 export const SETTINGS_SCHEMA = {
   features: {
-    beliefDissonanceInsights: { enabled: 'boolean', lastToggled: 'Timestamp|null' },
     interventionRecommendations: { enabled: 'boolean' },
-    narrativeArcTracking: { enabled: 'boolean' },
-    counterfactualInsights: { enabled: 'boolean' }
+    narrativeArcTracking: { enabled: 'boolean' }
   },
 
   preferences: {
@@ -340,10 +343,8 @@ export const SETTINGS_SCHEMA = {
 
 export const getDefaultSettings = () => ({
   features: {
-    beliefDissonanceInsights: { enabled: true }, // ON by default
     interventionRecommendations: { enabled: true },
-    narrativeArcTracking: { enabled: true },
-    counterfactualInsights: { enabled: true }
+    narrativeArcTracking: { enabled: true }
   },
   preferences: {
     insightDepth: 'comprehensive',

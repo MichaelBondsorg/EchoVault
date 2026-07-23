@@ -193,6 +193,26 @@ describe('handleWriteClaimWording', () => {
     expect(result.reasons).toEqual(expect.arrayContaining(['causal_language']));
   });
 
+  it('R4 Phase 3 backlog (P3-D7): a missing callGeminiImpl throws clearly instead of silently defaulting to a real Gemini client', async () => {
+    await expect(
+      handleWriteClaimWording(
+        { bundle },
+        { db: {}, apiKeys: { gemini: 'test-key' }, getModelImpl: makeGetModelImpl() }
+      )
+    ).rejects.toThrow(/callGeminiImpl is required/);
+  });
+
+  it('a non-function callGeminiImpl (e.g. accidentally passed undefined) throws the same clear error', async () => {
+    await expect(
+      handleWriteClaimWording(
+        { bundle },
+        {
+          db: {}, apiKeys: { gemini: 'test-key' }, callGeminiImpl: undefined, getModelImpl: makeGetModelImpl(),
+        }
+      )
+    ).rejects.toThrow(/callGeminiImpl is required/);
+  });
+
   it('oversized/invalid bundle -> invalid_bundle reason, zero model calls', async () => {
     const callGeminiImpl = vi.fn();
     const getModelImpl = vi.fn();

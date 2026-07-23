@@ -62,7 +62,12 @@
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import React from 'react';
-import { render, screen, fireEvent, renderHook, act } from '@testing-library/react';
+import { render, screen, fireEvent, renderHook, act, waitFor } from '@testing-library/react';
+// R4P3 row (b) (risky-modules-gone): fs-walk lint, mirroring
+// src/utils/__tests__/hookImports.test.js / verification.test.js's own
+// established repo-wide-scan pattern.
+import { readFileSync, readdirSync, statSync } from 'fs';
+import { resolve as pathResolve, join as pathJoin } from 'path';
 
 // ---------------------------------------------------------------------------
 // Shared platform-boundary fakes
@@ -3873,5 +3878,533 @@ describe('Matrix row: R4P2-i askjournal-claims-block', () => {
     expect(response).toBe('answer'); // askJournalAIFn still resolves normally
     const [call] = askJournalAIFn.mock.calls;
     expect(call[0].entriesContext).not.toContain('VERIFIED PATTERNS');
+  });
+});
+
+// ===========================================================================
+// R4 Phase 3 rows (a)-(f): action loop + risky-claim retirement, covering
+// docs/superpowers/plans/2026-07-23-r4-phase3-action-loop.md (Task 7).
+//
+// Real modules under test: insightIntegration.js's getTodayRecommendations,
+// layer4/recommendationEngine.js's generateRecommendations, the orchestrator
+// ideas-wrapping path, ExperimentsScreen.jsx's prefill safety ordering,
+// computeResult.js's confirmed-exposure mode, and experimentsService.js's
+// writeOrSupersedeExperimentResultClaim (repeat-run lineage). Row (b) is a
+// repo-wide fs-walk lint (no component under test), mirroring
+// src/utils/__tests__/hookImports.test.js's established pattern.
+// ===========================================================================
+
+describe('Matrix row: R4P3-a no-personal-evidence-in-ideas', () => {
+  it('getTodayRecommendations (real, direct — bypassing this file\'s own top-of-file mock via importActual) over a recovery+sleep fixture: zero percentage literals in any reasoning/action', async () => {
+    const { getBaselines } = await import('../services/nexus/layer2/baselineManager');
+    getBaselines.mockResolvedValue({ mood: { mean: 0.5 } }); // truthy — required to pass the baselines gate, for every call below
+    const { getTodayRecommendations } = await vi.importActual('../services/nexus/insightIntegration');
+
+    const lowRecoveryResult = await getTodayRecommendations('user-r4p3a', [], { recovery: { score: 20 } }, null);
+    const highRecoveryResult = await getTodayRecommendations('user-r4p3a', [], { recovery: { score: 90 } }, null);
+    const lowSleepResult = await getTodayRecommendations('user-r4p3a', [], { sleep: { totalHours: 4 } }, null);
+
+    for (const result of [lowRecoveryResult, highRecoveryResult, lowSleepResult]) {
+      for (const rec of result.recommendations) {
+        expect(rec.reasoning).not.toMatch(/\d+\s*%/);
+        expect(rec.action).not.toMatch(/\d+\s*%/);
+      }
+    }
+    // Sanity: the fixtures actually exercised real branches, not a
+    // vacuously-true "zero recommendations" pass.
+    expect(highRecoveryResult.recommendations.some((r) => r.type === 'activity')).toBe(true);
+    expect(lowSleepResult.recommendations.some((r) => r.type === 'self_care')).toBe(true);
+    // The dedicated insightIntegration.test.js (T1) already exercises the
+    // sunshine branch (the original live leak) with its own
+    // computeEnvironmentMoodCorrelations mock — not duplicated here.
+  });
+
+  it('generateRecommendations (real recommendationEngine, bypassing this file\'s own file-level mock via importActual) across every mapped life state: no percentage literals, no score/expectedOutcome/confidence fields anywhere', async () => {
+    const { generateRecommendations } = await vi.importActual('../services/nexus/layer4/recommendationEngine');
+    const states = [
+      'career_waiting', 'career_rejection', 'low_mood', 'high_strain',
+      'recovery_mode', 'burnout_risk', 'stable', 'some_unmapped_state',
+    ];
+    for (const primary of states) {
+      const ideas = await generateRecommendations('user-r4p3a', { currentState: { primary }, timeOfDay: 'morning' });
+      expect(ideas.length).toBeGreaterThan(0);
+      for (const idea of ideas) {
+        expect(idea.reasoning).not.toMatch(/\d+\s*%/);
+        expect(idea).not.toHaveProperty('score');
+        expect(idea).not.toHaveProperty('expectedOutcome');
+        expect(idea).not.toHaveProperty('confidence');
+      }
+    }
+  });
+
+  it('generateInsights (real orchestrator, this file\'s own harness): a surfaced idea is ALWAYS titled \'An Idea to Try\', regardless of what the recommendation engine returns', async () => {
+    const { getDoc, setDoc, getDocs } = await import('firebase/firestore');
+    const { generateRecommendations } = await import('../services/nexus/layer4/recommendationEngine');
+    getDoc.mockResolvedValue({ exists: () => false, data: () => ({}) });
+    getDocs.mockResolvedValue({ docs: [] });
+    getExcludedEntryIdsMock.mockResolvedValue(new Set());
+    generateRecommendations.mockResolvedValueOnce([
+      { intervention: 'yoga', category: 'movement', timing: 'morning', reasoning: 'Yoga could be worth trying right now.' },
+    ]);
+
+    const { generateInsights } = await import('../services/nexus/orchestrator');
+    const result = await generateInsights('user-r4p3a-title');
+    expect(result.success).toBe(true);
+    const idea = result.insights.find((i) => i.type === 'intervention');
+    expect(idea?.title).toBe('An Idea to Try');
+  });
+});
+
+describe('Matrix row: R4P3-b risky-modules-gone', () => {
+  it('the three whole-deleted risky modules are unresolvable (P3-D1): counterfactual.js, beliefDissonance.js, interventionTracker.js', async () => {
+    // Built from concatenated segments (not a literal specifier) so Vite's
+    // static import-analysis doesn't fail the WHOLE test file at collection
+    // time over a module that is SUPPOSED to be absent — the point of this
+    // assertion is a runtime rejection, not a build-time one.
+    const deletedModules = [
+      '../services/nexus/layer3/' + 'counterfactual.js',
+      '../services/nexus/layer3/' + 'beliefDissonance.js',
+      '../services/nexus/layer4/' + 'interventionTracker.js',
+    ];
+    for (const specifier of deletedModules) {
+      await expect(import(/* @vite-ignore */ specifier)).rejects.toBeTruthy();
+    }
+  });
+
+  it('RISKY_CLAIMS_ENABLED has no LIVE code references anywhere in src/ or functions/src/ (repo-wide fs-walk, mirrors hookImports.test.js\'s pattern) — historical tombstone COMMENTS and test-description STRINGS are not violations', () => {
+    // "Live reference" = appears on a line that is neither (a) a comment
+    // line (// or JSDoc `*` continuation — the tombstone comments T4/T5 left
+    // pointing at this plan are EXPECTED and desired, not a regression) nor
+    // (b) a describe()/it()/test() call's own string-literal title (human-
+    // readable test documentation, not an executable reference to the old
+    // identifier). Anything else — an import, an export, a declaration, a
+    // conditional read — would be a genuine resurrection of the retired gate
+    // and must fail this row.
+    function isCommentLine(line) {
+      const trimmed = line.trim();
+      return trimmed.startsWith('//') || trimmed.startsWith('*') || trimmed.startsWith('/*');
+    }
+    function isTestTitleLine(line) {
+      return /^\s*(describe|it|test)\s*\(\s*['"`]/.test(line);
+    }
+    function collectFiles(dir) {
+      const out = [];
+      let entries;
+      try {
+        entries = readdirSync(dir);
+      } catch {
+        return out;
+      }
+      for (const entry of entries) {
+        const full = pathJoin(dir, entry);
+        let st;
+        try {
+          st = statSync(full);
+        } catch {
+          continue;
+        }
+        if (st.isDirectory()) {
+          if (entry === 'node_modules' || entry === '.git') continue;
+          out.push(...collectFiles(full));
+        } else if (/\.(jsx?|tsx?)$/.test(entry)) {
+          out.push(full);
+        }
+      }
+      return out;
+    }
+
+    const roots = [
+      pathResolve(__dirname, '..'), // src/
+      pathResolve(__dirname, '../../functions/src'),
+    ];
+    // Built from two concatenated segments (not a contiguous literal) so
+    // this scanning line itself is never a false-positive match against its
+    // own source — this file (the one currently executing) is itself
+    // inside the scanned `src/` tree.
+    const RETIRED_CONST_NAME = 'RISKY_CLAIMS' + '_ENABLED';
+    const violations = [];
+    for (const root of roots) {
+      for (const file of collectFiles(root)) {
+        const content = readFileSync(file, 'utf-8');
+        const lines = content.split('\n');
+        lines.forEach((line, idx) => {
+          if (!line.includes(RETIRED_CONST_NAME)) return;
+          if (isCommentLine(line) || isTestTitleLine(line)) return;
+          violations.push(`${file}:${idx + 1}: ${line.trim()}`);
+        });
+      }
+    }
+    expect(violations).toEqual([]);
+  });
+
+  it('sanity: the fs-walk scans a meaningful number of files (guards against a silently-empty/misconfigured scan passing vacuously)', () => {
+    function collectFiles(dir) {
+      const out = [];
+      let entries;
+      try {
+        entries = readdirSync(dir);
+      } catch {
+        return out;
+      }
+      for (const entry of entries) {
+        const full = pathJoin(dir, entry);
+        let st;
+        try {
+          st = statSync(full);
+        } catch {
+          continue;
+        }
+        if (st.isDirectory()) {
+          if (entry === 'node_modules' || entry === '.git') continue;
+          out.push(...collectFiles(full));
+        } else if (/\.(jsx?|tsx?)$/.test(entry)) {
+          out.push(full);
+        }
+      }
+      return out;
+    }
+    expect(collectFiles(pathResolve(__dirname, '..')).length).toBeGreaterThan(100);
+  });
+});
+
+describe('Matrix row: R4P3-c prefill-safety-order', () => {
+  afterEach(() => {
+    vi.doUnmock('../services/experiments/experimentsService.js');
+    vi.doUnmock('../services/spaces/spacesService.js');
+    vi.doUnmock('../services/experiments/questionGate.js');
+    vi.doUnmock('../components/experiments/ExperimentResultView.jsx');
+    vi.doUnmock('../config/flags');
+    vi.resetModules();
+  });
+
+  // Fully self-contained isolation via vi.doMock + vi.resetModules (NOT this
+  // file's hoisted top-of-file vi.mock list): ExperimentsScreen.jsx is never
+  // rendered by any other row in this file, so this is zero-blast-radius —
+  // it cannot affect any earlier or later row's shared mocks. Mirrors
+  // ExperimentsScreen.prefill.test.jsx's own dedicated harness (that file
+  // has the FULL test surface for this contract — invalid-template,
+  // contextSpaces-on, crisis-verdict, etc. — this row is a condensed
+  // real-module proof of just the safety-ordering invariant).
+  async function renderPrefilled(screenQuestionImpl) {
+    vi.resetModules();
+    const screenQuestionSpy = vi.fn(screenQuestionImpl);
+    vi.doMock('../services/experiments/questionGate.js', () => ({
+      screenQuestion: (...args) => screenQuestionSpy(...args),
+      DECLINE_CONTRACTS: {},
+    }));
+    vi.doMock('../services/experiments/experimentsService.js', () => ({
+      subscribeExperiments: vi.fn(() => () => {}),
+      createExperiment: vi.fn().mockResolvedValue({ id: 'new-exp' }),
+      startExperiment: vi.fn().mockResolvedValue(undefined),
+      pauseExperiment: vi.fn().mockResolvedValue(undefined),
+      resumeExperiment: vi.fn().mockResolvedValue(undefined),
+      stopExperiment: vi.fn().mockResolvedValue(undefined),
+      deleteExperiment: vi.fn().mockResolvedValue(undefined),
+      writeResult: vi.fn().mockResolvedValue(undefined),
+      buildAnalysisPlan: vi.fn((template, params) => ({
+        templateId: template.id,
+        lag: template.lag,
+        exposure: params?.tag ? { ...template.exposure, tag: params.tag } : { ...template.exposure },
+        outcome: { ...template.outcome },
+        minPairedObservations: 10,
+        coverageFloor: 0.5,
+        confounders: [...(template.confounders || [])],
+        whatThisDoesNotProve: [...(template.whatThisDoesNotProve || [])],
+      })),
+      getExperimentPrefs: vi.fn().mockResolvedValue({ enabled: true }),
+      markExplainerSeen: vi.fn().mockResolvedValue(undefined),
+    }));
+    vi.doMock('../services/spaces/spacesService.js', () => ({ subscribeSpaces: vi.fn(() => () => {}) }));
+    vi.doMock('../components/experiments/ExperimentResultView.jsx', () => ({
+      __esModule: true,
+      default: () => null,
+      reasonCopy: () => '',
+    }));
+    vi.doMock('../config/flags', () => ({ getFlag: vi.fn(() => false) }));
+
+    const { default: ExperimentsScreen } = await import('../components/experiments/ExperimentsScreen.jsx');
+    render(
+      React.createElement(ExperimentsScreen, {
+        uid: 'user-r4p3c', entries: [], prefill: { templateId: 'exercise-minutes-mood' }, onClose: vi.fn(),
+      }),
+    );
+    return screenQuestionSpy;
+  }
+
+  it('screenQuestion runs FIRST: a forced non-ok verdict on the prefilled template blocks the create-flow state advance entirely', async () => {
+    const spy = await renderPrefilled(() => ({ verdict: 'medical' }));
+
+    await waitFor(() => expect(spy).toHaveBeenCalledWith('How does exercise move together with my mood?'));
+    // Flush any further pending microtasks (e.g. the one-time explainer's
+    // own getExperimentPrefs resolution) before asserting, same act()
+    // discipline the rest of this file's component-rendering rows use.
+    await waitFor(() => {});
+    expect(screen.queryByText('How long should this run?')).toBeNull();
+  });
+
+  it('a real (ok) verdict DOES advance to the duration step — proving the block above was the gate, not a broken prefill path', async () => {
+    const spy = await renderPrefilled(() => ({ verdict: 'ok' }));
+
+    expect(await screen.findByText('How long should this run?')).toBeTruthy();
+    expect(spy).toHaveBeenCalledWith('How does exercise move together with my mood?');
+  });
+});
+
+describe('Matrix row: R4P3-d confirmed-exposure-tri-state', () => {
+  function r4p3dConfirmedExperiment(template, overrides = {}) {
+    const startAt = r3DayBefore(r3IsoDay(2026, 8, 1, 0));
+    return {
+      id: 'r4p3d-exp',
+      question: 'How does @habit:meditate move together with my mood?',
+      template: template.id,
+      analysisPlan: {
+        templateId: template.id,
+        lag: template.lag,
+        exposure: { ...template.exposure, tag: '@habit:meditate' },
+        outcome: { ...template.outcome },
+        confounders: [...(template.confounders || [])],
+        whatThisDoesNotProve: [...(template.whatThisDoesNotProve || [])],
+        timezone: 'UTC',
+        splitMode: 'binary',
+        exposureMode: 'confirmed',
+      },
+      scope: null,
+      status: 'running',
+      startAt,
+      endAt: r3IsoDay(2026, 8, 15, 0),
+      durationDays: 14,
+      excludedObservations: [],
+      createdAt: startAt,
+      updatedAt: startAt,
+      ...overrides,
+    };
+  }
+
+  it('done:true -> 1, done:false -> 0, missing day -> omitted (tri-state, real computeExperimentResult + buildConfirmationSeries)', async () => {
+    const { computeExperimentResult } = await import('../services/experiments/computeResult.js');
+    const { getTemplateById } = await import('../services/experiments/templates.js');
+    const template = getTemplateById('tag-presence-mood');
+
+    const entries = [];
+    const confirmations = [];
+    for (let day = 1; day <= 14; day++) {
+      const dateKey = r3DateKeyFor(2026, 8, day);
+      entries.push({
+        id: `r4p3d-${day}`,
+        createdAt: r3IsoDay(2026, 8, day),
+        analysis: { mood_score: (day % 2 === 0 ? 40 : 70) / 100 },
+      });
+      if (day <= 12) confirmations.push({ dateKey, done: day % 2 === 0 }); // days 13-14 left UNANSWERED
+    }
+    const experiment = r4p3dConfirmedExperiment(template);
+    const result = computeExperimentResult({
+      experiment, entries, confirmations, now: new Date(r3IsoDay(2026, 9, 1, 0)),
+    });
+
+    expect(result.status).toBe('ok');
+    // 12 of 14 answered — the 2 missing days are OMITTED from coverage, not
+    // counted as a "no" (which would still show covered:14).
+    expect(result.coverage.exposure).toEqual({ covered: 12, total: 14, label: '12 of 14 days' });
+    expect(result.estimate.n).toBe(12);
+    // done:true days (mood 40) form the high group; done:false days (mood
+    // 70) form the low group — a done:false day is a real known 0, counted,
+    // not treated as missing.
+    expect(result.estimate.meanHigh).toBeCloseTo(40, 10);
+    expect(result.estimate.meanLow).toBeCloseTo(70, 10);
+  });
+
+  it('passive mode (no exposureMode key) is byte-identical whether or not the field is absent — regression proof the confirmed-mode branch never leaks into passive plans', async () => {
+    const { computeExperimentResult } = await import('../services/experiments/computeResult.js');
+    const { getTemplateById } = await import('../services/experiments/templates.js');
+    const template = getTemplateById('tag-presence-mood');
+
+    const entries = [];
+    for (let day = 1; day <= 14; day++) {
+      entries.push({
+        id: `r4p3d-pass-${day}`,
+        createdAt: r3IsoDay(2026, 8, day),
+        tags: day % 2 === 0 ? ['@habit:meditate'] : [],
+        analysis: { mood_score: (day % 2 === 0 ? 40 : 70) / 100 },
+      });
+    }
+    const passiveExperiment = r4p3dConfirmedExperiment(template, {
+      analysisPlan: {
+        templateId: template.id,
+        lag: template.lag,
+        exposure: { ...template.exposure, tag: '@habit:meditate' },
+        outcome: { ...template.outcome },
+        confounders: [...(template.confounders || [])],
+        whatThisDoesNotProve: [...(template.whatThisDoesNotProve || [])],
+        timezone: 'UTC',
+        splitMode: 'binary',
+        // exposureMode deliberately ABSENT — the legacy/passive case.
+      },
+    });
+    expect(passiveExperiment.analysisPlan).not.toHaveProperty('exposureMode');
+
+    const result = computeExperimentResult({
+      experiment: passiveExperiment, entries, now: new Date(r3IsoDay(2026, 9, 1, 0)),
+    });
+
+    expect(result.status).toBe('ok');
+    expect(result.coverage.exposure).toEqual({ covered: 14, total: 14, label: '14 of 14 days' });
+    // Passive mode reads TAG PRESENCE (not confirmations): tagged days
+    // (mood 40, even days) are the "present" group.
+    expect(result.estimate.meanHigh).toBeCloseTo(40, 10);
+    expect(result.estimate.meanLow).toBeCloseTo(70, 10);
+  });
+});
+
+describe('Matrix row: R4P3-e repeat-run-lineage', () => {
+  const R4P3E_PLAN = {
+    templateId: 'sleep-hours-mood-same-day',
+    lag: 0,
+    exposure: { source: 'health', field: 'sleepHours', label: 'sleep hours' },
+    outcome: { field: 'analysis.mood_score', label: 'mood', unit: 'mood_0_100' },
+    minPairedObservations: 10,
+    coverageFloor: 0.5,
+    whatThisDoesNotProve: ['This does not show that sleep hours caused the change in mood.'],
+    timezone: 'UTC',
+    hypothesisFamilyId: 'experiment:sleep-hours-mood-same-day-r4p3e',
+  };
+  function r4p3eExperiment(overrides = {}) {
+    return {
+      question: 'Does sleep affect my mood?', analysisPlan: R4P3E_PLAN, durationDays: 14,
+      createdAt: '2026-07-01T00:00:00.000Z', ...overrides,
+    };
+  }
+  function r4p3eOkResult(overrides = {}) {
+    return {
+      status: 'ok',
+      estimate: {
+        delta: 10, ci: [4, 16], n: 20, nHigh: 10, nLow: 10, splitThreshold: 7,
+        exposureContrast: 2.5, stability: { signConsistent: true },
+      },
+      coverage: {
+        exposure: { covered: 20, total: 20, label: '20 of 20 days' },
+        outcome: { covered: 20, total: 20, label: '20 of 20 days' },
+      },
+      receipt: {
+        sources: [{ entryId: 'e1', date: '2026-07-10T00:00:00.000Z', excerpt: 'slept well' }],
+        scope: null,
+        timeWindow: { start: '2026-07-01T00:00:00.000Z', end: '2026-07-20T00:00:00.000Z' },
+        sampleSize: 20,
+        missingness: 'Exposure: 20 of 20 days. Outcome: 20 of 20 days.',
+      },
+      sensitiveObservationCount: 0,
+      narrative: {
+        summary: 'On days with more sleep hours than usual, mood averaged 10.0 points (0-100) higher than on '
+          + 'days with less. This is an association, not proof that one caused the other.',
+      },
+      ...overrides,
+    };
+  }
+
+  it('a repeat run\'s claim SUPERSEDES the prior run\'s claim (v2, parentClaimId, prior marked superseded — both docs)', async () => {
+    await wireClaimsFirestore();
+    const { writeOrSupersedeExperimentResultClaim } = await import('../services/experiments/experimentsService');
+    const { listAllClaims } = await import('../services/insights/claims/claimsService');
+
+    await writeOrSupersedeExperimentResultClaim({}, 'u-r4p3e', {
+      experiment: r4p3eExperiment(), experimentId: 'exp-run-1', result: r4p3eOkResult(), now: '2026-07-22T12:00:00.000Z',
+    });
+    const afterRun1 = await listAllClaims({}, 'u-r4p3e');
+    expect(afterRun1).toHaveLength(1);
+    const run1Claim = afterRun1[0];
+    expect(run1Claim.version).toBe(1);
+
+    await writeOrSupersedeExperimentResultClaim({}, 'u-r4p3e', {
+      experiment: r4p3eExperiment(),
+      experimentId: 'exp-run-2',
+      result: r4p3eOkResult({ estimate: { ...r4p3eOkResult().estimate, delta: 14 } }),
+      now: '2026-08-05T09:00:00.000Z',
+    });
+    const afterRun2 = await listAllClaims({}, 'u-r4p3e');
+    expect(afterRun2).toHaveLength(2); // both docs present — old one is superseded, not overwritten/dropped
+    const run1After = afterRun2.find((c) => c.id === run1Claim.id);
+    const run2Claim = afterRun2.find((c) => c.id !== run1Claim.id);
+    expect(run1After.supersededByClaimId).toBe(run2Claim.id);
+    expect(run2Claim.version).toBe(2);
+    expect(run2Claim.parentClaimId).toBe(run1Claim.id);
+    expect(run2Claim.evidence.effectMoodPoints).toBe(14);
+  });
+
+  it('a suppressed prior claim is left untouched — the repeat run writes NO new claim (invariant: suppression is never auto-touched by a fresh computation)', async () => {
+    await wireClaimsFirestore();
+    const { writeOrSupersedeExperimentResultClaim } = await import('../services/experiments/experimentsService');
+    const { listAllClaims, setClaimStatus } = await import('../services/insights/claims/claimsService');
+
+    await writeOrSupersedeExperimentResultClaim({}, 'u-r4p3e-2', {
+      experiment: r4p3eExperiment(), experimentId: 'exp-run-1', result: r4p3eOkResult(), now: '2026-07-22T12:00:00.000Z',
+    });
+    const [run1Claim] = await listAllClaims({}, 'u-r4p3e-2');
+    await setClaimStatus({}, 'u-r4p3e-2', run1Claim.id, 'suppressed');
+
+    await writeOrSupersedeExperimentResultClaim({}, 'u-r4p3e-2', {
+      experiment: r4p3eExperiment(),
+      experimentId: 'exp-run-2',
+      result: r4p3eOkResult({ estimate: { ...r4p3eOkResult().estimate, delta: 14 } }),
+      now: '2026-08-05T09:00:00.000Z',
+    });
+
+    const all = await listAllClaims({}, 'u-r4p3e-2');
+    expect(all).toHaveLength(1); // still just the one, now-suppressed, claim — no new write
+    expect(all[0].id).toBe(run1Claim.id);
+    expect(all[0].status).toBe('suppressed');
+    expect(all[0].supersededByClaimId).toBeFalsy();
+  });
+});
+
+// Matrix row R4P3-f (confirmations-rules): the Firestore-rules half of this
+// invariant — owner CRUD with exact hasOnly(['dateKey','done','createdAt'])
+// keys, non-owner denied, extra-key denied, cross-experiment-id denied — is
+// exercised by the emulator-only suite `functions/src/__tests__/
+// firestoreRules.test.js`'s "Experiment confirmations subcollection rules"
+// describe block (see that file; not runnable from this Vitest process per
+// this repo's `npm run test:rules` CI-only executor convention, same as R3
+// row (b)'s own comment above). This row covers the JS-SIDE seam only: that
+// `setConfirmation`/`clearConfirmation` write/delete EXACTLY the shape the
+// rules' hasOnly list allows, so even a compromised/buggy caller of this
+// service cannot construct a write the rules layer would need to reject.
+describe('Matrix row: R4P3-f confirmations-rules (JS-side seam; rules half in functions/src/__tests__/firestoreRules.test.js\'s "Experiment confirmations subcollection rules")', () => {
+  const UID_F = 'user-r4p3f';
+  const EXP_ID = 'exp-r4p3f';
+
+  beforeEach(() => {
+    firestoreMocks.getDoc.mockResolvedValue({ exists: () => true, data: () => ({ status: 'running' }) });
+    firestoreMocks.setDoc.mockClear();
+    firestoreMocks.deleteDoc.mockClear();
+  });
+
+  it('setConfirmation writes EXACTLY {dateKey, done, createdAt} — the doc id equals dateKey, matching the rules\' create hasOnly list', async () => {
+    const { setConfirmation } = await import('../services/experiments/experimentsService.js');
+    await setConfirmation({}, UID_F, EXP_ID, '2026-08-05', true);
+
+    expect(firestoreMocks.setDoc).toHaveBeenCalledTimes(1);
+    const [ref, payload] = firestoreMocks.setDoc.mock.calls[0];
+    expect(ref.__doc).toMatch(/\/confirmations\/2026-08-05$/);
+    expect(Object.keys(payload).sort()).toEqual(['createdAt', 'dateKey', 'done']);
+    expect(payload.dateKey).toBe('2026-08-05');
+    expect(payload.done).toBe(true);
+    expect(typeof payload.createdAt).toBe('string');
+  });
+
+  it('clearConfirmation deletes the dateKey doc (un-answering a day -> UNKNOWN again, never a "no")', async () => {
+    const { clearConfirmation } = await import('../services/experiments/experimentsService.js');
+    await clearConfirmation({}, UID_F, EXP_ID, '2026-08-06');
+
+    expect(firestoreMocks.deleteDoc).toHaveBeenCalledTimes(1);
+    const [ref] = firestoreMocks.deleteDoc.mock.calls[0];
+    expect(ref.__doc).toMatch(/\/confirmations\/2026-08-06$/);
+  });
+
+  it('both writes are refused once the experiment is no longer running (client-enforced, mirrors the frozen-history posture rules leave to this seam)', async () => {
+    firestoreMocks.getDoc.mockResolvedValue({ exists: () => true, data: () => ({ status: 'completed' }) });
+    const { setConfirmation, clearConfirmation } = await import('../services/experiments/experimentsService.js');
+
+    await expect(setConfirmation({}, UID_F, EXP_ID, '2026-08-05', true)).rejects.toThrow(/running/);
+    await expect(clearConfirmation({}, UID_F, EXP_ID, '2026-08-06')).rejects.toThrow(/running/);
+    expect(firestoreMocks.setDoc).not.toHaveBeenCalled();
+    expect(firestoreMocks.deleteDoc).not.toHaveBeenCalled();
   });
 });

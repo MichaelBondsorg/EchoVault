@@ -21,6 +21,16 @@ const ALLOWED = [
 // DELETES the override so the registry default applies again (rollback).
 const STRING_ALLOWED = {
   'model.fusedTranscription': ['gemini-3.5-flash', 'gemini-2.5-flash', 'default'],
+  // R4 Phase 3 backlog (P3-D7): claim writer/verifier overrides. Registry
+  // defaults deliberately use DIFFERENT models for these two workloads (see
+  // functions/src/models/registry.js's MODEL_DEFAULTS comment) so the
+  // verifier's entailment check is genuinely independent of the writer's
+  // wording. Do NOT set both to the same model id without thinking it
+  // through first — that reintroduces the single-model blind-spot risk the
+  // split was built to avoid. This tool does not enforce that independence;
+  // it is a registry-defaults concern, not a typo guard.
+  'model.insightWriter': ['gemini-3.5-flash', 'gemini-3-flash-preview', 'default'],
+  'model.insightVerifier': ['gemini-3.5-flash', 'gemini-3-flash-preview', 'default'],
 };
 const isBool = ALLOWED.includes(name) && ['true', 'false'].includes(value);
 const isString = name in STRING_ALLOWED && STRING_ALLOWED[name].includes(value);

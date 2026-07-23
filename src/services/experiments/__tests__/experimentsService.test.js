@@ -1354,6 +1354,7 @@ describe('listFamilyRuns — family history (R4 Phase 3 Task 6, repeated trials)
       id,
       status: 'completed',
       analysisPlan: { hypothesisFamilyId: FAMILY_ID },
+      createdAt: '2026-07-05T00:00:00.000Z',
       updatedAt: '2026-07-10T00:00:00.000Z',
       result: { original: { status: 'ok', estimate: { delta: 5 } } },
       ...overrides,
@@ -1386,14 +1387,33 @@ describe('listFamilyRuns — family history (R4 Phase 3 Task 6, repeated trials)
     });
   });
 
-  it('sorts by completion time, oldest first', async () => {
+  it('sorts by createdAt (immutable), oldest first', async () => {
     mockDocs([
-      experimentDoc('exp-newest', { updatedAt: '2026-07-20T00:00:00.000Z' }),
-      experimentDoc('exp-oldest', { updatedAt: '2026-07-01T00:00:00.000Z' }),
-      experimentDoc('exp-middle', { updatedAt: '2026-07-10T00:00:00.000Z' }),
+      experimentDoc('exp-newest', { createdAt: '2026-07-20T00:00:00.000Z' }),
+      experimentDoc('exp-oldest', { createdAt: '2026-07-01T00:00:00.000Z' }),
+      experimentDoc('exp-middle', { createdAt: '2026-07-10T00:00:00.000Z' }),
     ]);
     const runs = await listFamilyRuns(db, UID, FAMILY_ID);
     expect(runs.map((r) => r.id)).toEqual(['exp-oldest', 'exp-middle', 'exp-newest']);
+  });
+
+  it('R4 Phase 3 backlog (review item B): a LATER exclusion-adjustment on an EARLIER run (bumping its updatedAt past a more-recent run\'s) does NOT reshuffle the order — createdAt is the sort key, not updatedAt', async () => {
+    mockDocs([
+      // exp-first was created first but its updatedAt (a post-result
+      // exclusion toggle, long after completion) is LATER than exp-second's.
+      // Pre-fix, sorting by updatedAt would have put exp-second first.
+      experimentDoc('exp-first', { createdAt: '2026-07-01T00:00:00.000Z', updatedAt: '2026-08-15T00:00:00.000Z' }),
+      experimentDoc('exp-second', { createdAt: '2026-07-10T00:00:00.000Z', updatedAt: '2026-07-11T00:00:00.000Z' }),
+    ]);
+    const runs = await listFamilyRuns(db, UID, FAMILY_ID);
+    expect(runs.map((r) => r.id)).toEqual(['exp-first', 'exp-second']);
+    // completedAt (the displayed value) is still sourced from updatedAt,
+    // unchanged — only the ORDER key moved to createdAt.
+    expect(runs[0].completedAt).toBe('2026-08-15T00:00:00.000Z');
+    expect(runs[1].completedAt).toBe('2026-07-11T00:00:00.000Z');
+    // The sort-key field never leaks into the returned shape.
+    expect(runs[0]).not.toHaveProperty('_createdAt');
+    expect(runs[0]).not.toHaveProperty('createdAt');
   });
 
   it('an insufficient original result reports its real status ("insufficient") with delta:null (no estimate to read)', async () => {
