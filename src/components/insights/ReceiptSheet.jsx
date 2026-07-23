@@ -15,6 +15,7 @@ import SourceList from './SourceList';
 import { recordFeedbackAndLearn } from '../../services/basicInsights/feedbackLearning';
 import { recordInsightEngagement } from '../../services/analytics/insightEngagement';
 import { excludeSource } from '../../services/insights/sourceExclusions';
+import { FEEDBACK_OPTIONS, recordClaimFeedback } from '../../services/insights/claims/claimFeedback';
 import { db } from '../../config/firebase';
 import { extractPatternTypeFromInsight } from '../../hooks/useNexusInsights';
 
@@ -37,6 +38,22 @@ import { extractPatternTypeFromInsight } from '../../hooks/useNexusInsights';
  * Copy constraints (tested): no "model"/"token"/version jargon rendered
  * anywhere — `receipt.versions` is intentionally never displayed. No guilt
  * copy on the repair actions.
+ *
+ * Claim vs legacy feedback branching (R4 Phase 1 Task 9, DR finding 10):
+ * when `insight.claimType` is present (an `InsightClaim` doc, per
+ * `claimSchema.js`), the repair-action row at the bottom is replaced by the
+ * 6-option diagnostic feedback taxonomy (`FEEDBACK_OPTIONS`/
+ * `recordClaimFeedback` from `claimFeedback.js`) — a radio list + submit
+ * button, each option routed to the RIGHT consumer (corrections change
+ * facts, preferences change ranking; see that module's header comment for
+ * the full table). The per-source "Wrong source" button keeps its existing
+ * row affordance and immediate (no-submit-needed) behavior, but for a claim
+ * it now calls `recordClaimFeedback(..., 'wrong_source', {entryId})`
+ * instead of `excludeSource` directly — `wrong_source` is excluded from the
+ * radio+submit flow (it requires a specific entryId the radio group doesn't
+ * have) and shows a hint pointing at the source rows instead. Legacy
+ * insights (no `claimType`) are completely untouched: they keep today's
+ * "Not true"/"Not useful" pair and `excludeSource`-direct "Wrong source".
  *
  * v1 scope notes (documented per the task brief, not gaps to silently
  * paper over):
@@ -275,12 +292,15 @@ const ReceiptSheet = ({
 }) => {
   const [confirmEntryId, setConfirmEntryId] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [selectedClaimOption, setSelectedClaimOption] = useState(null);
 
   const receipt = insight?.receipt || null;
   const isOpen = Boolean(open && receipt);
+  const isClaim = Boolean(insight?.claimType);
 
   const handleClose = () => {
     setConfirmEntryId(null);
+    setSelectedClaimOption(null);
     onClose?.();
   };
 
@@ -324,6 +344,41 @@ const ReceiptSheet = ({
       const appliesTo = patternTypeOf(insight);
       await excludeSource(db, uid, { entryId, appliesTo, reason: 'wrong_source' });
       onExcludeSource?.({ entryId, appliesTo, reason: 'wrong_source' });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // Claim-only counterpart to handleWrongSource above: routes through
+  // recordClaimFeedback (which scopes the exclusion to the claim's
+  // analysisPlan.hypothesisFamilyId AND writes the raw insightFeedback
+  // audit event) instead of calling excludeSource directly.
+  const handleClaimWrongSource = async (entryId) => {
+    setBusy(true);
+    try {
+      await recordClaimFeedback(db, uid, insight, 'wrong_source', { entryId });
+      onExcludeSource?.({
+        entryId,
+        appliesTo: insight?.analysisPlan?.hypothesisFamilyId,
+        reason: 'wrong_source',
+      });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // Submits one of the 5 radio-selectable claim feedback options (everything
+  // except 'wrong_source', which has its own per-source affordance above and
+  // is excluded here — the radio group has no entryId to hand it).
+  const handleClaimFeedbackSubmit = async () => {
+    if (!selectedClaimOption || selectedClaimOption === 'wrong_source' || busy) return;
+    setBusy(true);
+    try {
+      await recordClaimFeedback(db, uid, insight, selectedClaimOption, {
+        entriesCount: Object.keys(entriesById).length,
+      });
+      onFeedback?.(selectedClaimOption);
+      setSelectedClaimOption(null);
     } finally {
       setBusy(false);
     }
@@ -424,7 +479,7 @@ const ReceiptSheet = ({
                       <>
                         <button
                           type="button"
-                          onClick={() => handleWrongSource(source.entryId)}
+                          onClick={() => (isClaim ? handleClaimWrongSource(source.entryId) : handleWrongSource(source.entryId))}
                           disabled={busy}
                           className="relative inline-flex min-h-[28px] items-center text-xs font-medium text-accent-deep before:absolute before:-inset-2 before:content-[''] disabled:opacity-50"
                         >
@@ -459,25 +514,69 @@ const ReceiptSheet = ({
                 )}
               </div>
 
-              {/* Distinct repair actions (PRD P0) */}
-              <div className="mt-4 flex gap-2 border-t border-border pt-4">
-                <button
-                  type="button"
-                  onClick={handleNotTrue}
-                  disabled={busy}
-                  className="min-h-[44px] flex-1 rounded-full border border-border text-sm font-medium text-secondary-foreground transition-colors hover:bg-divider disabled:opacity-50"
-                >
-                  Not true
-                </button>
-                <button
-                  type="button"
-                  onClick={handleNotUseful}
-                  disabled={busy}
-                  className="min-h-[44px] flex-1 rounded-full border border-border text-sm font-medium text-secondary-foreground transition-colors hover:bg-divider disabled:opacity-50"
-                >
-                  Not useful
-                </button>
-              </div>
+              {/* Distinct repair actions: claims get the 6-option diagnostic
+                  feedback taxonomy; legacy insights keep the original pair
+                  untouched (see the doc comment above). */}
+              {isClaim ? (
+                <div className="mt-4 border-t border-border pt-4">
+                  <SectionLabel>Feedback</SectionLabel>
+                  <div
+                    role="radiogroup"
+                    aria-label="Feedback on this claim"
+                    className="mt-2 space-y-1"
+                  >
+                    {FEEDBACK_OPTIONS.map((option) => (
+                      <label
+                        key={option.id}
+                        className="flex min-h-[44px] cursor-pointer items-center gap-2 rounded-lg px-2 text-sm text-secondary-foreground transition-colors hover:bg-divider"
+                      >
+                        <input
+                          type="radio"
+                          name="claim-feedback-option"
+                          value={option.id}
+                          checked={selectedClaimOption === option.id}
+                          onChange={() => setSelectedClaimOption(option.id)}
+                          disabled={busy}
+                          className="h-4 w-4 shrink-0"
+                        />
+                        {option.label}
+                      </label>
+                    ))}
+                  </div>
+                  {selectedClaimOption === 'wrong_source' && (
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      Use “Wrong source” under a specific entry in Sources above instead.
+                    </p>
+                  )}
+                  <button
+                    type="button"
+                    onClick={handleClaimFeedbackSubmit}
+                    disabled={busy || !selectedClaimOption || selectedClaimOption === 'wrong_source'}
+                    className="mt-3 min-h-[44px] w-full rounded-full bg-accent-deep text-sm font-medium text-background transition-opacity hover:opacity-90 disabled:opacity-50"
+                  >
+                    Submit feedback
+                  </button>
+                </div>
+              ) : (
+                <div className="mt-4 flex gap-2 border-t border-border pt-4">
+                  <button
+                    type="button"
+                    onClick={handleNotTrue}
+                    disabled={busy}
+                    className="min-h-[44px] flex-1 rounded-full border border-border text-sm font-medium text-secondary-foreground transition-colors hover:bg-divider disabled:opacity-50"
+                  >
+                    Not true
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleNotUseful}
+                    disabled={busy}
+                    className="min-h-[44px] flex-1 rounded-full border border-border text-sm font-medium text-secondary-foreground transition-colors hover:bg-divider disabled:opacity-50"
+                  >
+                    Not useful
+                  </button>
+                </div>
+              )}
             </>
           )}
         </DrawerContent>
