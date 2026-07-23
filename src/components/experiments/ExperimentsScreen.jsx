@@ -122,6 +122,23 @@ import ExperimentResultView, { reasonCopy } from './ExperimentResultView';
  * behind the explainer would just detour a deliberate action back to a
  * screen it never asked to see.
  *
+ * PREFILL TRACKING-MODE OPT-IN (R4 Phase 3 T2/T3 interaction follow-up): a
+ * tag-template prefill jumps past the question step, where T3's confirmed-
+ * exposure toggle (`ExposureModeToggle` below) normally lives — without a
+ * fix, that silently locked every tag-prefill experiment to passive
+ * (mention-based) tracking with no way to opt in from this entry point. Chose
+ * option (a) from the review finding: render the SAME toggle on the duration
+ * step, gated on `prefillTagFlow` (set true only by the prefill effect's tag
+ * branch, reset alongside every other create-flow field in
+ * `resetCreateFlow`) rather than on `selectedTemplate === tagTemplate` alone
+ * — the latter would ALSO fire for the manual tag-picker path (which already
+ * shows its own copy of the toggle in the question step), doubling it. The
+ * chosen mode flows into `selectedParams` exactly as
+ * `handleTagTemplateAsk`'s does — `buildAnalysisPlan` (called at Start) is
+ * what actually decides whether it's honored — and, matching the prefill
+ * path's existing default (untouched), stays keyless until the user actively
+ * checks the box.
+ *
  * Nested-overlay a11y (RecipesScreen/RevisitControls precedent): only one
  * `aria-modal` dialog is ever active. The one-time explainer is a real
  * Radix `Dialog` (its own portal); the stop/delete confirms are hand-rolled
@@ -188,6 +205,12 @@ const ExperimentsScreen = ({ uid, entries = [], entriesLoaded, prefill = null, o
   // below); default 'passive'. Reset alongside every other create-flow field
   // in `resetCreateFlow`.
   const [exposureMode, setExposureMode] = useState('passive');
+  // Set true only by the prefill effect's tag branch (see PREFILL
+  // TRACKING-MODE OPT-IN in the module doc comment above) — gates the
+  // duration-step copy of `ExposureModeToggle` so the manual tag-picker
+  // path (which already shows its own copy in the question step) never
+  // sees a second one.
+  const [prefillTagFlow, setPrefillTagFlow] = useState(false);
   const [selectedTemplate, setSelectedTemplate] = useState(null);
   const [selectedParams, setSelectedParams] = useState(null);
   const [finalQuestionText, setFinalQuestionText] = useState('');
@@ -333,6 +356,7 @@ const ExperimentsScreen = ({ uid, entries = [], entriesLoaded, prefill = null, o
     setQuestionText('');
     setSelectedTagInput('');
     setExposureMode('passive');
+    setPrefillTagFlow(false);
     setSelectedTemplate(null);
     setSelectedParams(null);
     setFinalQuestionText('');
@@ -419,6 +443,7 @@ const ExperimentsScreen = ({ uid, entries = [], entriesLoaded, prefill = null, o
     if (prefill.tag) {
       const composed = `How does ${tagLabel(prefill.tag)} move together with my mood?`;
       screenAndProceed(composed, (trimmed) => {
+        setPrefillTagFlow(true);
         selectTemplateAndAdvance(template, { tag: prefill.tag }, trimmed);
       });
     } else {
@@ -749,17 +774,10 @@ const ExperimentsScreen = ({ uid, entries = [], entriesLoaded, prefill = null, o
                     instead. Honesty copy per the plan: missed days count as
                     unknown, never a "no". */}
                 {tagTemplate && availableTags.length > 0 && (
-                  <label className="flex items-start gap-2 pt-1 text-xs text-secondary-foreground">
-                    <input
-                      type="checkbox"
-                      className="mt-0.5"
-                      checked={exposureMode === 'confirmed'}
-                      onChange={(e) => setExposureMode(e.target.checked ? 'confirmed' : 'passive')}
-                    />
-                    <span>
-                      Track this with a daily check-in instead of guessing from your entries — you check in daily; missed days count as unknown, not no.
-                    </span>
-                  </label>
+                  <ExposureModeToggle
+                    checked={exposureMode === 'confirmed'}
+                    onChange={(checked) => setExposureMode(checked ? 'confirmed' : 'passive')}
+                  />
                 )}
               </div>
 
@@ -863,6 +881,29 @@ const ExperimentsScreen = ({ uid, entries = [], entriesLoaded, prefill = null, o
                   ))}
                 </div>
               </div>
+
+              {/* PREFILL TRACKING-MODE OPT-IN (R4 Phase 3 T2/T3 follow-up,
+                  see module doc comment) — same control as the question
+                  step's tag block above, surfaced here ONLY for a
+                  tag-template prefill (the manual tag-picker path already
+                  got its one copy). Writes straight into `selectedParams`
+                  since that's already seeded with `{tag}` by the prefill
+                  effect — no second plumbing into `buildAnalysisPlan`. */}
+              {prefillTagFlow && (
+                <div className="cloud-sheet space-y-2 rounded-2xl border p-4 shadow-sm">
+                  <ExposureModeToggle
+                    checked={exposureMode === 'confirmed'}
+                    onChange={(checked) => {
+                      const mode = checked ? 'confirmed' : 'passive';
+                      setExposureMode(mode);
+                      setSelectedParams((prev) => {
+                        const { exposureMode: _drop, ...rest } = prev || {};
+                        return mode === 'confirmed' ? { ...rest, exposureMode: 'confirmed' } : rest;
+                      });
+                    }}
+                  />
+                </div>
+              )}
             </section>
           )}
 
@@ -963,6 +1004,29 @@ const ExperimentsScreen = ({ uid, entries = [], entriesLoaded, prefill = null, o
     </>
   );
 };
+
+// ---------------------------------------------------------------------------
+// Confirmed-exposure opt-in toggle (R4 Phase 3 Task 3; extracted for the
+// T2/T3 interaction follow-up so both entry points — the question step's
+// tag block and the prefill duration-step block above — share one copy of
+// the markup and copy instead of two.)
+// ---------------------------------------------------------------------------
+
+function ExposureModeToggle({ checked, onChange }) {
+  return (
+    <label className="flex items-start gap-2 pt-1 text-xs text-secondary-foreground">
+      <input
+        type="checkbox"
+        className="mt-0.5"
+        checked={checked}
+        onChange={(e) => onChange(e.target.checked)}
+      />
+      <span>
+        Track this with a daily check-in instead of guessing from your entries — you check in daily; missed days count as unknown, not no.
+      </span>
+    </label>
+  );
+}
 
 // ---------------------------------------------------------------------------
 // Decline screen (crisis / medical)

@@ -271,3 +271,89 @@ describe('ExperimentsScreen — prefill (tag template)', () => {
     await waitFor(() => expect(startExperiment).toHaveBeenCalledWith({ __db: true }, UID, 'new-exp', 14));
   });
 });
+
+// ---------------------------------------------------------------------------
+// T2/T3 interaction follow-up (R4 Phase 3): a tag-template prefill used to
+// jump straight past the question step where T3's confirmed-exposure toggle
+// lives, silently locking exposureMode to passive with no way to opt in from
+// this entry point. The toggle now also surfaces on the duration step, but
+// ONLY when the flow arrived via a tag prefill — the manual tag-picker path
+// still gets its one copy in the question step, never two.
+// ---------------------------------------------------------------------------
+describe('ExperimentsScreen — prefill tag-template tracking-mode opt-in (R4 Phase 3 T2/T3 follow-up)', () => {
+  it('surfaces the confirmed-exposure toggle on the duration step for a tag prefill, before Start', async () => {
+    render(
+      <ExperimentsScreen
+        uid={UID}
+        entries={[]}
+        prefill={{ templateId: 'tag-presence-mood', tag: '@habit:gym' }}
+        onClose={vi.fn()}
+      />,
+    );
+
+    expect(await screen.findByText('How long should this run?')).toBeTruthy();
+    const toggle = await screen.findByRole('checkbox', { name: /track this with a daily check-in/i });
+    expect(toggle.checked).toBe(false);
+  });
+
+  it('choosing confirmed on the prefill duration-step toggle carries exposureMode:"confirmed" through to buildAnalysisPlan at Start', async () => {
+    render(
+      <ExperimentsScreen
+        uid={UID}
+        entries={taggedEntries(28, '@habit:gym')}
+        prefill={{ templateId: 'tag-presence-mood', tag: '@habit:gym' }}
+        onClose={vi.fn()}
+      />,
+    );
+
+    const toggle = await screen.findByRole('checkbox', { name: /track this with a daily check-in/i });
+    fireEvent.click(toggle);
+    expect(toggle.checked).toBe(true);
+
+    fireEvent.click(await screen.findByText('14 days'));
+    const startBtn = await screen.findByText('Start');
+    expect(startBtn.closest('button')).not.toBeDisabled();
+    fireEvent.click(startBtn);
+
+    await waitFor(() => expect(createExperiment).toHaveBeenCalledTimes(1));
+    expect(buildAnalysisPlan).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'tag-presence-mood' }),
+      { tag: '@habit:gym', exposureMode: 'confirmed' },
+    );
+  });
+
+  it('leaving the prefill duration-step toggle untouched keeps exposureMode passive (no key) through buildAnalysisPlan at Start', async () => {
+    render(
+      <ExperimentsScreen
+        uid={UID}
+        entries={taggedEntries(28, '@habit:gym')}
+        prefill={{ templateId: 'tag-presence-mood', tag: '@habit:gym' }}
+        onClose={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(await screen.findByText('14 days'));
+    fireEvent.click(await screen.findByText('Start'));
+
+    await waitFor(() => expect(createExperiment).toHaveBeenCalledTimes(1));
+    expect(buildAnalysisPlan).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'tag-presence-mood' }),
+      { tag: '@habit:gym' },
+    );
+  });
+
+  it('a NON-tag prefill (e.g. exercise-minutes-mood) never shows the tracking-mode toggle, on the duration step or anywhere else', async () => {
+    render(
+      <ExperimentsScreen
+        uid={UID}
+        entries={[]}
+        prefill={{ templateId: 'exercise-minutes-mood' }}
+        onClose={vi.fn()}
+      />,
+    );
+
+    expect(await screen.findByText('How long should this run?')).toBeTruthy();
+    expect(screen.queryByText(/track this with a daily check-in/i)).toBeNull();
+    expect(screen.queryByRole('checkbox')).toBeNull();
+  });
+});

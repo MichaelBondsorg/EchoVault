@@ -218,11 +218,10 @@ const InsightsPage = ({
     refresh: refreshClaims,
   } = useClaims(user);
 
-  // "Try as an experiment" (ClaimCard) has no wired navigation seam today:
-  // ExperimentsScreen is opened via a same-file `showExperiments` boolean
-  // in AppLayout.jsx (not a route, and not passed down to InsightsPage),
-  // and it accepts no prefill prop yet — see Task 10's report for the seam
-  // investigation.
+  // "Try as an experiment" (ClaimCard): the prefill seam is wired — AppLayout
+  // owns `experimentPrefill` state and passes it to ExperimentsScreen's
+  // `prefill` prop; `onTryExperiment` below is InsightsPage's own hop of
+  // that chain (R4 Phase 3 Task 2).
   //
   // F4 (closure-wave final review): previously this always resolved to a
   // callable stub — even with no real `onTryExperiment` from the parent, a
