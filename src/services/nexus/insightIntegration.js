@@ -15,7 +15,6 @@ import { computeEnvironmentMoodCorrelations } from '../environment/environmentCo
 import { getTopContextPrompt, hasHighPriorityContext } from '../prompts/contextPrompts';
 import { getBaselines } from './layer2/baselineManager';
 import { getInterventionData } from './layer4/interventionTracker';
-import { RISKY_CLAIMS_ENABLED } from './orchestrator';
 // R4 T-p0closure (Important 1): these were previously loaded via require()
 // inside getTodayRecommendations — an ESM module using CommonJS require()
 // is exactly the class of bug that caused the documented prod white-screen
@@ -178,20 +177,17 @@ export const getTodayRecommendations = async (userId, entries, todayHealth, toda
     });
   } else if (health?.recoveryScore >= 67) {
     // Check if exercise is effective for this user.
-    // R4 T-p0closure (Important 1): this personalized intervention-outcome
-    // claim reached InsightsPage's RecommendationsSection with the
-    // RISKY_CLAIMS_ENABLED gate OFF (ratified decision 4) — gated here the
-    // SAME way the pet_walk claim below is gated (same seam, same posture:
-    // gate-off -> generic idea copy, no personal-evidence number).
+    // R4 Phase 3 T1: this personalized intervention-outcome claim
+    // (previously RISKY_CLAIMS_ENABLED-gated, gate OFF in production) is
+    // retired outright — generic idea copy only, no personal-evidence
+    // number, no conditional.
     const workoutEffectiveness = interventions?.interventions?.workout_day?.effectiveness?.global?.score;
     if (workoutEffectiveness > 0.6) {
       recommendations.push({
         type: 'activity',
         priority: 'medium',
         action: 'Good day for a workout - your recovery is in the green zone',
-        reasoning: RISKY_CLAIMS_ENABLED
-          ? `Exercise has been effective for you (${Math.round(workoutEffectiveness * 100)}% effectiveness)`
-          : 'Worth trying — exercise can be a good use of a high-recovery day.'
+        reasoning: 'Worth trying — exercise can be a good use of a high-recovery day.'
       });
     }
   }
@@ -205,7 +201,7 @@ export const getTodayRecommendations = async (userId, entries, todayHealth, toda
         type: 'environment',
         priority: 'medium',
         action: 'Low sunshine today - consider light therapy or a morning walk if possible',
-        reasoning: `Your mood is ${Math.round((sunshineCorr.highSunshineMood - sunshineCorr.lowSunshineMood) * 100)}% higher on sunny days`
+        reasoning: "Sunshine tends to help some people's mood — worth getting outside if you can."
       });
     }
   }
@@ -229,18 +225,16 @@ export const getTodayRecommendations = async (userId, entries, todayHealth, toda
   // were already a 0-100 percentage — the exact scale bug class fixed
   // elsewhere in R4 T3, here compounded with a personal literal. Key
   // renamed to match `layer4/interventionTracker.js`'s generic `pet_walk`;
-  // the personalized number is gated behind the SAME `RISKY_CLAIMS_ENABLED`
-  // seam orchestrator.js uses for this exact claim class (ratified decision
-  // 4) rather than duplicating a second gate.
+  // R4 Phase 3 T1: the personalized-number branch (previously gated behind
+  // RISKY_CLAIMS_ENABLED, gate OFF in production) is retired outright —
+  // generic idea copy only.
   const petWalkMoodDelta = interventions?.interventions?.pet_walk?.effectiveness?.global?.moodDelta?.mean;
   if (Number.isFinite(petWalkMoodDelta) && petWalkMoodDelta > 0.05) {
     recommendations.push({
       type: 'activity',
       priority: 'low',
       action: 'A walk with your pet could boost your mood',
-      reasoning: RISKY_CLAIMS_ENABLED
-        ? `Pet walks have historically improved your mood by ${Math.round(petWalkMoodDelta * 100)} points on average`
-        : 'Worth trying — you might find it helps.'
+      reasoning: 'Worth trying — you might find it helps.'
     });
   }
 

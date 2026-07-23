@@ -1,41 +1,23 @@
 /**
  * R4 T3d — dedicated coverage for `insightIntegration.js`'s `getTodayRecommendations`
- * pet-walk gate branching (coordinator Important finding: this function is
- * live-wired at `InsightsPage.jsx:124` and renders directly to the user,
- * but every consumer test mocks the whole module, so the gate behavior
- * itself had zero direct coverage).
+ * pet-walk/workout/sunshine reasoning (coordinator Important finding: this
+ * function is live-wired at `InsightsPage.jsx:124` and renders directly to
+ * the user, but every consumer test mocks the whole module, so this
+ * behavior itself had zero direct coverage).
  *
- * `RISKY_CLAIMS_ENABLED` is imported live from `./orchestrator` at
- * `insightIntegration.js`'s module top level, so varying it across tests
- * requires a fresh module instance per value — `vi.doMock` + `vi.resetModules()`
- * + a dynamic `import()` per test (mirrors the technique
- * `orchestrator.riskyClaims.test.js` uses for its own gate-toggle tests,
- * adapted here because the gate lives in a DIFFERENT module than the one
- * under test).
+ * R4 Phase 3 T1: the module previously imported `RISKY_CLAIMS_ENABLED` from
+ * `./orchestrator` and ternary-gated the workout/pet_walk personal-evidence
+ * strings on it (both effectively OFF in production), while the sunshine
+ * branch interpolated a personalized percentage completely UNGATED — a live
+ * leak. All three personal-evidence branches are now deleted outright (not
+ * gated): the module no longer imports `RISKY_CLAIMS_ENABLED` at all, so
+ * there is nothing left to toggle. Tests below call `getTodayRecommendations`
+ * directly against a single static import.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { getTodayRecommendations } from '../insightIntegration';
 
-// The "real gate" test imports the REAL './orchestrator' (to prove
-// production wiring, not just a stub), which pulls in every layer1-4
-// module PLUS config/firebase transitively — mock firebase so this file
-// never touches a real Firebase app.
-vi.mock('../../../config/firebase', () => ({ db: {} }));
-vi.mock('firebase/firestore', () => ({
-  doc: vi.fn(() => ({})),
-  getDoc: vi.fn(async () => ({ exists: () => false, data: () => ({}) })),
-  setDoc: vi.fn(async () => {}),
-  collection: vi.fn(() => ({})),
-  query: vi.fn((...args) => ({ __args: args })),
-  orderBy: vi.fn(),
-  limit: vi.fn(),
-  getDocs: vi.fn(),
-  Timestamp: {
-    now: vi.fn(() => ({ toMillis: () => Date.now() })),
-    fromMillis: vi.fn((ms) => ({ toMillis: () => ms })),
-  },
-}));
-
-// Static mocks — not gate-dependent, safe to declare once (hoisted).
+// Static mocks — safe to declare once (hoisted).
 vi.mock('../../health/healthCorrelations', () => ({
   computeHealthMoodCorrelations: vi.fn(),
   getTopHealthInsights: vi.fn(),
@@ -75,31 +57,14 @@ vi.mock('../layer4/interventionTracker', () => ({
   getInterventionData: (...args) => mockGetInterventionData(...args),
 }));
 
-/**
- * Fresh module instance of insightIntegration.js with `./orchestrator`'s
- * `RISKY_CLAIMS_ENABLED` substituted to `riskyClaimsEnabled` for this
- * import only. `vi.resetModules()` clears the instance cache (NOT the
- * mock-factory registrations above, which persist and re-apply), so each
- * call gets its own live binding to the gate value.
- */
-async function loadWithGate(riskyClaimsEnabled) {
-  vi.resetModules();
-  vi.doMock('../orchestrator', () => ({ RISKY_CLAIMS_ENABLED: riskyClaimsEnabled }));
-  return import('../insightIntegration');
-}
-
-/** Real default: no mock at all — proves production wiring, not just a stub. */
-async function loadWithRealGate() {
-  vi.resetModules();
-  vi.doUnmock('../orchestrator');
-  return import('../insightIntegration');
-}
+import { computeEnvironmentMoodCorrelations } from '../../environment/environmentCorrelations';
 
 beforeEach(() => {
   mockGetBaselines.mockReset();
   mockGetInterventionData.mockReset();
   mockUpdateInterventionData.mockReset();
   mockGenerateCausalSynthesis.mockReset();
+  computeEnvironmentMoodCorrelations.mockReset();
   mockGetBaselines.mockResolvedValue({ calculatedAt: { toDate: () => new Date('2026-07-21') } });
 });
 
@@ -112,9 +77,19 @@ function petWalkInterventions(moodDeltaMean, extra = {}) {
   };
 }
 
-describe('getTodayRecommendations — pet_walk gate branching (R4 T3d)', () => {
-  it('gate OFF via the REAL orchestrator import (current production default): generic copy, no personalized number, no "Sterling"', async () => {
-    const { getTodayRecommendations } = await loadWithRealGate();
+function workoutIntervention(score, extra = {}) {
+  return {
+    interventions: {
+      workout_day: { effectiveness: { global: { score } } },
+      ...extra,
+    },
+  };
+}
+
+const GREEN_ZONE_HEALTH = { recovery: { score: 70 } };
+
+describe('getTodayRecommendations — pet_walk reasoning (R4 Phase 3 T1: personal branch deleted, not gated)', () => {
+  it('always generic copy: no personalized number, no percentage, no "Sterling"', async () => {
     mockGetInterventionData.mockResolvedValue(petWalkInterventions(0.08));
 
     const result = await getTodayRecommendations('user-1', [], null, null);
@@ -128,9 +103,8 @@ describe('getTodayRecommendations — pet_walk gate branching (R4 T3d)', () => {
     expect(rec.action.toLowerCase()).not.toContain('sterling');
   });
 
-  it('gate OFF (explicit mock, same assertion set): confirms the branch is driven by the gate value, not incidental', async () => {
-    const { getTodayRecommendations } = await loadWithGate(false);
-    mockGetInterventionData.mockResolvedValue(petWalkInterventions(0.08));
+  it('generic copy holds regardless of the size of the underlying (unused) moodDelta', async () => {
+    mockGetInterventionData.mockResolvedValue(petWalkInterventions(0.20));
 
     const result = await getTodayRecommendations('user-1', [], null, null);
     const rec = result.recommendations.find((r) => r.action?.toLowerCase().includes('pet'));
@@ -138,33 +112,7 @@ describe('getTodayRecommendations — pet_walk gate branching (R4 T3d)', () => {
     expect(rec.reasoning).toBe('Worth trying — you might find it helps.');
   });
 
-  it('gate ON: the number renders correctly scaled (0.08 Mood01 delta -> "8 points", never "0 points")', async () => {
-    const { getTodayRecommendations } = await loadWithGate(true);
-    mockGetInterventionData.mockResolvedValue(petWalkInterventions(0.08));
-
-    const result = await getTodayRecommendations('user-1', [], null, null);
-    const rec = result.recommendations.find((r) => r.action?.toLowerCase().includes('pet'));
-
-    expect(rec).toBeTruthy();
-    expect(rec.reasoning).toContain('8 points');
-    expect(rec.reasoning).not.toContain('0 points');
-    // Pre-fix this was `Math.round(moodDelta.mean)` treating the raw
-    // Mood01 delta as if already a 0-100 percentage — `Math.round(0.08)`
-    // rounds to 0, silently claiming "0 points" of improvement.
-  });
-
-  it('gate ON with a larger real delta scales correctly too (0.20 -> "20 points")', async () => {
-    const { getTodayRecommendations } = await loadWithGate(true);
-    mockGetInterventionData.mockResolvedValue(petWalkInterventions(0.20));
-
-    const result = await getTodayRecommendations('user-1', [], null, null);
-    const rec = result.recommendations.find((r) => r.action?.toLowerCase().includes('pet'));
-
-    expect(rec.reasoning).toContain('20 points');
-  });
-
   it('the renamed pet_walk key is consumed end-to-end from a fixture interventions doc; a stale pre-rename key is silently ignored (self-healing, not a bug)', async () => {
-    const { getTodayRecommendations } = await loadWithGate(false);
     // A doc with BOTH the current key and a stale pre-rename key present —
     // only `pet_walk` should ever be read (proves the rename actually
     // changed the lookup path, not just the surrounding code).
@@ -184,7 +132,6 @@ describe('getTodayRecommendations — pet_walk gate branching (R4 T3d)', () => {
   });
 
   it('below the significance threshold (delta <= 0.05), no pet-walk recommendation is pushed at all', async () => {
-    const { getTodayRecommendations } = await loadWithGate(false);
     mockGetInterventionData.mockResolvedValue(petWalkInterventions(0.02));
 
     const result = await getTodayRecommendations('user-1', [], null, null);
@@ -194,7 +141,6 @@ describe('getTodayRecommendations — pet_walk gate branching (R4 T3d)', () => {
   });
 
   it('no interventions tracked at all -> no pet-walk recommendation, no crash', async () => {
-    const { getTodayRecommendations } = await loadWithGate(false);
     mockGetInterventionData.mockResolvedValue({ interventions: {} });
 
     const result = await getTodayRecommendations('user-1', [], null, null);
@@ -202,26 +148,8 @@ describe('getTodayRecommendations — pet_walk gate branching (R4 T3d)', () => {
   });
 });
 
-/**
- * R4 P0-closure Important 1 — the workout/exercise-effectiveness claim
- * ("Exercise has been effective for you (X% effectiveness)") reached
- * InsightsPage's RecommendationsSection with the RISKY_CLAIMS_ENABLED gate
- * OFF. Gated identically to the pet_walk claim above (same seam).
- */
-function workoutIntervention(score, extra = {}) {
-  return {
-    interventions: {
-      workout_day: { effectiveness: { global: { score } } },
-      ...extra,
-    },
-  };
-}
-
-const GREEN_ZONE_HEALTH = { recovery: { score: 70 } };
-
-describe('getTodayRecommendations — workout-effectiveness gate branching (R4 P0-closure Important 1)', () => {
-  it('gate OFF via the REAL orchestrator import (current production default): generic copy, no personalized effectiveness number', async () => {
-    const { getTodayRecommendations } = await loadWithRealGate();
+describe('getTodayRecommendations — workout-effectiveness reasoning (R4 Phase 3 T1: personal branch deleted, not gated)', () => {
+  it('always generic copy: no personalized effectiveness number, no percentage', async () => {
     mockGetInterventionData.mockResolvedValue(workoutIntervention(0.8));
 
     const result = await getTodayRecommendations('user-1', [], GREEN_ZONE_HEALTH, null);
@@ -233,9 +161,8 @@ describe('getTodayRecommendations — workout-effectiveness gate branching (R4 P
     expect(rec.reasoning).not.toMatch(/%/); // no percentage
   });
 
-  it('gate OFF (explicit mock, same assertion set): confirms the branch is driven by the gate value, not incidental', async () => {
-    const { getTodayRecommendations } = await loadWithGate(false);
-    mockGetInterventionData.mockResolvedValue(workoutIntervention(0.8));
+  it('generic copy holds regardless of the size of the underlying (unused) effectiveness score', async () => {
+    mockGetInterventionData.mockResolvedValue(workoutIntervention(0.95));
 
     const result = await getTodayRecommendations('user-1', [], GREEN_ZONE_HEALTH, null);
     const rec = result.recommendations.find((r) => r.type === 'activity' && r.action?.toLowerCase().includes('workout'));
@@ -243,25 +170,83 @@ describe('getTodayRecommendations — workout-effectiveness gate branching (R4 P
     expect(rec.reasoning).toBe('Worth trying — exercise can be a good use of a high-recovery day.');
   });
 
-  it('gate ON: the personalized effectiveness number renders (0.8 -> "80% effectiveness")', async () => {
-    const { getTodayRecommendations } = await loadWithGate(true);
-    mockGetInterventionData.mockResolvedValue(workoutIntervention(0.8));
-
-    const result = await getTodayRecommendations('user-1', [], GREEN_ZONE_HEALTH, null);
-    const rec = result.recommendations.find((r) => r.type === 'activity' && r.action?.toLowerCase().includes('workout'));
-
-    expect(rec).toBeTruthy();
-    expect(rec.reasoning).toBe('Exercise has been effective for you (80% effectiveness)');
-  });
-
   it('below the effectiveness threshold (score <= 0.6), no workout recommendation is pushed at all', async () => {
-    const { getTodayRecommendations } = await loadWithGate(false);
     mockGetInterventionData.mockResolvedValue(workoutIntervention(0.5));
 
     const result = await getTodayRecommendations('user-1', [], GREEN_ZONE_HEALTH, null);
     const rec = result.recommendations.find((r) => r.type === 'activity' && r.action?.toLowerCase().includes('workout'));
 
     expect(rec).toBeUndefined();
+  });
+});
+
+describe('getTodayRecommendations — sunshine reasoning (R4 Phase 3 T1: kills the live ungated percentage leak)', () => {
+  it('always generic copy: no personalized mood-delta percentage, regardless of correlation strength', async () => {
+    mockGetInterventionData.mockResolvedValue({ interventions: {} });
+    computeEnvironmentMoodCorrelations.mockReturnValue({
+      sunshineMood: { strength: 'strong', highSunshineMood: 0.8, lowSunshineMood: 0.3 },
+    });
+
+    const result = await getTodayRecommendations(
+      'user-1',
+      [],
+      null,
+      { daySummary: { isLowSunshine: true, sunshinePercent: 10 } }
+    );
+    const rec = result.recommendations.find((r) => r.type === 'environment');
+
+    expect(rec).toBeTruthy();
+    expect(rec.reasoning).toBe("Sunshine tends to help some people's mood — worth getting outside if you can.");
+    expect(rec.reasoning).not.toMatch(/\d/); // no personalized number
+    expect(rec.reasoning).not.toMatch(/%/); // no percentage
+  });
+});
+
+/**
+ * R4 Phase 3 T1 — the core regression test for this task: a rich
+ * health/environment fixture that fires every reasoning-bearing branch at
+ * once (recovery red-zone self-care copy doesn't carry a number anyway, but
+ * low-sleep, sunny-day sensitivity, workout, and pet_walk all fire together
+ * here), asserting NO returned `reasoning` string anywhere contains a
+ * percentage digit pattern, and that the three specific generic strings
+ * appear verbatim. This is the RED case pre-fix: the sunshine assertion
+ * fails against the old code because it renders
+ * `Your mood is NN% higher on sunny days` ungated.
+ */
+describe('getTodayRecommendations — no percentage leaks anywhere (R4 Phase 3 T1 regression fixture)', () => {
+  it('rich fixture (low sleep + sunny-day sensitivity + green-zone workout + pet_walk all firing): every reasoning string is free of digit-percent patterns, and the three generic strings render verbatim', async () => {
+    mockGetInterventionData.mockResolvedValue({
+      interventions: {
+        workout_day: { effectiveness: { global: { score: 0.9 } } },
+        pet_walk: { effectiveness: { global: { moodDelta: { mean: 0.35 } } } },
+      },
+    });
+    computeEnvironmentMoodCorrelations.mockReturnValue({
+      sunshineMood: { strength: 'strong', highSunshineMood: 0.9, lowSunshineMood: 0.1 },
+    });
+
+    const result = await getTodayRecommendations(
+      'user-1',
+      [],
+      { recovery: { score: 70 }, sleep: { totalHours: 4 } },
+      { daySummary: { isLowSunshine: true, sunshinePercent: 5 } }
+    );
+
+    // Every branch actually fired — otherwise this fixture isn't exercising
+    // what it claims to.
+    expect(result.recommendations.length).toBeGreaterThanOrEqual(4);
+
+    for (const rec of result.recommendations) {
+      expect(rec.reasoning).not.toMatch(/\d+\s*%/);
+    }
+
+    const workoutRec = result.recommendations.find((r) => r.action?.toLowerCase().includes('workout'));
+    const sunshineRec = result.recommendations.find((r) => r.type === 'environment');
+    const petRec = result.recommendations.find((r) => r.action?.toLowerCase().includes('pet'));
+
+    expect(workoutRec.reasoning).toBe('Worth trying — exercise can be a good use of a high-recovery day.');
+    expect(sunshineRec.reasoning).toBe("Sunshine tends to help some people's mood — worth getting outside if you can.");
+    expect(petRec.reasoning).toBe('Worth trying — you might find it helps.');
   });
 });
 
@@ -277,7 +262,6 @@ describe('getTodayRecommendations — workout-effectiveness gate branching (R4 P
  */
 describe('getTodayRecommendations — formerly require()-d formatter symbols function correctly (R4 P0-closure Important 1)', () => {
   it('extractHealthSignals correctly derives recoveryScore from a real todayHealth object, driving the green-zone branch', async () => {
-    const { getTodayRecommendations } = await loadWithGate(false);
     mockGetInterventionData.mockResolvedValue(workoutIntervention(0.8));
 
     const result = await getTodayRecommendations('user-1', [], { recovery: { score: 70 } }, null);
@@ -287,7 +271,6 @@ describe('getTodayRecommendations — formerly require()-d formatter symbols fun
   });
 
   it('extractHealthSignals correctly derives sleepHours from a real todayHealth object, driving the low-sleep self-care branch', async () => {
-    const { getTodayRecommendations } = await loadWithGate(false);
     mockGetInterventionData.mockResolvedValue({ interventions: {} });
 
     const result = await getTodayRecommendations('user-1', [], { sleep: { totalHours: 4.5 } }, null);
@@ -298,7 +281,6 @@ describe('getTodayRecommendations — formerly require()-d formatter symbols fun
   });
 
   it('extractEnvironmentSignals runs against a real todayEnvironment object without throwing (both formatter symbols exercised together)', async () => {
-    const { getTodayRecommendations } = await loadWithGate(false);
     mockGetInterventionData.mockResolvedValue({ interventions: {} });
 
     await expect(
