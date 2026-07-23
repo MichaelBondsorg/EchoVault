@@ -60,4 +60,58 @@ describe('buildClaim', () => {
   it('CLAIM_TOP_LEVEL_KEYS matches exactly the keys buildClaim emits (rules parity source)', () => {
     expect(Object.keys(buildClaim(valid())).sort()).toEqual([...CLAIM_TOP_LEVEL_KEYS].sort());
   });
+
+  it('rejects version 1 with a non-null parentClaimId (lineage integrity)', () => {
+    expect(() => buildClaim({ ...valid(), version: 1, parentClaimId: 'claim_prior_v1' })).toThrow();
+  });
+
+  it('rejects version 2 with a null parentClaimId (lineage integrity)', () => {
+    expect(() => buildClaim({
+      ...valid(), version: 2, parentClaimId: null, analysisPlan: { ...validPlan, candidateId: 'tag:gym' },
+    })).toThrow();
+  });
+
+  it('rejects an unknown key in evidence (closes the nested-map seam)', () => {
+    expect(() => buildClaim({
+      ...valid(), evidence: { ...validEvidence, note: 'gym causes better mood' },
+    })).toThrow(/note/);
+  });
+
+  it('rejects an unknown key in analysisPlan (closes the nested-map seam)', () => {
+    expect(() => buildClaim({
+      ...valid(), analysisPlan: { ...validPlan, sneaky: 'gym causes better mood' },
+    })).toThrow(/sneaky/);
+  });
+
+  it('rejects causal verbs in limitations (communication integrity extends beyond wording)', () => {
+    expect(() => buildClaim({
+      ...valid(), limitations: ['Same-day association only.', 'This clearly causes lower motivation.'],
+    })).toThrow(/causal/i);
+  });
+
+  it('returns a deep-frozen claim (immutable fact once built)', () => {
+    const claim = buildClaim(valid());
+    expect(Object.isFrozen(claim)).toBe(true);
+    expect(Object.isFrozen(claim.evidence)).toBe(true);
+    expect(Object.isFrozen(claim.evidence.stabilityInterval)).toBe(true);
+    expect(Object.isFrozen(claim.analysisPlan)).toBe(true);
+    expect(Object.isFrozen(claim.analysisPlan.estimatorThresholds)).toBe(true);
+    expect(Object.isFrozen(claim.limitations)).toBe(true);
+    expect(Object.isFrozen(claim.provenance)).toBe(true);
+    expect(() => { claim.status = 'suppressed'; }).toThrow(TypeError);
+  });
+});
+
+describe('claimDocId', () => {
+  it('produces different ids for candidateIds that collide under fold-only slugging', () => {
+    const a = claimDocId({ familyId: 'basic:activity:tag:gym:mood', candidateId: 'tag:gym-time', version: 1 });
+    const b = claimDocId({ familyId: 'basic:activity:tag:gym:mood', candidateId: 'tag:gym_time', version: 1 });
+    expect(a).not.toBe(b);
+  });
+
+  it('is deterministic for identical inputs', () => {
+    const a = claimDocId({ familyId: 'basic:activity:tag:gym:mood', candidateId: 'tag:gym', version: 2 });
+    const b = claimDocId({ familyId: 'basic:activity:tag:gym:mood', candidateId: 'tag:gym', version: 2 });
+    expect(a).toBe(b);
+  });
 });

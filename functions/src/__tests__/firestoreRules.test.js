@@ -1775,6 +1775,34 @@ describe('insight_claims collection rules (create shape)', () => {
     const ref = doc(db, userPath(USER_ID), 'insight_claims', 'claim-junk');
     await assertFails(setDoc(ref, { ...validClaim, id: 'claim-junk', hacked: true }));
   });
+
+  // Lineage: version 1 claims are roots (no parent); version > 1 claims
+  // must explicitly link the claim they supersede. Mirrors claimSchema.js's
+  // buildClaim check server-side, so a malformed lineage can never reach
+  // Firestore even if a client bypasses buildClaim.
+  it('denies version 1 with a non-null parentClaimId', async () => {
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    const ref = doc(db, userPath(USER_ID), 'insight_claims', 'claim-v1-parent');
+    await assertFails(setDoc(ref, {
+      ...validClaim, id: 'claim-v1-parent', version: 1, parentClaimId: 'claim_prior_v1',
+    }));
+  });
+
+  it('denies version 2 with a null parentClaimId', async () => {
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    const ref = doc(db, userPath(USER_ID), 'insight_claims', 'claim-v2-noparent');
+    await assertFails(setDoc(ref, {
+      ...validClaim, id: 'claim-v2-noparent', version: 2, parentClaimId: null,
+    }));
+  });
+
+  it('allows version 2 with a string parentClaimId', async () => {
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    const ref = doc(db, userPath(USER_ID), 'insight_claims', 'claim-v2-parent');
+    await assertSucceeds(setDoc(ref, {
+      ...validClaim, id: 'claim-v2-parent', version: 2, parentClaimId: 'claim_prior_v1',
+    }));
+  });
 });
 
 describe('insight_claims collection rules (update contract)', () => {
@@ -1811,6 +1839,23 @@ describe('insight_claims collection rules (update contract)', () => {
     const db = testEnv.authenticatedContext(USER_ID).firestore();
     const ref = doc(db, userPath(USER_ID), 'insight_claims', 'claim-supersede-ok');
     await assertSucceeds(updateDoc(ref, { supersededByClaimId: 'claim_other_v2', updatedAt: 'now' }));
+  });
+
+  // Status regression guard: a stored claim can never return to 'candidate'
+  // (that status only ever exists at create time) — a correction produces a
+  // new claim version, never reopens an old one.
+  it('denies a status regression to candidate', async () => {
+    await seedClaim('claim-status-regress');
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    const ref = doc(db, userPath(USER_ID), 'insight_claims', 'claim-status-regress');
+    await assertFails(updateDoc(ref, { status: 'candidate', updatedAt: 'now' }));
+  });
+
+  it('allows a status update to suppressed', async () => {
+    await seedClaim('claim-status-suppress-ok');
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    const ref = doc(db, userPath(USER_ID), 'insight_claims', 'claim-status-suppress-ok');
+    await assertSucceeds(updateDoc(ref, { status: 'suppressed', updatedAt: 'now' }));
   });
 });
 

@@ -25,11 +25,12 @@ vi.mock('firebase/firestore', () => ({
         if (!store.has(ref.path)) throw new Error(`no doc at ${ref.path}`);
         store.set(ref.path, { ...store.get(ref.path), ...patch });
       }),
-      commit: async () => { ops.forEach((fn) => fn()); },
+      commit: vi.fn(async () => { ops.forEach((fn) => fn()); }),
     };
   }),
 }));
 
+import { setDoc, updateDoc, writeBatch } from 'firebase/firestore';
 import {
   writeClaim, listActiveClaims, listAllClaims, supersedeClaim, setClaimStatus, evidenceEquivalent,
 } from '../claimsService';
@@ -109,8 +110,11 @@ async function updateDocDirectly(claim) {
 }
 
 describe('supersedeClaim', () => {
-  it('writes the new claim and stamps the old claim supersededByClaimId in one batch', async () => {
+  it('writes the new claim and stamps the old claim supersededByClaimId in exactly one atomic batch', async () => {
     const oldClaim = await writeClaim({}, 'u1', makeClaim());
+    writeBatch.mockClear();
+    setDoc.mockClear();
+    updateDoc.mockClear();
     const newClaim = makeClaim({
       version: 2, parentClaimId: oldClaim.id, updatedAt: '2026-07-22T11:00:00.000Z',
     });
@@ -119,12 +123,28 @@ describe('supersedeClaim', () => {
     const oldFromStore = all.find((c) => c.id === oldClaim.id);
     expect(oldFromStore.supersededByClaimId).toBe(written.id);
     expect(all.find((c) => c.id === written.id)).toBeTruthy();
+
+    // Atomicity: exactly one writeBatch, its commit() awaited, and no
+    // direct setDoc/updateDoc calls (both writes must ride the same batch
+    // or the new-claim-write / old-claim-stamp pair could partially fail).
+    expect(writeBatch).toHaveBeenCalledTimes(1);
+    const batchInstance = writeBatch.mock.results[0].value;
+    expect(batchInstance.commit).toHaveBeenCalledTimes(1);
+    expect(setDoc).not.toHaveBeenCalled();
+    expect(updateDoc).not.toHaveBeenCalled();
   });
 
   it('throws on a lineage mismatch (newClaim.parentClaimId must equal oldClaim.id)', async () => {
     const oldClaim = await writeClaim({}, 'u1', makeClaim());
     const newClaim = makeClaim({ version: 2, parentClaimId: 'not-the-old-claim' });
     await expect(supersedeClaim({}, 'u1', oldClaim, newClaim)).rejects.toThrow();
+  });
+
+  it('throws if oldClaim is already superseded (a claim may be superseded at most once)', async () => {
+    const oldClaim = await writeClaim({}, 'u1', makeClaim());
+    const alreadySuperseded = { ...oldClaim, supersededByClaimId: 'claim_prior_v2' };
+    const newClaim = makeClaim({ version: 2, parentClaimId: oldClaim.id });
+    await expect(supersedeClaim({}, 'u1', alreadySuperseded, newClaim)).rejects.toThrow(/already superseded/);
   });
 });
 

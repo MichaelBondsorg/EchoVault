@@ -33,6 +33,9 @@ export async function listAllClaims(db, uid) {
 }
 
 export async function supersedeClaim(db, uid, oldClaim, newClaim) {
+  if (oldClaim.supersededByClaimId != null) {
+    throw new Error('supersedeClaim: oldClaim is already superseded (a claim may be superseded at most once)');
+  }
   if (newClaim.parentClaimId !== oldClaim.id) {
     throw new Error('supersedeClaim: newClaim.parentClaimId must link the old claim (lineage is explicit, never implicit)');
   }
