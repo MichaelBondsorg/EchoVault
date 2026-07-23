@@ -293,4 +293,26 @@ describe('Drawer', () => {
     expect(overlay.className).toContain('bg-[var(--overlay)]');
     expect(overlay.className).not.toMatch(/bg-(black|white|foreground|primary|card)\/\d+/);
   });
+
+  // 2026-07-24 capture-sheet fix (Fix A, UI-1 test 5): DrawerContent must be
+  // bounded + overflow-hidden, with a dvh limit that falls back to vh for
+  // WebViews that don't support the `dvh` unit — via a real `@supports`
+  // feature query (`supports-[height:100dvh]:`), not className source order
+  // (verified against this repo's Tailwind build: two plain arbitrary-value
+  // utilities for the same property do NOT preserve source order in the
+  // generated stylesheet, so a same-specificity "declare vh then dvh" bet
+  // would have `vh` win even where the browser supports `dvh`).
+  it('carries the dynamic-viewport (dvh-with-vh-fallback) and overflow-hidden classes', () => {
+    render(
+      <Drawer open>
+        <DrawerContent>
+          <DrawerTitle>New entry</DrawerTitle>
+        </DrawerContent>
+      </Drawer>
+    );
+    const dialog = screen.getByRole('dialog');
+    expect(dialog.className).toContain('max-h-[92vh]');
+    expect(dialog.className).toContain('supports-[height:100dvh]:max-h-[92dvh]');
+    expect(dialog.className).toContain('overflow-hidden');
+  });
 });

@@ -560,27 +560,46 @@ const EntryBar = ({
 
   return (
     <div className={containerClasses}>
+      {/*
+        2026-07-24 capture-sheet fix (Fix A): `loading` and `mode` used to be
+        independent sibling conditions here (`{loading && ...}` alongside
+        `{mode === 'x' && ...}`), so a `loading=true` render could — and, per
+        the UI-1 bug report, did — mount an absolutely-positioned processing
+        overlay *on top of* the still-mounted recording/idle/typing branch
+        underneath it (the overlay had no height of its own, so it inherited
+        whatever size that leftover branch happened to have, and the
+        underlying branch's controls, including the red recording button,
+        stayed interactive/visible behind it). This is now a single
+        mutually-exclusive ternary chain: `loading` takes priority and is the
+        *only* thing that renders while processing — no mode branch is
+        mounted underneath it — and the processing panel is a normal in-flow
+        element (no `absolute`), so it participates in this component's own
+        height rather than floating over whatever was there before.
+      */}
       <AnimatePresence mode="wait">
-        {/* Loading Overlay */}
-        {loading && (
+        {loading ? (
           <motion.div
-            className="absolute inset-0 bg-card flex flex-col justify-center items-center z-30 p-4"
+            role="status"
+            aria-live="polite"
+            aria-label="Processing your voice entry"
+            className={
+              embedded
+                ? 'flex flex-col items-center justify-center gap-2 py-6 text-center'
+                : 'flex flex-col items-center justify-center gap-2 border-t border-border bg-card p-6 text-center shadow-soft-lg'
+            }
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
           >
-            <div className="flex items-center gap-2 text-accent-deep font-medium mb-2">
-              <Loader2 className="animate-spin" size={20} />
+            <div className="flex items-center gap-2 text-accent-deep font-medium">
+              <Loader2 className="animate-spin" size={20} aria-hidden="true" />
               <span>Processing your voice...</span>
             </div>
             <p className="text-xs text-muted-foreground text-center max-w-xs">
               Please keep the app open until processing is complete.
             </p>
           </motion.div>
-        )}
-
-        {/* Text Input Mode */}
-        {mode === 'typing' && (
+        ) : mode === 'typing' ? (
           <motion.div
             className={embedded ? '' : 'border-t border-border bg-card shadow-soft-lg p-4'}
             initial={{ y: 100 }}
@@ -641,17 +660,12 @@ const EntryBar = ({
               </div>
             </div>
           </motion.div>
-        )}
-
-        {mode === 'preparing' && (
+        ) : mode === 'preparing' ? (
           <motion.div className="flex min-h-32 items-center justify-center gap-3 bg-card p-5 text-secondary-foreground" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
             <Loader2 className="animate-spin text-accent-deep" size={22} aria-hidden="true" />
             <span className="font-medium">Preparing secure recording…</span>
           </motion.div>
-        )}
-
-        {/* Recording Mode */}
-        {mode === 'recording' && (
+        ) : mode === 'recording' ? (
           <motion.div
             className={embedded ? '' : 'border-t border-border bg-card shadow-soft-lg p-4'}
             initial={{ y: 100 }}
@@ -701,10 +715,7 @@ const EntryBar = ({
               </div>
             </div>
           </motion.div>
-        )}
-
-        {/* Idle Mode - Show both buttons */}
-        {mode === 'idle' && (
+        ) : (
           <motion.div
             className={embedded ? '' : 'border-t border-border bg-card shadow-soft-lg p-4'}
             initial={{ y: 100 }}

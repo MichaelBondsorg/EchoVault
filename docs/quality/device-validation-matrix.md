@@ -222,6 +222,62 @@ was written before duration was known).
       scan — it surfaces as a reviewable (and likely discardable) draft
       rather than throwing.
 
+### 9. Capture processing sheet (New Entry) across viewport/text-size combinations
+
+**Setup:** Companion to the component tests in `EntryBar.test.jsx`,
+`EntryComposer.test.jsx`, and `cloud-kit.test.jsx` (Fix A, UI-1,
+`docs/superpowers/plans/2026-07-24-capture-sheet-insight-rebuild.md`) —
+those are the automatable rows; the ones below need real device chrome
+(dynamic Safari/WebView viewport resize, real Dynamic Type, real safe-area
+insets) that jsdom can't reproduce. Open the New Entry sheet from a Reflect
+prompt (so a Reflect card is present), start a voice recording, and let it
+run through to Stop → processing, for each of the following device/state
+combinations:
+
+- iPhone SE-size viewport (375×667 or smaller — the tightest common iOS
+  viewport)
+- a current Face ID iPhone (e.g. iPhone 15/16-class — home-indicator safe
+  area, no physical Home button)
+- portrait AND landscape orientation, for each device above
+- default text size AND iOS Larger Text set to 200%, for each orientation
+  above
+- with a long Reflect prompt (multi-line, near/at the prompt's max length)
+  loaded into the sheet before recording starts
+
+For each combination, run BOTH of:
+- recording → processing → success (let transcription/analysis complete
+  normally)
+- recording → processing → failure (force a failure — e.g. airplane mode
+  before Stop, or a backend error — to exercise the recovery path)
+
+**Depends on:** none (base capture-sheet layout; independent of every
+capture-durability flag above).
+
+**Expected outcome:**
+- [ ] At every combination, the processing panel ("Processing your voice…"
+      + the "keep the app open" note) is fully visible without being clipped
+      by the sheet edge, the home-indicator safe area, or the browser chrome
+      — scrolling inside the sheet if it doesn't fit, never spilling behind
+      the viewport.
+- [ ] No recording, idle, or typing control (mic/Aa buttons, the red Stop
+      button, the Type/Record tabs, the text editor) is visible during
+      processing, in any combination — including landscape and 200% text
+      size, where cramped layouts are most likely to leak the underlying
+      branch.
+- [ ] The Reflect prompt and initial-context chip are hidden during
+      processing and reappear, unchanged, once processing ends (success or
+      failure) — verify this specifically with the long Reflect prompt,
+      since that's the content most likely to visually break the layout if
+      the fix regresses.
+- [ ] Switching from recording → processing does not change the sheet's
+      horizontal bounds or reveal the page behind the scrim, at any
+      orientation.
+- [ ] On the processing → failure path, the sheet returns to a usable
+      capture state (Type/Record tabs and the Reflect prompt back) rather
+      than a stuck or blank sheet.
+- [ ] Close stays disabled/locked for the entire processing window in every
+      combination (dismissal-locking policy is unchanged by this fix).
+
 ## Flag cross-reference
 
 | Row | Flag(s) | Default | Where read |
@@ -234,6 +290,7 @@ was written before duration was known).
 | 6 | `nativeBackgroundUpload` | `false` | same |
 | 7 | — | n/a | build configuration |
 | 8 | — | n/a | native plugin (unconditional) |
+| 9 | — | n/a | `src/components/capture/EntryComposer.jsx`, `src/components/dashboard/EntryBar.jsx`, `src/components/cloud/Drawer.jsx` (unconditional) |
 
 Flip procedure for any flag above: edit the `config/flags` Firestore doc —
 see `docs/quality/trustworthy-capture-runbook.md` § Flags for the full table

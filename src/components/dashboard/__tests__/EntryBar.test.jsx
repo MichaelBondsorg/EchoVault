@@ -568,3 +568,50 @@ describe('EntryBar — Space picker dismissal (review fix)', () => {
     expect(screen.queryByRole('listbox')).toBeNull();
   });
 });
+
+// 2026-07-24 capture-sheet fix (Fix A, UI-1). `loading` and `mode` used to be
+// independent sibling conditions — a loading=true render could mount an
+// absolutely-positioned processing overlay on top of the still-mounted
+// idle/recording/typing branch underneath it. These tests pin the fixed
+// contract: `loading` is now mutually exclusive with every mode branch, the
+// processing panel is a normal in-flow element, and it exposes role=status +
+// an accessible name.
+describe('EntryBar — processing state (Fix A, UI-1)', () => {
+  it('loading=true renders the status but not Record, Type, stop-recording, or the text editor', () => {
+    render(
+      <EntryBar ownerUid={OWNER} onVoiceSave={vi.fn()} onTextSave={vi.fn()} embedded preferredMode="text" loading />
+    );
+    expect(screen.getByText('Processing your voice...')).toBeTruthy();
+    expect(screen.queryByLabelText('Record voice entry')).toBeNull();
+    expect(screen.queryByLabelText('Type entry')).toBeNull();
+    expect(screen.queryByLabelText('Stop recording')).toBeNull();
+    expect(screen.queryByPlaceholderText("What's on your mind?")).toBeNull();
+  });
+
+  it('renders the processing panel in normal flow, not absolutely positioned', () => {
+    render(<EntryBar ownerUid={OWNER} onVoiceSave={vi.fn()} onTextSave={vi.fn()} embedded loading />);
+    const status = screen.getByRole('status');
+    expect(status.className).not.toMatch(/\babsolute\b/);
+    expect(status.className).not.toMatch(/\binset-0\b/);
+  });
+
+  it('gives the processing panel role=status, aria-live=polite, and an accessible name', () => {
+    render(<EntryBar ownerUid={OWNER} onVoiceSave={vi.fn()} onTextSave={vi.fn()} embedded loading />);
+    const status = screen.getByRole('status');
+    expect(status.getAttribute('aria-live')).toBe('polite');
+    // getByRole('status') already resolves via the accessible name computation
+    // internally, but assert it explicitly too: an aria-label (or equivalent)
+    // must be present, not just the role.
+    expect(status.getAttribute('aria-label') || status.textContent).toBeTruthy();
+  });
+
+  it('does not mount the recording branch underneath processing (no stray recording artifact)', () => {
+    // The recording pulse dot and the destructive stop button only exist in
+    // the recording branch — assert the whole recording UI is absent, not
+    // just its accessible name.
+    const { container } = render(
+      <EntryBar ownerUid={OWNER} onVoiceSave={vi.fn()} onTextSave={vi.fn()} embedded loading />
+    );
+    expect(container.querySelector('.bg-destructive')).toBeNull();
+  });
+});
