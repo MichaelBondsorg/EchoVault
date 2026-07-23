@@ -129,7 +129,18 @@ export function enumerateExposures(observations, { minPresentDays = 3, minHealth
     if (count < minHealthDays) continue;
     specs.push({
       key: `health:${field}`, kind: 'health', field,
-      label: field.replace(/_/g, ' '), splitMode: 'median',
+      // F3 (closure-wave review): the real HEALTH_EXPOSURE_FIELDS keys are
+      // camelCase (e.g. 'sleepHours', 'recoveryScore' — see this file's own
+      // header comment), which have no underscores at all. A bare
+      // `replace(/_/g, ' ')` left those verbatim, and this label is frozen
+      // into a claim's immutable wording at write time — 'higher sleepHours'
+      // would never self-correct. Split on lower->upper case boundaries
+      // BEFORE lowercasing (order matters: lowercasing first destroys the
+      // boundary the regex looks for) so 'sleepHours' -> 'sleep hours',
+      // 'recoveryScore' -> 'recovery score'. The underscore swap stays for
+      // any future snake_case field.
+      label: field.replace(/_/g, ' ').replace(/([a-z0-9])([A-Z])/g, '$1 $2').toLowerCase(),
+      splitMode: 'median',
     });
   }
   return specs.sort((a, b) => (a.key < b.key ? -1 : 1));

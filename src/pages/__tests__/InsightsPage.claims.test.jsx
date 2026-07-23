@@ -74,8 +74,22 @@ vi.mock('../../services/dashboard', () => ({
   calculateStreak: vi.fn(() => 0),
 }));
 
+// F1 (closure-wave review): a real stub (not a bare `() => null`) so tests
+// can prove the sheet actually mounts (open=true) and exercise the
+// `onFeedback` wiring — a plain `() => null` can never distinguish "mounted
+// but rendered nothing" from "not mounted at all".
 vi.mock('../../components/insights/ReceiptSheet', () => ({
-  default: () => null,
+  default: ({ insight, open, onFeedback }) => {
+    if (!open) return null;
+    return (
+      <div data-testid="receipt-sheet-mount">
+        <p>receipt-for:{insight?.id}</p>
+        <button type="button" onClick={() => onFeedback?.('do_not_analyze')}>
+          submit-claim-feedback
+        </button>
+      </div>
+    );
+  },
 }));
 
 function baseNexusReturn(overrides = {}) {
@@ -193,11 +207,17 @@ describe('InsightsPage — insightClaims flag ON: ClaimCards render from claims'
     expect(() => fireEvent.click(screen.getByText('Feedback'))).not.toThrow();
   });
 
-  it('"Try as an experiment" fires without a wired navigation seam (stub path, no crash)', async () => {
+  // F4 (closure-wave review): a mapped claim with NO onTryExperiment handler
+  // supplied by the parent must render no button at all — previously
+  // InsightsPage always passed a stub handler (dev-only console.info) down
+  // to ClaimCard, so the button rendered as a guaranteed no-op in
+  // production (AppLayout wires no onTryExperiment). "undefined means
+  // hidden" now, not "click and nothing happens".
+  it('"Try as an experiment" does NOT render when the parent supplies no onTryExperiment handler (F4)', async () => {
     render(<InsightsPage entries={ENTRIES} userId="user-1" user={{ uid: 'user-1' }} />);
     await screen.findByText(VERIFIED_TAG_CLAIM.wording);
 
-    expect(() => fireEvent.click(screen.getByText('Try as an experiment'))).not.toThrow();
+    expect(screen.queryByText('Try as an experiment')).toBeNull();
   });
 
   it('calls the onTryExperiment prop when the parent supplies one', async () => {
@@ -214,5 +234,52 @@ describe('InsightsPage — insightClaims flag ON: ClaimCards render from claims'
 
     fireEvent.click(screen.getByText('Try as an experiment'));
     expect(onTryExperiment).toHaveBeenCalledWith('tag-presence-mood', 'gym');
+  });
+});
+
+// F1 (closure-wave final review): the ReceiptSheet mount site was gated
+// ONLY on `getFlag('insightReceipts')`, so with insightClaims ON and
+// insightReceipts OFF, ClaimCard's "See days"/"Feedback" set
+// `receiptInsight` but nothing was ever mounted to read it — a silent
+// no-op making the whole T9 claims-feedback taxonomy unreachable. Fixed:
+// the sheet now mounts when EITHER flag is on. This block deliberately
+// enables ONLY insightClaims (insightReceipts stays false/default) to
+// prove the fix, not just re-prove the already-covered "both flags on"
+// path.
+describe('InsightsPage — F1 (closure-wave review): ReceiptSheet mounts on insightClaims alone', () => {
+  beforeEach(() => {
+    getFlag.mockImplementation((name) => name === 'insightClaims');
+  });
+
+  it('"See days" actually mounts the ReceiptSheet even though insightReceipts is OFF', async () => {
+    render(<InsightsPage entries={ENTRIES} userId="user-1" user={{ uid: 'user-1' }} />);
+    await screen.findByText(VERIFIED_TAG_CLAIM.wording);
+
+    expect(screen.queryByTestId('receipt-sheet-mount')).toBeNull();
+    fireEvent.click(screen.getByText('See days'));
+    expect(screen.getByTestId('receipt-sheet-mount')).toBeTruthy();
+  });
+
+  it('"Feedback" actually mounts the ReceiptSheet even though insightReceipts is OFF', async () => {
+    render(<InsightsPage entries={ENTRIES} userId="user-1" user={{ uid: 'user-1' }} />);
+    await screen.findByText(VERIFIED_TAG_CLAIM.wording);
+
+    fireEvent.click(screen.getByText('Feedback'));
+    expect(screen.getByTestId('receipt-sheet-mount')).toBeTruthy();
+  });
+
+  it('submitting claim feedback from the sheet triggers a claims refresh (useClaims.refresh) — the suppressed claim leaves the list without a remount', async () => {
+    render(<InsightsPage entries={ENTRIES} userId="user-1" user={{ uid: 'user-1' }} />);
+    await screen.findByText(VERIFIED_TAG_CLAIM.wording);
+    await vi.waitFor(() => expect(listActiveClaims).toHaveBeenCalledTimes(1));
+
+    fireEvent.click(screen.getByText('Feedback'));
+    fireEvent.click(screen.getByText('submit-claim-feedback'));
+
+    // The mount site's onFeedback wiring calls useClaims' `refresh`, which
+    // re-invokes listActiveClaims — the same query path that would drop a
+    // now-suppressed claim from the list on its own (useClaims filters to
+    // status === 'verified'), with no page remount required.
+    await vi.waitFor(() => expect(listActiveClaims).toHaveBeenCalledTimes(2));
   });
 });

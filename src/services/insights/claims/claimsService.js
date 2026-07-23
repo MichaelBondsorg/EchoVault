@@ -1,9 +1,10 @@
 /**
  * InsightClaim store (R4 Phase 1). Claims are immutable facts: app code may
  * only (a) create, (b) set supersededByClaimId when a newer version replaces
- * one, (c) flip status verified<->suppressed (user feedback). History is
- * never deleted by the app (owner delete stays possible in rules — user
- * data rights — but no code path calls it).
+ * one, (c) flip status verified<->suppressed<->expired (user feedback, or
+ * the pipeline's own eligibility retraction/revival — see claimsPipeline.js).
+ * History is never deleted by the app (owner delete stays possible in rules
+ * — user data rights — but no code path calls it).
  */
 import {
   collection, doc, getDocs, setDoc, updateDoc, writeBatch,

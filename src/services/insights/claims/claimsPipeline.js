@@ -143,7 +143,16 @@ export async function generateClaims(db, uid, entries, { timeZone, now } = {}) {
       // merely equivalent to its prior keeps that prior's frozen (possibly
       // stale) candidateTestsCount/ciLevel metadata rather than refreshing
       // it every run — only the ineligible transition above retracts.
-      if (evidenceEquivalent(prior, candidate)) continue; // no churn
+      //
+      // F2 (closure-wave final review): this no-churn skip must apply ONLY
+      // to a VERIFIED prior. An EXPIRED prior re-deriving with merely
+      // equivalent evidence must still supersede — expired claims are
+      // documented as revivable (see the retraction sweep below and
+      // claimsService.js's header comment), and skipping here on status
+      // alone would leave an expired claim expired forever the moment its
+      // re-eligible evidence happens to land within the equivalence band,
+      // exactly the realistic "exclusion lift" scenario this fix closes.
+      if (prior.status === 'verified' && evidenceEquivalent(prior, candidate)) continue; // no churn
       await supersedeClaim(db, uid, prior, candidate);
       written += 1; superseded += 1;
     }

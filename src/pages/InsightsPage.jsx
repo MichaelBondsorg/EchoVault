@@ -211,15 +211,36 @@ const InsightsPage = ({
   // ExperimentsScreen is opened via a same-file `showExperiments` boolean
   // in AppLayout.jsx (not a route, and not passed down to InsightsPage),
   // and it accepts no prefill prop yet — see Task 10's report for the seam
-  // investigation. This stub lets a future `onTryExperiment` prop from the
-  // parent (once AppLayout wires one through) work with zero ClaimCard/
-  // InsightsPage changes; absent that prop, it just logs in dev so the
-  // click is never a silent no-op during manual testing.
-  const handleTryExperiment = (templateId, tag) => {
-    if (typeof onTryExperiment === 'function') {
-      onTryExperiment(templateId, tag);
-    } else if (import.meta.env.DEV) {
-      console.info('[InsightsPage] Try as an experiment (no navigation seam wired yet):', { templateId, tag });
+  // investigation.
+  //
+  // F4 (closure-wave final review): previously this always resolved to a
+  // callable stub — even with no real `onTryExperiment` from the parent, a
+  // dev-only `console.info` fallback made ClaimCard's button always fire
+  // *something*, so ClaimCard always rendered it (any mapped claim ->
+  // button visible) even in production, where AppLayout wires no
+  // `onTryExperiment` at all: a guaranteed no-op button. Fixed at both ends
+  // — ClaimCard now hides the button unless a real handler prop is present
+  // (see ClaimCard.jsx), and this page only ever passes one through when
+  // the PARENT actually supplied one; no dev stub, no fallback logging.
+  // `undefined` here means ClaimList/ClaimCard render no button at all.
+  const handleTryExperiment = typeof onTryExperiment === 'function'
+    ? (templateId, tag) => onTryExperiment(templateId, tag)
+    : undefined;
+
+  // F1 (closure-wave final review): ReceiptSheet's `onFeedback` fires after
+  // ANY feedback is recorded through it (legacy "Not true"/"Not useful", or
+  // — for a claim — one of the 6-option diagnostic taxonomy submissions,
+  // see ReceiptSheet.jsx). For a claim (`receiptInsight.claimType` is set),
+  // that write can change the claim's status (e.g. `do_not_analyze` ->
+  // suppressed) — `useClaims` only ever surfaces `status === 'verified'`
+  // claims, so re-running its `refresh` is what actually drops the
+  // suppressed card from the list, with no page remount required. Legacy
+  // (non-claim) insight feedback doesn't touch the claims collection at
+  // all, so `refreshClaims` is a harmless no-op call for that path — guarded
+  // anyway so a legacy feedback event never fires an unnecessary refetch.
+  const handleReceiptFeedback = () => {
+    if (receiptInsight?.claimType) {
+      refreshClaims();
     }
   };
 
@@ -506,13 +527,22 @@ const InsightsPage = ({
         </motion.div>
       )}
 
-      {getFlag('insightReceipts') && (
+      {/* F1 (closure-wave final review): must mount whenever EITHER
+          insightReceipts OR insightClaims is on — gating solely on
+          insightReceipts left ClaimCard's "See days"/"Feedback" actions
+          (which only ever setReceiptInsight) as silent no-ops with
+          insightClaims ON and insightReceipts OFF, making the whole T9
+          claim-feedback taxonomy unreachable. The runbook promises flag
+          independence between R4 Phase 1 (insightClaims) and R2
+          (insightReceipts). */}
+      {(getFlag('insightReceipts') || getFlag('insightClaims')) && (
         <ReceiptSheet
           insight={receiptInsight}
           entriesById={entriesById}
           uid={userId}
           open={Boolean(receiptInsight)}
           onClose={() => setReceiptInsight(null)}
+          onFeedback={handleReceiptFeedback}
         />
       )}
     </motion.div>

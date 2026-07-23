@@ -17,9 +17,15 @@
  * 5. Actions: "See days" (opens the ReceiptSheet source list), "Feedback"
  *    (opens the same ReceiptSheet — it already renders the 6-option
  *    diagnostic taxonomy for a claim, T9), and "Try as an experiment" —
- *    shown ONLY when this claim's exposure maps to a v1 experiment
- *    template (`experimentTemplateFor` below); entity/category claims and
- *    unmapped health fields render no third action.
+ *    shown ONLY when BOTH this claim's exposure maps to a v1 experiment
+ *    template (`experimentTemplateFor` below) AND the caller actually
+ *    supplied an `onTryExperiment` handler (F4, closure-wave final review:
+ *    production previously passed no real handler — AppLayout wires none,
+ *    and InsightsPage's own stub only `console.info`'d in dev — so the
+ *    button rendered as a guaranteed no-op wherever a template mapped;
+ *    `undefined` now means hidden, not clickable-but-inert). Entity/category
+ *    claims, unmapped health fields, and any mapped claim with no handler
+ *    render no third action.
  *
  * Never renders causal language itself: `claim.wording`/`limitations` are
  * already validated non-causal at `buildClaim` construction time
@@ -141,10 +147,10 @@ const ClaimCard = ({ claim, onShowReceipt, onFeedback, onTryExperiment }) => {
         >
           Feedback
         </button>
-        {experimentMapping && (
+        {experimentMapping && typeof onTryExperiment === 'function' && (
           <button
             type="button"
-            onClick={() => onTryExperiment?.(experimentMapping.templateId, experimentMapping.tag)}
+            onClick={() => onTryExperiment(experimentMapping.templateId, experimentMapping.tag)}
             className="relative inline-flex min-h-[28px] items-center text-xs font-medium text-accent-deep before:absolute before:-inset-2 before:content-['']"
           >
             Try as an experiment

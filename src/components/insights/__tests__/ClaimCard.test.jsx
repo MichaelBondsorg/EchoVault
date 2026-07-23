@@ -86,44 +86,55 @@ describe('ClaimCard — five-question layout', () => {
     expect(CAUSAL_RE.test(container.textContent)).toBe(false);
   });
 
-  it('"Try as an experiment" is present for a tag: claim', () => {
-    render(<ClaimCard claim={baseClaim()} />);
+  // F4 (closure-wave final review): the button now requires BOTH a template
+  // mapping AND a real `onTryExperiment` handler prop — a mapped claim with
+  // no handler must render nothing (previously it always rendered a
+  // guaranteed no-op in production, where no handler is ever wired). Every
+  // "present" case below now supplies a handler explicitly; the "no
+  // handler" and "no mapping + handler" cases are pinned as their own tests.
+  it('"Try as an experiment" is present for a tag: claim when a handler is supplied', () => {
+    render(<ClaimCard claim={baseClaim()} onTryExperiment={vi.fn()} />);
     expect(screen.getByText('Try as an experiment')).toBeTruthy();
   });
 
-  it('"Try as an experiment" is absent for an entity: claim', () => {
+  it('"Try as an experiment" is absent for a tag: claim (mapping exists) when NO handler is supplied (F4)', () => {
+    render(<ClaimCard claim={baseClaim()} />);
+    expect(screen.queryByText('Try as an experiment')).toBeNull();
+  });
+
+  it('"Try as an experiment" is absent for an entity: claim (no mapping) even when a handler IS supplied (F4)', () => {
     const entityClaim = baseClaim({
       subject: 'Sarah',
       analysisPlan: { hypothesisFamilyId: 'basic:people:entity:sarah:mood', candidateId: 'entity:sarah' },
     });
-    render(<ClaimCard claim={entityClaim} />);
+    render(<ClaimCard claim={entityClaim} onTryExperiment={vi.fn()} />);
     expect(screen.queryByText('Try as an experiment')).toBeNull();
   });
 
-  it('"Try as an experiment" is absent for a category: claim', () => {
+  it('"Try as an experiment" is absent for a category: claim (no mapping) even when a handler IS supplied (F4)', () => {
     const categoryClaim = baseClaim({
       subject: 'work',
       analysisPlan: { hypothesisFamilyId: 'basic:category:category:work:mood', candidateId: 'category:work' },
     });
-    render(<ClaimCard claim={categoryClaim} />);
+    render(<ClaimCard claim={categoryClaim} onTryExperiment={vi.fn()} />);
     expect(screen.queryByText('Try as an experiment')).toBeNull();
   });
 
-  it('"Try as an experiment" is present for a mapped health: claim (sleepHours)', () => {
+  it('"Try as an experiment" is present for a mapped health: claim (sleepHours) when a handler is supplied', () => {
     const healthClaim = baseClaim({
       subject: 'sleep hours',
       analysisPlan: { hypothesisFamilyId: 'basic:health:health:sleepHours:mood', candidateId: 'health:sleepHours' },
     });
-    render(<ClaimCard claim={healthClaim} />);
+    render(<ClaimCard claim={healthClaim} onTryExperiment={vi.fn()} />);
     expect(screen.getByText('Try as an experiment')).toBeTruthy();
   });
 
-  it('"Try as an experiment" is absent for an unmapped health: field', () => {
+  it('"Try as an experiment" is absent for an unmapped health: field even when a handler IS supplied', () => {
     const healthClaim = baseClaim({
       subject: 'HRV',
       analysisPlan: { hypothesisFamilyId: 'basic:health:health:hrv:mood', candidateId: 'health:hrv' },
     });
-    render(<ClaimCard claim={healthClaim} />);
+    render(<ClaimCard claim={healthClaim} onTryExperiment={vi.fn()} />);
     expect(screen.queryByText('Try as an experiment')).toBeNull();
   });
 });
@@ -168,11 +179,11 @@ describe('ClaimCard — action handlers', () => {
     expect(onTryExperiment).toHaveBeenCalledWith('steps-mood', null);
   });
 
-  it('does not throw when no handler props are given', async () => {
+  it('does not throw when no handler props are given (and renders no "Try as an experiment" button — F4: no handler means hidden)', async () => {
     render(<ClaimCard claim={baseClaim()} />);
     await fireEvent.click(screen.getByText('See days'));
     await fireEvent.click(screen.getByText('Feedback'));
-    await fireEvent.click(screen.getByText('Try as an experiment'));
+    expect(screen.queryByText('Try as an experiment')).toBeNull();
   });
 });
 

@@ -349,6 +349,39 @@ describe('generateClaims — retraction (ineligible candidate vs. live prior)', 
     expect(v2.status).toBe('verified');
     expect(v2.supersededByClaimId).toBeNull();
   });
+
+  it('(e) F2 (closure-wave review): v1 verified -> expired (ineligible rerun) -> re-eligible rerun with EQUIVALENT evidence still supersedes (expired priors are never no-churn-skipped, only verified ones are)', async () => {
+    const runA = await generateClaims(DB, UID, fixtures(STRONG), { timeZone: 'UTC', now: NOW });
+    expect(runA.written).toBe(1);
+    const v1Id = allClaimDocs()[0].id;
+
+    const runB = await generateClaims(DB, UID, fixtures(WEAK), { timeZone: 'UTC', now: '2026-07-25T00:00:00.000Z' });
+    expect(runB.expired).toBe(1);
+    expect(allClaimDocs().find((c) => c.id === v1Id).status).toBe('expired');
+
+    // Rerun with the EXACT SAME evidence as run A (evidenceEquivalent would
+    // be true against v1). Before the fix, the no-churn skip fired
+    // regardless of prior.status, leaving v1 expired forever even though the
+    // candidate is eligible again ("revivable" contradicted). After the fix,
+    // the skip only applies to a VERIFIED prior — an expired prior with
+    // eligible (even equivalent) evidence supersedes unconditionally.
+    const runC = await generateClaims(DB, UID, fixtures(STRONG), { timeZone: 'UTC', now: '2026-08-01T00:00:00.000Z' });
+    expect(runC.eligible).toBe(1);
+    expect(runC.written).toBe(1);
+    expect(runC.superseded).toBe(1);
+    expect(runC.expired).toBe(0);
+
+    const claims = allClaimDocs();
+    expect(claims).toHaveLength(2); // both versions persist
+    const v1 = claims.find((c) => c.id === v1Id);
+    const v2 = claims.find((c) => c.id !== v1Id);
+    expect(v1.status).toBe('expired'); // supersedeClaim never touches status
+    expect(v1.supersededByClaimId).toBe(v2.id);
+    expect(v2.version).toBe(2);
+    expect(v2.parentClaimId).toBe(v1Id);
+    expect(v2.status).toBe('verified');
+    expect(v2.supersededByClaimId).toBeNull();
+  });
 });
 
 describe('generateClaims — suppressed prior durability (eligible/supersede branch)', () => {

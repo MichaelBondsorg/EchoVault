@@ -164,6 +164,27 @@ describe('enumerateExposures', () => {
        entry('c', '2026-07-03T09:00:00Z', { tags: ['GYM'] })], { timeZone: 'UTC' }), { minPresentDays: 3 });
     expect(specs.filter((s) => s.kind === 'tag').map((s) => s.key)).toEqual(['tag:gym']);
   });
+
+  // F3 (closure-wave review): camelCase health field names must be
+  // humanized (case-boundary split + lowercase), not just underscore-swapped
+  // — 'sleepHours' has no underscore, so the old `field.replace(/_/g, ' ')`
+  // left it as literal 'sleepHours', which then froze verbatim into a
+  // claim's non-editable wording ("higher sleepHours").
+  it('humanizes camelCase health field labels (case-boundary split + lowercase), not just underscore-swap', () => {
+    const entries = [];
+    for (let d = 1; d <= 5; d += 1) {
+      entries.push(entry(`h${d}`, `2026-07-0${d}T09:00:00Z`, {
+        healthContext: {
+          sleep: { totalHours: 7 },
+          recovery: { score: 60 },
+        },
+      }));
+    }
+    const specs = enumerateExposures(buildDailyObservations(entries, { timeZone: 'UTC' }));
+    const byKey = Object.fromEntries(specs.map((s) => [s.key, s.label]));
+    expect(byKey['health:sleepHours']).toBe('sleep hours');
+    expect(byKey['health:recoveryScore']).toBe('recovery score');
+  });
 });
 
 describe('OBSERVATION_SCHEMA_VERSION', () => {
