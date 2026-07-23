@@ -337,6 +337,11 @@ describe('createExperiment — payload exactness', () => {
   it('rejects a missing template', async () => {
     await expect(createExperiment(db, UID, validCreateInput({ template: undefined }))).rejects.toThrow();
   });
+
+  it('never calls registerCandidates (ledger candidate registration only ever happens at start/result time, never at create — Important review finding, fix wave 1)', async () => {
+    await createExperiment(db, UID, validCreateInput());
+    expect(ledgerMocks.registerCandidates).not.toHaveBeenCalled();
+  });
 });
 
 describe('createExperiment — hypothesis-family ledger read + Bonferroni ciLevel freeze (R4 Phase 1 retrofit, Task 7)', () => {
@@ -476,6 +481,47 @@ describe('startExperiment — hypothesis-family ledger registration (R4 Phase 1 
   });
 });
 
+describe('startExperiment — ledger registration containment (Important review finding, fix wave 1)', () => {
+  const FAMILY_ID = 'experiment:sleep-hours-mood-same-day';
+
+  it('does NOT reject startExperiment when registerCandidates rejects — the status write already committed, so a thrown error here would falsely tell the UI the experiment never started; warns instead, with the experimentId in the message', async () => {
+    mocks.getDoc.mockResolvedValue({
+      exists: () => true,
+      data: () => ({ analysisPlan: { hypothesisFamilyId: FAMILY_ID } }),
+    });
+    ledgerMocks.registerCandidates.mockRejectedValueOnce(new Error('ledger write failed'));
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      await expect(
+        startExperiment(db, UID, 'exp-1', 14, new Date('2026-07-22T12:00:00.000Z')),
+      ).resolves.toBeUndefined();
+      // The draft->running status write happened regardless of the ledger failure.
+      expect(mocks.updateDoc).toHaveBeenCalledTimes(1);
+      expect(mocks.updateDoc.mock.calls[0][1].status).toBe('running');
+      expect(warnSpy).toHaveBeenCalledTimes(1);
+      expect(warnSpy.mock.calls[0][0]).toContain('exp-1');
+      expect(warnSpy.mock.calls[0][0]).toContain(FAMILY_ID);
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
+  it('also contains a read-back (getDoc) failure the same way — resolves, warns, does not call registerCandidates', async () => {
+    mocks.getDoc.mockRejectedValueOnce(new Error('read-back failed'));
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      await expect(
+        startExperiment(db, UID, 'exp-1', 14, new Date('2026-07-22T12:00:00.000Z')),
+      ).resolves.toBeUndefined();
+      expect(ledgerMocks.registerCandidates).not.toHaveBeenCalled();
+      expect(warnSpy).toHaveBeenCalledTimes(1);
+      expect(warnSpy.mock.calls[0][0]).toContain('exp-1');
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+});
+
 describe('pauseExperiment / resumeExperiment / stopExperiment', () => {
   it('pauseExperiment writes exactly {status:paused, updatedAt}', async () => {
     await pauseExperiment(db, UID, 'exp-1');
@@ -604,6 +650,57 @@ describe('writeResult — sets result + status:completed in one update (result i
   it('rejects a non-object result', async () => {
     await expect(writeResult(db, UID, 'exp-1', null)).rejects.toThrow();
     await expect(writeResult(db, UID, 'exp-1', 'not an object')).rejects.toThrow();
+  });
+});
+
+describe('writeResult — idempotent ledger re-registration retry (Important review finding, fix wave 1)', () => {
+  const FAMILY_ID = 'experiment:sleep-hours-mood-same-day';
+
+  it('re-attempts registerCandidates with the experiment\'s frozen hypothesisFamilyId AFTER the result write succeeds', async () => {
+    mocks.getDoc.mockResolvedValue({
+      exists: () => true,
+      data: () => ({ analysisPlan: { hypothesisFamilyId: FAMILY_ID } }),
+    });
+    await writeResult(db, UID, 'exp-1', { status: 'ok' });
+
+    expect(ledgerMocks.registerCandidates).toHaveBeenCalledTimes(1);
+    expect(ledgerMocks.registerCandidates).toHaveBeenCalledWith(
+      db, UID, FAMILY_ID, [FAMILY_ID], expect.objectContaining({ now: expect.any(String) }),
+    );
+    // Ordering: the result updateDoc must precede the retry registration.
+    const updateOrder = mocks.updateDoc.mock.invocationCallOrder[0];
+    const registerOrder = ledgerMocks.registerCandidates.mock.invocationCallOrder[0];
+    expect(updateOrder).toBeLessThan(registerOrder);
+  });
+
+  it('a rejection from the retry registration does NOT reject writeResult (contained, warned — the result write already committed)', async () => {
+    mocks.getDoc.mockResolvedValue({
+      exists: () => true,
+      data: () => ({ analysisPlan: { hypothesisFamilyId: FAMILY_ID } }),
+    });
+    ledgerMocks.registerCandidates.mockRejectedValueOnce(new Error('ledger write failed'));
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      await expect(writeResult(db, UID, 'exp-1', { status: 'ok' })).resolves.toBeUndefined();
+      expect(mocks.updateDoc).toHaveBeenCalledTimes(1);
+      expect(mocks.updateDoc.mock.calls[0][1].status).toBe('completed');
+      expect(warnSpy).toHaveBeenCalledTimes(1);
+      expect(warnSpy.mock.calls[0][0]).toContain('exp-1');
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
+  it('skips registration silently (no warn, registerCandidates not called) for a legacy experiment whose stored plan has no hypothesisFamilyId', async () => {
+    mocks.getDoc.mockResolvedValue({ exists: () => true, data: () => ({ analysisPlan: {} }) });
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      await writeResult(db, UID, 'exp-1', { status: 'ok' });
+      expect(ledgerMocks.registerCandidates).not.toHaveBeenCalled();
+      expect(warnSpy).not.toHaveBeenCalled();
+    } finally {
+      warnSpy.mockRestore();
+    }
   });
 });
 

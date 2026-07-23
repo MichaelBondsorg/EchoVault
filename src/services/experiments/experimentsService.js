@@ -367,10 +367,41 @@ export async function startExperiment(db, uid, experimentId, durationDays, now =
   // A legacy experiment (created before this retrofit; no
   // `hypothesisFamilyId` on its frozen plan) is silently skipped — it never
   // joined the ledger and this retrofit does not retroactively enroll it.
-  const startedSnap = await getDoc(doc(db, experimentsPath(uid), experimentId));
-  const hypothesisFamilyId = startedSnap.exists() ? startedSnap.data()?.analysisPlan?.hypothesisFamilyId : null;
-  if (typeof hypothesisFamilyId === 'string' && hypothesisFamilyId) {
-    await registerCandidates(db, uid, hypothesisFamilyId, [hypothesisFamilyId], { now: startAt });
+  //
+  // CONTAINMENT, NOT PROPAGATION (Important review finding, fix wave 1): by
+  // this point the status-transition `updateDoc` above has ALREADY
+  // COMMITTED, and the rules' update `hasOnly` list forbids adding any
+  // "registration pending"/retry-marker key to the experiment doc — there is
+  // no legal way to persist "start succeeded but ledger registration
+  // didn't" onto the doc itself. So a throw out of this block can only ever
+  // be a LIE to the caller: the UI's catch would say "Could not start that
+  // experiment. Please try again." when the experiment plainly DID start,
+  // and a well-meaning retry would then create a DUPLICATE experiment —
+  // while the real, recoverable problem (a transient ledger read/write
+  // failure) goes unaddressed. Given that constraint, the only sound design
+  // is containment (catch + warn, never rethrow) paired with an idempotent
+  // retry: `registerCandidates` is transactional and distinct-counting by
+  // candidateId, so re-registering the SAME candidateId again later (in
+  // `writeResult`, below) is harmless — `testedCount` (the actual family
+  // size the Bonferroni adjustment reads) is unchanged, only the cosmetic
+  // `timesTested` counter bumps. That later retry is the real recovery path
+  // for whatever fails here; this catch's job is only to stop a transient
+  // ledger failure from lying to the user about whether their experiment
+  // started.
+  let hypothesisFamilyId = null;
+  try {
+    const startedSnap = await getDoc(doc(db, experimentsPath(uid), experimentId));
+    hypothesisFamilyId = startedSnap.exists() ? startedSnap.data()?.analysisPlan?.hypothesisFamilyId : null;
+    if (typeof hypothesisFamilyId === 'string' && hypothesisFamilyId) {
+      await registerCandidates(db, uid, hypothesisFamilyId, [hypothesisFamilyId], { now: startAt });
+    }
+  } catch (err) {
+    console.warn(
+      `startExperiment: testing-ledger registration failed for experiment ${experimentId}`
+        + (typeof hypothesisFamilyId === 'string' && hypothesisFamilyId ? ` (family ${hypothesisFamilyId})` : ' (family unknown — read-back failed)')
+        + '; testing-ledger registration failed — family tested-count will undercount until re-registration — retried automatically at result time.',
+      err,
+    );
   }
 }
 
@@ -484,11 +515,52 @@ export async function writeResult(db, uid, experimentId, result) {
   if (!result || typeof result !== 'object' || Array.isArray(result)) {
     throw new Error('writeResult: result (a plain object) is required.');
   }
-  await updateDoc(doc(db, experimentsPath(uid), experimentId), {
+  const ref = doc(db, experimentsPath(uid), experimentId);
+  await updateDoc(ref, {
     result: { original: result, exclusionHistory: [] },
     status: 'completed',
     updatedAt: nowIso(),
   });
+
+  // IDEMPOTENT RETRY for start-time testing-ledger registration (Important
+  // review finding, fix wave 1 — see `startExperiment`'s containment
+  // comment above for the full reasoning behind why that registration is
+  // allowed to fail silently). Every experiment that reaches a result has,
+  // by definition, actually run — so re-attempt `registerCandidates` here,
+  // unconditionally, for any completed experiment whose frozen plan carries
+  // a `hypothesisFamilyId`. This is safe to run even when start-time
+  // registration already succeeded: `registerCandidates` is transactional
+  // and distinct-counting by candidateId, so re-registering the same
+  // candidateId is a no-op on `testedCount` (only a cosmetic `timesTested`
+  // bump) — and it GUARANTEES that any experiment producing a result ends
+  // up registered even if the original start-time attempt was
+  // contained/swallowed. A legacy experiment (no `hypothesisFamilyId` on
+  // its frozen plan) is skipped silently — no warn — matching
+  // `startExperiment`'s own legacy-skip behavior; it never joined the
+  // ledger and this retrofit does not retroactively enroll it. Failure here
+  // is contained the same way as in `startExperiment` (warn, never
+  // rethrow) — the result write above has already committed, so a throw
+  // here would be the same "lies to the UI, provokes a retry/duplicate"
+  // problem this whole fix wave exists to avoid.
+  try {
+    const snap = await getDoc(ref);
+    const hypothesisFamilyId = snap.exists() ? snap.data()?.analysisPlan?.hypothesisFamilyId : null;
+    if (typeof hypothesisFamilyId === 'string' && hypothesisFamilyId) {
+      try {
+        await registerCandidates(db, uid, hypothesisFamilyId, [hypothesisFamilyId], { now: nowIso() });
+      } catch (err) {
+        console.warn(
+          `writeResult: testing-ledger re-registration failed for experiment ${experimentId} (family ${hypothesisFamilyId}); family tested-count may remain undercounted.`,
+          err,
+        );
+      }
+    }
+  } catch (err) {
+    console.warn(
+      `writeResult: testing-ledger re-registration read-back failed for experiment ${experimentId}; family tested-count may remain undercounted.`,
+      err,
+    );
+  }
 }
 
 /**
