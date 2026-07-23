@@ -88,7 +88,49 @@ export const DECISION_ACTIONS = Object.freeze([
 const OUTCOME_KEYS = Object.freeze(['closedAt', 'kind', 'answerEntryId']);
 const OUTCOME_KINDS = Object.freeze(['answered', 'closed']);
 
+// Typed-assertion vocabularies (R4 Phase 1, deep-review finding 13). These
+// sit on top of the existing ten boolean attributes/kind and give a
+// deterministic actor/type/status/tense/polarity reading of a candidate —
+// the layer Phase 2's per-user ontology consumes. Only `tense` carries any
+// model authority (validated enum, 'unknown' fallback); everything else is
+// derived purely from `kind` + the existing attributes.
+export const ASSERTION_ACTORS = Object.freeze(['user', 'other', 'unknown']);
+export const ASSERTION_TYPES = Object.freeze([
+  'task',
+  'intention',
+  'possibility',
+  'event',
+  'belief',
+  'feeling',
+  'observation',
+]);
+export const ASSERTION_STATUSES = Object.freeze([
+  'considered',
+  'committed',
+  'started',
+  'completed',
+  'cancelled',
+  'unknown',
+]);
+export const ASSERTION_TENSES = Object.freeze(['past', 'current', 'future', 'recurring', 'unknown']);
+export const ASSERTION_POLARITIES = Object.freeze(['affirmed', 'negated', 'uncertain']);
+
+const ASSERTION_KEYS = Object.freeze(['actor', 'type', 'status', 'tense', 'polarity']);
+
+// kind -> assertion type. Every INTENT_KIND must have an entry here.
+const ASSERTION_TYPE_BY_KIND = Object.freeze({
+  task: 'task',
+  open_loop: 'intention',
+  goal_habit: 'intention',
+  conditional: 'possibility',
+  event: 'event',
+  completed: 'event',
+  reflection: 'observation',
+  external_action: 'event',
+});
+
 const SCHEMA_VERSION = 1;
+const ASSERTION_SCHEMA_VERSION = 2;
 const PROMPT_VERSION = 1;
 
 function isBool(v) {
@@ -183,6 +225,53 @@ function validateAttributes(attributes) {
 }
 
 /**
+ * Deterministically derive the typed assertion for a candidate. Only `tense`
+ * comes from the model (validated against ASSERTION_TENSES, defaulting to
+ * 'unknown') — actor/type/status/polarity are pure functions of `kind` and
+ * the existing ten boolean attributes, so this NEVER rejects a candidate.
+ *
+ * @param {string} kind - one of INTENT_KINDS.
+ * @param {object} attributes - the ten validated boolean attributes.
+ * @param {{tense?: string}} [opts]
+ * @returns {{actor:string, type:string, status:string, tense:string, polarity:string}}
+ */
+export function deriveAssertion(kind, attributes, { tense = 'unknown' } = {}) {
+  const attrs = attributes || {};
+  const actor = attrs.otherOwned ? 'other' : (attrs.quoted ? 'unknown' : 'user');
+  const polarity = attrs.negated ? 'negated' : ((attrs.conditional || attrs.quoted) ? 'uncertain' : 'affirmed');
+  const status = attrs.completed ? 'completed' : ((attrs.agency && attrs.concrete) ? 'committed' : 'considered');
+  const type = ASSERTION_TYPE_BY_KIND[kind] || 'observation';
+  const safeTense = ASSERTION_TENSES.includes(tense) ? tense : 'unknown';
+  return { actor, type, status, tense: safeTense, polarity };
+}
+
+/**
+ * Validate a (typically model-adjacent, but here always deterministically
+ * derived) assertion object: all five keys required, each value in its enum,
+ * no extra keys. Throws on any violation — a malformed assertion must never
+ * be persisted.
+ */
+function validateAssertion(assertion) {
+  if (!assertion || typeof assertion !== 'object') {
+    throw new Error('intent: assertion must be an object');
+  }
+  const keys = Object.keys(assertion);
+  for (const key of keys) {
+    if (!ASSERTION_KEYS.includes(key)) throw new Error(`intent: assertion has unknown key "${key}"`);
+  }
+  for (const key of ASSERTION_KEYS) {
+    if (!keys.includes(key)) throw new Error(`intent: assertion is missing "${key}"`);
+  }
+  const { actor, type, status, tense, polarity } = assertion;
+  if (!ASSERTION_ACTORS.includes(actor)) throw new Error(`intent: assertion.actor must be one of ${ASSERTION_ACTORS.join('/')}`);
+  if (!ASSERTION_TYPES.includes(type)) throw new Error(`intent: assertion.type must be one of ${ASSERTION_TYPES.join('/')}`);
+  if (!ASSERTION_STATUSES.includes(status)) throw new Error(`intent: assertion.status must be one of ${ASSERTION_STATUSES.join('/')}`);
+  if (!ASSERTION_TENSES.includes(tense)) throw new Error(`intent: assertion.tense must be one of ${ASSERTION_TENSES.join('/')}`);
+  if (!ASSERTION_POLARITIES.includes(polarity)) throw new Error(`intent: assertion.polarity must be one of ${ASSERTION_POLARITIES.join('/')}`);
+  return { actor, type, status, tense, polarity };
+}
+
+/**
  * Validate + construct a stored intent document. Throws on any malformed input
  * — extraction must never persist a half-formed intent.
  *
@@ -207,6 +296,7 @@ export function buildIntent({
   snoozedUntil = null,
   outcome = null,
   userText = null,
+  assertion = null,
 }) {
   if (typeof id !== 'string' || !id.trim()) throw new Error('intent: id is required');
   if (typeof ownerId !== 'string' || !ownerId.trim()) throw new Error('intent: ownerId is required');
@@ -225,6 +315,7 @@ export function buildIntent({
   const snoozed = validateIsoOrNull(snoozedUntil, 'snoozedUntil');
   const validatedOutcome = validateOutcome(outcome);
   const validatedUserText = validateUserText(userText);
+  const validatedAssertion = assertion !== null ? validateAssertion(assertion) : null;
   const now = new Date().toISOString();
 
   // authorization defaults CLOSED: no notification authority is granted at
@@ -232,7 +323,7 @@ export function buildIntent({
   const auth = { notifications: false };
   if (authorization && authorization.notifications === true) auth.notifications = true;
 
-  return {
+  const doc = {
     id,
     ownerId,
     entryId,
@@ -251,7 +342,10 @@ export function buildIntent({
       extraction: 1,
       model,
       prompt: PROMPT_VERSION,
-      schema: SCHEMA_VERSION,
+      // v1/v2 docs are distinguished by the presence of the `assertion` key
+      // below, not just this number — but we still stamp it so a reader can
+      // branch on schema version alone without checking key presence.
+      schema: validatedAssertion ? ASSERTION_SCHEMA_VERSION : SCHEMA_VERSION,
     },
     createdAt: createdAt || now,
     updatedAt: updatedAt || now,
@@ -260,6 +354,11 @@ export function buildIntent({
     outcome: validatedOutcome,
     userText: validatedUserText,
   };
+  // Additive-only: when absent, OMIT the key entirely (never `assertion:
+  // null`) so v1 docs are untouched and v1/v2 are distinguishable by key
+  // presence, not just versions.schema.
+  if (validatedAssertion) doc.assertion = validatedAssertion;
+  return doc;
 }
 
 /**
@@ -319,6 +418,12 @@ export default {
   INTENT_ATTRIBUTE_KEYS,
   CLIENT_MUTABLE_KEYS,
   DECISION_ACTIONS,
+  ASSERTION_ACTORS,
+  ASSERTION_TYPES,
+  ASSERTION_STATUSES,
+  ASSERTION_TENSES,
+  ASSERTION_POLARITIES,
+  deriveAssertion,
   buildIntent,
   isClientTransitionAllowed,
   validateUserIntentUpdate,

@@ -15,7 +15,14 @@
  * Never logs journal text — only ids, counts, and structured status.
  */
 import { createHash } from 'crypto';
-import { INTENT_KINDS, INTENT_ATTRIBUTE_KEYS, buildIntent, isValidIsoOrNull } from './intentSchema.js';
+import {
+  INTENT_KINDS,
+  INTENT_ATTRIBUTE_KEYS,
+  ASSERTION_TENSES,
+  buildIntent,
+  deriveAssertion,
+  isValidIsoOrNull,
+} from './intentSchema.js';
 import { decideActivation } from './activationPolicy.js';
 import { getServerFlag } from '../shared/flags.js';
 
@@ -51,6 +58,7 @@ For each candidate output an object with:
 - confidence: 0..1 (advisory only)
 - targetAt: ISO-8601 string if a specific time is stated, else null
 - explicitCommand: true ONLY for explicit task-list syntax ("TODO:", "- [ ]") or an explicit follow-up request ("ask me Friday how it went")
+- tense: one of ${ASSERTION_TENSES.join(', ')} — tense of the assertion relative to writing time; 'recurring' for habitual statements; 'unknown' if unclear
 
 Return ONLY a JSON array (possibly empty). No prose.`;
 
@@ -148,6 +156,9 @@ export function normalizeCandidates(rawCandidates, entryText) {
       confidence: clamp01(cand.confidence),
       targetAt: typeof cand.targetAt === 'string' && cand.targetAt.trim() ? cand.targetAt : null,
       explicitCommand: cand.explicitCommand === true,
+      // tense is the only model-authoritative slice of the typed assertion —
+      // never reject a candidate for a bad/missing value, just default it.
+      tense: ASSERTION_TENSES.includes(cand.tense) ? cand.tense : 'unknown',
     });
   }
   return out;
@@ -388,6 +399,7 @@ export async function runIntentExtraction({ db, entryRef, entry, modelId, apiKey
       targetAt,
       model: modelId,
       inputVersion,
+      assertion: deriveAssertion(cand.kind, cand.attributes, { tense: cand.tense }),
     });
     batch.set(intentsCol.doc(id), intent);
     if (state === 'active' && cand.kind === 'task') activeTaskIntents.push(intent);

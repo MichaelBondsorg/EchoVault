@@ -136,6 +136,18 @@ describe('normalizeCandidates', () => {
     expect(c.targetAt).toBeNull(); // non-string dropped
     for (const k of INTENT_ATTRIBUTE_KEYS) expect(typeof c.attributes[k]).toBe('boolean');
   });
+
+  it('carries a valid tense through and defaults an invalid/missing one to unknown', () => {
+    const raw = [
+      { kind: 'task', text: 'call the dentist', attributes: attrs(), confidence: 0.9, tense: 'future' },
+      { kind: 'task', text: 'call the dentist', attributes: attrs(), confidence: 0.9, tense: 'yesterday-ish' },
+      { kind: 'task', text: 'call the dentist', attributes: attrs(), confidence: 0.9 },
+    ];
+    const [withTense, badTense, missingTense] = normalizeCandidates(raw, entryText);
+    expect(withTense.tense).toBe('future');
+    expect(badTense.tense).toBe('unknown');
+    expect(missingTense.tense).toBe('unknown');
+  });
 });
 
 describe('deterministicIntentId', () => {
