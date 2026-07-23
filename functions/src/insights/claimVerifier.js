@@ -163,7 +163,7 @@ export function verifyDeterministic(wording, bundle) {
   return { pass: reasons.length === 0, reasons };
 }
 
-const MODEL_SYSTEM_PROMPT = 'Here is a JSON evidence bundle and one candidate sentence. '
+export const MODEL_SYSTEM_PROMPT = 'Here is a JSON evidence bundle and one candidate sentence. '
   + 'Answer strict JSON {"entailed": true|false, "offending": string|null} '
   + '— entailed is false if ANY factual assertion (number, comparison, '
   + 'event, causal implication) is not directly supported by the bundle.';

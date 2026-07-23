@@ -940,7 +940,8 @@ export const writeClaimWording = onCall(
   {
     secrets: [geminiApiKey],
     cors: true,
-    maxInstances: 10
+    maxInstances: 10,
+    timeoutSeconds: 120
   },
   async (request) => {
     if (!request.auth) {
@@ -959,10 +960,26 @@ export const writeClaimWording = onCall(
 
     const apiKey = geminiApiKey.value();
 
-    return handleWriteClaimWording(
-      { bundle },
-      { db, apiKeys: { gemini: apiKey }, callGeminiImpl: callGemini, getModelImpl: getModel }
-    );
+    try {
+      return await handleWriteClaimWording(
+        { bundle },
+        { db, apiKeys: { gemini: apiKey }, callGeminiImpl: callGemini, getModelImpl: getModel }
+      );
+    } catch (error) {
+      // Never log bundle text (PII) — only ids, length, error message.
+      console.error('[writeClaimWording] failed', {
+        userId,
+        bundleLength: JSON.stringify(bundle ?? {})?.length,
+        err: error?.message
+      });
+      return {
+        verdict: 'fail',
+        wording: null,
+        reasons: ['writer_error'],
+        writerModel: null,
+        verifierModel: null
+      };
+    }
   }
 );
 

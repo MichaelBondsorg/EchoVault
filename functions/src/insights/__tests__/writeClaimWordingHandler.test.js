@@ -7,6 +7,7 @@
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { handleWriteClaimWording, isValidBundle, MAX_WRITER_ATTEMPTS } from '../writeClaimWordingHandler.js';
+import { MODEL_SYSTEM_PROMPT } from '../claimVerifier.js';
 
 const bundle = {
   subject: 'gym',
@@ -262,5 +263,35 @@ describe('handleWriteClaimWording', () => {
     expect(getModelImpl).toHaveBeenCalledWith(db, 'insightWriter');
     expect(getModelImpl).toHaveBeenCalledWith(db, 'insightVerifier');
     expect(getModelImpl).toHaveBeenCalledTimes(2);
+  });
+
+  it('verifier adapter receives correct systemPrompt and JSON userPrompt with bundle+wording', async () => {
+    const callGeminiImpl = makeCallGeminiImpl({
+      writerModel,
+      writerResponses: [JSON.stringify({ wording: GOOD_WORDING })],
+      verifierModel,
+      verifierResponses: [ENTAILED_PASS],
+    });
+    const getModelImpl = makeGetModelImpl({ writerModel, verifierModel });
+
+    await handleWriteClaimWording(
+      { bundle },
+      { db: {}, apiKeys: { gemini: 'test-key' }, callGeminiImpl, getModelImpl }
+    );
+
+    // Filter to verifier calls only (4th arg is model)
+    const verifierCalls = callGeminiImpl.mock.calls.filter(([, , , model]) => model === verifierModel);
+    expect(verifierCalls).toHaveLength(1);
+
+    // Assert systemPrompt (2nd arg) is correct
+    const [, systemPrompt, userPrompt] = verifierCalls[0];
+    expect(systemPrompt).toBe(MODEL_SYSTEM_PROMPT);
+
+    // Assert userPrompt (3rd arg) is JSON containing both bundle and wording
+    const parsedUserPrompt = JSON.parse(userPrompt);
+    expect(parsedUserPrompt).toHaveProperty('bundle');
+    expect(parsedUserPrompt).toHaveProperty('wording');
+    expect(parsedUserPrompt.wording).toBe(GOOD_WORDING);
+    expect(parsedUserPrompt.bundle).toEqual(bundle);
   });
 });
