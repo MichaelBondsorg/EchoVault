@@ -50,8 +50,8 @@ export async function supersedeClaim(db, uid, oldClaim, newClaim) {
 }
 
 export async function setClaimStatus(db, uid, claimId, status, { now } = {}) {
-  if (status !== 'suppressed' && status !== 'verified') {
-    throw new Error(`setClaimStatus: app code may only toggle suppressed/verified, got "${status}"`);
+  if (status !== 'suppressed' && status !== 'verified' && status !== 'expired') {
+    throw new Error(`setClaimStatus: app code may only set suppressed/verified/expired, got "${status}"`);
   }
   await updateDoc(claimRef(db, uid, claimId), {
     status, updatedAt: now || new Date().toISOString(),

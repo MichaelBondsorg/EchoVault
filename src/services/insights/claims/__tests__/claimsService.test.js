@@ -149,13 +149,22 @@ describe('supersedeClaim', () => {
 });
 
 describe('setClaimStatus', () => {
-  it('allows only suppressed/verified from app code', async () => {
+  it('allows suppressed/verified/expired from app code; other statuses still throw', async () => {
     const claim = await writeClaim({}, 'u1', makeClaim());
     await setClaimStatus({}, 'u1', claim.id, 'suppressed', { now: '2026-07-22T12:00:00.000Z' });
-    const all = await listAllClaims({}, 'u1');
+    let all = await listAllClaims({}, 'u1');
     expect(all[0].status).toBe('suppressed');
-    await expect(setClaimStatus({}, 'u1', claim.id, 'expired')).rejects.toThrow();
+
+    await setClaimStatus({}, 'u1', claim.id, 'expired', { now: '2026-07-22T13:00:00.000Z' });
+    all = await listAllClaims({}, 'u1');
+    expect(all[0].status).toBe('expired');
+
+    await setClaimStatus({}, 'u1', claim.id, 'verified', { now: '2026-07-22T14:00:00.000Z' });
+    all = await listAllClaims({}, 'u1');
+    expect(all[0].status).toBe('verified');
+
     await expect(setClaimStatus({}, 'u1', claim.id, 'candidate')).rejects.toThrow();
+    await expect(setClaimStatus({}, 'u1', claim.id, 'bogus')).rejects.toThrow();
   });
 });
 

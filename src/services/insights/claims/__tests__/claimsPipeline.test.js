@@ -72,6 +72,7 @@ const { registerCandidates } = await import('../../testingLedger');
 const { freezeCandidatePlan } = await import('../evidenceBuilder');
 const { readLedgerCounts, familyIdForBasic } = await import('../../testingLedger');
 const { claimDocId } = await import('../claimSchema');
+const { setClaimStatus } = await import('../claimsService');
 
 beforeEach(() => {
   store.clear();
@@ -231,5 +232,113 @@ describe('generateClaims — dedup and supersede', () => {
     expect(newDoc.version).toBe(2);
     expect(newDoc.parentClaimId).toBe(oldId);
     expect(newDoc.supersededByClaimId).toBeNull();
+  });
+});
+
+// A live prior whose candidate stops clearing the gates on rerun — e.g. new
+// data weakens the effect below the practical floor. Same day/span structure
+// as STRONG (so only gate 5 fails) but gym-day mood dropped from 0.72 to
+// 0.58: delta ~3 points < the 5-point floor. Proven ineligible with
+// below_practical_floor in evidenceBuilder.test.js's identical fixture.
+const WEAK = [...mk(16, 1, '06', true, 0.58), ...mk(14, 17, '06', false, 0.55), ...mk(10, 1, '07', false, 0.55)];
+
+describe('generateClaims — retraction (ineligible candidate vs. live prior)', () => {
+  it('(a) ineligible candidate with a live VERIFIED prior: prior is expired, no new claim written, stats.expired === 1', async () => {
+    const first = await generateClaims(DB, UID, fixtures(STRONG), { timeZone: 'UTC', now: NOW });
+    expect(first.written).toBe(1);
+    const priorId = allClaimDocs()[0].id;
+
+    const laterNow = '2026-07-30T10:00:00.000Z';
+    const second = await generateClaims(DB, UID, fixtures(WEAK), { timeZone: 'UTC', now: laterNow });
+
+    expect(second.eligible).toBe(0);
+    expect(second.written).toBe(0);
+    expect(second.superseded).toBe(0);
+    expect(second.expired).toBe(1);
+
+    const claims = allClaimDocs();
+    expect(claims).toHaveLength(1); // no new claim written
+    const prior = claims.find((c) => c.id === priorId);
+    expect(prior.status).toBe('expired');
+    expect(prior.supersededByClaimId).toBeNull();
+    expect(prior.updatedAt).toBe(laterNow);
+  });
+
+  it('(b) ineligible candidate with a live SUPPRESSED prior is left untouched (user suppression sticks)', async () => {
+    await generateClaims(DB, UID, fixtures(STRONG), { timeZone: 'UTC', now: NOW });
+    const priorId = allClaimDocs()[0].id;
+    await setClaimStatus(DB, UID, priorId, 'suppressed', { now: '2026-07-23T00:00:00.000Z' });
+
+    const laterNow = '2026-07-30T10:00:00.000Z';
+    const second = await generateClaims(DB, UID, fixtures(WEAK), { timeZone: 'UTC', now: laterNow });
+
+    expect(second.expired).toBe(0);
+    const prior = allClaimDocs().find((c) => c.id === priorId);
+    expect(prior.status).toBe('suppressed');
+    expect(prior.updatedAt).toBe('2026-07-23T00:00:00.000Z'); // no status call touched it
+  });
+
+  it('(c) ineligible candidate with NO prior claim does nothing (current behavior)', async () => {
+    const result = await generateClaims(DB, UID, fixtures(WEAK), { timeZone: 'UTC', now: NOW });
+    expect(result.eligible).toBe(0);
+    expect(result.written).toBe(0);
+    expect(result.expired).toBe(0);
+    expect(allClaimDocs()).toHaveLength(0);
+  });
+
+  it('(d) revival: v1 verified -> v1 expired (ineligible rerun) -> v2 verified supersedes v1 (evidence re-strengthens); v1 keeps status expired + gains supersededByClaimId, both docs exist', async () => {
+    const runA = await generateClaims(DB, UID, fixtures(STRONG), { timeZone: 'UTC', now: NOW });
+    expect(runA.written).toBe(1);
+    const v1Id = allClaimDocs()[0].id;
+
+    const runB = await generateClaims(DB, UID, fixtures(WEAK), { timeZone: 'UTC', now: '2026-07-25T00:00:00.000Z' });
+    expect(runB.expired).toBe(1);
+    expect(allClaimDocs().find((c) => c.id === v1Id).status).toBe('expired');
+
+    // liveByCandidate only filters supersededByClaimId==null — an expired
+    // (not superseded) claim is still found as `prior` here, so re-strengthened
+    // evidence takes the normal supersede path.
+    const changedDays = [...STRONG, ...CONTRADICTING];
+    const runC = await generateClaims(DB, UID, fixtures(changedDays), { timeZone: 'UTC', now: '2026-08-01T00:00:00.000Z' });
+    expect(runC.eligible).toBe(1);
+    expect(runC.written).toBe(1);
+    expect(runC.superseded).toBe(1);
+    expect(runC.expired).toBe(0);
+
+    const claims = allClaimDocs();
+    expect(claims).toHaveLength(2); // both versions persist
+    const v1 = claims.find((c) => c.id === v1Id);
+    const v2 = claims.find((c) => c.id !== v1Id);
+    expect(v1.status).toBe('expired'); // supersedeClaim never touches status
+    expect(v1.supersededByClaimId).toBe(v2.id);
+    expect(v2.version).toBe(2);
+    expect(v2.parentClaimId).toBe(v1Id);
+    expect(v2.status).toBe('verified');
+    expect(v2.supersededByClaimId).toBeNull();
+  });
+});
+
+describe('generateClaims — two-engine fixture (tag + health) in one run', () => {
+  it('registers ONE call per engine family and freezes each candidate with its own family testedCount', async () => {
+    // First 5 days also carry health.sleep data, clearing the health
+    // engine's minHealthDays=5 floor, alongside STRONG's tag:gym exposure.
+    const entries = fixtures(STRONG).map((e, i) => (
+      i < 5 ? { ...e, healthContext: { sleep: { totalHours: 7 + (i % 2) } } } : e
+    ));
+    await generateClaims(DB, UID, entries, { timeZone: 'UTC', now: NOW });
+
+    const registerOps = callOrder.filter((c) => c.op === 'register');
+    const activityFamily = familyIdForBasic('activity');
+    const healthFamily = familyIdForBasic('health');
+    expect(registerOps).toHaveLength(2); // one registerCandidates call PER family
+    expect(registerOps.map((r) => r.familyId).sort()).toEqual([activityFamily, healthFamily].sort());
+
+    const freezeOps = callOrder.filter((c) => c.op === 'freeze');
+    expect(freezeOps.some((f) => f.familyId === activityFamily && f.candidateId === 'tag:gym')).toBe(true);
+    expect(freezeOps.some((f) => f.familyId === healthFamily && f.candidateId === 'health:sleepHours')).toBe(true);
+    for (const freeze of freezeOps) {
+      const matchingRegister = registerOps.find((r) => r.familyId === freeze.familyId);
+      expect(freeze.candidateTestsCount).toBe(matchingRegister.testedCount);
+    }
   });
 });
