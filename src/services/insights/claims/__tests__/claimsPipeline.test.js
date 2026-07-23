@@ -67,6 +67,23 @@ vi.mock('../evidenceBuilder', async () => {
   };
 });
 
+// Vanished-candidate retraction sweep (Task 9 re-review gap fix): spy on
+// setClaimStatus (keeping the real implementation, backed by the map-store
+// mocks above) so tests can prove "at most once per claim id in a mixed
+// run" — a fact plain end-state assertions on `store` can't distinguish
+// from "called twice, second call was a no-op".
+const setClaimStatusCalls = [];
+vi.mock('../claimsService', async () => {
+  const actual = await vi.importActual('../claimsService');
+  return {
+    ...actual,
+    setClaimStatus: vi.fn(async (...args) => {
+      setClaimStatusCalls.push(args[2]); // claimId
+      return actual.setClaimStatus(...args);
+    }),
+  };
+});
+
 // Adjacent gap fix (R4 Phase 1 Task 9 review): generateClaims must read
 // source_exclusions and drop excluded entries before analysis. Mocked
 // directly (rather than routed through the Firestore-mock `store` above)
@@ -84,13 +101,15 @@ const { registerCandidates } = await import('../../testingLedger');
 const { freezeCandidatePlan } = await import('../evidenceBuilder');
 const { readLedgerCounts, familyIdForBasic } = await import('../../testingLedger');
 const { claimDocId } = await import('../claimSchema');
-const { setClaimStatus } = await import('../claimsService');
+const { setClaimStatus, writeClaim } = await import('../claimsService');
 
 beforeEach(() => {
   store.clear();
   callOrder.length = 0;
+  setClaimStatusCalls.length = 0;
   registerCandidates.mockClear();
   freezeCandidatePlan.mockClear();
+  setClaimStatus.mockClear();
   listSourceExclusionsMock.mockClear();
   listSourceExclusionsMock.mockImplementation(async () => []);
 });
@@ -401,5 +420,123 @@ describe('generateClaims — source_exclusions (adjacent gap fix)', () => {
     ).rejects.toThrow('firestore unavailable');
     expect(allClaimDocs()).toHaveLength(0);
     expect(registerCandidates).not.toHaveBeenCalled(); // failed before any analysis started
+  });
+});
+
+describe('generateClaims — vanished-candidate retraction (candidate not enumerated at all)', () => {
+  it('(1) a live VERIFIED claim whose candidate is removed off the board entirely (source-exclusion drops ALL its backing entries, so it never reaches enumerateExposures) is expired; stats.expired counts it; no analysis is attempted for it', async () => {
+    const first = await generateClaims(DB, UID, fixtures(STRONG), { timeZone: 'UTC', now: NOW });
+    expect(first.written).toBe(1);
+    const priorId = allClaimDocs()[0].id;
+
+    const gymEntryIds = fixtures(STRONG).filter((e) => e.tags.includes('gym')).map((e) => e.id);
+    listSourceExclusionsMock.mockImplementation(async () => gymEntryIds.map((entryId) => ({
+      entryId, appliesTo: 'basic:activity:mood', reason: 'wrong_source',
+    })));
+
+    const freezeCallsBefore = callOrder.filter((c) => c.op === 'freeze').length;
+    const laterNow = '2026-07-30T10:00:00.000Z';
+    const second = await generateClaims(DB, UID, fixtures(STRONG), { timeZone: 'UTC', now: laterNow });
+
+    // tag:gym no longer clears minPresentDays (its every backing entry was
+    // excluded), so it isn't in `specs` at all this run.
+    expect(second.candidatesTested).toBe(0);
+    expect(second.eligible).toBe(0);
+    expect(second.written).toBe(0);
+    expect(second.superseded).toBe(0);
+    expect(second.expired).toBe(1);
+    // No analysis (freezeCandidatePlan) was attempted for it — or anything else.
+    const newFreezeOps = callOrder.filter((c) => c.op === 'freeze').slice(freezeCallsBefore);
+    expect(newFreezeOps).toHaveLength(0);
+
+    const claims = allClaimDocs();
+    expect(claims).toHaveLength(1); // no new claim written
+    const prior = claims.find((c) => c.id === priorId);
+    expect(prior.status).toBe('expired');
+    expect(prior.supersededByClaimId).toBeNull();
+    expect(prior.updatedAt).toBe(laterNow);
+    expect(setClaimStatusCalls.filter((id) => id === priorId)).toHaveLength(1);
+  });
+
+  it('(2) same as (1) but the prior is SUPPRESSED: left untouched (user suppression sticks, sweep never overrides it)', async () => {
+    await generateClaims(DB, UID, fixtures(STRONG), { timeZone: 'UTC', now: NOW });
+    const priorId = allClaimDocs()[0].id;
+    await setClaimStatus(DB, UID, priorId, 'suppressed', { now: '2026-07-23T00:00:00.000Z' });
+    setClaimStatusCalls.length = 0; // isolate the assertions below to the run under test
+
+    const gymEntryIds = fixtures(STRONG).filter((e) => e.tags.includes('gym')).map((e) => e.id);
+    listSourceExclusionsMock.mockImplementation(async () => gymEntryIds.map((entryId) => ({
+      entryId, appliesTo: 'basic:activity:mood', reason: 'wrong_source',
+    })));
+
+    const laterNow = '2026-07-30T10:00:00.000Z';
+    const second = await generateClaims(DB, UID, fixtures(STRONG), { timeZone: 'UTC', now: laterNow });
+
+    expect(second.expired).toBe(0);
+    expect(setClaimStatusCalls).toHaveLength(0);
+    const prior = allClaimDocs().find((c) => c.id === priorId);
+    expect(prior.status).toBe('suppressed');
+    expect(prior.updatedAt).toBe('2026-07-23T00:00:00.000Z'); // no status call touched it
+  });
+
+  it('(3) a live verified claim whose candidate IS enumerated stays governed by the existing (ineligible) path — mixed run proves no candidate is expired twice: setClaimStatus called at most once per claim id', async () => {
+    // Two candidates in the SAME 'activity' family, both strong on the same
+    // days (tag:yoga piggybacks on every gym day) so both start verified.
+    const days = STRONG.map((d, i) => (i < 16 ? { ...d, extraTag: 'yoga' } : d));
+    const first = await generateClaims(DB, UID, fixtures(days), { timeZone: 'UTC', now: NOW });
+    expect(first.written).toBe(2); // tag:gym + tag:yoga
+    const firstClaims = allClaimDocs();
+    expect(firstClaims).toHaveLength(2);
+    const gymId = firstClaims.find((c) => c.analysisPlan.candidateId === 'tag:gym').id;
+    const yogaId = firstClaims.find((c) => c.analysisPlan.candidateId === 'tag:yoga').id;
+
+    // Second run: WEAK has no 'yoga' extraTag anywhere (data drift vanishes
+    // tag:yoga from enumeration entirely), while tag:gym IS still enumerated
+    // (still present >= minPresentDays) but now fails the practical-floor
+    // gate (the existing ineligible-retraction path in the analyze loop).
+    const laterNow = '2026-07-30T10:00:00.000Z';
+    const second = await generateClaims(DB, UID, fixtures(WEAK), { timeZone: 'UTC', now: laterNow });
+
+    expect(second.eligible).toBe(0);
+    expect(second.expired).toBe(2); // gym via the analyze loop, yoga via the sweep
+
+    const gymCalls = setClaimStatusCalls.filter((id) => id === gymId);
+    const yogaCalls = setClaimStatusCalls.filter((id) => id === yogaId);
+    expect(gymCalls).toHaveLength(1);
+    expect(yogaCalls).toHaveLength(1);
+
+    const claims = allClaimDocs();
+    expect(claims.find((c) => c.id === gymId).status).toBe('expired');
+    expect(claims.find((c) => c.id === yogaId).status).toBe('expired');
+  });
+
+  it('(4) a claim whose analysisPlan.hypothesisFamilyId is "experiment:steps-mood" (not a "basic:" family) is never touched by the sweep, even though its candidate is never enumerated by this pipeline', async () => {
+    const first = await generateClaims(DB, UID, fixtures(STRONG), { timeZone: 'UTC', now: NOW });
+    expect(first.written).toBe(1);
+    const basicClaim = allClaimDocs()[0];
+
+    // Hand-construct a valid experiment_result claim in a non-'basic:'
+    // family — this pipeline never enumerates it (its candidateId/family
+    // shape isn't one enumerateExposures/familyIdForBasic can produce), so
+    // it must be excluded on the hypothesisFamilyId check alone.
+    const experimentClaim = await writeClaim(DB, UID, {
+      ...basicClaim,
+      version: 1,
+      parentClaimId: null,
+      claimType: 'experiment_result',
+      analysisPlan: {
+        ...basicClaim.analysisPlan,
+        hypothesisFamilyId: 'experiment:steps-mood',
+        candidateId: 'steps-mood',
+      },
+    });
+    setClaimStatusCalls.length = 0; // isolate to the run under test
+
+    const second = await generateClaims(DB, UID, fixtures(STRONG), { timeZone: 'UTC', now: '2026-07-30T10:00:00.000Z' });
+
+    expect(second.expired).toBe(0); // gym is a dedup rerun (still eligible); nothing to expire
+    expect(setClaimStatusCalls).toHaveLength(0);
+    const stillThere = allClaimDocs().find((c) => c.id === experimentClaim.id);
+    expect(stillThere.status).toBe('verified');
   });
 });

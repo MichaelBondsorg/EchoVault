@@ -84,10 +84,12 @@ export async function generateClaims(db, uid, entries, { timeZone, now } = {}) {
   // enumerated for that engine this run). The post-merge testedCount is the
   // family's total distinct candidates and applies to every candidate in it.
   const specsByFamily = new Map();
+  const enumeratedKeys = new Set(); // `${familyId}|${spec.key}` for every candidate THIS run can even see
   for (const spec of specs) {
     const familyId = familyIdForBasic(engineKeyFor(spec));
     if (!specsByFamily.has(familyId)) specsByFamily.set(familyId, []);
     specsByFamily.get(familyId).push(spec);
+    enumeratedKeys.add(`${familyId}|${spec.key}`);
   }
   const familyCounts = new Map();
   for (const [familyId, familySpecs] of specsByFamily) {
@@ -138,6 +140,32 @@ export async function generateClaims(db, uid, entries, { timeZone, now } = {}) {
       written += 1; superseded += 1;
     }
   }
+
+  // Vanished-candidate retraction (Task 9 re-review gap fix): the loop above
+  // only retracts a live VERIFIED claim when its candidate is enumerated AND
+  // analysis finds it ineligible. But source-exclusions (or plain data
+  // drift, e.g. a tag's present-day count dropping below minPresentDays)
+  // can remove a candidate from `enumerateExposures`'s output ENTIRELY —
+  // that candidate is never visited by the loop above, so its live claim
+  // would otherwise keep standing forever, citing entries the user may have
+  // just flagged wrong-source. `enumeratedKeys` and the analyze loop's
+  // ineligible-retraction are mutually exclusive by construction (a key is
+  // either in `enumeratedKeys`, handled above, or not, handled here), so no
+  // claim can be expired twice in one run. Never touch a SUPPRESSED prior
+  // (user suppression sticks), and never touch a non-`basic:` family (e.g.
+  // `experiment:*`) — this sweep is scoped to this pipeline's own claims.
+  // Retraction principle: a claim whose candidate can no longer even be
+  // enumerated from current data is not currently derivable — expire it;
+  // revival stays possible via the supersede lineage, same as the
+  // ineligible-but-enumerated case above.
+  for (const [key, claim] of liveByCandidate) {
+    if (enumeratedKeys.has(key)) continue;
+    if (claim.status !== 'verified') continue;
+    if (!String(claim.analysisPlan?.hypothesisFamilyId || '').startsWith('basic:')) continue;
+    await setClaimStatus(db, uid, claim.id, 'expired', { now: at });
+    expired += 1;
+  }
+
   return {
     written, superseded, candidatesTested: specs.length, eligible, expired,
   };
