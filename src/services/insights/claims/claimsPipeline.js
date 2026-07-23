@@ -6,15 +6,41 @@
 import { buildDailyObservations, enumerateExposures } from '../observations';
 import { familyIdForBasic, registerCandidates } from '../testingLedger';
 import { resolveDeviceTimezone } from '../../experiments/computeResult';
-import { freezeCandidatePlan, buildEvidenceForCandidate } from './evidenceBuilder';
+import { freezeCandidatePlan, buildEvidenceForCandidate, buildWriterBundle } from './evidenceBuilder';
 import {
   writeClaim, supersedeClaim, listAllClaims, evidenceEquivalent, setClaimStatus,
 } from './claimsService';
 import { buildClaim } from './claimSchema';
 import { listSourceExclusions } from '../sourceExclusions';
+import { writeClaimWordingFn } from '../../../config/firebase';
 
 const ENGINE_BY_KIND = { tag: 'activity', entity: 'people', category: 'category', health: 'health' };
 export const engineKeyFor = (spec) => ENGINE_BY_KIND[spec.kind] || spec.kind;
+
+// ============================================================
+// LLM WRITER GATE (R4 Phase 2 Task 5 / plan decision P2-D1..D3)
+// ============================================================
+// The server `writeClaimWording` callable (writer -> verifier, both
+// server-side) can author a claim's `wording` in place of the Phase-1
+// deterministic template, but ONLY when this constant is true. Production
+// always uses this constant (false); Phase 2 ships the writer path DARK
+// even with `insightClaims` ON, mirroring `RISKY_CLAIMS_ENABLED`'s pattern
+// in `src/services/nexus/orchestrator.js` — a single internal seam, no user
+// flag yet, flipped only after Michael eyeballs verifier behavior on real
+// data (see PROJECT_STATUS.md). The `llmWriterEnabled` override on
+// `generateClaims`'s `options` exists ONLY so tests can exercise the writer
+// path end-to-end without touching this production default.
+//
+// The fallback guarantee is absolute and layered: (1) the server verifier
+// must PASS before returning a wording at all; (2) ANY callable error,
+// timeout, or fail verdict falls back to the deterministic template right
+// here; (3) even a `verdict:'pass'` wording is re-validated locally by
+// `buildClaim`'s own CAUSAL_RE + shape checks (belt-and-braces — see
+// claimSchema.js's docblock) before it can reach a claim doc, and a local
+// rejection ALSO falls back to the deterministic template. A claim can
+// never fail to exist, and unverified/invalid prose can never reach a doc,
+// because the LLM writer misbehaved.
+export const LLM_WRITER_ENABLED = false;
 
 /**
  * Entry ids to drop from a claims run (adjacent gap fix, R4 Phase 1 Task 9
@@ -55,9 +81,95 @@ async function excludedEntryIdsForClaims(db, uid) {
   return ids;
 }
 
-export async function generateClaims(db, uid, entries, { timeZone, now } = {}) {
+/**
+ * One console.warn per RUN (not per claim) when the LLM writer path is
+ * unavailable — a busy run with many eligible candidates and a down
+ * callable must not spam the console once per candidate. `warnState` is a
+ * single `{ warned: boolean }` object shared across the whole
+ * `generateClaims` call.
+ */
+function warnLlmWriterFallbackOnce(warnState, err) {
+  if (warnState.warned) return;
+  warnState.warned = true;
+  // eslint-disable-next-line no-console
+  console.warn(
+    '[claimsPipeline] LLM writer path unavailable this run; falling back to deterministic wording.',
+    err,
+  );
+}
+
+/**
+ * Write (or supersede) ONE claim, attempting the LLM writer path first when
+ * enabled, with an absolute fallback to the deterministic `claimInput`
+ * unchanged. `write(input)` performs the actual Firestore write for a given
+ * claimInput (new-claim vs supersede — the two call sites below differ only
+ * in what `write` does).
+ *
+ * Fallback triggers, all -> deterministic `claimInput`, unmodified:
+ *   - `llmWriterEnabled` is false (LLM path never attempted).
+ *   - `writeClaimWordingFn` rejects/throws/times out.
+ *   - the callable resolves but `verdict !== 'pass'`, or `wording` is not a
+ *     non-empty string.
+ *   - `verdict:'pass'` wording is returned, but writing it throws (belt-
+ *     and-braces: `buildClaim`'s own CAUSAL_RE + shape validation, run
+ *     again client-side inside `write()`, rejects it) — proves the local
+ *     re-validation is load-bearing, not just the server verifier.
+ *
+ * @returns {Promise<{ usedLlm: boolean }>}
+ */
+async function writeWithOptionalLlmWording({
+  claimInput, write, llmWriterEnabled, warnState,
+}) {
+  if (!llmWriterEnabled) {
+    await write(claimInput);
+    return { usedLlm: false };
+  }
+
+  let llmInput = null;
+  try {
+    const bundle = buildWriterBundle(claimInput);
+    const response = await writeClaimWordingFn({ bundle });
+    const data = response?.data || {};
+    if (data.verdict === 'pass' && typeof data.wording === 'string' && data.wording.trim() !== '') {
+      llmInput = {
+        ...claimInput,
+        wording: data.wording,
+        provenance: {
+          ...claimInput.provenance,
+          wordingSource: 'llm_writer_v1',
+          writerModel: data.writerModel,
+          verifierModel: data.verifierModel,
+        },
+      };
+    } else {
+      warnLlmWriterFallbackOnce(warnState, new Error(`writeClaimWording verdict "${data.verdict}"`));
+    }
+  } catch (err) {
+    warnLlmWriterFallbackOnce(warnState, err);
+  }
+
+  if (llmInput) {
+    try {
+      await write(llmInput);
+      return { usedLlm: true };
+    } catch (err) {
+      // Local re-validation is load-bearing: buildClaim (CAUSAL_RE + shape)
+      // rejected wording the server verifier passed. Fall back silently to
+      // the deterministic template rather than surface a build error for an
+      // otherwise-eligible, well-evidenced claim.
+      warnLlmWriterFallbackOnce(warnState, err);
+    }
+  }
+
+  await write(claimInput);
+  return { usedLlm: false };
+}
+
+export async function generateClaims(db, uid, entries, { timeZone, now, llmWriterEnabled } = {}) {
   const at = now || new Date().toISOString();
   const tz = timeZone || resolveDeviceTimezone();
+  const useLlmWriter = llmWriterEnabled ?? LLM_WRITER_ENABLED;
+  const warnState = { warned: false };
 
   // Source Exclusions (adjacent gap fix): read and filter BEFORE anything
   // derives from `entries`. FAIL-CLOSED, deliberately NOT wrapped in a
@@ -104,7 +216,7 @@ export async function generateClaims(db, uid, entries, { timeZone, now } = {}) {
     .filter((c) => c.supersededByClaimId == null)
     .map((c) => [`${c.analysisPlan.hypothesisFamilyId}|${c.analysisPlan.candidateId}`, c]));
 
-  let written = 0; let superseded = 0; let eligible = 0; let expired = 0;
+  let written = 0; let superseded = 0; let eligible = 0; let expired = 0; let llmWordings = 0;
   for (const spec of specs) {
     const { familyId, testedCount } = familyCounts.get(spec.key);
     const plan = freezeCandidatePlan({
@@ -135,8 +247,14 @@ export async function generateClaims(db, uid, entries, { timeZone, now } = {}) {
     // no supersede happens, and the prior's status/updatedAt are untouched.
     if (prior && prior.status === 'suppressed') continue;
     if (!prior) {
-      await writeClaim(db, uid, { ...result.claimInput, version: 1, parentClaimId: null });
+      const { usedLlm } = await writeWithOptionalLlmWording({
+        claimInput: result.claimInput,
+        write: (input) => writeClaim(db, uid, { ...input, version: 1, parentClaimId: null }),
+        llmWriterEnabled: useLlmWriter,
+        warnState,
+      });
       written += 1;
+      if (usedLlm) llmWordings += 1;
     } else {
       const candidate = buildClaim({ ...result.claimInput, version: prior.version + 1, parentClaimId: prior.id });
       // Trade-off (accepted): a still-eligible candidate whose evidence is
@@ -153,8 +271,16 @@ export async function generateClaims(db, uid, entries, { timeZone, now } = {}) {
       // re-eligible evidence happens to land within the equivalence band,
       // exactly the realistic "exclusion lift" scenario this fix closes.
       if (prior.status === 'verified' && evidenceEquivalent(prior, candidate)) continue; // no churn
-      await supersedeClaim(db, uid, prior, candidate);
+      const { usedLlm } = await writeWithOptionalLlmWording({
+        claimInput: result.claimInput,
+        write: (input) => supersedeClaim(
+          db, uid, prior, buildClaim({ ...input, version: prior.version + 1, parentClaimId: prior.id }),
+        ),
+        llmWriterEnabled: useLlmWriter,
+        warnState,
+      });
       written += 1; superseded += 1;
+      if (usedLlm) llmWordings += 1;
     }
   }
 
@@ -184,7 +310,7 @@ export async function generateClaims(db, uid, entries, { timeZone, now } = {}) {
   }
 
   return {
-    written, superseded, candidatesTested: specs.length, eligible, expired,
+    written, superseded, candidatesTested: specs.length, eligible, expired, llmWordings,
   };
 }
 

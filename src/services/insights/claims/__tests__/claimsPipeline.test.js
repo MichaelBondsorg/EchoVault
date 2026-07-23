@@ -96,6 +96,24 @@ vi.mock('../../sourceExclusions', () => ({
   listSourceExclusions: (...args) => listSourceExclusionsMock(...args),
 }));
 
+// LLM writer path (R4 Phase 2 Task 5): `claimsPipeline.js` imports
+// `writeClaimWordingFn` from the app's Firebase bootstrap module
+// (`src/config/firebase.js`), which — unmocked — throws at import time
+// (missing VITE_FIREBASE_API_KEY) and, even if it didn't, would try to make
+// a real network call. Mocked the same way `listSourceExclusionsMock` above
+// mocks its module: default resolves a 'fail' verdict (deterministic
+// fallback is always the safe default for tests that don't care about the
+// LLM path), individual tests override with `mockImplementation`/
+// `mockResolvedValueOnce`/`mockRejectedValueOnce`.
+const writeClaimWordingFnMock = vi.fn(async () => ({
+  data: {
+    verdict: 'fail', wording: null, reasons: ['not_configured'], writerModel: null, verifierModel: null,
+  },
+}));
+vi.mock('../../../../config/firebase', () => ({
+  writeClaimWordingFn: (...args) => writeClaimWordingFnMock(...args),
+}));
+
 const { generateClaims } = await import('../claimsPipeline');
 const { registerCandidates } = await import('../../testingLedger');
 const { freezeCandidatePlan } = await import('../evidenceBuilder');
@@ -112,6 +130,12 @@ beforeEach(() => {
   setClaimStatus.mockClear();
   listSourceExclusionsMock.mockClear();
   listSourceExclusionsMock.mockImplementation(async () => []);
+  writeClaimWordingFnMock.mockClear();
+  writeClaimWordingFnMock.mockImplementation(async () => ({
+    data: {
+      verdict: 'fail', wording: null, reasons: ['not_configured'], writerModel: null, verifierModel: null,
+    },
+  }));
 });
 
 const NOW = '2026-07-22T10:00:00.000Z';
@@ -626,5 +650,171 @@ describe('generateClaims — vanished-candidate retraction (candidate not enumer
     expect(setClaimStatusCalls).toHaveLength(0);
     const stillThere = allClaimDocs().find((c) => c.id === experimentClaim.id);
     expect(stillThere.status).toBe('verified');
+  });
+});
+
+describe('generateClaims — LLM writer path (R4 Phase 2 Task 5, llmWriterEnabled)', () => {
+  it('default (option omitted): writeClaimWordingFn is never called, and wording is byte-identical to an explicit llmWriterEnabled:false run (proves "default OFF" is really off, not just usually off)', async () => {
+    const defaultResult = await generateClaims(DB, UID, fixtures(STRONG), { timeZone: 'UTC', now: NOW });
+    expect(defaultResult.written).toBe(1);
+    expect(defaultResult.llmWordings).toBe(0);
+    expect(writeClaimWordingFnMock).not.toHaveBeenCalled();
+    const defaultClaim = allClaimDocs()[0];
+    expect(defaultClaim.provenance.wordingSource).toBe('deterministic_template_v1');
+
+    store.clear();
+    const explicitOffResult = await generateClaims(DB, UID, fixtures(STRONG), {
+      timeZone: 'UTC', now: NOW, llmWriterEnabled: false,
+    });
+    expect(explicitOffResult.llmWordings).toBe(0);
+    expect(writeClaimWordingFnMock).not.toHaveBeenCalled();
+    const explicitOffClaim = allClaimDocs()[0];
+    expect(explicitOffClaim.wording).toBe(defaultClaim.wording); // byte-equal
+    expect(explicitOffClaim.provenance.wordingSource).toBe('deterministic_template_v1');
+  });
+
+  it('override ON + callable verdict pass: claim carries the LLM wording and provenance (writerModel/verifierModel), llmWordings counts it, and the bundle sent to the callable mirrors the deterministic evidence exactly (numbers, subject, direction, claimType, capped excerpts)', async () => {
+    const LLM_WORDING = 'Recorded mood on gym days averaged 7 points higher than non-gym days — 16 vs 24 days over 40 days.';
+    writeClaimWordingFnMock.mockResolvedValueOnce({
+      data: {
+        verdict: 'pass',
+        wording: LLM_WORDING,
+        reasons: [],
+        writerModel: 'insight-writer-v1',
+        verifierModel: 'insight-verifier-v1',
+      },
+    });
+
+    const result = await generateClaims(DB, UID, fixtures(STRONG), {
+      timeZone: 'UTC', now: NOW, llmWriterEnabled: true,
+    });
+    expect(result.written).toBe(1);
+    expect(result.llmWordings).toBe(1);
+    expect(writeClaimWordingFnMock).toHaveBeenCalledTimes(1);
+
+    const claim = allClaimDocs()[0];
+    expect(claim.wording).toBe(LLM_WORDING);
+    expect(claim.provenance.wordingSource).toBe('llm_writer_v1');
+    expect(claim.provenance.writerModel).toBe('insight-writer-v1');
+    expect(claim.provenance.verifierModel).toBe('insight-verifier-v1');
+
+    const { bundle } = writeClaimWordingFnMock.mock.calls[0][0];
+    expect(bundle.subject).toBe('gym');
+    expect(bundle.outcome).toBe('mood');
+    expect(bundle.direction).toBe('positive');
+    expect(bundle.claimType).toBe('pattern_to_watch');
+    expect(bundle.numbers.exposedDayCount).toBe(claim.evidence.exposedDayCount);
+    expect(bundle.numbers.comparisonDayCount).toBe(claim.evidence.comparisonDayCount);
+    expect(bundle.numbers.observedSpanDays).toBe(claim.evidence.observedSpanDays);
+    expect(bundle.numbers.hiddenSensitiveSourceCount).toBe(0);
+    expect(bundle.numbers.effectMoodPoints).toBeCloseTo(Math.round(claim.evidence.effectMoodPoints * 10) / 10, 5);
+    expect(bundle.excerpts.length).toBeGreaterThan(0);
+    expect(bundle.excerpts.length).toBeLessThanOrEqual(8);
+    // deterministicWording is the Phase-1 template sentence (style anchor),
+    // distinct from the LLM wording actually written to the claim above.
+    expect(bundle.deterministicWording).not.toBe(LLM_WORDING);
+    expect(bundle.deterministicWording).toMatch(/gym/i);
+  });
+
+  it('callable resolves a fail verdict: falls back to the deterministic wording, the claim is still written, llmWordings stays 0, and exactly ONE console.warn fires', async () => {
+    writeClaimWordingFnMock.mockResolvedValueOnce({
+      data: {
+        verdict: 'fail', wording: null, reasons: ['causal_language'], writerModel: 'w', verifierModel: 'v',
+      },
+    });
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const result = await generateClaims(DB, UID, fixtures(STRONG), {
+        timeZone: 'UTC', now: NOW, llmWriterEnabled: true,
+      });
+      expect(result.written).toBe(1);
+      expect(result.llmWordings).toBe(0);
+      const claim = allClaimDocs()[0];
+      expect(claim.provenance.wordingSource).toBe('deterministic_template_v1');
+      expect(warnSpy).toHaveBeenCalledTimes(1);
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
+  it('callable throws (error/timeout): every eligible claim in the run still gets written with deterministic wording (fallback never blocks a write), and console.warn fires exactly ONCE for the whole run — not once per claim', async () => {
+    writeClaimWordingFnMock.mockImplementation(async () => {
+      throw new Error('deadline exceeded');
+    });
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      // tag:gym and tag:yoga are both present on the same 16 strong-effect
+      // days (see the vanished-candidate-retraction suite above), so both
+      // are independently eligible -> two LLM-writer attempts in ONE run.
+      const days = STRONG.map((d, i) => (i < 16 ? { ...d, extraTag: 'yoga' } : d));
+      const result = await generateClaims(DB, UID, fixtures(days), {
+        timeZone: 'UTC', now: NOW, llmWriterEnabled: true,
+      });
+      expect(result.written).toBe(2);
+      expect(result.llmWordings).toBe(0);
+      expect(writeClaimWordingFnMock).toHaveBeenCalledTimes(2); // one attempt per eligible claim
+      const claims = allClaimDocs();
+      expect(claims).toHaveLength(2);
+      for (const claim of claims) {
+        expect(claim.provenance.wordingSource).toBe('deterministic_template_v1');
+      }
+      expect(warnSpy).toHaveBeenCalledTimes(1); // ONE per run, not per claim
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
+  it('forged-pass causal wording: server verdict is "pass" but the wording itself is causal — buildClaim\'s own CAUSAL_RE (local re-validation, run again client-side) rejects it, so the pipeline falls back to the deterministic wording (proves the client-side re-check is load-bearing, not decorative)', async () => {
+    writeClaimWordingFnMock.mockResolvedValueOnce({
+      data: {
+        verdict: 'pass',
+        wording: 'Gym boosts your mood by 7 points on gym days.',
+        reasons: [],
+        writerModel: 'w',
+        verifierModel: 'v',
+      },
+    });
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const result = await generateClaims(DB, UID, fixtures(STRONG), {
+        timeZone: 'UTC', now: NOW, llmWriterEnabled: true,
+      });
+      expect(result.written).toBe(1);
+      expect(result.llmWordings).toBe(0);
+      const claim = allClaimDocs()[0];
+      expect(claim.provenance.wordingSource).toBe('deterministic_template_v1');
+      expect(claim.wording).not.toMatch(/boosts?/i);
+      expect(warnSpy).toHaveBeenCalledTimes(1);
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
+  it("bundle excerpt visibility: a sensitive day's entry text never reaches the bundle sent to the callable, even though its hidden count is reflected in bundle.numbers.hiddenSensitiveSourceCount", async () => {
+    writeClaimWordingFnMock.mockResolvedValueOnce({
+      data: {
+        verdict: 'fail', wording: null, reasons: [], writerModel: null, verifierModel: null,
+      },
+    });
+    // Mark the two MOST RECENT days sensitive (e38/e39 — 2026-07-09/10):
+    // receipt.sources sorts most-recent-first, so if sensitivity filtering
+    // didn't apply, these would be the very first candidates for the
+    // bundle's 8-excerpt cap. Marking them proves exclusion is due to
+    // sensitivity, not just falling outside the cap.
+    const sensitiveDays = STRONG.map((d, i) => ((i === 38 || i === 39) ? { ...d, sensitive: true } : d));
+    const result = await generateClaims(DB, UID, fixtures(sensitiveDays), {
+      timeZone: 'UTC', now: NOW, llmWriterEnabled: true,
+    });
+    expect(result.written).toBe(1);
+    expect(writeClaimWordingFnMock).toHaveBeenCalledTimes(1);
+
+    const claim = allClaimDocs()[0];
+    expect(claim.evidence.hiddenSensitiveSourceCount).toBe(2);
+
+    const { bundle } = writeClaimWordingFnMock.mock.calls[0][0];
+    expect(bundle.numbers.hiddenSensitiveSourceCount).toBe(2);
+    const excerptText = bundle.excerpts.map((e) => e.excerpt).join(' | ');
+    expect(excerptText).not.toContain('entry 38 text');
+    expect(excerptText).not.toContain('entry 39 text');
   });
 });

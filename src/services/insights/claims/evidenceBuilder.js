@@ -188,6 +188,64 @@ export function buildEvidenceForCandidate({ observations, entriesById, exposureS
   };
 }
 
+// Excerpts capped at 8 (Shared contracts, R4 Phase 2 plan) — a courtesy cap
+// on prompt size; NOT a re-application of gate 6 (evidence integrity), which
+// already ran in buildEvidenceForCandidate above.
+const MAX_WRITER_EXCERPTS = 8;
+
+/**
+ * Build the Shared-contracts evidence bundle sent to the server
+ * `writeClaimWording` callable (R4 Phase 2, Task 5). PURE — no Firestore, no
+ * clock; every value is read straight off an already-built `claimInput`
+ * (the same object `buildClaim`/`writeClaim` consume), so this can run on
+ * any claimInput regardless of which candidate produced it.
+ *
+ * `claimInput.receipt.sources` are ALREADY sensitive-filtered: this module's
+ * `buildEvidenceForCandidate` only ever feeds `buildReceipt` the `visible`
+ * (non-`sensitive`) contributing observations' entries (see the `visible`/
+ * `hidden` split above) — hidden/sensitive-day text never reaches
+ * `receipt.sources`, and therefore never reaches this bundle or the writer
+ * prompt. Excerpts are further capped to `MAX_WRITER_EXCERPTS` (8) here,
+ * independent of `buildReceipt`'s own `maxSources` cap (20).
+ *
+ * Excerpt length: `receipts.js`'s `excerptFromText` already caps every
+ * excerpt at its own EXCERPT_MAX_LEN (120 chars) when the source was built,
+ * well under the callable's 200-char rejection threshold — nothing produced
+ * by `sourceFromEntry`/`buildReceipt` can trip that server-side check, so no
+ * additional truncation is applied here (an assertion, not a runtime guard:
+ * truncating an already-short excerpt would just be silently wrong data).
+ *
+ * @param {object} claimInput - a complete `buildClaim` input (Phase-1 shape:
+ *   subject/direction/claimType/evidence/limitations/receipt/wording).
+ * @returns {object} the Shared-contracts bundle:
+ *   { subject, outcome, direction, claimType, numbers, limitations, excerpts, deterministicWording }
+ */
+export function buildWriterBundle(claimInput) {
+  const {
+    subject, outcome, direction, claimType, evidence, limitations, receipt, wording,
+  } = claimInput;
+  return {
+    subject,
+    outcome: outcome || 'mood',
+    direction,
+    claimType,
+    numbers: {
+      exposedDayCount: evidence.exposedDayCount,
+      comparisonDayCount: evidence.comparisonDayCount,
+      observedSpanDays: evidence.observedSpanDays,
+      // Signed, 1-decimal rounded (Shared contracts) — evidence.effectMoodPoints
+      // already carries the sign (estimate.delta), so this only rounds.
+      effectMoodPoints: Math.round(evidence.effectMoodPoints * 10) / 10,
+      hiddenSensitiveSourceCount: evidence.hiddenSensitiveSourceCount,
+    },
+    limitations: [...(limitations || [])],
+    excerpts: (receipt?.sources || [])
+      .slice(0, MAX_WRITER_EXCERPTS)
+      .map((s) => ({ date: s.date, excerpt: s.excerpt })),
+    deterministicWording: wording,
+  };
+}
+
 export default {
   EVIDENCE_BUILDER_VERSION,
   EMERGING_MIN_TOTAL_DAYS,
@@ -195,4 +253,5 @@ export default {
   PRACTICAL_EFFECT_FLOOR_POINTS,
   freezeCandidatePlan,
   buildEvidenceForCandidate,
+  buildWriterBundle,
 };
