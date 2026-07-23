@@ -36,6 +36,8 @@ export const WORKLOADS = Object.freeze({
   entityResolution: 'entityResolution',
   insight: 'insight',
   intentExtraction: 'intentExtraction',
+  insightWriter: 'insightWriter',
+  insightVerifier: 'insightVerifier',
   // realtime voice model is owned by the relay-server (env var REALTIME_MODEL);
   // recorded here for documentation/inventory completeness only.
   realtimeNA: 'realtimeNA',
@@ -60,6 +62,14 @@ export const MODEL_DEFAULTS = Object.freeze({
   entityResolution: 'gemini-3-flash-preview',
   insight: 'gemini-3-flash-preview',
   intentExtraction: 'gemini-3.5-flash',
+  // R4 Phase 2 claim writer/verifier: deliberately DIFFERENT default models.
+  // The verifier polices the writer's wording (entailment check), so the two
+  // must not share a model — a single model's blind spots would otherwise
+  // pass its own unentailed claims. Both are independently overridable via
+  // `model.insightWriter`/`model.insightVerifier` if that independence needs
+  // to change.
+  insightWriter: 'gemini-3.5-flash',
+  insightVerifier: 'gemini-3-flash-preview',
   realtimeNA: 'gpt-realtime-2.1',
 });
 

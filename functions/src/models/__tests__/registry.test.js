@@ -55,6 +55,12 @@ describe('registry — defaults', () => {
   it('getModelSync throws on an unknown workload', () => {
     expect(() => getModelSync('nope')).toThrow(/Unknown model workload/);
   });
+
+  it('insightWriter and insightVerifier default to DIFFERENT models (verifier independence)', () => {
+    expect(getModelSync('insightWriter')).toBe('gemini-3.5-flash');
+    expect(getModelSync('insightVerifier')).toBe('gemini-3-flash-preview');
+    expect(getModelSync('insightWriter')).not.toBe(getModelSync('insightVerifier'));
+  });
 });
 
 describe('registry — getModel resolution', () => {
