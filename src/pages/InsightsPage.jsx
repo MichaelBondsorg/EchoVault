@@ -11,10 +11,12 @@ import { recordInsightEngagement } from '../services/analytics/insightEngagement
 import { recordInsightDismissal } from '../services/nexus/insightDismissal';
 import { useNexusInsights } from '../hooks/useNexusInsights';
 import { useBasicInsights } from '../hooks/useBasicInsights';
+import { useClaims } from '../hooks/useClaims';
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { recordFeedbackAndLearn } from '../services/basicInsights/feedbackLearning';
 import { getFlag } from '../config/flags';
 import ReceiptSheet from '../components/insights/ReceiptSheet';
+import ClaimCard from '../components/insights/ClaimCard';
 import { ownerStorageKey } from '../services/storage/ownerScopedStorage';
 import {
   computeHealthMoodCorrelations,
@@ -79,6 +81,7 @@ const InsightsPage = ({
   user,
   todayHealth = null,
   todayEnvironment = null,
+  onTryExperiment,
 }) => {
   const [dismissedInsights, setDismissedInsights] = useState(new Set());
   const [expandedInsight, setExpandedInsight] = useState(null);
@@ -193,6 +196,32 @@ const InsightsPage = ({
     regenerate: regenerateBasic,
     lastGeneratedFormatted: basicLastGenerated
   } = useBasicInsights(user, entries, { autoRefresh: true });
+
+  // Claim-backed Quick Insights (R4 Phase 1, Task 10) — always called (Rules
+  // of Hooks), but the hook itself never reads Firestore unless
+  // getFlag('insightClaims') is on (see useClaims.js), so mounting this
+  // hook flag-OFF is a no-op for `listActiveClaims` call counts.
+  const {
+    claims,
+    loading: claimsLoading,
+    refresh: refreshClaims,
+  } = useClaims(user);
+
+  // "Try as an experiment" (ClaimCard) has no wired navigation seam today:
+  // ExperimentsScreen is opened via a same-file `showExperiments` boolean
+  // in AppLayout.jsx (not a route, and not passed down to InsightsPage),
+  // and it accepts no prefill prop yet — see Task 10's report for the seam
+  // investigation. This stub lets a future `onTryExperiment` prop from the
+  // parent (once AppLayout wires one through) work with zero ClaimCard/
+  // InsightsPage changes; absent that prop, it just logs in dev so the
+  // click is never a silent no-op during manual testing.
+  const handleTryExperiment = (templateId, tag) => {
+    if (typeof onTryExperiment === 'function') {
+      onTryExperiment(templateId, tag);
+    } else if (import.meta.env.DEV) {
+      console.info('[InsightsPage] Try as an experiment (no navigation seam wired yet):', { templateId, tag });
+    }
+  };
 
   // Helper to check if an insight has meaningful content
   const hasQualityContent = (insight) => {
@@ -381,19 +410,33 @@ const InsightsPage = ({
         />
       )}
 
-      {/* Quick Insights (Basic statistical correlations) */}
-      <QuickInsightsSection
-        insights={basicInsights}
-        entries={entries}
-        loading={basicLoading}
-        generating={basicGenerating}
-        hasEnoughData={hasEnoughBasicData}
-        entriesNeeded={basicEntriesNeeded}
-        lastGenerated={basicLastGenerated}
-        onRefresh={regenerateBasic}
-        userId={userId}
-        onWhyThis={handleShowReceipt}
-      />
+      {/* Quick Insights: claim-backed cards (R4 Phase 1, Task 10) behind
+          insightClaims, legacy statistical-correlation cards otherwise.
+          Flag OFF renders the exact legacy tree byte-identical — no claims
+          data is read (see useClaims.js's own internal flag gate). */}
+      {getFlag('insightClaims') ? (
+        <ClaimList
+          claims={claims}
+          loading={claimsLoading}
+          onRefresh={refreshClaims}
+          onShowReceipt={handleShowReceipt}
+          onFeedback={handleShowReceipt}
+          onTryExperiment={handleTryExperiment}
+        />
+      ) : (
+        <QuickInsightsSection
+          insights={basicInsights}
+          entries={entries}
+          loading={basicLoading}
+          generating={basicGenerating}
+          hasEnoughData={hasEnoughBasicData}
+          entriesNeeded={basicEntriesNeeded}
+          lastGenerated={basicLastGenerated}
+          onRefresh={regenerateBasic}
+          userId={userId}
+          onWhyThis={handleShowReceipt}
+        />
+      )}
 
       {/* Today's Recommendations */}
       {recommendations?.recommendations?.length > 0 && (
@@ -1269,6 +1312,84 @@ const RecommendationsSection = ({ recommendations }) => {
           )}
         </p>
       )}
+    </motion.div>
+  );
+};
+
+/**
+ * ClaimList — Quick Insights render site under `insightClaims` (R4 Phase 1,
+ * Task 10). Same outer "Quick Insights" card chrome as the legacy
+ * `QuickInsightsSection` (a single bg-card rounded-2xl block with the same
+ * header) so flipping the flag doesn't reshuffle the page's overall
+ * rhythm — the row content is `ClaimCard` per claim instead of the legacy
+ * stat row.
+ */
+const ClaimList = ({ claims, loading, onRefresh, onShowReceipt, onFeedback, onTryExperiment }) => {
+  if (loading && (!claims || claims.length === 0)) {
+    return (
+      <motion.div
+        className="bg-card border border-border rounded-2xl p-4"
+        initial={{ opacity: 0, y: -10 }}
+        animate={{ opacity: 1, y: 0 }}
+      >
+        <div className="flex items-center gap-3">
+          <div className="p-2 bg-divider rounded-xl">
+            <Loader2 size={18} className="text-muted-foreground animate-spin" />
+          </div>
+          <div>
+            <h3 className="font-medium text-secondary-foreground">Quick Insights</h3>
+            <p className="text-xs text-muted-foreground">Checking your patterns...</p>
+          </div>
+        </div>
+      </motion.div>
+    );
+  }
+
+  if (!claims || claims.length === 0) return null;
+
+  return (
+    <motion.div
+      className="bg-card border border-border rounded-2xl overflow-hidden"
+      initial={{ opacity: 0, y: -10 }}
+      animate={{ opacity: 1, y: 0 }}
+    >
+      {/* Header */}
+      <div className="p-4 flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <div className="p-2 bg-accent-wash rounded-xl">
+            <Zap size={18} className="text-accent-deep" />
+          </div>
+          <div>
+            <h3 className="font-semibold text-foreground">Quick Insights</h3>
+            <p className="text-xs text-muted-foreground">Based on your patterns</p>
+          </div>
+        </div>
+        {onRefresh && (
+          <button
+            onClick={onRefresh}
+            disabled={loading}
+            className="cloud-icon-button disabled:opacity-50"
+          >
+            <RefreshCw
+              size={14}
+              className={`text-muted-foreground ${loading ? 'animate-spin' : ''}`}
+            />
+          </button>
+        )}
+      </div>
+
+      {/* Claim cards */}
+      <div className="px-4 pb-4 grid gap-2">
+        {claims.map((claim) => (
+          <ClaimCard
+            key={claim.id}
+            claim={claim}
+            onShowReceipt={onShowReceipt}
+            onFeedback={onFeedback}
+            onTryExperiment={onTryExperiment}
+          />
+        ))}
+      </div>
     </motion.div>
   );
 };

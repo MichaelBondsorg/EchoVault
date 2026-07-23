@@ -180,7 +180,9 @@ describe('InsightsPage — insightReceipts flag OFF', () => {
 });
 
 describe('InsightsPage — insightReceipts flag ON', () => {
-  beforeEach(() => getFlag.mockReturnValue(true));
+  // Only the flag under test: a blanket `true` would also enable
+  // insightClaims and swap the Quick Insights section to ClaimCards.
+  beforeEach(() => getFlag.mockImplementation((name) => name === 'insightReceipts'));
 
   it('two-taps acceptance: insight card -> trigger -> sources visible', () => {
     render(<InsightsPage entries={ENTRIES} userId="user-1" user={{ uid: 'user-1' }} />);
