@@ -25,32 +25,42 @@
  * `'positive'` (which would misrepresent a null result as a real finding).
  *
  * THE CAUSAL-LANGUAGE COLLISION (binding finding, read before touching the
- * wording/limitations logic below): `claimSchema.js`'s `CAUSAL_RE` rejects
- * the bare word "caused" (and siblings) ANYWHERE in `wording`/
- * `questionWording`/every `limitations` entry — no negation-awareness. Two
- * of this codebase's own EXISTING fixed strings trip it on every real
- * result:
+ * wording/questionWording/limitations logic below): `claimSchema.js`'s
+ * `CAUSAL_RE` rejects the bare word "caused" (and siblings) in `wording`/
+ * `questionWording` with no negation-awareness — two of this codebase's own
+ * EXISTING inputs trip it on every real result, and this module handles
+ * each differently:
  *   - `computeResult.js`'s `NON_CAUSAL_FRAMING` ("...not proof that one
  *     caused the other.") is unconditionally appended to EVERY
  *     `narrative.summary` — so `result.narrative.summary` will, in
  *     practice, NEVER pass `CAUSAL_RE`. This module still checks it (never
  *     hand-waves the rule away) per the mapping spec, but the check is
  *     expected to always fall through to the rebuilt wording below.
+ *   - The user's own `experiment.question` is natural free text ("Does more
+ *     sleep improve my mood?") and routinely trips `CAUSAL_RE` too —
+ *     unlike `wording`, there is no fallback template to silently swap in
+ *     upstream, so an unguarded pass-through used to make `buildClaim`
+ *     throw and `writeResult`'s containment swallow it, losing the claim
+ *     entirely with no visible error. This module now checks
+ *     `experiment.question` itself and substitutes evidenceBuilder.js's
+ *     neutral `questionWording` template ("How did {subject} and mood move
+ *     together in your recorded days?") whenever the raw question trips the
+ *     regex, so a causal-sounding question never silently drops a claim.
  *   - `templates.js`'s `whatThisDoesNotProveFor` bullet #1 ("This does not
- *     show that {exposure} caused the change in {outcome}.") trips the same
- *     regex, for the same reason (explicitly negating causation still
- *     contains the trigger word). Reusing `analysisPlan.whatThisDoesNotProve`
- *     verbatim would make `buildClaim` throw on every template. This module
- *     defensively filters `whatThisDoesNotProve` to the entries that already
- *     pass `CAUSAL_RE` (bullets #2-4 on every v1 template) rather than
- *     letting an unrelated wording rule crash an otherwise-valid claim —
- *     see the module's own report for the flag raised about this collision
- *     upstream.
- * `CAUSAL_RE` itself is not exported by `claimSchema.js` (by design — it's
- * an internal validation detail); the copy below is a deliberate, minimal
- * duplication kept byte-identical to that module's pattern, matching the
- * codebase's existing precedent for small duplicated helpers (e.g.
- * `computeResult.js`'s date helpers vs. `preflight.js`'s copy).
+ *     show that {exposure} caused the change in {outcome}.") used to trip
+ *     the same regex for the same reason (explicitly negating causation
+ *     still contains the trigger word) — `claimSchema.js`'s `buildClaim`
+ *     now applies a negation-aware strip to `limitations` ONLY (adjudicated
+ *     option (c); `wording`/`questionWording` remain fully strict) before
+ *     testing for causal language, so legitimate negated-causal disclaimers
+ *     like this one pass. This module therefore no longer filters
+ *     `whatThisDoesNotProve` at all — every template bullet flows into
+ *     `limitations` verbatim.
+ * `CAUSAL_RE` is exported by `claimSchema.js` specifically so this module
+ * (and any future claim-producing module) can import the SAME regex
+ * instance instead of maintaining a duplicate that could drift — the
+ * server-side parity test (Task 9) still asserts the shared client pattern
+ * matches `functions/src/insights/claimVerifier.js`.
  */
 import {
   MIN_PAIRED_OBSERVATIONS, MIN_GROUP_SIZE, MIN_GROUP_FRACTION, BOOTSTRAP_RESAMPLES, SMALL_EFFECT_DELTA,
@@ -58,10 +68,8 @@ import {
 import { ADAPTER_VERSION } from '../insights/entryAdapter';
 import { OBSERVATION_SCHEMA_VERSION } from '../insights/observations';
 import { EVIDENCE_BUILDER_VERSION } from '../insights/claims/evidenceBuilder';
+import { CAUSAL_RE } from '../insights/claims/claimSchema';
 import { generatorVersion } from '../insights/generatorVersion';
-
-// Byte-identical copy of claimSchema.js's (unexported) CAUSAL_RE.
-const CAUSAL_RE = /\b(boosts?|causes?|caused|improves?|improved|makes? you|leads? to|results? in|because of your)\b/i;
 
 function roundToOneDecimal(n) {
   return Math.round(n * 10) / 10;
@@ -181,17 +189,28 @@ export function buildExperimentResultClaim({
       subject, outcomeLabel, delta, nHigh: estimate.nHigh, nLow: estimate.nLow, n: estimate.n, splitMode,
     });
 
-  const questionWording = typeof experiment.question === 'string' ? experiment.question : '';
+  // The user's raw question is natural free text and routinely trips
+  // CAUSAL_RE (see module doc comment's causal-language section) — silently
+  // passing it through used to make buildClaim throw and writeResult's
+  // containment swallow the whole claim with no visible error. Substitute
+  // evidenceBuilder.js's own neutral questionWording template whenever the
+  // raw question trips the regex; pass it through verbatim otherwise.
+  const rawQuestion = typeof experiment.question === 'string' ? experiment.question : '';
+  const questionWording = rawQuestion && CAUSAL_RE.test(rawQuestion)
+    ? `How did ${subject} and mood move together in your recorded days?`
+    : rawQuestion;
 
-  const rawWhatThisDoesNotProve = Array.isArray(plan.whatThisDoesNotProve) ? plan.whatThisDoesNotProve : [];
-  // Defensive filter (see module doc comment's causal-language section):
-  // never let a caveat bullet that happens to trip CAUSAL_RE crash claim
-  // construction — drop it rather than lose the whole claim.
-  const safeWhatThisDoesNotProve = rawWhatThisDoesNotProve.filter((l) => typeof l === 'string' && !CAUSAL_RE.test(l));
+  // No longer filtered for CAUSAL_RE (see module doc comment's
+  // causal-language section): claimSchema.js's negation-aware limitations
+  // check now accepts legitimate negated-causal disclaimers like bullet #1,
+  // so every template bullet flows into limitations verbatim.
+  const whatThisDoesNotProve = Array.isArray(plan.whatThisDoesNotProve)
+    ? plan.whatThisDoesNotProve.filter((l) => typeof l === 'string')
+    : [];
   const coverageCaveat = typeof result.receipt?.missingness === 'string' && result.receipt.missingness
     ? result.receipt.missingness
     : `Exposure: ${result.coverage?.exposure?.label || 'unknown coverage'}. Outcome: ${result.coverage?.outcome?.label || 'unknown coverage'}.`;
-  const limitations = [...safeWhatThisDoesNotProve, coverageCaveat];
+  const limitations = [...whatThisDoesNotProve, coverageCaveat];
 
   const frozenAt = typeof experiment.createdAt === 'string' && experiment.createdAt ? experiment.createdAt : nowIso;
 
@@ -235,6 +254,12 @@ export function buildExperimentResultClaim({
     totalCandidateDayCount: estimate.n,
     exposedDayCount: estimate.nHigh,
     comparisonDayCount: estimate.nLow,
+    // NOTE: here `observedSpanDays` is the experiment WINDOW length (total
+    // days in `result.coverage.exposure`, i.e. coverage denominator) — not
+    // the paired-day span the pipeline's own evidenceBuilder.js means by
+    // the same field name. computeResult.js does not expose per-pair
+    // dateKeys, so there is no narrower span to compute here; `estimate.n`
+    // (paired observations) is the closest available fallback.
     observedSpanDays: Number.isFinite(result.coverage?.exposure?.total) ? result.coverage.exposure.total : estimate.n,
     exposureContrast: estimate.exposureContrast,
     effectMoodPoints: estimate.delta,

@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { buildClaim, claimDocId, CLAIM_TYPES, CLAIM_STATUSES, CLAIM_TOP_LEVEL_KEYS } from '../claimSchema';
+import {
+  buildClaim, claimDocId, CLAIM_TYPES, CLAIM_STATUSES, CLAIM_TOP_LEVEL_KEYS, CAUSAL_RE,
+} from '../claimSchema';
 
 const NOW = '2026-07-22T10:00:00.000Z';
 const validPlan = {
@@ -89,6 +91,34 @@ describe('buildClaim', () => {
     })).toThrow(/causal/i);
   });
 
+  it('accepts a negated-causal disclaimer in limitations (negation-aware check, adjudicated option c)', () => {
+    expect(() => buildClaim({
+      ...valid(),
+      limitations: ['This does not show that sleep hours caused the change in mood.'],
+    })).not.toThrow();
+  });
+
+  it('still rejects an affirmative (non-negated) causal claim in limitations', () => {
+    expect(() => buildClaim({
+      ...valid(), limitations: ['Sleep causes better mood.'],
+    })).toThrow(/causal/i);
+  });
+
+  it('rejects a limitation that smuggles an affirmative causal claim before a negated clause', () => {
+    expect(() => buildClaim({
+      ...valid(), limitations: ['Sleep boosts mood but this does not prove it.'],
+    })).toThrow(/causal/i);
+  });
+
+  it('still rejects negated-causal phrasing in wording/questionWording (strictness unchanged there)', () => {
+    expect(() => buildClaim({
+      ...valid(), wording: 'This does not show that sleep hours caused the change in mood.',
+    })).toThrow(/causal/i);
+    expect(() => buildClaim({
+      ...valid(), questionWording: 'This does not show that sleep hours caused the change in mood.',
+    })).toThrow(/causal/i);
+  });
+
   it('returns a deep-frozen claim (immutable fact once built)', () => {
     const claim = buildClaim(valid());
     expect(Object.isFrozen(claim)).toBe(true);
@@ -99,6 +129,13 @@ describe('buildClaim', () => {
     expect(Object.isFrozen(claim.limitations)).toBe(true);
     expect(Object.isFrozen(claim.provenance)).toBe(true);
     expect(() => { claim.status = 'suppressed'; }).toThrow(TypeError);
+  });
+});
+
+describe('CAUSAL_RE export', () => {
+  it('is exported for reuse by other claim-producing modules (e.g. experimentClaim.js)', () => {
+    expect(CAUSAL_RE.test('this causes better mood')).toBe(true);
+    expect(CAUSAL_RE.test('a neutral sentence')).toBe(false);
   });
 });
 

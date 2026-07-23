@@ -204,9 +204,10 @@ describe('buildExperimentResultClaim — a positive-delta ok result maps to a va
     });
   });
 
-  it('drops the whatThisDoesNotProve bullet that trips CAUSAL_RE ("...caused the change...") and appends the coverage caveat', () => {
-    expect(claim.limitations.some((l) => /\bcaused\b/i.test(l))).toBe(false);
-    expect(claim.limitations).toHaveLength(4); // 3 safe template bullets + 1 coverage caveat
+  it('passes every whatThisDoesNotProve bullet through verbatim (negation-aware limitations check accepts the disclaimer) and appends the coverage caveat', () => {
+    expect(claim.limitations).toHaveLength(5); // 4 template bullets (incl. the negated-causal disclaimer) + 1 coverage caveat
+    expect(claim.limitations.slice(0, 4)).toEqual(SLEEP_PLAN.whatThisDoesNotProve);
+    expect(claim.limitations[0]).toMatch(/\bcaused\b/i); // the disclaimer bullet survives verbatim, negation and all
     expect(claim.limitations[claim.limitations.length - 1]).toBe('Exposure: 20 of 20 days. Outcome: 20 of 20 days.');
   });
 
@@ -249,6 +250,38 @@ describe('buildExperimentResultClaim — prefers a real narrative.summary when i
     const result = okResult({ narrative: { summary: safeSummary, alternatives: [], whatThisDoesNotProve: [] } });
     const input = buildExperimentResultClaim({ experiment: experimentFor(SLEEP_PLAN), experimentId: 'exp-1', result, now: NOW });
     expect(input.wording).toBe(safeSummary);
+  });
+});
+
+describe('buildExperimentResultClaim — causal-question substitution (Fix 1: no silent claim loss)', () => {
+  it('substitutes a neutral questionWording when the user\'s raw question trips CAUSAL_RE (no throw, no lost claim)', () => {
+    const experiment = experimentFor(SLEEP_PLAN, { question: 'Does more sleep improve my mood?' });
+    const result = okResult();
+    let input;
+    expect(() => { input = buildExperimentResultClaim({
+      experiment, experimentId: 'exp-1', result, now: NOW,
+    }); }).not.toThrow();
+    expect(input.questionWording).toBe('How did sleep hours and mood move together in your recorded days?');
+    expect(() => buildClaim(input)).not.toThrow();
+  });
+
+  it('substitutes a neutral questionWording for another natural causal phrasing ("boost")', () => {
+    const experiment = experimentFor(SLEEP_PLAN, { question: 'Does exercise boost my mood?' });
+    const result = okResult();
+    const input = buildExperimentResultClaim({
+      experiment, experimentId: 'exp-1', result, now: NOW,
+    });
+    expect(input.questionWording).toBe('How did sleep hours and mood move together in your recorded days?');
+    expect(() => buildClaim(input)).not.toThrow();
+  });
+
+  it('passes a neutral (non-causal) question through verbatim', () => {
+    const experiment = experimentFor(SLEEP_PLAN, { question: 'What is the relationship between my sleep and mood?' });
+    const result = okResult();
+    const input = buildExperimentResultClaim({
+      experiment, experimentId: 'exp-1', result, now: NOW,
+    });
+    expect(input.questionWording).toBe('What is the relationship between my sleep and mood?');
   });
 });
 

@@ -23,7 +23,32 @@ export const CLAIM_TOP_LEVEL_KEYS = Object.freeze([
 // functions/src/insights/claimVerifier.js (cross-package duplicate, same
 // precedent as dismissalKey.js <-> insightDismissal.js — see that pair's
 // doc comments). A parity test (Task 9) asserts the two stay identical.
-const CAUSAL_RE = /\b(boosts?|causes?|caused|improves?|improved|makes? you|leads? to|results? in|because of your)\b/i;
+// Exported so other claim-producing modules (e.g.
+// `src/services/experiments/experimentClaim.js`) can reuse the SAME regex
+// instance rather than maintaining a byte-identical duplicate that could
+// drift. The regex text/behavior itself must stay unchanged for the
+// server-side parity test above — only the export keyword is new.
+export const CAUSAL_RE = /\b(boosts?|causes?|caused|improves?|improved|makes? you|leads? to|results? in|because of your)\b/i;
+
+// LIMITATIONS-ONLY negation strip (adjudicated option (c)): a limitation
+// bullet exists to tell the user what the result does NOT show, so an
+// explicitly negated causal clause ("This does not show that X caused Y")
+// is the whole point of a limitation, not a violation of the causal-language
+// rule. Before running CAUSAL_RE on a limitation string, strip clauses that
+// open with a negation word directly followed by a claim-verb ("does not
+// show/prove/mean/establish/imply/demonstrate/tell us") and run to the next
+// sentence boundary ([^.!?]*) — narrowly anchored so it only ever removes
+// the negated clause itself. It intentionally does NOT touch wording/
+// questionWording (those stay fully strict — no legitimate reason for a
+// headline claim to contain causal language, negated or not) and it is
+// clause-bounded so an affirmative causal claim earlier in the same
+// sentence (e.g. "Sleep boosts mood but this does not prove it.") survives
+// the strip and still trips CAUSAL_RE on the remainder.
+const NEGATED_CAUSAL_CLAUSE_RE = /\b(does not|doesn't|do not|don't|cannot|can't|won't|did not|didn't)\s+(show|prove|mean|establish|imply|demonstrate|tell us)\b[^.!?]*/gi;
+
+function stripNegatedCausalClauses(str) {
+  return str.replace(NEGATED_CAUSAL_CLAUSE_RE, '');
+}
 
 const REQUIRED_PLAN_KEYS = ['frozenAt', 'hypothesisFamilyId', 'candidateId',
   'candidateTestsCount', 'ciLevel', 'outcomeUnit', 'timezone', 'datePolicy',
@@ -108,7 +133,10 @@ export function buildClaim(input) {
   req(!CAUSAL_RE.test(wording) && !CAUSAL_RE.test(questionWording),
     'causal language rejected in claim wording');
   req(Array.isArray(limitations) && limitations.every(isStr), 'limitations must be string[]');
-  req(limitations.every((l) => !CAUSAL_RE.test(l)), 'causal language rejected in claim limitations');
+  // Negation-aware: strip explicitly-negated causal clauses (the point of a
+  // limitation) before checking the remainder for affirmative causal
+  // language — see NEGATED_CAUSAL_CLAUSE_RE's doc comment above.
+  req(limitations.every((l) => !CAUSAL_RE.test(stripNegatedCausalClauses(l))), 'causal language rejected in claim limitations');
 
   req(analysisPlan && typeof analysisPlan === 'object', 'analysisPlan required');
   for (const k of REQUIRED_PLAN_KEYS) req(analysisPlan[k] !== undefined && analysisPlan[k] !== null, `analysisPlan.${k} required (frozen before analysis)`);
