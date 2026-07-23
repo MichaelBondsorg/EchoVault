@@ -11,8 +11,14 @@ import { APP_COLLECTION_ID } from '../../config/constants';
 
 export const LEDGER_ALPHA = 0.05;
 
-export function familyIdForBasic(engineKey, exposureKey) {
-  return `basic:${engineKey}:${exposureKey}:mood`;
+/**
+ * Basic-claim families pool at ENGINE level (activity/people/category/health):
+ * one family per engine, whose candidates are the exposure keys tested
+ * within it. Do NOT embed the exposure key in the family id — that would
+ * make every family a singleton and defeat the multiple-testing correction.
+ */
+export function familyIdForBasic(engineKey) {
+  return `basic:${engineKey}:mood`;
 }
 
 export function familyIdForExperiment(templateId, tag) {

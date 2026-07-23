@@ -25,7 +25,7 @@ const NOW = '2026-07-22T10:00:00.000Z';
 
 describe('family ids and correction', () => {
   it('builds stable family ids', () => {
-    expect(familyIdForBasic('activity', 'tag:gym')).toBe('basic:activity:tag:gym:mood');
+    expect(familyIdForBasic('activity')).toBe('basic:activity:mood');
     expect(familyIdForExperiment('steps-mood')).toBe('experiment:steps-mood');
     expect(familyIdForExperiment('tag-presence-mood', 'Gym')).toBe('experiment:tag-presence-mood:tag:gym');
   });

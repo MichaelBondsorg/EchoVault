@@ -47,7 +47,9 @@ vi.mock('../../testingLedger', async () => {
     ...actual,
     registerCandidates: vi.fn(async (...args) => {
       const result = await actual.registerCandidates(...args);
-      callOrder.push({ op: 'register', candidateId: args[3][0], testedCount: result.testedCount });
+      callOrder.push({
+        op: 'register', familyId: args[2], candidateIds: [...args[3]], testedCount: result.testedCount,
+      });
       return result;
     }),
   };
@@ -57,7 +59,9 @@ vi.mock('../evidenceBuilder', async () => {
   return {
     ...actual,
     freezeCandidatePlan: vi.fn((args) => {
-      callOrder.push({ op: 'freeze', candidateId: args.candidateId, candidateTestsCount: args.candidateTestsCount });
+      callOrder.push({
+        op: 'freeze', familyId: args.familyId, candidateId: args.candidateId, candidateTestsCount: args.candidateTestsCount,
+      });
       return actual.freezeCandidatePlan(args);
     }),
   };
@@ -116,13 +120,16 @@ function allClaimDocs() {
 }
 
 describe('generateClaims — pipeline order (count-before-analyze)', () => {
-  it('registers every candidate before analyzing any, and freezes plans with the post-registration family count', async () => {
+  it('registers every candidate before analyzing any (ONE call per engine family), and freezes plans with the post-registration family count', async () => {
     const days = STRONG.map((d, i) => (i < 3 ? { ...d, extraTag: 'call' } : d));
     await generateClaims(DB, UID, fixtures(days), { timeZone: 'UTC', now: NOW });
 
     const registerOps = callOrder.filter((c) => c.op === 'register');
     const freezeOps = callOrder.filter((c) => c.op === 'freeze');
-    expect(registerOps.map((r) => r.candidateId).sort()).toEqual(['tag:call', 'tag:gym']);
+    // tag:gym and tag:call both belong to the 'activity' engine family, so
+    // they are registered together in ONE registerCandidates call.
+    expect(registerOps).toHaveLength(1);
+    expect(registerOps[0].candidateIds.sort()).toEqual(['tag:call', 'tag:gym']);
     expect(freezeOps.map((f) => f.candidateId).sort()).toEqual(['tag:call', 'tag:gym']);
 
     // Count-before-analyze: the LAST register call happens before the
@@ -133,21 +140,33 @@ describe('generateClaims — pipeline order (count-before-analyze)', () => {
     expect(lastRegisterIndex).toBeLessThan(firstFreezeIndex);
 
     // Each freeze call's candidateTestsCount is exactly the testedCount its
-    // own registerCandidates call returned (captured post-registration, not
-    // re-derived from a separate/stale read).
+    // own family's registerCandidates call returned (captured
+    // post-registration, not re-derived from a separate/stale read) —
+    // and, since both candidates share one family, both freezes get the
+    // SAME pooled count.
     for (const freeze of freezeOps) {
-      const matchingRegister = registerOps.find((r) => r.candidateId === freeze.candidateId);
+      const matchingRegister = registerOps.find((r) => r.familyId === freeze.familyId);
       expect(freeze.candidateTestsCount).toBe(matchingRegister.testedCount);
     }
+    expect(freezeOps.every((f) => f.candidateTestsCount === 2)).toBe(true);
   });
 });
 
 describe('generateClaims — strong candidate, mixed eligibility', () => {
-  it('a strong candidate ends as ONE verified claim doc, and ALL enumerated candidates are ledgered even though only one is eligible', async () => {
-    const days = STRONG.map((d, i) => (i < 3 ? { ...d, extraTag: 'call' } : d));
+  it('a strong candidate ends as ONE verified claim doc; ALL enumerated candidates pool into ONE engine-level family doc even though only one is eligible; every frozen plan (including the eligible one) carries the family-pooled candidateTestsCount/ciLevel — this IS the multiple-testing correction the defect defeated', async () => {
+    // 3 tag specs enumerated within the SAME 'activity' engine: tag:gym
+    // (16 present days, clears every gate), tag:call and tag:book (3
+    // present days each — enumerated, ledgered, but too few days to be
+    // eligible). Before this fix, each would have formed its OWN
+    // singleton family (m=1, ciLevel=0.95, correction never applies).
+    const days = STRONG.map((d, i) => {
+      if (i < 3) return { ...d, extraTag: 'call' };
+      if (i >= 3 && i < 6) return { ...d, extraTag: 'book' };
+      return d;
+    });
     const result = await generateClaims(DB, UID, fixtures(days), { timeZone: 'UTC', now: NOW });
 
-    expect(result.candidatesTested).toBe(2); // tag:gym + tag:call
+    expect(result.candidatesTested).toBe(3); // tag:gym + tag:call + tag:book
     expect(result.eligible).toBe(1); // only tag:gym clears the gates
     expect(result.written).toBe(1);
     expect(result.superseded).toBe(0);
@@ -156,17 +175,22 @@ describe('generateClaims — strong candidate, mixed eligibility', () => {
     expect(claims).toHaveLength(1);
     expect(claims[0].status).toBe('verified');
     expect(claims[0].analysisPlan.candidateId).toBe('tag:gym');
+    // The point of the fix: the eligible candidate's frozen plan carries
+    // the FAMILY's pooled count (3), not its own singleton count (1).
+    expect(claims[0].analysisPlan.candidateTestsCount).toBe(3);
+    expect(claims[0].analysisPlan.ciLevel).toBeCloseTo(1 - 0.05 / 3);
     expect(claims[0].id).toBe(claimDocId({
-      familyId: familyIdForBasic('activity', 'tag:gym'), candidateId: 'tag:gym', version: 1,
+      familyId: familyIdForBasic('activity'), candidateId: 'tag:gym', version: 1,
     }));
 
-    // Both candidates left a ledger mark, even the ineligible one.
-    const gymFamily = familyIdForBasic('activity', 'tag:gym');
-    const callFamily = familyIdForBasic('activity', 'tag:call');
-    const counts = await readLedgerCounts(DB, UID, [gymFamily, callFamily]);
-    expect(counts.get(gymFamily)).toBe(1);
-    expect(counts.get(callFamily)).toBe(1);
-    expect(store.has(ledgerPath(callFamily))).toBe(true);
+    // All three candidates pool into ONE engine-level family doc — not
+    // three single-member families.
+    const activityFamily = familyIdForBasic('activity');
+    const counts = await readLedgerCounts(DB, UID, [activityFamily]);
+    expect(counts.get(activityFamily)).toBe(3);
+    expect(store.has(ledgerPath(activityFamily))).toBe(true);
+    const ledgerDoc = store.get(ledgerPath(activityFamily));
+    expect(Object.keys(ledgerDoc.candidates).sort()).toEqual(['tag:book', 'tag:call', 'tag:gym']);
   });
 });
 

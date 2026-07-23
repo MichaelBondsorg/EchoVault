@@ -20,12 +20,21 @@ export async function generateClaims(db, uid, entries, { timeZone, now } = {}) {
   const entriesById = new Map((entries || []).filter((e) => e && e.id).map((e) => [e.id, e]));
   const specs = enumerateExposures(observations);
 
-  // 1) Register EVERY candidate before any analysis.
-  const familyCounts = new Map();
+  // 1) Register EVERY candidate before any analysis, grouped by engine-level
+  // family (one registerCandidates call per family, covering all specs
+  // enumerated for that engine this run). The post-merge testedCount is the
+  // family's total distinct candidates and applies to every candidate in it.
+  const specsByFamily = new Map();
   for (const spec of specs) {
-    const familyId = familyIdForBasic(engineKeyFor(spec), spec.key);
-    const { testedCount } = await registerCandidates(db, uid, familyId, [spec.key], { now: at });
-    familyCounts.set(spec.key, { familyId, testedCount });
+    const familyId = familyIdForBasic(engineKeyFor(spec));
+    if (!specsByFamily.has(familyId)) specsByFamily.set(familyId, []);
+    specsByFamily.get(familyId).push(spec);
+  }
+  const familyCounts = new Map();
+  for (const [familyId, familySpecs] of specsByFamily) {
+    const keys = familySpecs.map((s) => s.key);
+    const { testedCount } = await registerCandidates(db, uid, familyId, keys, { now: at });
+    for (const spec of familySpecs) familyCounts.set(spec.key, { familyId, testedCount });
   }
 
   // 2) Analyze under frozen plans; write/supersede eligible claims.
