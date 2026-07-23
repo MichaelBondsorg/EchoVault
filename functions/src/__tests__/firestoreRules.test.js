@@ -1630,3 +1630,99 @@ describe('Experiments collection rules (owner isolation)', () => {
     await assertFails(deleteDoc(ref));
   });
 });
+
+// --- testing_ledger collection rules (R4 Phase 1: hypothesis-family --------
+// multiple-testing ledger) --------------------------------------------------
+
+// Seed a testing_ledger doc directly (bypassing rules, as the Admin SDK
+// would for a server-authored fixture) so update-contract tests can start
+// from an arbitrary testedCount without going through the owner-create path.
+async function seedLedger(id, extra = {}) {
+  await testEnv.withSecurityRulesDisabled(async (context) => {
+    const db = context.firestore();
+    await setDoc(doc(db, userPath(USER_ID), 'testing_ledger', id), {
+      familyId: 'basic:activity:tag:gym:mood',
+      candidates: { 'tag:gym': { firstTestedAt: 'seed', lastTestedAt: 'seed', timesTested: 1 } },
+      testedCount: 1,
+      createdAt: 'seed',
+      updatedAt: 'seed',
+      ...extra,
+    });
+  });
+}
+
+describe('testing_ledger collection rules (create shape)', () => {
+  const validLedger = {
+    familyId: 'basic:activity:tag:gym:mood',
+    candidates: { 'tag:gym': { firstTestedAt: 'now', lastTestedAt: 'now', timesTested: 1 } },
+    testedCount: 1,
+    createdAt: 'now',
+    updatedAt: 'now',
+  };
+
+  it('allows the owner to create a well-formed ledger doc', async () => {
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    const ref = doc(db, userPath(USER_ID), 'testing_ledger', 'basic:activity:tag:gym:mood');
+    await assertSucceeds(setDoc(ref, validLedger));
+  });
+
+  it('denies an unexpected extra key', async () => {
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    const ref = doc(db, userPath(USER_ID), 'testing_ledger', 'e-junk');
+    await assertFails(setDoc(ref, { ...validLedger, hacked: true }));
+  });
+});
+
+describe('testing_ledger collection rules (update contract)', () => {
+  it('denies an update that lowers testedCount', async () => {
+    await seedLedger('e-lower', { testedCount: 3 });
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    const ref = doc(db, userPath(USER_ID), 'testing_ledger', 'e-lower');
+    await assertFails(updateDoc(ref, { testedCount: 2, updatedAt: 'now' }));
+  });
+
+  it('allows an update that raises testedCount', async () => {
+    await seedLedger('e-raise', { testedCount: 1 });
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    const ref = doc(db, userPath(USER_ID), 'testing_ledger', 'e-raise');
+    await assertSucceeds(updateDoc(ref, {
+      candidates: { 'tag:gym': { firstTestedAt: 'seed', lastTestedAt: 'now', timesTested: 1 }, 'tag:run': { firstTestedAt: 'now', lastTestedAt: 'now', timesTested: 1 } },
+      testedCount: 2,
+      updatedAt: 'now',
+    }));
+  });
+
+  it('denies an update that touches familyId', async () => {
+    await seedLedger('e-freeze-family');
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    const ref = doc(db, userPath(USER_ID), 'testing_ledger', 'e-freeze-family');
+    await assertFails(updateDoc(ref, { familyId: 'basic:activity:tag:run:mood', updatedAt: 'now' }));
+  });
+
+  it('denies an update that touches createdAt', async () => {
+    await seedLedger('e-freeze-created');
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    const ref = doc(db, userPath(USER_ID), 'testing_ledger', 'e-freeze-created');
+    await assertFails(updateDoc(ref, { createdAt: 'rewritten', updatedAt: 'now' }));
+  });
+});
+
+describe('testing_ledger collection rules (owner isolation)', () => {
+  it('denies another user reading a ledger doc', async () => {
+    await seedLedger('e-cross');
+    const db = testEnv.authenticatedContext(OTHER_USER_ID).firestore();
+    const ref = doc(db, userPath(USER_ID), 'testing_ledger', 'e-cross');
+    await assertFails(getDoc(ref));
+  });
+
+  it('denies another user creating, updating, or deleting a ledger doc', async () => {
+    await seedLedger('e-cross2');
+    const db = testEnv.authenticatedContext(OTHER_USER_ID).firestore();
+    const ref = doc(db, userPath(USER_ID), 'testing_ledger', 'e-cross2');
+    await assertFails(setDoc(ref, {
+      familyId: 'hacked', candidates: {}, testedCount: 0, createdAt: 'now', updatedAt: 'now',
+    }));
+    await assertFails(updateDoc(ref, { testedCount: 2, updatedAt: 'now' }));
+    await assertFails(deleteDoc(ref));
+  });
+});

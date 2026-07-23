@@ -478,7 +478,7 @@ function computePearsonR(pairs) {
  * deltas actually survived — NOT over `BOOTSTRAP_RESAMPLES` — so a run with
  * some discards still produces a well-formed CI from its valid subset.
  */
-function bootstrapDeltaCIPerResampleSplit({ pairs, splitMode, rng }) {
+function bootstrapDeltaCIPerResampleSplit({ pairs, splitMode, rng, ciLevel = CI_LEVEL }) {
   const n = pairs.length;
   const deltas = [];
   let discardCount = 0;
@@ -499,10 +499,10 @@ function bootstrapDeltaCIPerResampleSplit({ pairs, splitMode, rng }) {
   }
 
   deltas.sort((a, b) => a - b);
-  const alpha = (1 - CI_LEVEL) / 2;
+  const alphaHalf = (1 - ciLevel) / 2;
   const lastIdx = deltas.length - 1;
-  const lowerIdx = Math.max(0, Math.floor(alpha * lastIdx));
-  const upperIdx = Math.min(lastIdx, Math.ceil((1 - alpha) * lastIdx));
+  const lowerIdx = Math.max(0, Math.floor(alphaHalf * lastIdx));
+  const upperIdx = Math.min(lastIdx, Math.ceil((1 - alphaHalf) * lastIdx));
   return { ci: [deltas[lowerIdx], deltas[upperIdx]], discardCount };
 }
 
@@ -719,6 +719,8 @@ export function runAnalysisPlan({ pairs = [], plan = {}, seed } = {}) {
   const minExposureContrast = Number.isFinite(plan?.minExposureContrast)
     ? plan.minExposureContrast
     : DEFAULT_MIN_EXPOSURE_CONTRAST;
+  const ciLevel =
+    Number.isFinite(plan?.ciLevel) && plan.ciLevel > 0 && plan.ciLevel < 1 ? plan.ciLevel : CI_LEVEL;
 
   if (n < MIN_PAIRED_OBSERVATIONS) {
     reasons.push('insufficient_paired_observations');
@@ -773,6 +775,7 @@ export function runAnalysisPlan({ pairs = [], plan = {}, seed } = {}) {
     pairs: canonicalPairs,
     splitMode,
     rng,
+    ciLevel,
   });
 
   if (discardCount / BOOTSTRAP_RESAMPLES > RESAMPLE_DISCARD_LIMIT) {

@@ -449,6 +449,21 @@ service cloud.firestore {
           && !request.resource.data.keys().hasAny(['startAt', 'endAt']);
         allow update: if isOwner(userId) && experimentUpdateAllowed(resource.data, request.resource.data);
       }
+
+      // R4 Phase 1: hypothesis-family testing ledger. Append-only in spirit:
+      // testedCount may never decrease (the multiple-testing count must be
+      // durable even when candidates are inconclusive or later suppressed).
+      match /testing_ledger/{ledgerId} {
+        allow read, delete: if isOwner(userId);
+        allow create: if isOwner(userId)
+          && request.resource.data.keys().hasOnly(['familyId', 'candidates', 'testedCount', 'createdAt', 'updatedAt'])
+          && request.resource.data.testedCount is int
+          && request.resource.data.testedCount >= 0;
+        allow update: if isOwner(userId)
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['candidates', 'testedCount', 'updatedAt'])
+          && request.resource.data.testedCount is int
+          && request.resource.data.testedCount >= resource.data.testedCount;
+      }
     }
 
     // Top-level runtime feature-flag doc, written only by the Admin
