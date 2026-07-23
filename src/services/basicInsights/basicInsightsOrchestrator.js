@@ -346,17 +346,23 @@ export const generateBasicInsights = async (userId, entries) => {
     // OFF). Runs after the legacy insights are computed and cached — never
     // blocks or fails legacy generation; any pipeline error is swallowed
     // (logged) so a claims-pipeline bug can never regress basicInsights.
+    // Capture outcome (ok/error) so rebuildInsights can report a claims failure
+    // as a claims failure, not as a complete rebuild success.
+    let claims = null;
     if (getFlag('insightClaims')) {
       try {
-        await generateClaims(db, userId, entries);
+        const c = await generateClaims(db, userId, entries);
+        claims = { ok: true, ...c };
       } catch (error) {
         console.warn('[basicInsights] claim generation failed (legacy insights unaffected):', error?.message);
+        claims = { ok: false, error: error?.name || 'Error' };
       }
     }
 
     return {
       success: true,
-      ...result
+      ...result,
+      ...(claims && { claims })
     };
 
   } catch (error) {

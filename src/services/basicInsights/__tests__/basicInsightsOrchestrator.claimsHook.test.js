@@ -101,4 +101,34 @@ describe('generateBasicInsights — claims pipeline hook (R4 Phase 1)', () => {
     expect(result.insights.length).toBeGreaterThan(0);
     expect(warnSpy).toHaveBeenCalled();
   });
+
+  it('RED: flag ON, pipeline throws: result includes claims.ok === false (binding gap)', async () => {
+    getFlagMock.mockReturnValue(true);
+    generateClaimsMock.mockRejectedValue(new Error('boom'));
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const result = await generateBasicInsights('user-1', buildEntries());
+
+    // Legacy insights still succeed
+    expect(result.success).toBe(true);
+    expect(result.insights.length).toBeGreaterThan(0);
+    // BUT: claims outcome is captured, not swallowed
+    expect(result.claims).toBeDefined();
+    expect(result.claims.ok).toBe(false);
+    expect(result.claims.error).toBe('Error'); // Error name from mocked error
+    expect(warnSpy).toHaveBeenCalled();
+  });
+
+  it('RED: flag ON, pipeline succeeds: result includes claims.ok === true', async () => {
+    getFlagMock.mockReturnValue(true);
+    generateClaimsMock.mockResolvedValue({ written: 2, superseded: 0, candidatesTested: 5, eligible: 3 });
+
+    const result = await generateBasicInsights('user-1', buildEntries());
+
+    expect(result.success).toBe(true);
+    expect(result.claims).toBeDefined();
+    expect(result.claims.ok).toBe(true);
+    expect(result.claims.written).toBe(2);
+    expect(result.claims.eligible).toBe(3);
+  });
 });

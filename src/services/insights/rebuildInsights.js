@@ -84,6 +84,13 @@ const inFlightByUid = new Map();
 const FAILURE_MESSAGE = "We couldn't rebuild your insights. Your previous insights are still available.";
 const EMPTY_MESSAGE = 'Rebuild complete. Nothing currently clears the evidence threshold.';
 
+// Map internal engine names to user-facing display names (used in partial-failure messages)
+const ENGINE_DISPLAY_NAMES = {
+  claims: 'verified insights',
+  basic: 'quick insights',
+  nexus: 'pattern insights'
+};
+
 function errorClassOf(error) {
   if (error instanceof Error) return error.name || 'Error';
   return typeof error;
@@ -95,7 +102,12 @@ async function runBasicEngine(uid, poolEntries) {
     const result = await generateBasicInsights(uid, poolEntries);
     const durationMs = Date.now() - startedAt;
     if (result?.success) {
-      return { ok: true, insightCount: result.insights?.length ?? 0, durationMs };
+      return {
+        ok: true,
+        insightCount: result.insights?.length ?? 0,
+        durationMs,
+        ...(result.claims && { claims: result.claims })
+      };
     }
     if (result?.insufficientData) {
       // Not an error — the pool genuinely doesn't clear the minimum-entries
@@ -175,18 +187,28 @@ async function doRebuild(db, uid, entries, options = {}) {
   let result;
   if (insightClaims) {
     // The claims-pipeline hook lives INSIDE generateBasicInsights and only
-    // runs after a successful compute — if the basic engine itself failed,
-    // the hook never ran this pass, so a "claims read" here would only
-    // reflect stale data from a prior run. Report it as not-run rather
-    // than mislabeling a stale re-read as current.
-    const claimsResult = basicResult.ok
-      ? await runClaimsRead(db, uid)
-      : { ok: false, error: 'basic_engine_failed', count: 0 };
+    // runs after a successful compute. Check the basicResult.claims outcome
+    // (captured by the hook) to determine if the hook succeeded or failed.
+    let claimsOutcome;
+    if (!basicResult.ok) {
+      // Basic engine failed, so hook never ran
+      claimsOutcome = { ok: false, error: 'basic_engine_failed', count: 0 };
+    } else if (basicResult.claims?.ok === false) {
+      // Hook ran but failed — report that failure directly
+      claimsOutcome = basicResult.claims;
+    } else {
+      // Hook succeeded (or isn't tracked), run standard post-generation claims read
+      claimsOutcome = await runClaimsRead(db, uid);
+    }
 
-    engines.claims = { ok: claimsResult.ok, error: claimsResult.error, count: claimsResult.count };
-    const verifiedClaimCount = claimsResult.count || 0;
+    engines.claims = {
+      ok: claimsOutcome.ok,
+      error: claimsOutcome.error,
+      count: claimsOutcome.count
+    };
+    const verifiedClaimCount = claimsOutcome.count || 0;
     result = {
-      ok: basicResult.ok && claimsResult.ok,
+      ok: basicResult.ok && claimsOutcome.ok,
       engines,
       dayCount,
       verifiedClaimCount,
@@ -288,9 +310,10 @@ export function describeRebuildResult(result) {
   }
 
   if (failedEngines.length > 0) {
+    const displayNames = failedEngines.map(name => ENGINE_DISPLAY_NAMES[name] || name);
     return {
       tone: 'partial',
-      message: `Rebuild partially completed — ${failedEngines.join(' and ')} couldn't finish. Your previous insights for that engine are still current.`,
+      message: `Rebuild partially completed — ${displayNames.join(' and ')} couldn't finish. Your previous insights for that engine are still current.`,
     };
   }
 

@@ -195,6 +195,40 @@ describe('rebuildInsights — insightClaims ON (claims branch)', () => {
     expect(result.ok).toBe(true);
     expect(result.verifiedClaimCount).toBe(0);
   });
+
+  it('RED: threads claims.ok === false from basicResult into claims engine result', async () => {
+    insightClaimsFlag = true;
+    generateBasicInsights.mockResolvedValue({
+      success: true,
+      insights: [{ id: 'b1' }],
+      claims: { ok: false, error: 'Error' } // Claims failed during generation
+    });
+
+    const result = await rebuildInsights(DB, UID, ENTRIES);
+
+    // Basic succeeded but claims failed during it
+    expect(result.engines.basic.ok).toBe(true);
+    expect(result.engines.claims.ok).toBe(false);
+    expect(result.engines.claims.error).toBe('Error');
+    expect(result.ok).toBe(false); // Partial failure
+    expect(listActiveClaims).not.toHaveBeenCalled(); // Do not attempt read if basic's claims failed
+  });
+
+  it('RED: threads claims.ok === true from basicResult into claims engine result', async () => {
+    insightClaimsFlag = true;
+    generateBasicInsights.mockResolvedValue({
+      success: true,
+      insights: [{ id: 'b1' }],
+      claims: { ok: true, written: 3, eligible: 5 } // Claims succeeded during generation
+    });
+
+    const result = await rebuildInsights(DB, UID, ENTRIES);
+
+    // Basic succeeded and claims succeeded
+    expect(result.engines.basic.ok).toBe(true);
+    expect(result.engines.claims.ok).toBe(true);
+    expect(listActiveClaims).toHaveBeenCalledWith(DB, UID);
+  });
 });
 
 describe('rebuildInsights — dayCount', () => {
@@ -286,7 +320,8 @@ describe('describeRebuildResult', () => {
       insightCount: 2,
     });
     expect(tone).toBe('partial');
-    expect(message).toMatch(/nexus/);
+    // Uses display name instead of internal engine name
+    expect(message).toMatch(/pattern insights/);
     expect(message).not.toMatch(/^Insights rebuilt from/);
   });
 
@@ -317,5 +352,31 @@ describe('describeRebuildResult', () => {
       insightCount: 5,
     });
     expect(message).toBe('Insights rebuilt from 4 recorded days. 5 insights are available.');
+  });
+
+  it('RED: partial-failure message maps engine names to display names (claims → "verified insights", etc)', () => {
+    const { message } = describeRebuildResult({
+      ok: false,
+      engines: { basic: { ok: true }, claims: { ok: false, error: 'boom' } },
+      dayCount: 5,
+      verifiedClaimCount: 0,
+      insightCount: 0,
+    });
+    // Should use display names, not internal ones
+    expect(message).toMatch(/verified insights/);
+    expect(message).not.toMatch(/claims/);
+  });
+
+  it('RED: partial-failure message maps nexus and basic to display names in legacy branch', () => {
+    const { message } = describeRebuildResult({
+      ok: false,
+      engines: { basic: { ok: false, error: 'boom' }, nexus: { ok: true } },
+      dayCount: 5,
+      verifiedClaimCount: 0,
+      insightCount: 2,
+    });
+    // Should use display names
+    expect(message).toMatch(/quick insights/);
+    expect(message).not.toMatch(/basic/);
   });
 });
