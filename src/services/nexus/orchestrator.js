@@ -1034,15 +1034,44 @@ const saveInsights = async (userId, insights) => {
     console.warn('[Orchestrator] Could not read existing history:', e);
   }
 
-  // Combine existing insights for deduplication check
-  const allExisting = [...existingActive, ...existingHistory];
+  // Fix B (INS-1, 2026-07-24 brief): deduplicate the newly generated batch
+  // against (a) other items in the same batch and (b) stable user decisions
+  // (dismissal/suppression keys), NOT against `existingActive`/
+  // `existingHistory`. `active` is wholesale-overwritten by this
+  // generation's own output a few lines down regardless, and audit history
+  // is lineage, not a display instruction — rejecting a fresh insight for
+  // resembling an old (possibly legacyVersion, archived) card is exactly
+  // the "can block their own replacements" defect the brief documents.
+  // Resurfacing frequency for previously-shown-but-not-dismissed insights
+  // belongs to the Insight Budget/shown ledger (`insightBudget.js`), not
+  // this dedup pass.
+  //
+  // `insights` arrives already sorted by priority (ascending — see the
+  // `insights.sort((a, b) => a.priority - b.priority)` call at the
+  // `generateInsights` call site), so within-batch dedup below keeps
+  // whichever of two same-theme candidates was encountered FIRST, which is
+  // the stronger/higher-ranked one per that ordering — not an arbitrary
+  // survivor.
+  let dismissedKeys = new Set();
+  try {
+    dismissedKeys = await getDismissedKeys(userId);
+  } catch (e) {
+    console.warn('[Orchestrator] Could not read dismissed keys for generation-side filter:', e);
+  }
 
-  // Filter new insights to remove duplicates (by semantic similarity)
   const uniqueNewInsights = [];
   for (const insight of insights) {
-    // Check against both existing insights AND already-added new insights
-    const allToCheck = [...allExisting, ...uniqueNewInsights];
-    if (!isDuplicateInsight(insight, allToCheck)) {
+    // Stable user decision: a dismissed/suppressed insight (matched by its
+    // content-derived dismissalKeyFor, not raw id — see insightDismissal.js)
+    // never re-enters `active`, generation-side, in addition to the
+    // existing read-time filter in `getCachedInsights`.
+    const key = dismissalKeyFor(insight);
+    if (key && dismissedKeys.has(key)) {
+      continue;
+    }
+    // Within-batch duplicate check only — NOT against existingActive/
+    // existingHistory (see comment above).
+    if (!isDuplicateInsight(insight, uniqueNewInsights)) {
       uniqueNewInsights.push(insight);
     }
   }

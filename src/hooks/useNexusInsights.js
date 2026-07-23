@@ -234,29 +234,28 @@ export const useNexusInsights = (user, options = {}) => {
     }
   }, [enabled, user?.uid, refreshing]);
 
-  // Combine active + history, dedupe, filter by confidence and learning.
+  // Fix B (INS-1, 2026-07-24 brief): the proactive feed reads `active`
+  // ONLY. `historyInsights` (loaded above for `historyCount`/diagnostic use
+  // only) is a separate audit/lineage record and is never blended back into
+  // the live feed — that's the exact defect the brief documents ("the
+  // 50-item audit history becomes a second, stale proactive feed"). If a
+  // labeled "Previous insights" surface is ever built, it reads
+  // `historyInsights` directly and separately; it does not get folded into
+  // `allInsights`.
+  //
   // Memoized (Task 12 follow-up) so the array reference is stable across
-  // re-renders that don't touch activeInsights/historyInsights/learningData
-  // — this is what makes the Insight Budget's flag-off path a genuine,
-  // reference-identical passthrough rather than one that merely happens to
-  // contain equal values.
+  // re-renders that don't touch activeInsights/learningData — this is what
+  // makes the Insight Budget's flag-off path a genuine, reference-identical
+  // passthrough rather than one that merely happens to contain equal
+  // values.
   const allInsights = useMemo(() => {
     const seenIds = new Set();
     const combined = [];
 
-    // Add active first (they're most current)
     for (const insight of activeInsights) {
       if (insight.id && !seenIds.has(insight.id)) {
         seenIds.add(insight.id);
         combined.push({ ...insight, isActive: true });
-      }
-    }
-
-    // Add history (non-duplicates)
-    for (const insight of historyInsights) {
-      if (insight.id && !seenIds.has(insight.id)) {
-        seenIds.add(insight.id);
-        combined.push({ ...insight, isActive: false });
       }
     }
 
@@ -296,7 +295,7 @@ export const useNexusInsights = (user, options = {}) => {
       return confidence >= 0.5;
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeInsights, historyInsights, learningData]);
+  }, [activeInsights, learningData]);
 
   // Freshness tick (R2 Task 2): a day/week allowance derived from `shownLog`
   // needs to re-evaluate at a day boundary even when nothing else causes a
@@ -366,9 +365,10 @@ export const useNexusInsights = (user, options = {}) => {
   const isCalibrating = !!calibrationInsight;
 
   return {
-    // State - budgetedInsights is allInsights (active + history, confidence
-    // ≥50%) further gated by the Insight Budget when insightBudget is on;
-    // flag off -> identical to allInsights.
+    // State - budgetedInsights is allInsights (active only, confidence
+    // ≥50%, Fix B INS-1: history is never blended in) further gated by the
+    // Insight Budget when insightBudget is on; flag off -> identical to
+    // allInsights.
     insights: budgetedInsights,
     activeInsights,
     historyInsights,

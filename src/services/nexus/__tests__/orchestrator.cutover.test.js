@@ -119,6 +119,44 @@ function buildFixtureEntries() {
   return entries;
 }
 
+// Fixture for Fix B (INS-1) dedup tests: two distinct entities ("meeting",
+// "project") matched by the SAME `computeEntityMoodCorrelations` regex
+// (`/\b(work|meeting|project)\b/gi`, type 'activity'), given identical mood
+// statistics (avg 85%, baseline ~73%, delta ~12) so their generated
+// "X Effect" insights are textually near-identical apart from the entity
+// name — enough to cross `isDuplicateInsight`'s combined-content-similarity
+// threshold (>0.6) and exercise the within-batch dedup path deterministically,
+// without relying on the theme dictionary.
+function buildEntityFixtureEntries() {
+  const now = Date.parse('2026-07-21T12:00:00.000Z');
+  const entries = [];
+  for (let i = 0; i < 4; i++) {
+    entries.push({
+      id: `meeting-${i}`,
+      createdAt: new Date(now - i * DAY_MS).toISOString(),
+      text: `Had a great meeting today, feeling really good about it. Entry number ${i}.`,
+      analysis: { mood_score: 0.85 },
+    });
+  }
+  for (let i = 0; i < 4; i++) {
+    entries.push({
+      id: `project-${i}`,
+      createdAt: new Date(now - (i + 4) * DAY_MS).toISOString(),
+      text: `Worked on the project today, feeling really good about it. Entry number ${i}.`,
+      analysis: { mood_score: 0.85 },
+    });
+  }
+  for (let i = 0; i < 4; i++) {
+    entries.push({
+      id: `neutral-${i}`,
+      createdAt: new Date(now - (i + 8) * DAY_MS).toISOString(),
+      text: `A regular day. Nothing special. Entry number ${i}.`,
+      analysis: { mood_score: 0.50 },
+    });
+  }
+  return entries;
+}
+
 beforeEach(() => {
   getDocs.mockReset();
   getDoc.mockReset();
@@ -228,5 +266,134 @@ describe('saveInsights — versioned cutover (R4 Task 6)', () => {
     }
     // The only real write in this pipeline is the nexus/insights doc itself.
     expect(writtenPaths.some((p) => p.endsWith('nexus/insights'))).toBe(true);
+  });
+});
+
+/**
+ * Fix B (INS-1, 2026-07-24 brief) — generation deduplication redesign.
+ * `saveInsights` must dedup the newly generated batch against (a) other
+ * items in the same batch and (b) stable dismissal/suppression decisions —
+ * NOT against `existingActive`/`existingHistory`. Root-cause quote from the
+ * brief: "A newly generated insight can be rejected for resembling an
+ * archived legacy card" — these tests pin the fix for that specific defect,
+ * plus confirm the version-cutover archiving behavior the redesign must not
+ * disturb.
+ */
+describe('saveInsights — Fix B (INS-1) generation dedup redesign', () => {
+  it('a fresh current-generation insight is NOT rejected merely because a semantically similar item exists in archived (legacyVersion) history', async () => {
+    // Seeded history entry closely resembles the "Yoga Effect" entity
+    // correlation `buildFixtureEntries()` reliably produces (4 yoga entries
+    // at 0.85 mood vs a ~0.72 baseline — see the module doc comment on that
+    // fixture in the describe block above).
+    const legacyYogaInsight = {
+      id: 'entity_yoga_1690000000000',
+      type: 'entity_correlation',
+      title: 'Yoga Effect',
+      summary: 'Yoga boosts your mood by ~13%',
+      priority: 3,
+      legacyVersion: true,
+    };
+
+    getDoc.mockImplementation(async (ref) => {
+      if (ref?.__path?.endsWith('nexus/insights')) {
+        return { exists: () => true, data: () => ({ active: [], history: [legacyYogaInsight] }) };
+      }
+      return { exists: () => false, data: () => ({}) };
+    });
+    getDocs.mockResolvedValueOnce(mockEntriesSnapshot(buildFixtureEntries()));
+
+    const result = await generateInsights('user-dedup-non-rejection');
+    expect(result.success).toBe(true);
+
+    const persistCall = setDoc.mock.calls.find((call) => call[1] && Array.isArray(call[1].active));
+    expect(persistCall).toBeTruthy();
+
+    const freshYoga = persistCall[1].active.find(
+      (i) => i.type === 'entity_correlation' && i.title === 'Yoga Effect'
+    );
+    expect(freshYoga).toBeTruthy();
+    expect(freshYoga.generatorVersion).toBe(generatorVersion);
+    // It's the CURRENT generation's own insight, not the archived one.
+    expect(freshYoga.legacyVersion).toBeFalsy();
+  });
+
+  it('two same-theme outputs in one generation collapse to at most one visible active card (within-batch dedup only)', async () => {
+    getDoc.mockResolvedValue({ exists: () => false, data: () => ({}) });
+    getDocs.mockResolvedValueOnce(mockEntriesSnapshot(buildEntityFixtureEntries()));
+
+    const result = await generateInsights('user-dedup-within-batch');
+    expect(result.success).toBe(true);
+
+    const persistCall = setDoc.mock.calls.find((call) => call[1] && Array.isArray(call[1].active));
+    const entityInsights = persistCall[1].active.filter((i) => i.type === 'entity_correlation');
+
+    // "Meeting Effect" and "Project Effect" would both individually qualify
+    // (same mood delta), but their generated title+summary+body cross
+    // isDuplicateInsight's combined-content-similarity threshold against
+    // each other — at most one survives.
+    expect(entityInsights.length).toBe(1);
+    expect(entityInsights[0].title).toBe('Meeting Effect');
+  });
+
+  it('archiving still happens: the dedup redesign does not disturb version-cutover archiving of a superseded active into history', async () => {
+    const legacyInsight = {
+      id: 'pattern_still_archives',
+      type: 'pattern_correlation',
+      title: 'A pre-cutover pattern',
+      summary: 'legacy summary text',
+      priority: 3,
+      // no generatorVersion — implicit version 1, eligible for archiving
+    };
+
+    getDoc.mockImplementation(async (ref) => {
+      if (ref?.__path?.endsWith('nexus/insights')) {
+        return { exists: () => true, data: () => ({ active: [legacyInsight], history: [] }) };
+      }
+      return { exists: () => false, data: () => ({}) };
+    });
+    getDocs.mockResolvedValueOnce(mockEntriesSnapshot(buildFixtureEntries()));
+
+    await generateInsights('user-dedup-archive-still-happens');
+
+    const persistCall = setDoc.mock.calls.find((call) => call[1] && Array.isArray(call[1].active));
+    expect(persistCall[1].active.find((i) => i.id === 'pattern_still_archives')).toBeUndefined();
+
+    const archived = persistCall[1].history.find((i) => i.id === 'pattern_still_archives');
+    expect(archived).toBeTruthy();
+    expect(archived.legacyVersion).toBe(true);
+  });
+
+  it('a dismissed/suppressed insight in the new batch does not re-enter `active` (generation-side stable-decision check)', async () => {
+    // dismissalKeyFor an entity_correlation insight is
+    // `entity_correlation:${normalizedEntityName}:${direction}` — see
+    // insightDismissal.js. "Meeting Effect" with a positive moodDelta ->
+    // `entity_correlation:meeting:boosts`.
+    getDoc.mockResolvedValue({ exists: () => false, data: () => ({}) });
+    getDocs.mockImplementation(async (refOrQuery) => {
+      if (refOrQuery?.__path?.includes('insight_engagement')) {
+        return {
+          docs: [],
+          forEach: (cb) => cb({
+            id: 'dismissed-1',
+            data: () => ({ dismissed: true, dismissalKey: 'entity_correlation:meeting:boosts' }),
+          }),
+        };
+      }
+      return mockEntriesSnapshot(buildEntityFixtureEntries());
+    });
+
+    const result = await generateInsights('user-dedup-dismissal');
+    expect(result.success).toBe(true);
+
+    const persistCall = setDoc.mock.calls.find((call) => call[1] && Array.isArray(call[1].active));
+    const entityInsights = persistCall[1].active.filter((i) => i.type === 'entity_correlation');
+
+    // "Meeting Effect" is dismissed and must not resurface generation-side;
+    // "Project Effect" was the within-batch-dedup loser in the sibling test
+    // above, but with Meeting filtered out first, Project is now the sole
+    // survivor.
+    expect(entityInsights.find((i) => i.title === 'Meeting Effect')).toBeUndefined();
+    expect(entityInsights.length).toBe(1);
+    expect(entityInsights[0].title).toBe('Project Effect');
   });
 });

@@ -254,3 +254,90 @@ describe('useNexusInsights - enabled option (R4 Phase 2 Task 6)', () => {
     expect(result.current.insights.map((i) => i.id)).toEqual(['i1', 'i2', 'i3']);
   });
 });
+
+// Fix B (INS-1, 2026-07-24 brief): "the proactive Nexus feed reads `active`
+// only. `history` remains an audit/diagnostic record and is never blended
+// into the current feed." This is the missing contract the brief calls out
+// explicitly: "no test proves archived items are absent from the live hook
+// output." Root-cause quote: "`useNexusInsights` then combines
+// `activeInsights + historyInsights` into the user-visible feed" — these
+// tests pin that the combination no longer happens, even when history is
+// non-empty and contains `legacyVersion: true` items.
+describe('useNexusInsights - Fix B (INS-1): history never blends into the feed', () => {
+  it('archived/legacyVersion history items never appear in `insights`, even though `historyInsights` still carries them', async () => {
+    orchestratorMocks.getCachedInsights.mockResolvedValue({
+      insights: [{ id: 'active-1', title: 'Current Card', type: 'pattern', confidence: 0.9 }],
+      history: [
+        { id: 'legacy-1', title: 'Old Legacy Card', type: 'pattern', confidence: 0.9, legacyVersion: true },
+        { id: 'legacy-2', title: 'Another Old Card', type: 'pattern', confidence: 0.9 },
+      ],
+      generatedAt: Date.now(),
+      stale: false,
+      expiresAt: Date.now() + 60 * 60 * 1000,
+    });
+
+    const { result } = renderHook(() => useNexusInsights(USER, { autoRefresh: false }));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    // The displayed feed is active-only.
+    expect(result.current.insights.map((i) => i.id)).toEqual(['active-1']);
+    expect(result.current.insights.some((i) => i.legacyVersion)).toBe(false);
+    expect(result.current.insights.some((i) => i.id === 'legacy-1' || i.id === 'legacy-2')).toBe(false);
+
+    // History is still tracked (audit/diagnostic use, e.g. historyCount) —
+    // it just never gets folded into the display feed.
+    expect(result.current.historyInsights.map((i) => i.id)).toEqual(['legacy-1', 'legacy-2']);
+    expect(result.current.historyCount).toBe(2);
+    expect(result.current.activeCount).toBe(1);
+  });
+
+  it('reloading (regenerateInsights re-reading the cache) does not reintroduce historical cards into the feed', async () => {
+    orchestratorMocks.getCachedInsights
+      .mockResolvedValueOnce({
+        insights: [{ id: 'active-1', title: 'Current Card', type: 'pattern', confidence: 0.9 }],
+        history: [{ id: 'legacy-1', title: 'Old Legacy Card', type: 'pattern', confidence: 0.9, legacyVersion: true }],
+        generatedAt: Date.now(),
+        stale: false,
+        expiresAt: Date.now() + 60 * 60 * 1000,
+      })
+      // Regeneration re-read (triggered by `refresh()` below): a different
+      // active set, same stale history still present in the cache.
+      .mockResolvedValueOnce({
+        insights: [{ id: 'active-2', title: 'New Current Card', type: 'pattern', confidence: 0.9 }],
+        history: [{ id: 'legacy-1', title: 'Old Legacy Card', type: 'pattern', confidence: 0.9, legacyVersion: true }],
+        generatedAt: Date.now(),
+        stale: false,
+        expiresAt: Date.now() + 60 * 60 * 1000,
+      });
+    orchestratorMocks.generateInsights.mockResolvedValue({ success: true, insights: [], generatedAt: Date.now() });
+
+    const { result } = renderHook(() => useNexusInsights(USER, { autoRefresh: false }));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.insights.map((i) => i.id)).toEqual(['active-1']);
+
+    await act(async () => { await result.current.refresh(); });
+
+    expect(result.current.insights.map((i) => i.id)).toEqual(['active-2']);
+    expect(result.current.insights.some((i) => i.id === 'legacy-1')).toBe(false);
+  });
+
+  it('an empty active set with non-empty history displays no cards at all (first post-cutover generation: archives-but-displays-none)', async () => {
+    orchestratorMocks.getCachedInsights.mockResolvedValue({
+      insights: [],
+      history: [
+        { id: 'legacy-1', title: 'Old Legacy Card', legacyVersion: true },
+        { id: 'legacy-2', title: 'Another Old Card', legacyVersion: true },
+      ],
+      generatedAt: Date.now(),
+      stale: false,
+      expiresAt: Date.now() + 60 * 60 * 1000,
+    });
+
+    const { result } = renderHook(() => useNexusInsights(USER, { autoRefresh: false }));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    expect(result.current.insights).toEqual([]);
+    expect(result.current.hasInsights).toBe(false);
+    expect(result.current.historyCount).toBe(2);
+  });
+});
