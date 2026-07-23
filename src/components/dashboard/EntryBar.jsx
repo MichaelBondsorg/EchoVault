@@ -283,7 +283,9 @@ const EntryBar = ({
       const mime = MediaRecorder.isTypeSupported("audio/webm") ? "audio/webm" : "audio/mp4";
       console.log('[Recording] Using MIME type:', mime);
 
-      const recorder = new MediaRecorder(stream, { mimeType: mime, audioBitsPerSecond: 32000 });
+      // 128 kbps (was 32): ASR mishearing quality is bounded by input audio;
+      // matches PromptScreen's rate. Transcription-quality decision 2026-07-23.
+      const recorder = new MediaRecorder(stream, { mimeType: mime, audioBitsPerSecond: 128000 });
       const chunks = [];
 
       // Incremental chunk persistence (flag: webChunkPersistence). The

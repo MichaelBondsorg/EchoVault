@@ -16,8 +16,17 @@ const ALLOWED = [
   'gentleRevisit', 'personalExperiments', 'insightClaims',
   'model.embeddingWriteV2', 'model.embeddingV2Read',
 ];
-if (!ALLOWED.includes(name) || !['true', 'false'].includes(value)) {
+// String-valued model-workload overrides (registry `model.<workload>` keys).
+// Each name whitelists its accepted model ids as a typo guard; 'default'
+// DELETES the override so the registry default applies again (rollback).
+const STRING_ALLOWED = {
+  'model.fusedTranscription': ['gemini-3.5-flash', 'gemini-2.5-flash', 'default'],
+};
+const isBool = ALLOWED.includes(name) && ['true', 'false'].includes(value);
+const isString = name in STRING_ALLOWED && STRING_ALLOWED[name].includes(value);
+if (!isBool && !isString) {
   console.error(`Usage: node flip-flag.mjs <${ALLOWED.join('|')}> <true|false>`);
+  console.error(`   or: node flip-flag.mjs <${Object.keys(STRING_ALLOWED).join('|')}> <model-id|default>`);
   process.exit(1);
 }
 initializeApp({ credential: applicationDefault(), projectId: 'echo-vault-app' });
@@ -25,6 +34,14 @@ const db = getFirestore();
 const ref = db.doc('config/flags');
 const before = (await ref.get()).data() || {};
 console.log(`[flip-flag] before: ${name} = ${JSON.stringify(before[name])}`);
-await ref.set({ [name]: value === 'true' }, { merge: true });
+if (isString) {
+  const { FieldValue } = await import('firebase-admin/firestore');
+  await ref.set(
+    { [name]: value === 'default' ? FieldValue.delete() : value },
+    { merge: true },
+  );
+} else {
+  await ref.set({ [name]: value === 'true' }, { merge: true });
+}
 const after = (await ref.get()).data() || {};
 console.log(`[flip-flag] after:  ${name} = ${JSON.stringify(after[name])}`);

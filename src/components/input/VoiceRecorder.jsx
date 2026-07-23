@@ -43,7 +43,8 @@ const VoiceRecorder = ({ onSave, onSwitch, loading, minimal }) => {
       const mime = MediaRecorder.isTypeSupported("audio/webm") ? "audio/webm" : "audio/mp4";
       console.log('[VoiceRecorder] Using MIME type:', mime);
 
-      const r = new MediaRecorder(stream, { mimeType: mime, audioBitsPerSecond: 32000 });
+      // 128 kbps (was 32) — see EntryBar.jsx; transcription-quality decision 2026-07-23.
+      const r = new MediaRecorder(stream, { mimeType: mime, audioBitsPerSecond: 128000 });
       const chunks = [];
 
       r.ondataavailable = e => {
