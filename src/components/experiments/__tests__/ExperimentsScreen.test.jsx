@@ -23,10 +23,13 @@ import {
   buildAnalysisPlan,
   getExperimentPrefs,
   markExplainerSeen,
+  setConfirmation,
+  clearConfirmation,
+  listConfirmations,
 } from '../../../services/experiments/experimentsService';
 import { subscribeSpaces } from '../../../services/spaces/spacesService';
 import { getFlag } from '../../../config/flags';
-import { computeExperimentResult } from '../../../services/experiments/computeResult';
+import { computeExperimentResult, localDateKeyForMs } from '../../../services/experiments/computeResult';
 
 vi.mock('../../../config/firebase', () => ({ db: { __db: true } }));
 vi.mock('../../../config/flags', () => ({ getFlag: vi.fn() }));
@@ -76,6 +79,9 @@ vi.mock('../../../services/experiments/experimentsService', () => ({
   })),
   getExperimentPrefs: vi.fn().mockResolvedValue({ enabled: true }),
   markExplainerSeen: vi.fn().mockResolvedValue(undefined),
+  setConfirmation: vi.fn().mockResolvedValue(undefined),
+  clearConfirmation: vi.fn().mockResolvedValue(undefined),
+  listConfirmations: vi.fn().mockResolvedValue([]),
 }));
 
 vi.mock('../../../services/spaces/spacesService', () => ({
@@ -426,6 +432,94 @@ describe('ExperimentsScreen — picker/tag direct template selection (Important 
 });
 
 // ---------------------------------------------------------------------------
+// Confirmed-exposure opt-in toggle (R4 Phase 3 Task 3, action confirmation
+// v1) — tag-template create flow only.
+// ---------------------------------------------------------------------------
+
+/** `n` daily entries, most-recent-first, every entry carrying `tag` and full mood coverage (mirrors preflight.test.js's own `fullyCoveredEntries(n, {tag})`). */
+function tagEntries(n, tag) {
+  const entries = [];
+  for (let i = 0; i < n; i++) {
+    entries.push({
+      id: `tag-entry-${i}`,
+      createdAt: isoDaysAgo(i),
+      tags: [tag],
+      analysis: { mood_score: (60 + (i % 20)) / 100 },
+    });
+  }
+  return entries;
+}
+
+describe('ExperimentsScreen — confirmed-exposure opt-in toggle (create flow, R4 Phase 3 Task 3)', () => {
+  it('does not show the toggle when the user has zero tags', async () => {
+    render(<ExperimentsScreen uid={UID} entries={sleepEntries(5)} onClose={vi.fn()} />);
+    fireEvent.click(await screen.findByText('New experiment'));
+    await screen.findByText('Pick a question');
+    expect(screen.queryByText(/track this with a daily check-in/i)).toBeNull();
+  });
+
+  it('shows the toggle, unchecked by default, once the user has at least one tag', async () => {
+    const entries = tagEntries(5, '@person:spencer');
+    render(<ExperimentsScreen uid={UID} entries={entries} onClose={vi.fn()} />);
+    fireEvent.click(await screen.findByText('New experiment'));
+    const toggle = await screen.findByRole('checkbox', { name: /track this with a daily check-in/i });
+    expect(toggle.checked).toBe(false);
+  });
+
+  it('checking the toggle carries exposureMode:"confirmed" through to buildAnalysisPlan at Start', async () => {
+    const entries = tagEntries(28, '@person:spencer');
+    render(<ExperimentsScreen uid={UID} entries={entries} onClose={vi.fn()} />);
+    fireEvent.click(await screen.findByText('New experiment'));
+
+    const toggle = await screen.findByRole('checkbox', { name: /track this with a daily check-in/i });
+    fireEvent.click(toggle);
+    expect(toggle.checked).toBe(true);
+
+    const tagSelect = screen.getByLabelText('Choose a tag');
+    fireEvent.change(tagSelect, { target: { value: '@person:spencer' } });
+    fireEvent.click(screen.getByText('See how this moves with my mood'));
+
+    fireEvent.click(await screen.findByText('14 days'));
+    const startBtn = await screen.findByText('Start');
+    expect(startBtn.closest('button')).not.toBeDisabled();
+    fireEvent.click(startBtn);
+
+    await waitFor(() => expect(createExperiment).toHaveBeenCalledTimes(1));
+    const [, params] = buildAnalysisPlan.mock.calls[buildAnalysisPlan.mock.calls.length - 1];
+    expect(params).toEqual({ tag: '@person:spencer', exposureMode: 'confirmed' });
+  });
+
+  it('leaving the toggle unchecked carries exposureMode:"passive" through to buildAnalysisPlan at Start', async () => {
+    const entries = tagEntries(28, '@person:spencer');
+    render(<ExperimentsScreen uid={UID} entries={entries} onClose={vi.fn()} />);
+    fireEvent.click(await screen.findByText('New experiment'));
+
+    const tagSelect = await screen.findByLabelText('Choose a tag');
+    fireEvent.change(tagSelect, { target: { value: '@person:spencer' } });
+    fireEvent.click(screen.getByText('See how this moves with my mood'));
+
+    fireEvent.click(await screen.findByText('14 days'));
+    fireEvent.click(await screen.findByText('Start'));
+
+    await waitFor(() => expect(createExperiment).toHaveBeenCalledTimes(1));
+    const [, params] = buildAnalysisPlan.mock.calls[buildAnalysisPlan.mock.calls.length - 1];
+    expect(params).toEqual({ tag: '@person:spencer', exposureMode: 'passive' });
+  });
+
+  it('resetting the create flow (Back) resets the toggle to passive', async () => {
+    const entries = tagEntries(5, '@person:spencer');
+    render(<ExperimentsScreen uid={UID} entries={entries} onClose={vi.fn()} />);
+    fireEvent.click(await screen.findByText('New experiment'));
+    fireEvent.click(await screen.findByRole('checkbox', { name: /track this with a daily check-in/i }));
+
+    fireEvent.click(screen.getByRole('button', { name: /back/i }));
+    fireEvent.click(await screen.findByText('New experiment'));
+    const toggle = await screen.findByRole('checkbox', { name: /track this with a daily check-in/i });
+    expect(toggle.checked).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Preflight review: freeze copy + appropriate=false disables Start
 // ---------------------------------------------------------------------------
 
@@ -535,6 +629,73 @@ describe('ExperimentsScreen — running card', () => {
     expect(text).not.toMatch(/don't break/i);
     expect(text).not.toMatch(/keep it up/i);
     expect(text).not.toMatch(/overdue/i);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Confirmed-exposure daily check-in row (R4 Phase 3 Task 3, action
+// confirmation v1) — running-card region.
+// ---------------------------------------------------------------------------
+
+describe('ExperimentsScreen — confirmed-exposure daily check-in row (R4 Phase 3 Task 3)', () => {
+  function confirmedRunningExperiment(overrides = {}) {
+    return runningExperiment({
+      id: 'exp-conf',
+      question: 'How does meditate move together with my mood?',
+      analysisPlan: {
+        templateId: 'tag-presence-mood',
+        lag: 0,
+        exposure: { source: 'tags', field: 'tags', label: 'meditate', tag: '@habit:meditate' },
+        outcome: { field: 'analysis.mood_score', label: 'mood', unit: 'mood_0_100' },
+        minPairedObservations: 10,
+        coverageFloor: 0.5,
+        confounders: [],
+        whatThisDoesNotProve: [],
+        splitMode: 'binary',
+        exposureMode: 'confirmed',
+      },
+      ...overrides,
+    });
+  }
+
+  it('renders the check-in row only for a RUNNING confirmed-mode experiment (not passive, not paused)', async () => {
+    withExperiments([
+      confirmedRunningExperiment(),
+      runningExperiment({ id: 'exp-passive', question: 'How does my sleep move together with my mood?' }),
+      confirmedRunningExperiment({ id: 'exp-conf-paused', status: 'paused', question: 'How does exercise move together with my mood?' }),
+    ]);
+    render(<ExperimentsScreen uid={UID} entries={[]} onClose={vi.fn()} />);
+    await screen.findByText('How does meditate move together with my mood?');
+
+    expect(screen.getAllByText(/did you do meditate today/i)).toHaveLength(1);
+  });
+
+  it('calls setConfirmation(db, uid, experimentId, todayKey, true) when Yes is clicked, then re-shows it pressed', async () => {
+    withExperiments([confirmedRunningExperiment()]);
+    render(<ExperimentsScreen uid={UID} entries={[]} onClose={vi.fn()} />);
+    await screen.findByText(/did you do meditate today/i);
+
+    // The mount-time call already resolved via the default `[]` mock above —
+    // queue exactly ONE more resolved value, for the re-fetch triggered by
+    // the click below (refreshKey bump).
+    const todayKey = localDateKeyForMs(Date.now(), 'UTC');
+    listConfirmations.mockResolvedValueOnce([{ id: todayKey, dateKey: todayKey, done: true, createdAt: 'x' }]);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Yes' }));
+    await waitFor(() => expect(setConfirmation).toHaveBeenCalledWith({ __db: true }, UID, 'exp-conf', todayKey, true));
+
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Yes' })).toHaveAttribute('aria-pressed', 'true'));
+  });
+
+  it('calls clearConfirmation(db, uid, experimentId, todayKey) when Clear is clicked', async () => {
+    withExperiments([confirmedRunningExperiment()]);
+    const todayKey = localDateKeyForMs(Date.now(), 'UTC');
+    listConfirmations.mockResolvedValue([{ id: todayKey, dateKey: todayKey, done: false, createdAt: 'x' }]);
+    render(<ExperimentsScreen uid={UID} entries={[]} onClose={vi.fn()} />);
+
+    const clearBtn = await screen.findByRole('button', { name: 'Clear' });
+    fireEvent.click(clearBtn);
+    await waitFor(() => expect(clearConfirmation).toHaveBeenCalledWith({ __db: true }, UID, 'exp-conf', todayKey));
   });
 });
 

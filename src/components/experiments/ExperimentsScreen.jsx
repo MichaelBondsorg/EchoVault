@@ -6,10 +6,10 @@ import { Button, Chip, Dialog, DialogContent, DialogTitle, DialogDescription } f
 import SpacePicker from '../spaces/SpacePicker';
 import { useDismissablePopover } from '../../hooks/useDismissablePopover';
 import { subscribeSpaces } from '../../services/spaces/spacesService';
-import { TEMPLATES, matchQuestionToTemplate } from '../../services/experiments/templates';
+import { TEMPLATES, getTemplateById, matchQuestionToTemplate } from '../../services/experiments/templates';
 import { screenQuestion, DECLINE_CONTRACTS } from '../../services/experiments/questionGate';
 import { preflightExperiment } from '../../services/experiments/preflight';
-import { computeExperimentResult } from '../../services/experiments/computeResult';
+import { computeExperimentResult, localDateKeyForMs } from '../../services/experiments/computeResult';
 import {
   subscribeExperiments,
   createExperiment,
@@ -22,6 +22,9 @@ import {
   buildAnalysisPlan,
   getExperimentPrefs,
   markExplainerSeen,
+  setConfirmation,
+  clearConfirmation,
+  listConfirmations,
 } from '../../services/experiments/experimentsService';
 import ExperimentResultView, { reasonCopy } from './ExperimentResultView';
 
@@ -101,6 +104,24 @@ import ExperimentResultView, { reasonCopy } from './ExperimentResultView';
  * that fully requires a real `entriesLoaded` signal from the entries
  * source, which is out of scope for this file.
  *
+ * PREFILL SEAM (R4 Phase 3 Task 2): an optional `prefill = {templateId,
+ * tag?}` prop lets a caller (ClaimCard's "Try as an experiment" via
+ * InsightsPage, or an idea card's own mapped CTA — both funneled through
+ * AppLayout's `handleTryExperiment`) open this screen straight into a
+ * chosen template instead of the question step. Resolved exactly once on
+ * mount via `getTemplateById`: an unknown/stale id is never a crash — it's
+ * `console.warn`ed and the screen opens to its normal list view, prefill
+ * silently ignored. A known id is entered through the SAME
+ * `screenAndProceed` choke point every other entry path uses (never a
+ * shortcut straight to `selectTemplateAndAdvance`) — a tag prefill composes
+ * the same "How does {tag} move together with my mood?" text
+ * `handleTagTemplateAsk` does before screening it, a plain prefill screens
+ * the template's own title exactly like `handleTemplateTap`. The one-time
+ * explainer is intentionally NOT shown on this path — the caller already
+ * made an explicit "try this as an experiment" choice elsewhere; re-gating
+ * behind the explainer would just detour a deliberate action back to a
+ * screen it never asked to see.
+ *
  * Nested-overlay a11y (RecipesScreen/RevisitControls precedent): only one
  * `aria-modal` dialog is ever active. The one-time explainer is a real
  * Radix `Dialog` (its own portal); the stop/delete confirms are hand-rolled
@@ -145,7 +166,7 @@ function coverageLine(coverage, label) {
   return `${coverage.covered} of ${coverage.total} days have ${label} data`;
 }
 
-const ExperimentsScreen = ({ uid, entries = [], entriesLoaded, onClose, onShowSafetyPlan, onOpenRecipes }) => {
+const ExperimentsScreen = ({ uid, entries = [], entriesLoaded, prefill = null, onClose, onShowSafetyPlan, onOpenRecipes }) => {
   const [experiments, setExperiments] = useState([]);
   const [experimentsLoaded, setExperimentsLoaded] = useState(false);
   const [loadError, setLoadError] = useState(false);
@@ -162,6 +183,11 @@ const ExperimentsScreen = ({ uid, entries = [], entriesLoaded, onClose, onShowSa
   const [createStep, setCreateStep] = useState('question'); // question | space | duration | preflight | decline
   const [questionText, setQuestionText] = useState('');
   const [selectedTagInput, setSelectedTagInput] = useState('');
+  // Confirmed-exposure opt-in (R4 Phase 3 Task 3, action confirmation v1) —
+  // tag-template create flow ONLY (see the tag-picker section's toggle
+  // below); default 'passive'. Reset alongside every other create-flow field
+  // in `resetCreateFlow`.
+  const [exposureMode, setExposureMode] = useState('passive');
   const [selectedTemplate, setSelectedTemplate] = useState(null);
   const [selectedParams, setSelectedParams] = useState(null);
   const [finalQuestionText, setFinalQuestionText] = useState('');
@@ -294,6 +320,7 @@ const ExperimentsScreen = ({ uid, entries = [], entriesLoaded, onClose, onShowSa
     setCreateStep('question');
     setQuestionText('');
     setSelectedTagInput('');
+    setExposureMode('passive');
     setSelectedTemplate(null);
     setSelectedParams(null);
     setFinalQuestionText('');
@@ -362,6 +389,33 @@ const ExperimentsScreen = ({ uid, entries = [], entriesLoaded, onClose, onShowSa
     setCreateStep(contextSpacesOn ? 'space' : 'duration');
   };
 
+  // Prefill seam (R4 Phase 3 Task 2) — see module doc comment's "PREFILL
+  // SEAM" section. Runs once per mount (this screen is freshly mounted on
+  // every open — see AppLayout's flag-gated mount site — so an empty dep
+  // array is the correct "consume once" contract, not a stale-closure risk).
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (!prefill?.templateId) return;
+    const template = getTemplateById(prefill.templateId);
+    if (!template) {
+      console.warn(
+        `ExperimentsScreen: unknown prefill templateId "${prefill.templateId}" — opening normally.`,
+      );
+      return;
+    }
+    setCreating(true);
+    if (prefill.tag) {
+      const composed = `How does ${tagLabel(prefill.tag)} move together with my mood?`;
+      screenAndProceed(composed, (trimmed) => {
+        selectTemplateAndAdvance(template, { tag: prefill.tag }, trimmed);
+      });
+    } else {
+      screenAndProceed(template.title, (trimmed) => {
+        selectTemplateAndAdvance(template, null, trimmed);
+      });
+    }
+  }, []);
+
   // Free-text path: screenQuestion, THEN matchQuestionToTemplate — this is
   // the only path that has to guess a template from arbitrary text, so it's
   // the only one that still calls the matcher.
@@ -404,8 +458,13 @@ const ExperimentsScreen = ({ uid, entries = [], entriesLoaded, onClose, onShowSa
     // Co-movement framing (Michael review hardening, item 7) — matches the
     // catalog's own tag-presence template.title pattern.
     const composed = `How does ${tagLabel(selectedTagInput)} move together with my mood?`;
+    // exposureMode (R4 Phase 3 Task 3): carried into `params` exactly like
+    // `tag` — `buildAnalysisPlan` (called later, at Start) is what actually
+    // decides whether it's honored (tag templates + 'confirmed' only); this
+    // handler just passes through whatever the toggle below is currently
+    // set to.
     screenAndProceed(composed, (trimmed) => {
-      selectTemplateAndAdvance(tagTemplate, { tag: selectedTagInput }, trimmed);
+      selectTemplateAndAdvance(tagTemplate, { tag: selectedTagInput, exposureMode }, trimmed);
     });
   };
 
@@ -605,6 +664,7 @@ const ExperimentsScreen = ({ uid, entries = [], entriesLoaded, onClose, onShowSa
                     {experiments.map((experiment) => (
                       <ExperimentRow
                         key={experiment.id}
+                        uid={uid}
                         experiment={experiment}
                         entries={entries}
                         onPause={handlePause}
@@ -669,6 +729,25 @@ const ExperimentsScreen = ({ uid, entries = [], entriesLoaded, onClose, onShowSa
                       See how this moves with my mood
                     </Button>
                   </div>
+                )}
+
+                {/* Confirmed-exposure opt-in (R4 Phase 3 Task 3): tag
+                    templates only — passive (mention-based) is the default;
+                    checking this asks for an explicit daily check-in
+                    instead. Honesty copy per the plan: missed days count as
+                    unknown, never a "no". */}
+                {tagTemplate && availableTags.length > 0 && (
+                  <label className="flex items-start gap-2 pt-1 text-xs text-secondary-foreground">
+                    <input
+                      type="checkbox"
+                      className="mt-0.5"
+                      checked={exposureMode === 'confirmed'}
+                      onChange={(e) => setExposureMode(e.target.checked ? 'confirmed' : 'passive')}
+                    />
+                    <span>
+                      Track this with a daily check-in instead of guessing from your entries — you check in daily; missed days count as unknown, not no.
+                    </span>
+                  </label>
                 )}
               </div>
 
@@ -975,7 +1054,7 @@ function PreflightReview({ preflight, durationDays, exposureLabel, startBusy, cr
 // Running / completed / stopped row
 // ---------------------------------------------------------------------------
 
-function ExperimentRow({ experiment, entries, onPause, onResume, onStop, onDelete, onViewResult }) {
+function ExperimentRow({ uid, experiment, entries, onPause, onResume, onStop, onDelete, onViewResult }) {
   const coverage = useMemo(() => {
     if (experiment.status !== 'running' && experiment.status !== 'paused') return null;
     try {
@@ -1012,6 +1091,13 @@ function ExperimentRow({ experiment, entries, onPause, onResume, onStop, onDelet
           <li>{coverageLine(coverage.exposure, exposureLabel)}</li>
           <li>{coverageLine(coverage.outcome, 'mood')}</li>
         </ul>
+      )}
+
+      {/* Today's check-in row (R4 Phase 3 Task 3) — running only; a paused
+          confirmed-mode experiment does not prompt for today (matching the
+          service's own running-status-only write guard). */}
+      {experiment.status === 'running' && experiment.analysisPlan?.exposureMode === 'confirmed' && (
+        <ConfirmationCheckIn uid={uid} experiment={experiment} />
       )}
 
       {(experiment.status === 'running' || experiment.status === 'paused') && (
@@ -1057,6 +1143,125 @@ function ExperimentRow({ experiment, entries, onPause, onResume, onStop, onDelet
       {experiment.status === 'stopped' && (
         <p className="mt-2 text-xs text-[var(--muted-foreground)]">Stopped — entries were not affected.</p>
       )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Today's confirmed-exposure check-in row (R4 Phase 3 Task 3, action
+// confirmation v1)
+// ---------------------------------------------------------------------------
+
+/**
+ * Self-contained (fetches its own confirmations via `listConfirmations` —
+ * no top-level `ExperimentsScreen` state), mirroring `ExperimentRow`'s own
+ * per-row `computeExperimentResult` pattern above. Only ever mounted for a
+ * RUNNING confirmed-mode experiment (see the gate at its call site) — the
+ * service's `setConfirmation`/`clearConfirmation` enforce the same
+ * running-status-only guard server-round-trip-side, this is just the UI
+ * never offering the control outside that state.
+ *
+ * `todayKey` is derived in the experiment's own FROZEN
+ * `analysisPlan.timezone` (falling back to 'UTC' for a plan predating that
+ * field) via `computeResult.js`'s `localDateKeyForMs` — the same helper
+ * `computeExperimentResult` itself uses for every other dateKey in this
+ * pipeline, so "today" here always means the same calendar day the result
+ * computation would eventually assign this check-in to.
+ */
+function ConfirmationCheckIn({ uid, experiment }) {
+  const timeZone = typeof experiment.analysisPlan?.timezone === 'string' && experiment.analysisPlan.timezone
+    ? experiment.analysisPlan.timezone
+    : 'UTC';
+  const todayKey = useMemo(() => localDateKeyForMs(Date.now(), timeZone), [timeZone]);
+  const [state, setState] = useState({ loading: true, done: null });
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+  const [refreshKey, setRefreshKey] = useState(0);
+
+  useEffect(() => {
+    if (!uid || !experiment?.id) return undefined;
+    let cancelled = false;
+    setState((prev) => ({ ...prev, loading: true }));
+    listConfirmations(db, uid, experiment.id)
+      .then((list) => {
+        if (cancelled) return;
+        const match = (list || []).find((c) => c.dateKey === todayKey);
+        setState({ loading: false, done: match ? match.done === true : null });
+      })
+      .catch(() => {
+        if (!cancelled) setState({ loading: false, done: null });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [uid, experiment?.id, todayKey, refreshKey]);
+
+  const answer = async (done) => {
+    setError(null);
+    setBusy(true);
+    try {
+      await setConfirmation(db, uid, experiment.id, todayKey, done);
+      setRefreshKey((k) => k + 1);
+    } catch (err) {
+      setError(err?.message || 'Could not save that check-in. Please try again.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const clearToday = async () => {
+    setError(null);
+    setBusy(true);
+    try {
+      await clearConfirmation(db, uid, experiment.id, todayKey);
+      setRefreshKey((k) => k + 1);
+    } catch (err) {
+      setError(err?.message || 'Could not clear that check-in. Please try again.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const exposureLabel = experiment.analysisPlan?.exposure?.label || 'this';
+
+  return (
+    <div className="mt-2 rounded-xl bg-[var(--accent-wash)] p-2.5 text-xs">
+      <p className="font-medium text-[var(--accent-deep)]">Did you do {exposureLabel} today?</p>
+      {error && <p role="alert" className="mt-1 text-destructive">{error}</p>}
+      <div className="mt-1.5 flex items-center gap-2">
+        <button
+          type="button"
+          disabled={busy || state.loading}
+          aria-pressed={state.done === true}
+          onClick={() => answer(true)}
+          className={`min-h-[32px] rounded-full border px-3 font-medium ${
+            state.done === true ? 'border-accent-deep bg-accent-deep text-background' : 'border-border text-secondary-foreground'
+          }`}
+        >
+          Yes
+        </button>
+        <button
+          type="button"
+          disabled={busy || state.loading}
+          aria-pressed={state.done === false}
+          onClick={() => answer(false)}
+          className={`min-h-[32px] rounded-full border px-3 font-medium ${
+            state.done === false ? 'border-accent-deep bg-accent-deep text-background' : 'border-border text-secondary-foreground'
+          }`}
+        >
+          No
+        </button>
+        {state.done !== null && (
+          <button
+            type="button"
+            disabled={busy}
+            onClick={clearToday}
+            className="text-secondary-foreground underline"
+          >
+            Clear
+          </button>
+        )}
+      </div>
     </div>
   );
 }
