@@ -11,6 +11,7 @@
  * Empty state is deliberately non-apologetic: Engram doesn't manufacture a
  * pattern to fill the space when the data doesn't support one yet.
  */
+import { useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { Loader2, RefreshCw, Layers } from 'lucide-react';
 import ClaimCard from './ClaimCard';
@@ -52,13 +53,21 @@ export function groupSummary(claims) {
 const ClaimFeed = ({
   claims,
   loading,
-  now,
   onRefresh,
   onShowReceipt,
   onFeedback,
   onTryExperiment,
 }) => {
   const hasClaims = Array.isArray(claims) && claims.length > 0;
+
+  // Review finding (minor, R4 Phase 2 Task 6): ranking was recomputed on
+  // every render (a fresh `rankClaims` call, closing over a fresh
+  // `Date.now()`-derived `now`, each time) rather than only when `claims`
+  // actually changes. Memoized on `[claims]` — `now` is captured once per
+  // claims-change, not per render. Hoisted above the early returns below
+  // (rules of hooks: this must run unconditionally, same order every
+  // render) — `rankClaims` already tolerates a non-array `claims` safely.
+  const ranked = useMemo(() => rankClaims(claims, { now: Date.now() }), [claims]);
 
   if (loading && !hasClaims) {
     return (
@@ -97,7 +106,6 @@ const ClaimFeed = ({
     );
   }
 
-  const ranked = rankClaims(claims, now !== undefined ? { now } : undefined);
   const summary = groupSummary(ranked);
 
   return (

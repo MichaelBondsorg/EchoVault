@@ -4,10 +4,10 @@
  * and a non-apologetic empty state.
  */
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, act } from '@testing-library/react';
 import ClaimFeed, { groupSummary } from '../ClaimFeed';
+import * as rankClaimsModule from '../../../services/insights/claims/rankClaims';
 
-const NOW = new Date('2026-07-23T00:00:00.000Z').getTime();
 
 function claim({
   id,
@@ -73,7 +73,7 @@ describe('ClaimFeed — rendering', () => {
       claim({ id: 'b', claimType: 'pattern_to_watch' }),
       claim({ id: 'c', claimType: 'experiment_result' }),
     ];
-    render(<ClaimFeed claims={claims} loading={false} now={NOW} />);
+    render(<ClaimFeed claims={claims} loading={false} />);
     expect(screen.getByText('1 experiment result · 2 patterns to watch')).toBeTruthy();
   });
 
@@ -83,26 +83,26 @@ describe('ClaimFeed — rendering', () => {
       claim({ id: 'pat-1', claimType: 'pattern_to_watch', wording: 'pattern wording' }),
       claim({ id: 'exp-1', claimType: 'experiment_result', wording: 'experiment wording' }),
     ];
-    render(<ClaimFeed claims={claims} loading={false} now={NOW} />);
+    render(<ClaimFeed claims={claims} loading={false} />);
 
     const rendered = screen.getAllByText(/wording$/).map((el) => el.textContent);
     expect(rendered).toEqual(['experiment wording', 'pattern wording', 'observation wording']);
   });
 
   it('renders a loading state when loading and no claims are available yet', () => {
-    render(<ClaimFeed claims={[]} loading={true} now={NOW} />);
+    render(<ClaimFeed claims={[]} loading={true} />);
     expect(screen.getByText('Checking your patterns...')).toBeTruthy();
   });
 
   it('prefers rendering claims over the loading state once claims are present, even if loading is still true (refresh-in-place)', () => {
     const claims = [claim({ id: 'a', wording: 'still visible during refresh' })];
-    render(<ClaimFeed claims={claims} loading={true} now={NOW} />);
+    render(<ClaimFeed claims={claims} loading={true} />);
     expect(screen.getByText('still visible during refresh')).toBeTruthy();
     expect(screen.queryByText('Checking your patterns...')).toBeNull();
   });
 
   it('renders a non-apologetic empty state when there are no claims and not loading', () => {
-    render(<ClaimFeed claims={[]} loading={false} now={NOW} />);
+    render(<ClaimFeed claims={[]} loading={false} />);
     expect(screen.getByText('Nothing verified yet')).toBeTruthy();
     expect(screen.getByText(/Engram only surfaces what your recorded days actually support/)).toBeTruthy();
     // Non-apologetic: no "sorry"/apology language.
@@ -110,23 +110,62 @@ describe('ClaimFeed — rendering', () => {
   });
 
   it('empty state also renders for a null/undefined claims prop', () => {
-    render(<ClaimFeed claims={null} loading={false} now={NOW} />);
+    render(<ClaimFeed claims={null} loading={false} />);
     expect(screen.getByText('Nothing verified yet')).toBeTruthy();
   });
 
   it('calls onRefresh when the refresh button is clicked', () => {
     const onRefresh = vi.fn();
     const claims = [claim({ id: 'a' })];
-    render(<ClaimFeed claims={claims} loading={false} now={NOW} onRefresh={onRefresh} />);
+    render(<ClaimFeed claims={claims} loading={false} onRefresh={onRefresh} />);
 
     screen.getByRole('button', { name: 'Refresh insights' }).click();
     expect(onRefresh).toHaveBeenCalledTimes(1);
   });
 
+  // Review finding (minor, R4 Phase 2 Task 6): the ranked list was
+  // recomputed on every render (a fresh `rankClaims` call + a fresh
+  // `Date.now()`-derived `now` each time), not memoized per claims-change.
+  // Memoizing on `[claims]` means an unrelated re-render (same claims
+  // reference) must not recompute the ranking.
+  it('memoizes the ranked list per claims reference — a re-render with the same claims array does not recompute rankClaims', () => {
+    const claims = [claim({ id: 'a' })];
+    const rankClaimsSpy = vi.spyOn(rankClaimsModule, 'rankClaims');
+
+    const { rerender } = render(<ClaimFeed claims={claims} loading={false} />);
+    const callsAfterFirstRender = rankClaimsSpy.mock.calls.length;
+    expect(callsAfterFirstRender).toBeGreaterThan(0);
+
+    act(() => {
+      rerender(<ClaimFeed claims={claims} loading={false} onRefresh={() => {}} />);
+    });
+
+    expect(rankClaimsSpy.mock.calls.length).toBe(callsAfterFirstRender);
+
+    rankClaimsSpy.mockRestore();
+  });
+
+  it('recomputes the ranked list when the claims array reference changes', () => {
+    const claimsA = [claim({ id: 'a' })];
+    const claimsB = [claim({ id: 'a' }), claim({ id: 'b' })];
+    const rankClaimsSpy = vi.spyOn(rankClaimsModule, 'rankClaims');
+
+    const { rerender } = render(<ClaimFeed claims={claimsA} loading={false} />);
+    const callsAfterFirstRender = rankClaimsSpy.mock.calls.length;
+
+    act(() => {
+      rerender(<ClaimFeed claims={claimsB} loading={false} />);
+    });
+
+    expect(rankClaimsSpy.mock.calls.length).toBeGreaterThan(callsAfterFirstRender);
+
+    rankClaimsSpy.mockRestore();
+  });
+
   it('passes onShowReceipt/onFeedback/onTryExperiment through to ClaimCard actions', () => {
     const onShowReceipt = vi.fn();
     const claims = [claim({ id: 'a' })];
-    render(<ClaimFeed claims={claims} loading={false} now={NOW} onShowReceipt={onShowReceipt} />);
+    render(<ClaimFeed claims={claims} loading={false} onShowReceipt={onShowReceipt} />);
 
     screen.getByText('See days').click();
     expect(onShowReceipt).toHaveBeenCalledWith(claims[0]);

@@ -119,6 +119,12 @@ const InsightsPage = ({
 
   // Load recommendations when health/environment data is available
   useEffect(() => {
+    // Review finding (important, cheap, R4 Phase 2 Task 6): RecommendationsSection
+    // is hidden flag-ON (superseded by the unified ClaimFeed — see the
+    // render-site guard below) — avoid a dark Firestore read for a section
+    // nobody sees.
+    if (getFlag('insightClaims')) return;
+
     const loadRecommendations = async () => {
       if (!userId || !entries?.length) return;
       if (!todayHealth && !todayEnvironment) return;

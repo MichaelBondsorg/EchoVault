@@ -7,7 +7,8 @@
  * claim (wording), what's the evidence (evidence line), what does this NOT
  * prove (first limitation), what can I do about it (actions).
  *
- * 1. Badge: "Pattern to watch" + a direction arrow.
+ * 1. Badge: label derived from `claim.claimType` (`badgeLabelFor` below) +
+ *    a direction arrow.
  * 2. `claim.wording` — the one precise, non-causal sentence.
  * 3. Evidence line: exposed vs comparison day counts, observed span,
  *    absolute mood-point difference, and (when the claim's evidence hid any
@@ -43,6 +44,29 @@ const HEALTH_TEMPLATE_BY_FIELD = Object.freeze({
   steps: 'steps-mood',
   recoveryScore: 'recovery-score-mood',
 });
+
+// claimType -> badge label (review finding, R4 Phase 2 Task 6: the badge
+// was hardcoded "Pattern to watch" for every claim, mislabeling
+// experiment_result claims — feedable since T4 — as the weakest tier even
+// though ClaimFeed's own type-count header already labels claims by type).
+const CLAIM_TYPE_BADGE = Object.freeze({
+  experiment_result: 'Experiment result',
+  pattern_to_watch: 'Pattern to watch',
+  observation: 'Observation',
+});
+
+/**
+ * Badge label for a claim, derived from `claim.claimType`. Falls back to
+ * the legacy "Pattern to watch" label for an absent or unrecognized
+ * claimType — tolerance for any pre-claimType claim shape rather than
+ * rendering a blank badge or throwing.
+ *
+ * @param {object} claim
+ * @returns {string}
+ */
+export function badgeLabelFor(claim) {
+  return CLAIM_TYPE_BADGE[claim?.claimType] || 'Pattern to watch';
+}
 
 /**
  * Maps a claim's exposure (`analysisPlan.candidateId`, e.g. `'tag:gym'`,
@@ -110,7 +134,7 @@ const ClaimCard = ({ claim, onShowReceipt, onFeedback, onTryExperiment }) => {
       {/* 1. Badge + direction arrow */}
       <div className="flex items-center gap-1.5">
         <span className="text-xs px-2 py-0.5 rounded-full bg-accent-wash text-accent-deep font-medium">
-          Pattern to watch
+          {badgeLabelFor(claim)}
         </span>
         <span
           className={isPositive ? 'text-accent-deep text-xs' : 'text-muted-foreground text-xs'}

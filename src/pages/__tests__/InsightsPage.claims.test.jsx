@@ -352,6 +352,25 @@ describe('InsightsPage — R4 Phase 2 Task 6: unified feed replaces Quick Insigh
     expect(screen.queryByText('Take an evening walk')).toBeNull();
   });
 
+  // Review finding (important, cheap, R4 Phase 2 Task 6): the
+  // recommendations-loading effect still called getTodayRecommendations
+  // flag-ON even though RecommendationsSection is hidden in that mode — a
+  // dark Firestore read for a section nobody sees. Guarded with an
+  // early-return on getFlag('insightClaims').
+  it('never calls getTodayRecommendations (the section is hidden flag-ON — avoid a dark Firestore read)', async () => {
+    render(
+      <InsightsPage
+        entries={ENTRIES}
+        userId="user-1"
+        user={{ uid: 'user-1' }}
+        todayHealth={{ sleepHours: 7 }}
+      />,
+    );
+
+    await screen.findByText(VERIFIED_TAG_CLAIM.wording);
+    expect(getTodayRecommendations).not.toHaveBeenCalled();
+  });
+
   it('calls useNexusInsights with enabled:false (no dark fetch/budget work for a hidden section)', async () => {
     render(<InsightsPage entries={ENTRIES} userId="user-1" user={{ uid: 'user-1' }} />);
 

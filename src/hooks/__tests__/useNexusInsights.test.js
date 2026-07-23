@@ -197,3 +197,57 @@ describe('useNexusInsights - Insight Budget freshness (day-boundary drift fix)',
     expect(budgetMocks.applyInsightBudget).not.toHaveBeenCalled();
   });
 });
+
+// Review finding (important, R4 Phase 2 Task 6): `enabled` (added so the
+// unified ClaimFeed can disable this hook entirely with insightClaims ON —
+// see the hook's own doc comment) had zero direct test coverage. These pin
+// both the disabled no-op contract and that the (unchanged) default/enabled
+// path keeps working.
+describe('useNexusInsights - enabled option (R4 Phase 2 Task 6)', () => {
+  it('enabled:false never fetches (cached insights, learning data, budget mode/log/record) and returns a stable, empty return shape', async () => {
+    flagValue = true; // insightBudget ON too — proves the `enabled` gate wins over it, not just that budget was already off.
+    const { result } = renderHook(() => useNexusInsights(USER, { autoRefresh: false, enabled: false }));
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    // No Firestore-backed fetch of any kind fires — these mocked functions
+    // stand in for the hook's Firestore reads (orchestrator's
+    // getCachedInsights/generateInsights, feedbackLearning's
+    // getAllPatternLearning, insightBudget's readBudgetMode/readShownLog).
+    expect(orchestratorMocks.getCachedInsights).not.toHaveBeenCalled();
+    expect(orchestratorMocks.generateInsights).not.toHaveBeenCalled();
+    expect(learningMocks.getAllPatternLearning).not.toHaveBeenCalled();
+    expect(budgetMocks.readBudgetMode).not.toHaveBeenCalled();
+    expect(budgetMocks.readShownLog).not.toHaveBeenCalled();
+
+    // No shown-recording effect (a real Firestore write) fires either — its
+    // own effect gates on `enabled` directly. `applyInsightBudget` itself is
+    // a pure, synchronous memo (not a Firestore read/write) that still runs
+    // over the empty allInsights array when the insightBudget flag is on
+    // regardless of `enabled` — harmless (produces `[]` from `[]`) and out
+    // of scope for this fix (useNexusInsights.js itself isn't touched here),
+    // so it's intentionally not asserted against.
+    expect(budgetMocks.recordShownInsights).not.toHaveBeenCalled();
+
+    // Stable, empty return shape.
+    expect(result.current.insights).toEqual([]);
+    expect(result.current.activeInsights).toEqual([]);
+    expect(result.current.historyInsights).toEqual([]);
+    expect(result.current.error).toBeNull();
+    expect(result.current.dataStatus).toBeNull();
+    expect(result.current.lastGenerated).toBeNull();
+    expect(result.current.isCalibrating).toBe(false);
+    expect(result.current.hasInsights).toBe(false);
+    expect(result.current.insightCount).toBe(0);
+  });
+
+  it('enabled:true (explicit) reproduces the unchanged default happy path: cached insights load and are returned', async () => {
+    flagValue = false;
+    const { result } = renderHook(() => useNexusInsights(USER, { autoRefresh: false, enabled: true }));
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    expect(orchestratorMocks.getCachedInsights).toHaveBeenCalledWith('user-1');
+    expect(result.current.insights.map((i) => i.id)).toEqual(['i1', 'i2', 'i3']);
+  });
+});

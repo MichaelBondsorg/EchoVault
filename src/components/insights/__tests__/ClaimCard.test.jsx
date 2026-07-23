@@ -6,7 +6,7 @@
  */
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
-import ClaimCard, { evidenceLineFor, experimentTemplateFor } from '../ClaimCard';
+import ClaimCard, { evidenceLineFor, experimentTemplateFor, badgeLabelFor } from '../ClaimCard';
 
 // Mirrors claimSchema.js's CAUSAL_RE — pinned independently here so a
 // change to ClaimCard's own copy (not the schema's validator) is what this
@@ -54,8 +54,37 @@ describe('ClaimCard — five-question layout', () => {
     expect(screen.queryByText(claim.limitations[1])).toBeNull();
   });
 
-  it('renders "Pattern to watch" badge', () => {
+  it('renders "Pattern to watch" badge for a pattern_to_watch claim', () => {
     render(<ClaimCard claim={baseClaim()} />);
+    expect(screen.getByText('Pattern to watch')).toBeTruthy();
+  });
+
+  // Review finding (critical, R4 Phase 2 Task 6): the badge was hardcoded
+  // "Pattern to watch" for every claim, mislabeling experiment_result claims
+  // (feedable since T4) as the weakest tier even though the feed's own
+  // type-count header already labels claims by type. The badge must derive
+  // from `claim.claimType`.
+  it('renders "Experiment result" badge for an experiment_result claim', () => {
+    render(<ClaimCard claim={baseClaim({ claimType: 'experiment_result' })} />);
+    expect(screen.getByText('Experiment result')).toBeTruthy();
+    expect(screen.queryByText('Pattern to watch')).toBeNull();
+  });
+
+  it('renders "Observation" badge for an observation claim', () => {
+    render(<ClaimCard claim={baseClaim({ claimType: 'observation' })} />);
+    expect(screen.getByText('Observation')).toBeTruthy();
+    expect(screen.queryByText('Pattern to watch')).toBeNull();
+  });
+
+  it('falls back to "Pattern to watch" for an unrecognized claimType (legacy tolerance)', () => {
+    render(<ClaimCard claim={baseClaim({ claimType: 'some_future_type' })} />);
+    expect(screen.getByText('Pattern to watch')).toBeTruthy();
+  });
+
+  it('falls back to "Pattern to watch" when claimType is absent entirely (legacy tolerance)', () => {
+    const claim = baseClaim();
+    delete claim.claimType;
+    render(<ClaimCard claim={claim} />);
     expect(screen.getByText('Pattern to watch')).toBeTruthy();
   });
 
@@ -223,6 +252,20 @@ describe('experimentTemplateFor', () => {
   it('returns null for a claim with no analysisPlan/candidateId', () => {
     expect(experimentTemplateFor({})).toBeNull();
     expect(experimentTemplateFor(null)).toBeNull();
+  });
+});
+
+describe('badgeLabelFor', () => {
+  it('maps each known claimType to its label', () => {
+    expect(badgeLabelFor(baseClaim({ claimType: 'experiment_result' }))).toBe('Experiment result');
+    expect(badgeLabelFor(baseClaim({ claimType: 'pattern_to_watch' }))).toBe('Pattern to watch');
+    expect(badgeLabelFor(baseClaim({ claimType: 'observation' }))).toBe('Observation');
+  });
+
+  it('falls back to "Pattern to watch" for unrecognized/absent claimType', () => {
+    expect(badgeLabelFor(baseClaim({ claimType: 'unknown' }))).toBe('Pattern to watch');
+    expect(badgeLabelFor({})).toBe('Pattern to watch');
+    expect(badgeLabelFor(null)).toBe('Pattern to watch');
   });
 });
 
