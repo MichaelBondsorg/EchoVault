@@ -39,12 +39,23 @@ vi.mock('../../intents/extractIntents.js', () => ({
   runIntentExtraction: vi.fn(async () => ({ ran: true, extractedTasks: [] })),
 }));
 
+// R4 Phase 2 Task 7 (multi-channel contextual retrieval): only
+// generateEmbeddingV2 is mocked (it would otherwise make a real network
+// call) — cosineSimilarity/EMBEDDING_V2_QUERY_TASK_TYPE stay the real, pure
+// implementations so the semantic-channel scoring logic is genuinely
+// exercised.
+vi.mock('../../ai/embeddingV2.js', async (importOriginal) => {
+  const actual = await importOriginal();
+  return { ...actual, generateEmbeddingV2: vi.fn() };
+});
+
 const { runEntryAnalysis } = await import('../orchestrator.js');
 const helpers = await import('../analysisHelpers.js');
 const { runIntentExtraction } = await import('../../intents/extractIntents.js');
 const { isAiAllowed } = await import('../../consent/consentGate.js');
 const { claimProcessingMarker } = await import('../../triggers/idempotency.js');
 const { _clearFlagCacheForTest } = await import('../../shared/flags.js');
+const { generateEmbeddingV2 } = await import('../../ai/embeddingV2.js');
 
 const MODEL_ID = 'gemini-3-flash-preview';
 
@@ -482,7 +493,11 @@ describe('runEntryAnalysis - scoped recent context (flag: contextSpaces, R1 plan
     expect(res.outcome).toBe('published');
     expect(callLog).toContainEqual({ type: 'where', field: 'spaceId', op: '==', value: 'work-space' });
     expect(callLog).toContainEqual({ type: 'orderBy', field: 'createdAt', dir: 'desc' });
-    expect(callLog).toContainEqual({ type: 'limit', n: 15 });
+    // R4 Phase 2 Task 7: the raw candidate fetch widened to CANDIDATE_POOL_LIMIT
+    // (40) so the entity/tag/semantic channels have room beyond the
+    // most-recent 15 — the FINAL assembled context still caps at 15 (see the
+    // multi-channel describe block below).
+    expect(callLog).toContainEqual({ type: 'limit', n: 40 });
   });
 
   it('flag OFF: legacy query — no where clause even though entry.spaceId is set', async () => {
@@ -520,6 +535,161 @@ describe('runEntryAnalysis - scoped recent context (flag: contextSpaces, R1 plan
 
     expect(res.outcome).toBe('published');
     expect(callLog.some((c) => c.type === 'where')).toBe(false);
+  });
+});
+
+describe('runEntryAnalysis - multi-channel contextual retrieval (R4 Phase 2 Task 7)', () => {
+  it('recent-only fallback: no tag/entity/semantic signal -> merged context is exactly the recent window, same order', async () => {
+    const callLog = [];
+    const stored = { entryInputVersion: 1, text: 'hi' };
+    const db = makeDb(stored);
+    const docs = [
+      { id: 'r0', data: { text: 'newest entry' } },
+      { id: 'r1', data: { text: 'second newest' } },
+      { id: 'r2', data: { text: 'third newest' } },
+    ];
+    const entryRef = makeEntryRefWithCollection('userA', docs, callLog);
+
+    await runEntryAnalysis({
+      db, entryRef,
+      entry: { id: 'e1', entryInputVersion: 1, text: 'hi' },
+      apiKeys: { gemini: 'g', openai: 'o' },
+      logStage: noopLogStage,
+    });
+
+    expect(generateEmbeddingV2).not.toHaveBeenCalled();
+    const recentContext = helpers.generateInsight.mock.calls[0][2];
+    expect(recentContext).toBe('[recent] newest entry\n\n[recent] second newest\n\n[recent] third newest');
+  });
+
+  it('entity-overlap finds a match OUTSIDE the top-15 recency window and merges it in, dedupes, and respects the RECENT_CONTEXT_LIMIT cap', async () => {
+    const callLog = [];
+    const stored = { entryInputVersion: 1, text: 'thinking about mom again' };
+    const db = makeDb(stored);
+
+    // 15 generic recent docs fill the recent-window channel completely...
+    const recentDocs = Array.from({ length: 15 }, (_, i) => ({
+      id: `recent-${i}`,
+      data: { text: `generic recent entry number ${i}` },
+    }));
+    // ...plus one older doc, OUTSIDE that window, sharing an @person: tag
+    // with the new entry — only reachable via the entity-overlap channel.
+    const entityDoc = { id: 'entity-old', data: { text: 'MOM_GARDEN_MATCH', tags: ['@person:mom'] } };
+    const docs = [...recentDocs, entityDoc];
+    const entryRef = makeEntryRefWithCollection('userA', docs, callLog);
+
+    await runEntryAnalysis({
+      db, entryRef,
+      entry: { id: 'e1', entryInputVersion: 1, text: 'thinking about mom again', tags: ['@person:mom'] },
+      apiKeys: { gemini: 'g', openai: 'o' },
+      logStage: noopLogStage,
+    });
+
+    const recentContext = helpers.generateInsight.mock.calls[0][2];
+    // Entity match present (found beyond the recent-15 window)...
+    expect(recentContext).toContain('MOM_GARDEN_MATCH');
+    // ...cap respected: entity match (1) + 14 of the 15 recent docs = 15 lines total.
+    const lines = recentContext.split('\n\n');
+    expect(lines).toHaveLength(15);
+    // ...and the LAST (oldest) recent doc was the one pushed out to make room.
+    expect(recentContext).not.toContain('generic recent entry number 14');
+    expect(recentContext).toContain('generic recent entry number 0');
+  });
+
+  it('sensitive entries (safety_flagged / has_warning_indicators) are never in the assembled context text', async () => {
+    const callLog = [];
+    const stored = { entryInputVersion: 1, text: 'hi' };
+    const db = makeDb(stored);
+    const docs = [
+      { id: 'safe-1', data: { text: 'an ordinary entry' } },
+      { id: 'flagged-1', data: { text: 'SENSITIVE_SAFETY_FLAGGED', safety_flagged: true } },
+      { id: 'flagged-2', data: { text: 'SENSITIVE_WARNING_INDICATORS', has_warning_indicators: true } },
+    ];
+    const entryRef = makeEntryRefWithCollection('userA', docs, callLog);
+
+    await runEntryAnalysis({
+      db, entryRef,
+      entry: { id: 'e1', entryInputVersion: 1, text: 'hi' },
+      apiKeys: { gemini: 'g', openai: 'o' },
+      logStage: noopLogStage,
+    });
+
+    const recentContext = helpers.generateInsight.mock.calls[0][2];
+    expect(recentContext).toContain('an ordinary entry');
+    expect(recentContext).not.toContain('SENSITIVE_SAFETY_FLAGGED');
+    expect(recentContext).not.toContain('SENSITIVE_WARNING_INDICATORS');
+  });
+
+  it('semantic channel is skipped silently (no embedding call) when no candidate has a stored embeddingV2 vector', async () => {
+    const callLog = [];
+    const stored = { entryInputVersion: 1, text: 'hi' };
+    const db = makeDb(stored);
+    const docs = [
+      { id: 'r0', data: { text: 'no vectors here', tags: ['@goal:fitness'] } },
+    ];
+    const entryRef = makeEntryRefWithCollection('userA', docs, callLog);
+
+    const res = await runEntryAnalysis({
+      db, entryRef,
+      entry: { id: 'e1', entryInputVersion: 1, text: 'hi', tags: [] },
+      apiKeys: { gemini: 'g', openai: 'o' },
+      logStage: noopLogStage,
+    });
+
+    expect(res.outcome).toBe('published');
+    expect(generateEmbeddingV2).not.toHaveBeenCalled();
+  });
+
+  it('semantic channel finds a cosine match OUTSIDE the top-15 recency window via stored embeddingV2 vectors', async () => {
+    const callLog = [];
+    const stored = { entryInputVersion: 1, text: 'a calm morning walk' };
+    const db = makeDb(stored);
+    // 15 generic recent docs fill the recent-window channel completely (none
+    // of them carry a vector, so they can't be mistaken for the semantic
+    // match)...
+    const recentDocs = Array.from({ length: 15 }, (_, i) => ({
+      id: `recent-${i}`,
+      data: { text: `generic recent entry number ${i}` },
+    }));
+    // ...plus one older doc, OUTSIDE that window, with a matching vector —
+    // only reachable via the semantic channel.
+    const semDoc = { id: 'sem-match', data: { text: 'SEMANTIC_MATCH', embeddingV2: [1, 0, 0] } };
+    const docs = [...recentDocs, semDoc];
+    const entryRef = makeEntryRefWithCollection('userA', docs, callLog);
+    generateEmbeddingV2.mockResolvedValueOnce({ embedding: [1, 0, 0], dim: 3 });
+
+    await runEntryAnalysis({
+      db, entryRef,
+      entry: { id: 'e1', entryInputVersion: 1, text: 'a calm morning walk', tags: [] },
+      apiKeys: { gemini: 'g', openai: 'o' },
+      logStage: noopLogStage,
+    });
+
+    expect(generateEmbeddingV2).toHaveBeenCalledTimes(1);
+    const recentContext = helpers.generateInsight.mock.calls[0][2];
+    expect(recentContext).toContain('SEMANTIC_MATCH');
+  });
+
+  it('semantic channel failure (embedding call throws) degrades to recent-only, never throws', async () => {
+    const callLog = [];
+    const stored = { entryInputVersion: 1, text: 'hi' };
+    const db = makeDb(stored);
+    const docs = [
+      { id: 'r0', data: { text: 'has a vector', embeddingV2: [1, 0, 0] } },
+    ];
+    const entryRef = makeEntryRefWithCollection('userA', docs, callLog);
+    generateEmbeddingV2.mockRejectedValueOnce(new Error('embedding API down'));
+
+    const res = await runEntryAnalysis({
+      db, entryRef,
+      entry: { id: 'e1', entryInputVersion: 1, text: 'hi', tags: [] },
+      apiKeys: { gemini: 'g', openai: 'o' },
+      logStage: noopLogStage,
+    });
+
+    expect(res.outcome).toBe('published');
+    const recentContext = helpers.generateInsight.mock.calls[0][2];
+    expect(recentContext).toContain('has a vector'); // still present via the recent-window fallback
   });
 });
 

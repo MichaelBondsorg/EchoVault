@@ -32,11 +32,23 @@ import {
   extractEnhancedContext,
   generateInsight,
 } from './analysisHelpers.js';
+import { generateEmbeddingV2, cosineSimilarity, EMBEDDING_V2_QUERY_TASK_TYPE } from '../ai/embeddingV2.js';
 
 const ORCHESTRATOR_VERSION = 1;
 const PROMPT_VERSION = 1;
 const CONTEXT_VERSION = 1; // mirrors src/config/constants.js CURRENT_CONTEXT_VERSION
 const RECENT_CONTEXT_LIMIT = 15;
+
+// R4 Phase 2 Task 7: multi-channel contextual retrieval. The raw Firestore
+// fetch is widened beyond RECENT_CONTEXT_LIMIT (same query SHAPE/index as
+// before — where(spaceId)?.orderBy(createdAt desc), just a bigger `.limit`)
+// so the entity/tag/semantic channels below have candidates to search beyond
+// the most-recent RECENT_CONTEXT_LIMIT window. The FINAL assembled context
+// still caps at RECENT_CONTEXT_LIMIT entries — "capped at the existing
+// context size" per the plan task.
+const CANDIDATE_POOL_LIMIT = 40;
+const SEMANTIC_CHANNEL_SIMILARITY_THRESHOLD = 0.3; // mirrors src/services/analysis/index.js's client-side threshold
+const ENTITY_TAG_PREFIXES = ['@person:', '@place:'];
 
 function pruneUndefined(obj) {
   const out = {};
@@ -46,19 +58,73 @@ function pruneUndefined(obj) {
   return out;
 }
 
+/** True for entries that must never appear in an assembled AI context. */
+function isSensitiveEntry(d) {
+  return d?.safety_flagged === true || d?.has_warning_indicators === true;
+}
+
+/** A candidate is usable in ANY channel iff it has text and isn't sensitive. */
+function isUsableCandidate(d) {
+  return typeof d?.text === 'string' && d.text.trim().length > 0 && !isSensitiveEntry(d);
+}
+
+/** @person:/@place: tags are "resolved entities"; everything else (@goal:, @situation:, plain topic tags) is a weaker topical tag. */
+function splitEntityAndTopicTags(tags) {
+  const entity = [];
+  const topic = [];
+  for (const t of Array.isArray(tags) ? tags : []) {
+    if (typeof t !== 'string') continue;
+    if (ENTITY_TAG_PREFIXES.some((p) => t.startsWith(p))) entity.push(t);
+    else topic.push(t);
+  }
+  return { entity, topic };
+}
+
+function formatContextLine(d) {
+  const when = d.createdAt?.toDate ? d.createdAt.toDate().toLocaleDateString() : 'recent';
+  return `[${when}] ${d.text}`;
+}
+
 /**
  * Best-effort recent-entries context string for the insight/context stages.
  * The client passes rich, pre-computed context; server-side we assemble a
  * lightweight recent-text window. Any read failure degrades to '' (no throw).
  *
  * Context Spaces (R1 plan task 10): when the `contextSpaces` server flag is
- * on AND the entry being analyzed has a `spaceId`, the recent-context window
- * is scoped to that space (`where('spaceId','==',entry.spaceId)`) so a
+ * on AND the entry being analyzed has a `spaceId`, the candidate query is
+ * scoped to that space (`where('spaceId','==',entry.spaceId)`) so a
  * Work-space entry's insight/context stages never see Personal-space text.
  * Otherwise (flag off, or the entry is unscoped) the legacy all-entries
- * query runs unchanged.
+ * query runs unchanged. This scoping is applied at the QUERY itself, i.e.
+ * FIRST — before any of the multi-channel selection below ever sees a
+ * candidate.
+ *
+ * R4 Phase 2 Task 7 (multi-channel contextual retrieval): four channels,
+ * merged and deduped by entry id, capped at RECENT_CONTEXT_LIMIT:
+ *   1. recent window   — the original behavior: the most-recent
+ *      RECENT_CONTEXT_LIMIT candidates from the (scoped) query. Also the
+ *      FALLBACK — when the other three channels find nothing, the merged
+ *      result is exactly this channel, in the same order, so a corpus with
+ *      no entity/tag/semantic signal degrades to byte-for-byte legacy
+ *      behavior (modulo the sensitive-entry exclusion below, which is new).
+ *   2. entity-overlap  — candidates sharing an @person:/@place: tag with the
+ *      new entry. The new entry's own tags are whatever's been computed on
+ *      it so far (often none yet, pre-analysis — the channel is then simply
+ *      empty, not an error).
+ *   3. tag-overlap     — candidates sharing any OTHER tag (@goal:,
+ *      @situation:, plain topic tags) with the new entry.
+ *   4. semantic        — cosine similarity over stored `embeddingV2`
+ *      vectors. Skipped silently (never throws) when the new entry has no
+ *      text to embed, no apiKey is available, the embedding call fails, or
+ *      no candidate in the pool has a stored vector.
+ * `safety_flagged`/`has_warning_indicators` candidates are excluded from
+ * EVERY channel before ranking — they must never reach the assembled
+ * context text (previously they were NOT excluded here; this is the fix).
+ * Priority when the cap is reached: entity > tag > semantic > recent
+ * backfill, so the strongest relevance signals win a slot first while
+ * recency still fills any remaining room.
  */
-async function buildRecentContext(db, entryRef, currentId, entry) {
+async function buildRecentContext(db, entryRef, currentId, entry, apiKey) {
   try {
     const col = entryRef.parent;
     if (!col || typeof col.orderBy !== 'function') return '';
@@ -66,21 +132,80 @@ async function buildRecentContext(db, entryRef, currentId, entry) {
     const spaceId = entry?.spaceId;
     const scoped = !!spaceId && (await getServerFlag(db, 'contextSpaces', false));
 
+    // Wider raw fetch (same query shape/index as before — just a bigger
+    // limit) so channels 2-4 have room to look past the most-recent
+    // RECENT_CONTEXT_LIMIT candidates. createdAt-desc order is stable, so
+    // this changes nothing about WHICH docs occupy the first
+    // RECENT_CONTEXT_LIMIT positions (channel 1, below).
     const q = scoped
-      ? col.where('spaceId', '==', spaceId).orderBy('createdAt', 'desc').limit(RECENT_CONTEXT_LIMIT)
-      : col.orderBy('createdAt', 'desc').limit(RECENT_CONTEXT_LIMIT);
+      ? col.where('spaceId', '==', spaceId).orderBy('createdAt', 'desc').limit(CANDIDATE_POOL_LIMIT)
+      : col.orderBy('createdAt', 'desc').limit(CANDIDATE_POOL_LIMIT);
 
     const snap = await q.get();
-    const parts = [];
+    const rawDocs = [];
     snap.forEach((doc) => {
       if (doc.id === currentId) return;
-      const d = doc.data() || {};
-      if (typeof d.text === 'string' && d.text.trim()) {
-        const when = d.createdAt?.toDate ? d.createdAt.toDate().toLocaleDateString() : 'recent';
-        parts.push(`[${when}] ${d.text}`);
-      }
+      rawDocs.push({ id: doc.id, ...(doc.data() || {}) });
     });
-    return parts.join('\n\n');
+
+    // Channel 1: recent window + fallback. Exactly the raw slice a plain
+    // limit(RECENT_CONTEXT_LIMIT) query would have returned, filtered the
+    // same way the legacy code filtered (usable text), PLUS the new
+    // sensitive-entry exclusion.
+    const recentWindow = rawDocs.slice(0, RECENT_CONTEXT_LIMIT).filter(isUsableCandidate);
+
+    // Wider filtered pool for channels 2-4.
+    const pool = rawDocs.filter(isUsableCandidate);
+
+    const newEntryTags = Array.isArray(entry?.tags) ? entry.tags : [];
+    const { entity: newEntityTags, topic: newTopicTags } = splitEntityAndTopicTags(newEntryTags);
+    const entityTagSet = new Set(newEntityTags);
+    const topicTagSet = new Set(newTopicTags);
+
+    const entityMatches = entityTagSet.size > 0
+      ? pool.filter((d) => (Array.isArray(d.tags) ? d.tags : []).some((t) => entityTagSet.has(t)))
+      : [];
+    const tagMatches = topicTagSet.size > 0
+      ? pool.filter((d) => (Array.isArray(d.tags) ? d.tags : []).some((t) => topicTagSet.has(t)))
+      : [];
+
+    // Channel 4: semantic. Only attempted when there's SOMETHING to embed
+    // against — skips the embedding API call entirely if no pool candidate
+    // has a stored vector.
+    let semanticMatches = [];
+    const vectorCandidates = pool.filter((d) => Array.isArray(d.embeddingV2) && d.embeddingV2.length > 0);
+    if (vectorCandidates.length > 0 && apiKey && typeof entry?.text === 'string' && entry.text.trim()) {
+      try {
+        const v2Model = await getModel(db, 'embeddingV2');
+        const queryVector = await generateEmbeddingV2(entry.text, apiKey, {
+          model: v2Model,
+          taskType: EMBEDDING_V2_QUERY_TASK_TYPE,
+        });
+        if (queryVector?.embedding) {
+          semanticMatches = vectorCandidates
+            .map((d) => ({ d, score: cosineSimilarity(queryVector.embedding, d.embeddingV2) }))
+            .filter((s) => s.score > SEMANTIC_CHANNEL_SIMILARITY_THRESHOLD)
+            .sort((a, b) => b.score - a.score)
+            .map((s) => s.d);
+        }
+      } catch {
+        semanticMatches = []; // best-effort — never fail the analysis over a semantic-channel error
+      }
+    }
+
+    // Merge -> dedupe by id -> cap at RECENT_CONTEXT_LIMIT (the existing
+    // context size). Priority order: entity, tag, semantic, then recent
+    // backfill — see doc comment above for the fallback guarantee.
+    const seen = new Set();
+    const merged = [];
+    for (const d of [...entityMatches, ...tagMatches, ...semanticMatches, ...recentWindow]) {
+      if (seen.has(d.id)) continue;
+      seen.add(d.id);
+      merged.push(d);
+      if (merged.length >= RECENT_CONTEXT_LIMIT) break;
+    }
+
+    return merged.map(formatContextLine).join('\n\n');
   } catch {
     return '';
   }
@@ -193,7 +318,7 @@ export async function runEntryAnalysis({ db, entryRef, entry, apiKeys, logStage 
 
   // Stage 2: analyze + (non-task) insight + enhanced context, in parallel.
   // The client skips insight/context for pure 'task' entries — mirror that.
-  const recentContext = entryType === 'task' ? '' : await buildRecentContext(db, entryRef, opId, entry);
+  const recentContext = entryType === 'task' ? '' : await buildRecentContext(db, entryRef, opId, entry, gemini);
   const stageTasks = [analyzeEntry(gemini, text, entryType, entry?.userLocalHour ?? null, { modelId: analyzeModel })];
   if (entryType !== 'task') {
     stageTasks.push(generateInsight(gemini, text, recentContext, null, null, [], { modelId: insightModel }));

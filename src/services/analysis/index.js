@@ -1,6 +1,9 @@
 import { analyzeJournalEntryCloud } from '../ai/gemini';
 import { scoreEntryInBestSpace, toQueryVectors } from '../ai/embeddingSpaces';
-import { askJournalAIFn } from '../../config/firebase';
+import { askJournalAIFn, auth, db } from '../../config/firebase';
+import { getFlag } from '../../config/flags';
+import { listActiveClaims } from '../insights/claims/claimsService';
+import { rankClaims } from '../insights/claims/rankClaims';
 import { formatHealthForAI, formatHealthDetailed } from '../health/healthFormatter';
 import { formatEnvironmentForAI, formatEnvironmentDetailed } from '../environment/environmentFormatter';
 import { filterEntriesByScope } from '../spaces/scopeFilter';
@@ -471,6 +474,38 @@ ${entriesContext}`,
   }
 };
 
+// R4 Phase 2 Task 7 (P2-D6): Ask Journal claims context — ranked by the
+// shared feed ordering (rankClaims), capped below.
+const MAX_CLAIMS_IN_CONTEXT = 5;
+
+/**
+ * Verified-claims context block for Ask Journal (flag-gated `insightClaims`,
+ * P2-D6). Loads the current user's verified claims, ranks them, caps at
+ * MAX_CLAIMS_IN_CONTEXT, and formats them into a labeled block that gets
+ * PREPENDED to `entriesContext` — never appended, so the model reads it
+ * before any raw entry text.
+ *
+ * Contained failure: flag off, no signed-in user, or a claims-load error
+ * (Firestore down, etc.) all resolve to '' — askJournalAI proceeds with the
+ * unmodified entries context rather than failing the whole question.
+ */
+async function buildVerifiedPatternsBlock() {
+  if (!getFlag('insightClaims')) return '';
+  try {
+    const uid = auth?.currentUser?.uid;
+    if (!uid) return '';
+    const claims = await listActiveClaims(db, uid);
+    const verified = claims.filter((c) => c.status === 'verified');
+    const ranked = rankClaims(verified).slice(0, MAX_CLAIMS_IN_CONTEXT);
+    if (ranked.length === 0) return '';
+    const lines = ranked.map((c) => `- ${c.wording} [${c.evidence?.exposedDayCount} vs ${c.evidence?.comparisonDayCount} days]`);
+    return `VERIFIED PATTERNS (associations from this user's recorded days — never causal):\n${lines.join('\n')}\n\n`;
+  } catch (e) {
+    console.error('askJournalAI: verified claims load failed, proceeding without', e);
+    return '';
+  }
+}
+
 /**
  * Ask the journal AI a question
  * Now uses Cloud Function
@@ -496,7 +531,7 @@ export const askJournalAI = async (entries, question, questionEmbedding = null, 
   const relevantEntries = returnSources ? contextResult.context : contextResult;
   const entryIds = returnSources ? contextResult.entryIds : undefined;
 
-  const context = relevantEntries.map(e => {
+  const entriesText = relevantEntries.map(e => {
     const date = e.createdAt instanceof Date ? e.createdAt : e.createdAt?.toDate?.() || new Date();
     const tags = e.tags?.filter(t => t.startsWith('@')).join(', ') || '';
     // Include health and environment context for AI awareness
@@ -505,6 +540,13 @@ export const askJournalAI = async (entries, question, questionEmbedding = null, 
     const contextLine = [healthInfo, envInfo].filter(Boolean).join(' ');
     return `[${date.toLocaleDateString()}] ${contextLine}\n[${e.title}] ${tags ? `{${tags}} ` : ''}${e.text}`;
   }).join('\n\n');
+
+  // P2-D6: verified claims block, PREPENDED so the model sees it before any
+  // raw entry text. '' (flag off / no user / load failure) is identity, so
+  // this is byte-identical to the pre-claims context in every non-flag-on
+  // case.
+  const claimsBlock = await buildVerifiedPatternsBlock();
+  const context = claimsBlock + entriesText;
 
   try {
     const result = await askJournalAIFn({

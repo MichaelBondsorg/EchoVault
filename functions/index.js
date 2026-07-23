@@ -1020,6 +1020,7 @@ INSTRUCTIONS:
 - Reference specific dates when relevant
 - Notice patterns across entries (recurring people, places, goals, situations)
 - Tags starting with @ indicate: @person:name, @place:location, @goal:intention, @situation:ongoing_context, @self:self_statement
+- If VERIFIED PATTERNS are provided, prefer them over inferring your own patterns, and describe them only as associations.
 
 HEALTH DATA (in [Health: ...] brackets):
 - Sleep: hours and quality/score (higher score = better quality)
