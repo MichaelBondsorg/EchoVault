@@ -4,7 +4,8 @@ import InsightControlCenter from '../InsightControlCenter';
 import { listSourceExclusions, restoreSource } from '../../../services/insights/sourceExclusions';
 import { getSuppressedPatterns, liftSuppression } from '../../../services/basicInsights/feedbackLearning';
 import { getActiveExclusions, removeExclusion } from '../../../services/signals/signalLifecycle';
-import { getCachedInsights, generateInsights } from '../../../services/nexus/orchestrator';
+import { getCachedInsights } from '../../../services/nexus/orchestrator';
+import { rebuildInsights } from '../../../services/insights/rebuildInsights';
 import { readBudgetMode, readShownLog } from '../../../services/insights/insightBudget';
 
 vi.mock('../../../config/firebase', () => ({ db: { __db: true } }));
@@ -26,8 +27,15 @@ vi.mock('../../../services/signals/signalLifecycle', () => ({
 
 vi.mock('../../../services/nexus/orchestrator', () => ({
   getCachedInsights: vi.fn(),
-  generateInsights: vi.fn(),
 }));
+
+vi.mock('../../../services/insights/rebuildInsights', async () => {
+  const actual = await vi.importActual('../../../services/insights/rebuildInsights');
+  return {
+    ...actual,
+    rebuildInsights: vi.fn(),
+  };
+});
 
 vi.mock('../../../services/insights/insightBudget', () => ({
   readBudgetMode: vi.fn(),
@@ -97,7 +105,13 @@ beforeEach(() => {
   restoreSource.mockResolvedValue();
   liftSuppression.mockResolvedValue(true);
   removeExclusion.mockResolvedValue();
-  generateInsights.mockResolvedValue({ success: true, insights: [{ id: 'n1' }, { id: 'n2' }], generatedAt: '2026-07-21T00:00:00.000Z' });
+  rebuildInsights.mockResolvedValue({
+    ok: true,
+    engines: { basic: { ok: true, insightCount: 1 }, nexus: { ok: true, insightCount: 1 } },
+    dayCount: 3,
+    verifiedClaimCount: 0,
+    insightCount: 2,
+  });
 });
 
 afterEach(() => {
@@ -330,37 +344,68 @@ describe('InsightControlCenter — Recompute', () => {
     });
   });
 
-  it('Recompute now triggers generateInsights(uid), shows a loading state, then a result line', async () => {
+  it('Recompute now triggers the shared rebuildInsights orchestration (db, uid, entries), shows a loading state, then a result line', async () => {
     defaultMocks();
-    let resolveGenerate;
-    generateInsights.mockReturnValue(new Promise((resolve) => { resolveGenerate = resolve; }));
+    let resolveRebuild;
+    rebuildInsights.mockReturnValue(new Promise((resolve) => { resolveRebuild = resolve; }));
     renderCenter();
 
     await waitFor(() => expect(screen.getByRole('button', { name: /recompute now/i })).toBeTruthy());
     const button = screen.getByRole('button', { name: /recompute now/i });
     fireEvent.click(button);
 
-    expect(generateInsights).toHaveBeenCalledWith(UID);
+    expect(rebuildInsights).toHaveBeenCalledWith({ __db: true }, UID, ENTRIES);
     expect(button).toBeDisabled();
 
-    resolveGenerate({ success: true, insights: [{ id: 'n1' }, { id: 'n2' }], generatedAt: '2026-07-21T00:00:00.000Z' });
+    resolveRebuild({
+      ok: true,
+      engines: { basic: { ok: true }, nexus: { ok: true } },
+      dayCount: 3,
+      verifiedClaimCount: 0,
+      insightCount: 2,
+    });
 
     await waitFor(() => {
-      expect(screen.getByText(/2 insights/i)).toBeTruthy();
+      expect(screen.getByText(/2 insights are available/i)).toBeTruthy();
     });
     expect(button).not.toBeDisabled();
   });
 
-  it('shows a non-alarming result line when recompute fails', async () => {
+  it('shows a non-alarming, brief-worded failure line when every engine fails', async () => {
     defaultMocks();
-    generateInsights.mockResolvedValueOnce({ success: false, insights: [], errors: ['boom'] });
+    rebuildInsights.mockResolvedValueOnce({
+      ok: false,
+      engines: { basic: { ok: false, error: 'boom' }, nexus: { ok: false, error: 'boom' } },
+      dayCount: 0,
+      verifiedClaimCount: 0,
+      insightCount: 0,
+    });
     renderCenter();
 
     await waitFor(() => expect(screen.getByRole('button', { name: /recompute now/i })).toBeTruthy());
     fireEvent.click(screen.getByRole('button', { name: /recompute now/i }));
 
     await waitFor(() => {
-      expect(screen.getByText(/didn.?t complete|try again/i)).toBeTruthy();
+      expect(screen.getByText(/couldn.?t rebuild your insights.*previous insights are still available/i)).toBeTruthy();
+    });
+  });
+
+  it('shows the nothing-qualifies line when the rebuild succeeds with zero results', async () => {
+    defaultMocks();
+    rebuildInsights.mockResolvedValueOnce({
+      ok: true,
+      engines: { basic: { ok: true }, nexus: { ok: true } },
+      dayCount: 1,
+      verifiedClaimCount: 0,
+      insightCount: 0,
+    });
+    renderCenter();
+
+    await waitFor(() => expect(screen.getByRole('button', { name: /recompute now/i })).toBeTruthy());
+    fireEvent.click(screen.getByRole('button', { name: /recompute now/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/nothing currently clears the evidence threshold/i)).toBeTruthy();
     });
   });
 });

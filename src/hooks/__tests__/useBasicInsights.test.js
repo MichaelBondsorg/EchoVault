@@ -160,3 +160,35 @@ describe('useBasicInsights — exclusions read failure (fail-closed)', () => {
     errorSpy.mockRestore();
   });
 });
+
+// Fix C (2026-07-24 brief): `refreshFromCache` is the read-only counterpart
+// to `regenerate` — the unified "Rebuild insights" orchestration
+// (rebuildInsights.js) already ran generateBasicInsights itself; this hook
+// must be able to pull the fresh cache into its own displayed state WITHOUT
+// triggering a second generation.
+describe('useBasicInsights — refreshFromCache (Fix C)', () => {
+  it('reads the cache doc (getDoc) without calling generateBasicInsights again', async () => {
+    const { getDoc } = await import('firebase/firestore');
+    const entries = buildEntries();
+    const { result } = renderHook(() => useBasicInsights(USER, entries, { autoRefresh: true, refreshOnMount: true }));
+
+    await waitFor(() => expect(generateBasicInsights).toHaveBeenCalledTimes(1));
+    generateBasicInsights.mockClear();
+    getDoc.mockClear();
+
+    await act(async () => { await result.current.refreshFromCache(); });
+
+    expect(generateBasicInsights).not.toHaveBeenCalled();
+    expect(getDoc).toHaveBeenCalledTimes(1);
+  });
+
+  it('is a no-op with no user (never reads the cache)', async () => {
+    const { getDoc } = await import('firebase/firestore');
+    const { result } = renderHook(() => useBasicInsights(null, buildEntries()));
+    getDoc.mockClear();
+
+    await act(async () => { await result.current.refreshFromCache(); });
+
+    expect(getDoc).not.toHaveBeenCalled();
+  });
+});

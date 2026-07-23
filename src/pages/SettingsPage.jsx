@@ -242,9 +242,11 @@ const SettingsPage = ({
     },
   ];
 
-  // Insight Control Center (flag: insightReceipts, R2 Task 12) — reversible
-  // controls over exclusions/muted families/recompute. Flag-gated: filtered
-  // out entirely when off, same convention as `contextSpacesItem` below.
+  // Insight Control Center (flags: insightReceipts OR insightClaims, R2
+  // Task 12; widened Fix C, 2026-07-24 brief — rebuild is useful
+  // independently of receipts) — reversible controls over
+  // exclusions/muted families/recompute. Flag-gated: filtered out entirely
+  // when both are off, same convention as `contextSpacesItem` below.
   const controlCenterItem = {
     label: 'Insight Control Center',
     description: 'Excluded sources, muted families, and recompute',
@@ -262,7 +264,7 @@ const SettingsPage = ({
       description: 'Control AI pattern detection',
       onClick: onOpenNexusSettings,
     },
-    getFlag('insightReceipts') && controlCenterItem,
+    (getFlag('insightReceipts') || getFlag('insightClaims')) && controlCenterItem,
     {
       label: 'People & Things',
       description: 'Edit names, relationships, and entities',

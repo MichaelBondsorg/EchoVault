@@ -5,7 +5,8 @@ import { Button } from '../cloud';
 import { listSourceExclusions, restoreSource } from '../../services/insights/sourceExclusions';
 import { getSuppressedPatterns, liftSuppression } from '../../services/basicInsights/feedbackLearning';
 import { getActiveExclusions, removeExclusion } from '../../services/signals/signalLifecycle';
-import { getCachedInsights, generateInsights } from '../../services/nexus/orchestrator';
+import { getCachedInsights } from '../../services/nexus/orchestrator';
+import { rebuildInsights, describeRebuildResult } from '../../services/insights/rebuildInsights';
 import { readBudgetMode, readShownLog, getBudgetConfig } from '../../services/insights/insightBudget';
 import { sourceFromEntry } from '../../services/insights/receipts';
 
@@ -18,8 +19,13 @@ import { sourceFromEntry } from '../../services/insights/receipts';
  *   (a) Excluded sources    — `sourceExclusions.js` (Task 10)
  *   (b) Muted insight families — feedback-learning suppression (Task ~9) AND
  *       the R1-era per-pattern-type exclusions (`signalLifecycle.js`)
- *   (c) Recompute            — staleness (`nexus/insights.stale`) + manual
- *       `generateInsights` trigger
+ *   (c) Recompute            — staleness (`nexus/insights.stale`) + the
+ *       manual "Recompute now" trigger, which routes through the SAME
+ *       `rebuildInsights` orchestration contract every other refresh
+ *       surface on the Insights page uses (Fix C, 2026-07-24 brief) —
+ *       reruns the active engine's real pipeline, not a bare re-read, and
+ *       (with `insightClaims` on) reruns the claims pipeline too, not just
+ *       Nexus.
  *   (d) Withheld this week    — an honest (never over-claiming) budget count
  *       derived from the shown-log + the user's chosen mode's weekly cap
  *
@@ -202,21 +208,25 @@ const InsightControlCenter = ({ uid, entries = [], onClose }) => {
     }
   };
 
+  // Fix C (2026-07-24 brief): "Recompute now" routes through the SAME
+  // `rebuildInsights` orchestration the Insights page header's "Rebuild
+  // insights" action uses — it reruns the active engine's real generation
+  // pipeline (Basic Insights, plus Nexus or the claims pipeline depending
+  // on `insightClaims`), never a bare Firestore re-read. `describeRebuildResult`
+  // is the SAME formatter that page uses, so the two surfaces' result copy
+  // never drifts apart.
   const handleRecompute = async () => {
     if (recomputing || !uid) return;
     setRecomputing(true);
     setRecomputeResult(null);
     try {
-      const result = await generateInsights(uid);
-      if (result?.success) {
-        const count = result.insights?.length ?? 0;
-        setRecomputeResult(`Recomputed — ${count} ${count === 1 ? 'insight' : 'insights'} generated.`);
-        setCachedInfo({ stale: false, generatedAt: result.generatedAt || new Date().toISOString() });
-      } else {
-        setRecomputeResult("Recompute didn't complete. Please try again.");
+      const result = await rebuildInsights(db, uid, entries);
+      setRecomputeResult(describeRebuildResult(result).message);
+      if (result?.ok) {
+        setCachedInfo({ stale: false, generatedAt: new Date().toISOString() });
       }
     } catch {
-      setRecomputeResult("Recompute didn't complete. Please try again.");
+      setRecomputeResult(describeRebuildResult(null).message);
     } finally {
       setRecomputing(false);
     }

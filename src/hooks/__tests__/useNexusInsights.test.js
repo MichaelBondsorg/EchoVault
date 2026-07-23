@@ -341,3 +341,47 @@ describe('useNexusInsights - Fix B (INS-1): history never blends into the feed',
     expect(result.current.historyCount).toBe(2);
   });
 });
+
+// Fix C (2026-07-24 brief): `refreshFromCache` is the read-only counterpart
+// to `refresh` — the unified "Rebuild insights" orchestration
+// (rebuildInsights.js) already ran generateInsights itself; this hook must
+// be able to pull the fresh cache into its own displayed state WITHOUT
+// triggering a second generation.
+describe('useNexusInsights — refreshFromCache (Fix C)', () => {
+  it('re-reads the cache and updates active/history insights WITHOUT calling generateInsights', async () => {
+    orchestratorMocks.getCachedInsights.mockResolvedValueOnce({
+      insights: threeInsights(),
+      history: [],
+      generatedAt: 1,
+      stale: false,
+      expiresAt: Date.now() + 60 * 60 * 1000,
+    });
+
+    const { result } = renderHook(() => useNexusInsights(USER, { autoRefresh: false }));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(orchestratorMocks.generateInsights).not.toHaveBeenCalled();
+
+    orchestratorMocks.getCachedInsights.mockResolvedValueOnce({
+      insights: [{ id: 'fresh-1', title: 'Rebuilt', type: 'pattern', confidence: 0.9 }],
+      history: [{ id: 'legacy-1', legacyVersion: true }],
+      generatedAt: 2,
+      stale: false,
+      expiresAt: Date.now() + 60 * 60 * 1000,
+    });
+
+    await act(async () => { await result.current.refreshFromCache(); });
+
+    expect(orchestratorMocks.generateInsights).not.toHaveBeenCalled();
+    expect(result.current.insights.map((i) => i.id)).toEqual(['fresh-1']);
+    expect(result.current.historyCount).toBe(1);
+  });
+
+  it('is a no-op when disabled (enabled:false) — never reads the cache', async () => {
+    const { result } = renderHook(() => useNexusInsights(USER, { enabled: false }));
+    orchestratorMocks.getCachedInsights.mockClear();
+
+    await act(async () => { await result.current.refreshFromCache(); });
+
+    expect(orchestratorMocks.getCachedInsights).not.toHaveBeenCalled();
+  });
+});

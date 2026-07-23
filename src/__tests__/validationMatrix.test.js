@@ -176,7 +176,11 @@ const firestoreMocks = {
   updateDoc: vi.fn(async () => {}),
   deleteDoc: vi.fn(async () => {}),
   getDoc: vi.fn(async () => ({ exists: () => false, data: () => undefined })),
-  getDocs: vi.fn(async () => ({ docs: [] })),
+  // `.forEach` alongside `.docs` (FIX-B follow-up): saveInsights' new
+  // getDismissedKeys call reads the snapshot via `.forEach`, not `.docs` —
+  // an empty-docs-only stub throws a TypeError there that this shared mock
+  // otherwise silently swallows into test noise.
+  getDocs: vi.fn(async () => ({ docs: [], forEach: () => {} })),
   setDoc: vi.fn(async () => {}),
   writeBatch: vi.fn(() => makeFirestoreBatch()),
 };

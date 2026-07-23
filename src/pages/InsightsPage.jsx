@@ -14,6 +14,8 @@ import { useBasicInsights } from '../hooks/useBasicInsights';
 import { useClaims } from '../hooks/useClaims';
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { recordFeedbackAndLearn } from '../services/basicInsights/feedbackLearning';
+import { rebuildInsights, describeRebuildResult } from '../services/insights/rebuildInsights';
+import { db } from '../config/firebase';
 import { getFlag } from '../config/flags';
 import ReceiptSheet from '../components/insights/ReceiptSheet';
 import ClaimFeed from '../components/insights/ClaimFeed';
@@ -178,7 +180,9 @@ const InsightsPage = ({
     return result;
   }, [entries]);
 
-  // Nexus 2.0 insights (includes active + historical, filtered by confidence ≥50%)
+  // Nexus 2.0 insights (active only — Fix B, 2026-07-24 brief: `history` is
+  // a separate audit/lineage record and is never blended into this live
+  // feed, see useNexusInsights.js's own "allInsights" doc comment).
   // R4 Phase 2 Task 6: the unified ClaimFeed (below) replaces this hook's
   // whole output when insightClaims is ON, so it's disabled in that case —
   // called unconditionally (rules of hooks) but `enabled: false` short-
@@ -193,7 +197,7 @@ const InsightsPage = ({
     refreshing,
     error,
     dataStatus,
-    refresh,
+    refreshFromCache: refreshNexusFromCache,
     lastGenerated
   } = useNexusInsights(user, { autoRefresh: true, enabled: !getFlag('insightClaims') });
 
@@ -204,7 +208,7 @@ const InsightsPage = ({
     generating: basicGenerating,
     hasEnoughData: hasEnoughBasicData,
     entriesNeeded: basicEntriesNeeded,
-    regenerate: regenerateBasic,
+    refreshFromCache: refreshBasicFromCache,
     lastGeneratedFormatted: basicLastGenerated
   } = useBasicInsights(user, entries, { autoRefresh: true });
 
@@ -217,6 +221,50 @@ const InsightsPage = ({
     loading: claimsLoading,
     refresh: refreshClaims,
   } = useClaims(user);
+
+  // Fix C (2026-07-24 brief) — ONE authoritative "Rebuild insights" action.
+  // Every refresh/recompute entry point on this page (header button,
+  // ClaimFeed's refresh, Quick Insights' refresh) routes through this same
+  // callback, which itself routes through the single `rebuildInsights`
+  // orchestration contract — never a per-surface subset of it again.
+  const [rebuilding, setRebuilding] = useState(false);
+  const [rebuildResult, setRebuildResult] = useState(null);
+
+  const handleRebuild = useCallback(async () => {
+    setRebuildResult(null);
+    setRebuilding(true);
+    try {
+      const result = await rebuildInsights(db, userId, entries);
+      setRebuildResult(result);
+      // Generate-then-replace: pull the freshly computed caches into every
+      // hook's displayed state via a read-only reload — never a second
+      // generation (rebuildInsights already ran the pipeline once). Only
+      // the active engine's surface needs reloading; the inactive one's
+      // hook is already disabled/inert (useNexusInsights `enabled:false`,
+      // useClaims's own internal flag gate).
+      if (getFlag('insightClaims')) {
+        await refreshClaims();
+      } else {
+        await Promise.all([refreshBasicFromCache(), refreshNexusFromCache()]);
+      }
+    } catch (error) {
+      console.warn('[InsightsPage] rebuild failed:', error?.name || typeof error);
+      // A sentinel all-engines-failed shape (not null) so the failure copy
+      // below still renders — "a failed run leaves prior artifacts
+      // visible" AND explains what happened, per the brief's acceptance
+      // criteria, even when rebuildInsights itself threw outside its own
+      // per-engine try/catch.
+      setRebuildResult({
+        ok: false,
+        engines: { basic: { ok: false, error: 'unexpected_error' } },
+        dayCount: 0,
+        verifiedClaimCount: 0,
+        insightCount: 0,
+      });
+    } finally {
+      setRebuilding(false);
+    }
+  }, [userId, entries, refreshClaims, refreshBasicFromCache, refreshNexusFromCache]);
 
   // "Try as an experiment" (ClaimCard): the prefill seam is wired — AppLayout
   // owns `experimentPrefill` state and passes it to ExperimentsScreen's
@@ -373,19 +421,54 @@ const InsightsPage = ({
             </button>
           )}
 
-          {/* Refresh Button */}
+          {/* Rebuild insights — Fix C (2026-07-24 brief). The ONE
+              authoritative refresh/rebuild action on this page: every other
+              refresh surface (ClaimFeed, Quick Insights, Insight Control
+              Center) routes through the same `handleRebuild` /
+              `rebuildInsights` contract. Label is "Rebuild insights"
+              deliberately, not "reset" — non-destructive, so it needs no
+              destructive-confirm dialog; the supporting copy (brief's exact
+              text) lives in `title` as the accessible/native tooltip. */}
           <button
-            onClick={refresh}
-            disabled={loading || refreshing}
-            className="cloud-icon-button bg-card disabled:opacity-50"
+            type="button"
+            onClick={handleRebuild}
+            disabled={rebuilding}
+            aria-label="Rebuild insights"
+            title="Reanalyze your current journal data. Your entries, feedback, dismissed insights, exclusions, experiments, and insight history won't be deleted."
+            className="cloud-icon-button bg-card disabled:opacity-50 w-auto px-3 flex items-center gap-1.5"
           >
             <RefreshCw
               size={18}
-              className={`text-muted-foreground ${refreshing ? 'animate-spin' : ''}`}
+              className={`text-muted-foreground shrink-0 ${rebuilding ? 'animate-spin' : ''}`}
             />
+            <span className="text-sm font-medium text-secondary-foreground">
+              {rebuilding ? 'Rebuilding…' : 'Rebuild insights'}
+            </span>
           </button>
         </div>
       </div>
+
+      {/* Rebuild result (Fix C, 2026-07-24 brief) — one of the brief's four
+          result-state copies, rendered from the SAME `describeRebuildResult`
+          formatter Insight Control Center uses, so the two surfaces never
+          drift. `role="status"` (not `alert`): even the failure copy is
+          calm, informational text ("your previous insights are still
+          available"), not an urgent interruption. */}
+      {rebuildResult && !rebuilding && (() => {
+        const { tone, message } = describeRebuildResult(rebuildResult);
+        // Cloud palette only (no off-palette amber/warning token exists) —
+        // failure and partial-failure both read as `text-destructive`; the
+        // message copy itself is what distinguishes "nothing rebuilt" from
+        // "one engine didn't finish".
+        const toneClass = (tone === 'failure' || tone === 'partial')
+          ? 'text-destructive'
+          : 'text-accent-deep';
+        return (
+          <div role="status" className="bg-accent-wash border border-border rounded-2xl px-4 py-3">
+            <p className={`text-sm font-medium ${toneClass}`}>{message}</p>
+          </div>
+        );
+      })()}
 
       {/* First-use tip: "Why am I seeing this?" (see RECEIPTS_TIP_AREA doc
           comment above) — one dismissible pointer, shown once per owner. */}
@@ -448,24 +531,30 @@ const InsightsPage = ({
           data is read (see useClaims.js's own internal flag gate), and the
           legacy Nexus list + empty state below render exactly as before. */}
       {getFlag('insightClaims') ? (
+        // Fix C (2026-07-24 brief): ClaimFeed's own refresh button now
+        // routes through the SAME `handleRebuild` orchestration as the page
+        // header — it reruns the pipeline, not merely `useClaims`' re-read.
         <ClaimFeed
           claims={claims}
-          loading={claimsLoading}
-          onRefresh={refreshClaims}
+          loading={claimsLoading || rebuilding}
+          onRefresh={handleRebuild}
           onShowReceipt={handleShowReceipt}
           onFeedback={handleShowReceipt}
           onTryExperiment={handleTryExperiment}
         />
       ) : (
+        // Fix C: Quick Insights' own refresh button routes through the same
+        // `handleRebuild` orchestration too (was `regenerateBasic`, which
+        // only ever rebuilt Basic Insights and never Nexus).
         <QuickInsightsSection
           insights={basicInsights}
           entries={entries}
           loading={basicLoading}
-          generating={basicGenerating}
+          generating={basicGenerating || rebuilding}
           hasEnoughData={hasEnoughBasicData}
           entriesNeeded={basicEntriesNeeded}
           lastGenerated={basicLastGenerated}
-          onRefresh={regenerateBasic}
+          onRefresh={handleRebuild}
           userId={userId}
           onWhyThis={handleShowReceipt}
         />

@@ -599,10 +599,12 @@ const AppLayout = ({
 
       {/* Insight Control Center (R2 Task 12) — double-gated on the flag (not
           just the nav row that's the only way to flip showControlCenter
-          true): if `insightReceipts` is off, this never mounts even if
-          state were somehow set, mirroring ReceiptSheet's own flag-gated
-          mount site in InsightsPage.jsx. */}
-      {getFlag('insightReceipts') && showControlCenter && (
+          true), mirroring ReceiptSheet's own flag-gated mount site in
+          InsightsPage.jsx. Fix C (2026-07-24 brief): mounts on EITHER
+          `insightReceipts` OR `insightClaims` — rebuild is useful
+          independently of receipts, and Control Center is the brief's
+          preferred placement 2 for the shared rebuild action. */}
+      {(getFlag('insightReceipts') || getFlag('insightClaims')) && showControlCenter && (
         <InsightControlCenter
           uid={user?.uid}
           entries={entries}

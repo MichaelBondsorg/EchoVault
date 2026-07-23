@@ -156,6 +156,29 @@ export const useBasicInsights = (user, entries, options = {}) => {
     }
   }, [user?.uid, entries, generating]);
 
+  // Fix C (2026-07-24 brief): pull the current cache into this hook's
+  // displayed state WITHOUT re-running generation — the unified "Rebuild
+  // insights" orchestration (`rebuildInsights.js`) already ran
+  // `generateBasicInsights` once; a caller re-reading the result through
+  // this hook must not trigger a second generation the way
+  // `regenerateInsights` above (which itself calls `generateBasicInsights`)
+  // would.
+  const refreshFromCache = useCallback(async () => {
+    if (!user?.uid) return;
+    try {
+      const cached = await getCachedBasicInsights(user.uid, entries?.length || 0);
+      if (cached) {
+        setInsights(cached.insights || []);
+        setLastGenerated(cached.generatedAt);
+        setCategoryCounts(cached.categoryCounts);
+        setError(null);
+      }
+    } catch (err) {
+      console.error('[useBasicInsights] refreshFromCache failed:', err);
+      setError(err.message);
+    }
+  }, [user?.uid, entries]);
+
   // Get insights by category
   const getInsightsByCategory = useCallback((category) => {
     return insights.filter(i => i.category === category);
@@ -193,6 +216,7 @@ export const useBasicInsights = (user, entries, options = {}) => {
 
     // Actions
     regenerate: regenerateInsights,
+    refreshFromCache,
     getInsightsByCategory,
 
     // Helpers

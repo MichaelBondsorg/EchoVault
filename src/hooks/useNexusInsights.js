@@ -352,6 +352,29 @@ export const useNexusInsights = (user, options = {}) => {
     });
   }, [enabled, budgetedInsights, shownLog, user?.uid]);
 
+  // Fix C (2026-07-24 brief): pull the current cache into this hook's
+  // displayed state WITHOUT re-running generation. `regenerateInsights`
+  // above calls `generateInsights` itself — that's fine for this hook's
+  // own auto-refresh/staleness paths, but the unified "Rebuild insights"
+  // orchestration (`rebuildInsights.js`) already ran generation once; a
+  // caller re-reading the result through this hook must not trigger a
+  // SECOND generation. Same read this hook already does inside
+  // `regenerateInsights` after generation completes — just without the
+  // generation step in front of it.
+  const refreshFromCache = useCallback(async () => {
+    if (!enabled || !user?.uid) return;
+    try {
+      const cached = await getCachedInsights(user.uid);
+      if (cached) {
+        setActiveInsights(cached.insights || []);
+        setHistoryInsights(cached.history || []);
+        setLastGenerated(cached.generatedAt);
+      }
+    } catch (err) {
+      console.error('[useNexusInsights] refreshFromCache failed:', err);
+    }
+  }, [enabled, user?.uid]);
+
   // Get primary insight
   const primaryInsight = activeInsights.find(i => i.priority === 1) || activeInsights[0];
 
@@ -383,6 +406,7 @@ export const useNexusInsights = (user, options = {}) => {
 
     // Actions
     refresh: regenerateInsights,
+    refreshFromCache,
     getInsightsByType,
 
     // Helpers

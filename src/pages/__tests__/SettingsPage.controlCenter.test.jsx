@@ -92,6 +92,17 @@ describe('SettingsPage — Insight Control Center nav row', () => {
     expect(within(section).getByText('Insight Control Center')).toBeTruthy();
   });
 
+  // Fix C (2026-07-24 brief): widened to `insightReceipts || insightClaims`
+  // — rebuild is useful independently of receipts.
+  it('also renders when insightClaims is on, even with insightReceipts off', () => {
+    flagsModule.getFlag = vi.fn((flag) => flag === 'insightClaims');
+    render(<SettingsPage {...defaultProps} />);
+
+    const sectionLabel = screen.getByText('AI & Privacy');
+    const section = sectionLabel.closest('.space-y-2');
+    expect(within(section).getByText('Insight Control Center')).toBeTruthy();
+  });
+
   it('calls onOpenControlCenter when clicked', async () => {
     flagsModule.getFlag = vi.fn((flag) => flag === 'insightReceipts');
     render(<SettingsPage {...defaultProps} />);
