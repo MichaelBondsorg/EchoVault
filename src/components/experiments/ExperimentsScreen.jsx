@@ -283,7 +283,19 @@ const ExperimentsScreen = ({ uid, entries = [], entriesLoaded, prefill = null, o
       completingRef.current.add(experiment.id);
       (async () => {
         try {
-          const result = computeExperimentResult({ experiment, entries, now });
+          // C1 fix (fix wave 1): a confirmed-mode experiment's exposure
+          // series comes from its `confirmations` subcollection, not from
+          // tag-scanning `entries` — load it before computing. A load
+          // failure here propagates through the SAME catch below as a
+          // compute failure always has (best-effort: no write, next render
+          // pass retries) — never a partial/insufficiency write, since
+          // nothing is written unless BOTH the load and the compute
+          // succeed. Passive/legacy plans never reach this branch (no new
+          // read for them).
+          const confirmations = experiment.analysisPlan?.exposureMode === 'confirmed'
+            ? await listConfirmations(db, uid, experiment.id)
+            : undefined;
+          const result = computeExperimentResult({ experiment, entries, confirmations, now });
           await writeResult(db, uid, experiment.id, result);
         } catch {
           // Best-effort: a transient failure just means the next render
@@ -1055,17 +1067,48 @@ function PreflightReview({ preflight, durationDays, exposureLabel, startBusy, cr
 // ---------------------------------------------------------------------------
 
 function ExperimentRow({ uid, experiment, entries, onPause, onResume, onStop, onDelete, onViewResult }) {
+  const confirmedMode = (experiment.status === 'running' || experiment.status === 'paused')
+    && experiment.analysisPlan?.exposureMode === 'confirmed';
+
+  // C1 fix (fix wave 1): this row's own live coverage-so-far is
+  // self-contradicting for a confirmed-mode experiment unless it also loads
+  // confirmations — mirrors `ConfirmationCheckIn`'s own self-contained fetch
+  // just below. `status: 'loaded'` gates the coverage computation so a
+  // still-loading or errored fetch never silently computes coverage as if
+  // zero days were confirmed (which would render a WRONG, not merely
+  // absent, coverage line) — matching this same function's existing
+  // catch-returns-null posture (a failure here means no coverage line is
+  // shown, not a wrong one). Passive rows never mount this effect at all —
+  // no new read for them.
+  const [confirmationsState, setConfirmationsState] = useState({ status: 'idle', list: [] });
+  useEffect(() => {
+    if (!confirmedMode) return undefined;
+    let cancelled = false;
+    setConfirmationsState({ status: 'loading', list: [] });
+    listConfirmations(db, uid, experiment.id)
+      .then((list) => { if (!cancelled) setConfirmationsState({ status: 'loaded', list: list || [] }); })
+      .catch(() => { if (!cancelled) setConfirmationsState({ status: 'error', list: [] }); });
+    return () => { cancelled = true; };
+  }, [confirmedMode, uid, experiment.id]);
+
   const coverage = useMemo(() => {
     if (experiment.status !== 'running' && experiment.status !== 'paused') return null;
+    if (confirmedMode && confirmationsState.status !== 'loaded') return null;
     try {
-      const result = computeExperimentResult({ experiment, entries, now: new Date() });
+      const result = computeExperimentResult({
+        experiment,
+        entries,
+        now: new Date(),
+        ...(confirmedMode ? { confirmations: confirmationsState.list } : {}),
+      });
       return result.coverage;
     } catch {
       return null;
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- recompute only
-    // when the experiment's own persisted fields or the entry pool change.
-  }, [experiment.id, experiment.status, experiment.excludedObservations, experiment.startAt, experiment.endAt, entries]);
+    // when the experiment's own persisted fields, the entry pool, or the
+    // (confirmed-mode-only) loaded confirmations change.
+  }, [experiment.id, experiment.status, experiment.excludedObservations, experiment.startAt, experiment.endAt, entries, confirmedMode, confirmationsState]);
 
   const exposureLabel = experiment.analysisPlan?.exposure?.label || 'this variable';
 

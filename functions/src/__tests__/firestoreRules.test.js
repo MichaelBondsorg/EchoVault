@@ -1684,6 +1684,25 @@ describe('Experiment confirmations subcollection rules', () => {
     await assertFails(setDoc(ref, { ...validConfirmation, dateKey: 20260723 }));
   });
 
+  // M1 (fix wave 1): the `dateKey` FIELD must equal the doc id — a mismatch
+  // would let `computeResult.js`'s confirmed-mode series builder (which
+  // reads the field, not the doc id) file the check-in under the wrong day.
+  it('denies a dateKey field that does not match the doc id, on create', async () => {
+    await seedExperiment('e-conf-mismatch', 'running');
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    const ref = doc(db, userPath(USER_ID), 'experiments', 'e-conf-mismatch', 'confirmations', '2026-07-23');
+    await assertFails(setDoc(ref, { ...validConfirmation, dateKey: '2026-07-24' }));
+  });
+
+  it('denies a dateKey field that does not match the doc id, on update; allows a matching update', async () => {
+    await seedExperiment('e-conf-mismatch-update', 'running');
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    const ref = doc(db, userPath(USER_ID), 'experiments', 'e-conf-mismatch-update', 'confirmations', '2026-07-23');
+    await assertSucceeds(setDoc(ref, validConfirmation));
+    await assertFails(setDoc(ref, { ...validConfirmation, dateKey: '2026-07-24' }));
+    await assertSucceeds(setDoc(ref, { ...validConfirmation, done: false }));
+  });
+
   it('denies another user reading, creating, updating, or deleting a confirmation', async () => {
     await seedExperiment('e-conf-cross', 'running');
     const ownerDb = testEnv.authenticatedContext(USER_ID).firestore();

@@ -982,3 +982,104 @@ describe('ExperimentsScreen — auto-completion', () => {
     expect(writeResult).not.toHaveBeenCalled();
   });
 });
+
+// ---------------------------------------------------------------------------
+// C1 (Critical, fix wave 1): confirmations must actually be loaded into
+// compute at every call site — a confirmed-mode experiment must not ALWAYS
+// compute 0-coverage insufficiency because no site ever fetches its
+// confirmations subcollection. Two of the three C1 call sites live in this
+// file (the third, the exclusion-adjustment recompute, is covered in
+// ExperimentResultView.test.jsx).
+// ---------------------------------------------------------------------------
+
+describe('ExperimentsScreen — confirmed-mode compute wiring (fix wave 1, C1)', () => {
+  /** The local ('UTC') dateKey for `daysAgo` days before "now" at noon — matches the confirmations/entries fixtures below to the real window computation. */
+  function confirmedDateKey(daysAgo) {
+    return localDateKeyForMs(Date.parse(isoDaysAgo(daysAgo, 12)), 'UTC');
+  }
+
+  function confirmedTagAnalysisPlan() {
+    return {
+      templateId: 'tag-presence-mood',
+      lag: 0,
+      exposure: { source: 'tags', field: 'tags', label: 'meditate', tag: '@habit:meditate' },
+      outcome: { field: 'analysis.mood_score', label: 'mood', unit: 'mood_0_100' },
+      minPairedObservations: 10,
+      coverageFloor: 0.5,
+      confounders: [],
+      whatThisDoesNotProve: [],
+      splitMode: 'binary',
+      exposureMode: 'confirmed',
+    };
+  }
+
+  it('auto-complete (site 1) loads confirmations and stores a result whose exposure coverage reflects the seeded check-in days (status ok)', async () => {
+    // Elapsed window: day1 = 39 days ago .. effectiveEnd = 10 days ago
+    // (exclusive) — see computeResult.js's PARTIAL START DAY RULE. Pick 20
+    // days safely inside that range, alternating done true/false with a
+    // matching mood contrast so the fixture is unambiguously 'ok'.
+    const experiment = runningExperiment({
+      id: 'exp-conf-auto',
+      question: 'How does meditate move together with my mood?',
+      startAt: isoDaysAgo(40, 0),
+      endAt: isoDaysAgo(10, 0),
+      analysisPlan: confirmedTagAnalysisPlan(),
+    });
+    const daysAgoList = Array.from({ length: 20 }, (_, i) => 12 + i); // 12..31
+    const confirmations = daysAgoList.map((d, idx) => {
+      const dateKey = confirmedDateKey(d);
+      return { id: dateKey, dateKey, done: idx % 2 === 0, createdAt: 'x' };
+    });
+    const entries = daysAgoList.map((d, idx) => ({
+      id: `mood-auto-${d}`,
+      createdAt: isoDaysAgo(d, 12),
+      analysis: { mood_score: idx % 2 === 0 ? 0.8 : 0.4 },
+    }));
+
+    withExperiments([experiment]);
+    listConfirmations.mockResolvedValue(confirmations);
+    render(<ExperimentsScreen uid={UID} entries={entries} onClose={vi.fn()} />);
+
+    await waitFor(() => expect(writeResult).toHaveBeenCalledTimes(1));
+    expect(listConfirmations).toHaveBeenCalledWith({ __db: true }, UID, 'exp-conf-auto');
+
+    const payload = writeResult.mock.calls[0][3];
+    expect(payload.status).toBe('ok');
+    expect(payload.coverage.exposure.covered).toBe(20);
+    expect(payload.estimate.n).toBe(20);
+    expect(payload.estimate.delta).toBeGreaterThan(0);
+  });
+
+  it('the running card (site 2) shows exposure coverage-so-far derived from seeded confirmations, not tag-scanned (tagless) entries', async () => {
+    const experiment = runningExperiment({
+      id: 'exp-conf-row',
+      question: 'How does meditate move together with my mood?',
+      analysisPlan: confirmedTagAnalysisPlan(),
+      // default fixture window: startAt 14 days ago, endAt 14 days in the
+      // future — NOT elapsed, so this exercises the row's live coverage
+      // computation rather than auto-completion.
+    });
+    const daysAgoList = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+    const confirmations = daysAgoList.map((d, idx) => {
+      const dateKey = confirmedDateKey(d);
+      return { id: dateKey, dateKey, done: idx % 2 === 0, createdAt: 'x' };
+    });
+    // Entries carry mood only — NO `tags` field at all, so a passive
+    // tag-scan would find nothing; a confirmed-mode fix must ignore that
+    // and read the confirmations subcollection instead.
+    const entries = daysAgoList.map((d, idx) => ({
+      id: `mood-row-${d}`,
+      createdAt: isoDaysAgo(d, 12),
+      analysis: { mood_score: idx % 2 === 0 ? 0.8 : 0.4 },
+    }));
+
+    withExperiments([experiment]);
+    listConfirmations.mockResolvedValue(confirmations);
+    render(<ExperimentsScreen uid={UID} entries={entries} onClose={vi.fn()} />);
+    await screen.findByText('How does meditate move together with my mood?');
+
+    const exposureLine = await screen.findByText(/^\d+ of \d+ days have meditate data$/);
+    const [covered] = exposureLine.textContent.match(/^(\d+) of/).slice(1).map(Number);
+    expect(covered).toBe(10);
+  });
+});

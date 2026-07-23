@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { ChevronLeft } from 'lucide-react';
 import { db } from '../../config/firebase';
 import { Button } from '../cloud';
@@ -9,8 +9,10 @@ import {
   exposureValueForEntry,
   outcomeValueForEntry,
   buildDaySeries,
+  buildConfirmationSeries,
   computeExperimentResult,
   localDateKeyForMs,
+  pseudoMsFromDateKey,
   shiftLocalDateKey,
   localMidnightUtcMs,
   STABILITY_CAVEAT_COPY,
@@ -21,6 +23,7 @@ import {
   EXCLUSION_REASONS,
   buildAdjustedResultUpdate,
   writeAdjustedResult,
+  listConfirmations,
 } from '../../services/experiments/experimentsService';
 import { safeDate } from '../../utils/date';
 
@@ -208,9 +211,22 @@ function entryDateKeyLocal(entry, timeZone) {
  * "Sensitive day — details hidden" for that row instead of its raw
  * exposure/outcome numbers.
  *
- * @returns {{dateKey:string, outcomeDateKey:string, exposure:number, outcome:number, sensitive:boolean}[]}
+ * CONFIRMED-EXPOSURE MODE (I1, fix wave 1): when
+ * `plan.exposureMode === 'confirmed'`, the exposure series is built from
+ * `confirmations` (via `computeResult.js`'s `buildConfirmationSeries` — the
+ * SAME helper the real pipeline uses) instead of tag-scanning `windowed`
+ * entries, and each row's `exposure` field is a display string —
+ * `'Yes'`/`'No'`/`'—'` — rather than the raw 0/1 number, matching the
+ * summary's own check-in framing above the table. Passive/legacy plans take
+ * the unchanged `buildDaySeries` branch and keep a numeric `exposure` value,
+ * byte-identical to before this fix.
+ *
+ * @param {Array<{dateKey?:string, done?:boolean}>} [confirmations] - only
+ *   consulted when `plan.exposureMode === 'confirmed'`; ignored otherwise
+ *   (no behavior change for a passive/legacy plan).
+ * @returns {{dateKey:string, outcomeDateKey:string, exposure:number|string, outcome:number, sensitive:boolean}[]}
  */
-export function buildObservationRows(experiment, entries) {
+export function buildObservationRows(experiment, entries, confirmations = []) {
   const plan = experiment?.analysisPlan;
   if (!plan || typeof plan.exposure !== 'object' || typeof plan.outcome !== 'object') return [];
   const startMs = Date.parse(experiment.startAt);
@@ -230,7 +246,14 @@ export function buildObservationRows(experiment, entries) {
     return ts !== null && ts >= windowStartMs && ts < effectiveEndMs;
   });
 
-  const exposureSeries = buildDaySeries(windowed, (entry) => exposureValueForEntry(entry, plan.exposure, plan.exposure?.tag), timeZone);
+  const confirmedExposureMode = plan.exposureMode === 'confirmed';
+  const exposureSeries = confirmedExposureMode
+    ? buildConfirmationSeries(
+      confirmations,
+      pseudoMsFromDateKey(day1LocalKey),
+      pseudoMsFromDateKey(localDateKeyForMs(effectiveEndMs, timeZone)),
+    )
+    : buildDaySeries(windowed, (entry) => exposureValueForEntry(entry, plan.exposure, plan.exposure?.tag), timeZone);
   const outcomeSeries = buildDaySeries(windowed, (entry) => outcomeValueForEntry(entry, plan.outcome), timeZone);
 
   const pairs = pairObservations({ exposureSeries, outcomeSeries, lag: plan.lag });
@@ -241,8 +264,16 @@ export function buildObservationRows(experiment, entries) {
       ...(entriesByDateKey.get(pair.outcomeDateKey) || []),
     ];
     const sensitive = dayEntries.some((entry) => entry && (entry.safety_flagged || entry.has_warning_indicators));
-    return { ...pair, sensitive };
+    const exposure = confirmedExposureMode ? confirmationDisplay(pair.exposure) : pair.exposure;
+    return { ...pair, exposure, sensitive };
   });
+}
+
+/** `'Yes'`/`'No'`/`'—'` display for a confirmed-mode exposure series value (1/0/other — see module doc comment's "CONFIRMED-EXPOSURE MODE"). */
+function confirmationDisplay(value) {
+  if (value === 1) return 'Yes';
+  if (value === 0) return 'No';
+  return '—';
 }
 
 function roundToOneDecimal(n) {
@@ -298,7 +329,33 @@ const ExperimentResultView = ({ uid, entries = [], experiment, onClose }) => {
     return map;
   }, [entries]);
 
-  const rows = useMemo(() => buildObservationRows(experiment, entries), [experiment, entries]);
+  // I1 fix (fix wave 1): the paired-days table needs the confirmation
+  // subcollection to render confirmed-mode rows correctly (see
+  // `buildObservationRows`' "CONFIRMED-EXPOSURE MODE" doc comment). Loaded
+  // once on mount — a completed/stopped experiment's confirmations are
+  // frozen (no further check-in is legal once it leaves `running`), so
+  // there is no live-refresh concern here. A passive/legacy plan never
+  // triggers this fetch at all (no new read for it). A load failure
+  // defaults to `[]`, matching this table's own pre-existing
+  // no-error-surface posture (it already silently reflects whatever
+  // `entries` it's handed, with no error state of its own).
+  const [tableConfirmations, setTableConfirmations] = useState([]);
+  useEffect(() => {
+    if (experiment.analysisPlan?.exposureMode !== 'confirmed') {
+      setTableConfirmations([]);
+      return undefined;
+    }
+    let cancelled = false;
+    listConfirmations(db, uid, experiment.id)
+      .then((list) => { if (!cancelled) setTableConfirmations(Array.isArray(list) ? list : []); })
+      .catch(() => { if (!cancelled) setTableConfirmations([]); });
+    return () => { cancelled = true; };
+  }, [uid, experiment.id, experiment.analysisPlan?.exposureMode]);
+
+  const rows = useMemo(
+    () => buildObservationRows(experiment, entries, tableConfirmations),
+    [experiment, entries, tableConfirmations],
+  );
 
   const exposureLabel = experiment.analysisPlan?.exposure?.label || 'this variable';
   const outcomeLabel = experiment.analysisPlan?.outcome?.label || 'mood';
@@ -328,7 +385,20 @@ const ExperimentResultView = ({ uid, entries = [], experiment, onClose }) => {
     try {
       const updatedExcluded = await setObservationExcluded(db, uid, experiment.id, dateKey, nextExcluded);
       const updatedExperiment = { ...experiment, excludedObservations: updatedExcluded };
-      const nextResult = computeExperimentResult({ experiment: updatedExperiment, entries, now: new Date() });
+      // C1 fix (fix wave 1): a confirmed-mode experiment's recompute must
+      // read the SAME confirmations series the original result was built
+      // from, or this rerun silently tag-scans (zero-confirmation) entries
+      // and nukes the adjusted result to 'insufficient'. A load failure
+      // here is caught by the SAME try/catch as every other step of this
+      // toggle (setObservationExcluded, the recompute itself) — the same
+      // user-visible error message, no partial/wrong write, matching how a
+      // compute failure already propagates at this call site.
+      const confirmationsForCompute = experiment.analysisPlan?.exposureMode === 'confirmed'
+        ? await listConfirmations(db, uid, experiment.id)
+        : undefined;
+      const nextResult = computeExperimentResult({
+        experiment: updatedExperiment, entries, confirmations: confirmationsForCompute, now: new Date(),
+      });
       const at = new Date().toISOString();
       const nextField = buildAdjustedResultUpdate(storedField, {
         adjusted: nextResult,

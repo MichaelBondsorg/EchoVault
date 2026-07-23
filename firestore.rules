@@ -468,7 +468,14 @@ service cloud.firestore {
           allow create, update: if isOwner(userId)
             && request.resource.data.keys().hasOnly(['dateKey', 'done', 'createdAt'])
             && request.resource.data.dateKey is string
-            && request.resource.data.done is bool;
+            && request.resource.data.done is bool
+            // M1 (fix wave 1): pin the `dateKey` FIELD to equal the doc id —
+            // without this, a client could write a confirmation doc whose
+            // `dateKey` field disagrees with the path it's actually stored
+            // under, and `computeResult.js`'s confirmed-mode series builder
+            // (which reads the FIELD, not the doc id) would silently file
+            // the check-in under the wrong calendar day.
+            && request.resource.data.dateKey == dateKey;
         }
       }
 

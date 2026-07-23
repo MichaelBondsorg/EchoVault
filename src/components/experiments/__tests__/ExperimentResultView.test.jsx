@@ -16,7 +16,7 @@ import { render, screen, fireEvent, waitFor, within } from '@testing-library/rea
 import ExperimentResultView, { buildObservationRows, reasonCopy, normalizeStoredResult } from '../ExperimentResultView';
 import { computeExperimentResult, NON_CAUSAL_FRAMING } from '../../../services/experiments/computeResult';
 import { getTemplateById } from '../../../services/experiments/templates';
-import { setObservationExcluded, writeResult, writeAdjustedResult } from '../../../services/experiments/experimentsService';
+import { setObservationExcluded, writeResult, writeAdjustedResult, listConfirmations } from '../../../services/experiments/experimentsService';
 
 vi.mock('../../../config/firebase', () => ({ db: { __db: true } }));
 
@@ -27,6 +27,7 @@ vi.mock('../../../services/experiments/experimentsService', async (importOrigina
     setObservationExcluded: vi.fn(),
     writeResult: vi.fn().mockResolvedValue(undefined),
     writeAdjustedResult: vi.fn().mockResolvedValue(undefined),
+    listConfirmations: vi.fn().mockResolvedValue([]),
   };
 });
 
@@ -183,7 +184,7 @@ describe('ExperimentResultView — ok result (golden fixture)', () => {
 // ---------------------------------------------------------------------------
 
 describe('ExperimentResultView — confirmed-exposure source disclosure (R4 Phase 3 Task 3)', () => {
-  it('shows the daily-check-in disclosure with the N-days-answered count when analysisPlan.exposureMode is confirmed', () => {
+  it('shows the daily-check-in disclosure with the N-days-answered count when analysisPlan.exposureMode is confirmed', async () => {
     const okResult = {
       status: 'ok',
       estimate: {
@@ -207,6 +208,9 @@ describe('ExperimentResultView — confirmed-exposure source disclosure (R4 Phas
     render(<ExperimentResultView uid={UID} entries={[]} experiment={experiment} onClose={vi.fn()} />);
 
     expect(screen.getByText('From your daily check-ins — 9 days answered.')).toBeTruthy();
+    // Flush the table's own confirmations load (I1) so this test doesn't
+    // leak a pending state update into the next one.
+    await waitFor(() => expect(listConfirmations).toHaveBeenCalled());
   });
 
   it('never shows the check-in disclosure for a passive-mode (no exposureMode) result', () => {
@@ -619,5 +623,148 @@ describe('ExperimentResultView — invalid-observation disclosure (item 3)', () 
     expect(result.invalidObservationCount).toBe(0);
     render(<ExperimentResultView uid={UID} entries={entries} experiment={goldenExperiment({ result })} onClose={vi.fn()} />);
     expect(screen.queryByText(/out-of-range/i)).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// C1 (Critical, fix wave 1) — site 3: exclusion-adjustment recompute must
+// load confirmations for a confirmed-mode experiment, or the adjusted
+// result is nuked to 'insufficient' regardless of the original result.
+// I1 (Important, fix wave 1) — the paired-days table must be
+// exposureMode-aware: confirmed rows show check-in-derived Yes/No, not a
+// tag scan over (tagless) entries.
+// ---------------------------------------------------------------------------
+
+function confirmedTagAnalysisPlan() {
+  return {
+    templateId: 'tag-presence-mood',
+    lag: 0,
+    exposure: { source: 'tags', field: 'tags', label: 'meditate', tag: '@habit:meditate' },
+    outcome: { field: 'analysis.mood_score', label: 'mood', unit: 'mood_0_100' },
+    minPairedObservations: 10,
+    coverageFloor: 0.5,
+    confounders: [],
+    whatThisDoesNotProve: [],
+    splitMode: 'binary',
+    exposureMode: 'confirmed',
+  };
+}
+
+/** 20-day fixture, mood only (deliberately NO `tags` field on any entry — a passive tag-scan would find nothing). */
+function confirmedFixtureEntries() {
+  const entries = [];
+  for (let day = 1; day <= 20; day++) {
+    entries.push({
+      id: `conf-${day}`,
+      createdAt: isoDay(2026, 3, day, 12),
+      analysis: { mood_score: (day % 2 === 0 ? 80 : 40) / 100 },
+    });
+  }
+  return entries;
+}
+
+function confirmedFixtureConfirmations() {
+  const list = [];
+  for (let day = 1; day <= 20; day++) {
+    const dateKey = `2026-03-${String(day).padStart(2, '0')}`;
+    list.push({ id: dateKey, dateKey, done: day % 2 === 0, createdAt: 'x' });
+  }
+  return list;
+}
+
+function confirmedFixtureExperiment(overrides = {}) {
+  return {
+    id: 'exp-conf-result',
+    question: 'How does meditate move together with my mood?',
+    template: 'tag-presence-mood',
+    analysisPlan: confirmedTagAnalysisPlan(),
+    scope: null,
+    status: 'completed',
+    startAt: isoDay(2026, 2, 28, 0),
+    endAt: isoDay(2026, 3, 21, 0),
+    durationDays: 28,
+    excludedObservations: [],
+    createdAt: isoDay(2026, 2, 28, 0),
+    updatedAt: isoDay(2026, 2, 28, 0),
+    ...overrides,
+  };
+}
+
+const CONFIRMED_FIXTURE_NOW = new Date(isoDay(2026, 4, 1, 0));
+
+describe('ExperimentResultView — confirmed-mode exclusion-adjustment recompute (fix wave 1, C1)', () => {
+  it('retains the confirmation-derived exposure series on a post-result exclusion toggle (never nuked to insufficient)', async () => {
+    const entries = confirmedFixtureEntries();
+    const confirmations = confirmedFixtureConfirmations();
+    const experimentBase = confirmedFixtureExperiment();
+    const originalResult = computeExperimentResult({
+      experiment: experimentBase, entries, confirmations, now: CONFIRMED_FIXTURE_NOW,
+    });
+    expect(originalResult.status).toBe('ok'); // sanity: fixture is well-formed
+
+    listConfirmations.mockResolvedValue(confirmations);
+    const experiment = { ...experimentBase, result: originalResult };
+
+    render(<ExperimentResultView uid={UID} entries={entries} experiment={experiment} onClose={vi.fn()} />);
+    expect(screen.getByText(`${originalResult.estimate.n} matched days`)).toBeTruthy();
+
+    const excludedDateKey = '2026-03-01';
+    setObservationExcluded.mockResolvedValueOnce([excludedDateKey]);
+
+    // The paired-days table's own confirmations load (I1) is async — wait
+    // for the row to actually appear before interacting with it.
+    fireEvent.click(await screen.findByRole('button', { name: `Exclude ${excludedDateKey}` }));
+    fireEvent.click(await screen.findByRole('radio', { name: /something else/i }));
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+
+    await waitFor(() => expect(writeAdjustedResult).toHaveBeenCalledTimes(1));
+    const adjusted = writeAdjustedResult.mock.calls[0][3].adjusted;
+    // Pre-fix, confirmations are never loaded at this call site, so the
+    // recompute tag-scans zero-confirmation (tagless) entries and always
+    // lands on 'insufficient' — this assertion is what proves the fix.
+    expect(adjusted.status).toBe('ok');
+    expect(adjusted.estimate.n).toBe(originalResult.estimate.n - 1);
+  });
+});
+
+describe('ExperimentResultView — paired-days table is exposureMode-aware (I1)', () => {
+  it('confirmed-mode rows show check-in-derived Yes/No values, not a tag scan over (tagless) entries', async () => {
+    const entries = confirmedFixtureEntries();
+    const confirmations = confirmedFixtureConfirmations();
+    const experimentBase = confirmedFixtureExperiment();
+    const originalResult = computeExperimentResult({
+      experiment: experimentBase, entries, confirmations, now: CONFIRMED_FIXTURE_NOW,
+    });
+    listConfirmations.mockResolvedValue(confirmations);
+    const experiment = { ...experimentBase, result: originalResult };
+
+    render(<ExperimentResultView uid={UID} entries={entries} experiment={experiment} onClose={vi.fn()} />);
+
+    // Confirmations are loaded async (mount effect) for the table — wait for
+    // that load before asserting on the row content.
+    await waitFor(() => expect(listConfirmations).toHaveBeenCalled());
+
+    // 2026-03-02 has done:true -> "Yes"; 2026-03-01 has done:false -> "No".
+    const yesRow = await screen.findByText('2026-03-02');
+    const yesCells = yesRow.closest('tr').querySelectorAll('td');
+    expect(yesCells[1].textContent).toBe('Yes');
+
+    const noRow = screen.getByText('2026-03-01');
+    const noCells = noRow.closest('tr').querySelectorAll('td');
+    expect(noCells[1].textContent).toBe('No');
+  });
+
+  it('passive-mode rows stay byte-identical (numeric tag-scan values, unaffected by this fix)', () => {
+    const entries = buildGoldenEntries();
+    const result = computeExperimentResult({ experiment: goldenExperiment(), entries, now: GOLDEN_NOW });
+    const experiment = goldenExperiment({ result });
+
+    render(<ExperimentResultView uid={UID} entries={entries} experiment={experiment} onClose={vi.fn()} />);
+
+    const row = screen.getByText('2026-01-01').closest('tr');
+    const cells = row.querySelectorAll('td');
+    expect(cells[1].textContent).toBe(String(goldenSleepHours(0)));
+    // Passive path: no new reads.
+    expect(listConfirmations).not.toHaveBeenCalled();
   });
 });
