@@ -19,6 +19,10 @@ export const CLAIM_TOP_LEVEL_KEYS = Object.freeze([
 
 // Non-causal copy is an integrity surface (DR gate 7). Deterministic Phase-1
 // wording never uses these; the check also protects Phase-2 LLM wording.
+// Sync: byte-identical copy of this regex lives server-side as CAUSAL_RE in
+// functions/src/insights/claimVerifier.js (cross-package duplicate, same
+// precedent as dismissalKey.js <-> insightDismissal.js — see that pair's
+// doc comments). A parity test (Task 9) asserts the two stay identical.
 const CAUSAL_RE = /\b(boosts?|causes?|caused|improves?|improved|makes? you|leads? to|results? in|because of your)\b/i;
 
 const REQUIRED_PLAN_KEYS = ['frozenAt', 'hypothesisFamilyId', 'candidateId',
