@@ -868,7 +868,7 @@ dedicated per-area test files cited throughout the sections above and in
 
 ## R4 Phase 1 (Insight Integrity — canonical claim store + evidence rails)
 
-Plan: `docs/superpowers/plans/2026-07-22-r4-phase1-insight-integrity.md`.
+Plan: `docs/superpowers/plans/2026-07-22-r4-phase1-evidence-foundation.md`.
 Where Phase 0 above repaired the legacy engines' *statistics*, Phase 1 adds
 the evidence-integrity machinery the DR calls for on top of them: a daily
 observation rollup, a hypothesis-family multiple-testing ledger, an
