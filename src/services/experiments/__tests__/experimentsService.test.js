@@ -6,6 +6,12 @@
  * and the create `hasOnly` list) — the R2 regression-guard pattern.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+// Pure, no-Firebase module (see computeResult.test.js's own note on why it
+// avoids importing experimentsService.js directly) — safe to import
+// statically here since this file already mocks `../../../config/firebase`
+// for `experimentsService.js` itself.
+import { computeExperimentResult } from '../computeResult';
+import { getTemplateById } from '../templates';
 
 const mocks = {
   collection: vi.fn((_db, path) => ({ __col: path })),
@@ -22,6 +28,27 @@ const mocks = {
 
 vi.mock('../../../config/firebase', () => mocks);
 vi.mock('../../../config/constants', () => ({ APP_COLLECTION_ID: 'echo-vault-v5-fresh' }));
+
+// Hypothesis-family testing ledger (T2/R4 Phase 1). `familyIdForExperiment`
+// and `bonferroniCiLevel` are re-implemented here as plain (non-Firestore)
+// logic identical to `testingLedger.js`'s real implementation, so every
+// existing/new `buildAnalysisPlan` assertion below can rely on real,
+// deterministic family ids/ciLevel values. `registerCandidates` and
+// `readLedgerCounts` — the two Firestore-touching exports — are spies
+// (`vi.fn()`) so `createExperiment`/`startExperiment` tests can assert on
+// how they're called and control their resolved/rejected values per test.
+const ledgerMocks = {
+  familyIdForExperiment: vi.fn((templateId, tag) => (
+    tag == null ? `experiment:${templateId}` : `experiment:${templateId}:tag:${String(tag).toLowerCase()}`
+  )),
+  bonferroniCiLevel: vi.fn((testedCount, alpha = 0.05) => {
+    const m = Number.isFinite(testedCount) && testedCount > 1 ? testedCount : 1;
+    return 1 - alpha / m;
+  }),
+  registerCandidates: vi.fn(async () => ({ testedCount: 1 })),
+  readLedgerCounts: vi.fn(async () => new Map()),
+};
+vi.mock('../../insights/testingLedger', () => ledgerMocks);
 
 const {
   resolveDeviceTimezone,
@@ -100,7 +127,10 @@ describe('buildAnalysisPlan', () => {
       confounders: ['Confounder one.', 'Confounder two.'],
       whatThisDoesNotProve: ['Does not prove one.', 'Does not prove two.'],
       timezone: resolveDeviceTimezone(),
+      hypothesisFamilyId: 'experiment:sleep-hours-mood-same-day',
     });
+    // No priorTestedCount given -> no ciLevel key (absence, not undefined).
+    expect(plan).not.toHaveProperty('ciLevel');
   });
 
   it('carries splitMode onto the plan only when the template declares one (e.g. tag-presence-mood: binary)', () => {
@@ -160,6 +190,59 @@ describe('buildAnalysisPlan', () => {
   it('throws for an invalid template', () => {
     expect(() => buildAnalysisPlan(null)).toThrow();
     expect(() => buildAnalysisPlan({})).toThrow();
+  });
+});
+
+describe('buildAnalysisPlan — hypothesis family + Bonferroni ciLevel (R4 Phase 1 retrofit, Task 7)', () => {
+  it('always stamps hypothesisFamilyId (experiment:{templateId}) for an untagged template, with no ciLevel when no priorTestedCount is given', () => {
+    const template = validTemplate({ id: 'steps-mood' });
+    const plan = buildAnalysisPlan(template);
+    expect(plan.hypothesisFamilyId).toBe('experiment:steps-mood');
+    expect(plan).not.toHaveProperty('ciLevel');
+  });
+
+  it('stamps a tag-qualified (lowercased) hypothesisFamilyId and the Bonferroni-adjusted ciLevel when priorTestedCount is finite >= 1', () => {
+    const tagTemplate = validTemplate({
+      id: 'tag-presence-mood',
+      exposure: { source: 'tags', field: 'tags', label: 'tag presence' },
+    });
+    const plan = buildAnalysisPlan(tagTemplate, { tag: 'Gym', priorTestedCount: 3 });
+    expect(plan.hypothesisFamilyId).toBe('experiment:tag-presence-mood:tag:gym');
+    // m = priorTestedCount + 1 (this experiment included) = 4 -> 1 - 0.05/4.
+    expect(plan.ciLevel).toBeCloseTo(1 - 0.05 / 4, 10);
+  });
+
+  it('omits ciLevel when priorTestedCount is 0, negative, non-finite, or simply absent (absence, not undefined — estimator default applies)', () => {
+    const template = validTemplate();
+    expect(buildAnalysisPlan(template, {})).not.toHaveProperty('ciLevel');
+    expect(buildAnalysisPlan(template, { priorTestedCount: 0 })).not.toHaveProperty('ciLevel');
+    expect(buildAnalysisPlan(template, { priorTestedCount: -1 })).not.toHaveProperty('ciLevel');
+    expect(buildAnalysisPlan(template, { priorTestedCount: NaN })).not.toHaveProperty('ciLevel');
+    expect(buildAnalysisPlan(template, { priorTestedCount: Infinity })).not.toHaveProperty('ciLevel');
+  });
+
+  it('priorTestedCount === 1 (exactly one prior candidate) DOES trigger a ciLevel — the boundary is inclusive', () => {
+    const template = validTemplate();
+    const plan = buildAnalysisPlan(template, { priorTestedCount: 1 });
+    // m = 1 + 1 = 2 -> 1 - 0.05/2.
+    expect(plan.ciLevel).toBeCloseTo(1 - 0.05 / 2, 10);
+  });
+
+  it('an untagged experiment repeated (same template) resolves to the SAME family id regardless of params.tag being absent vs explicitly null', () => {
+    const template = validTemplate();
+    const planA = buildAnalysisPlan(template);
+    const planB = buildAnalysisPlan(template, { tag: null });
+    expect(planA.hypothesisFamilyId).toBe(planB.hypothesisFamilyId);
+  });
+
+  it('two different tags on the same tag-presence template resolve to DIFFERENT family ids (each tag is its own hypothesis)', () => {
+    const tagTemplate = validTemplate({
+      id: 'tag-presence-mood',
+      exposure: { source: 'tags', field: 'tags', label: 'tag presence' },
+    });
+    const gymPlan = buildAnalysisPlan(tagTemplate, { tag: 'Gym' });
+    const runPlan = buildAnalysisPlan(tagTemplate, { tag: 'Run' });
+    expect(gymPlan.hypothesisFamilyId).not.toBe(runPlan.hypothesisFamilyId);
   });
 });
 
@@ -256,6 +339,56 @@ describe('createExperiment — payload exactness', () => {
   });
 });
 
+describe('createExperiment — hypothesis-family ledger read + Bonferroni ciLevel freeze (R4 Phase 1 retrofit, Task 7)', () => {
+  const FAMILY_ID = 'experiment:sleep-hours-mood-same-day'; // validTemplate()'s id, untagged
+
+  it('reads the ledger count for the plan\'s hypothesisFamilyId before writing', async () => {
+    await createExperiment(db, UID, validCreateInput());
+    expect(ledgerMocks.readLedgerCounts).toHaveBeenCalledTimes(1);
+    expect(ledgerMocks.readLedgerCounts).toHaveBeenCalledWith(db, UID, [FAMILY_ID]);
+  });
+
+  it('writes NO ciLevel (analysisPlan keeps the default) when the ledger reports no prior tests for the family', async () => {
+    ledgerMocks.readLedgerCounts.mockResolvedValueOnce(new Map()); // count undefined -> treated as 0
+    await createExperiment(db, UID, validCreateInput());
+    const payload = mocks.addDoc.mock.calls[0][1];
+    expect(payload.analysisPlan).not.toHaveProperty('ciLevel');
+    expect(payload.analysisPlan.hypothesisFamilyId).toBe(FAMILY_ID);
+  });
+
+  it('freezes a Bonferroni ciLevel onto analysisPlan when the ledger reports priorTestedCount >= 1, computed from THIS create\'s fresh read (overriding whatever ciLevel — if any — the caller\'s own buildAnalysisPlan call already set)', async () => {
+    ledgerMocks.readLedgerCounts.mockResolvedValueOnce(new Map([[FAMILY_ID, 2]]));
+    await createExperiment(db, UID, validCreateInput());
+    const payload = mocks.addDoc.mock.calls[0][1];
+    // m = priorTestedCount (2) + 1 (this experiment) = 3 -> 1 - 0.05/3.
+    expect(payload.analysisPlan.ciLevel).toBeCloseTo(1 - 0.05 / 3, 10);
+    expect(payload.analysisPlan.hypothesisFamilyId).toBe(FAMILY_ID);
+  });
+
+  it('does not mutate the caller-provided analysisPlan object (writes a new object when ciLevel is stamped)', async () => {
+    ledgerMocks.readLedgerCounts.mockResolvedValueOnce(new Map([[FAMILY_ID, 2]]));
+    const input = validCreateInput();
+    const originalPlan = input.analysisPlan;
+    await createExperiment(db, UID, input);
+    expect(originalPlan).not.toHaveProperty('ciLevel');
+  });
+
+  it('fails closed: a ledger read failure throws and NOTHING is written (never silently falls back to the unadjusted 0.95 default)', async () => {
+    ledgerMocks.readLedgerCounts.mockRejectedValueOnce(new Error('ledger unavailable'));
+    await expect(createExperiment(db, UID, validCreateInput())).rejects.toThrow(/ledger unavailable/);
+    expect(mocks.addDoc).not.toHaveBeenCalled();
+  });
+
+  it('skips the ledger read entirely for a hand-built analysisPlan with no hypothesisFamilyId (defensive; every real buildAnalysisPlan output always has one)', async () => {
+    const { hypothesisFamilyId, ...planWithoutFamilyId } = buildAnalysisPlan(validTemplate());
+    await createExperiment(db, UID, validCreateInput({ analysisPlan: planWithoutFamilyId }));
+    expect(ledgerMocks.readLedgerCounts).not.toHaveBeenCalled();
+    const payload = mocks.addDoc.mock.calls[0][1];
+    expect(payload.analysisPlan).not.toHaveProperty('ciLevel');
+    expect(payload.analysisPlan).not.toHaveProperty('hypothesisFamilyId');
+  });
+});
+
 describe('startExperiment — the only startAt/endAt writer', () => {
   it('writes exactly {status:running, startAt, endAt, updatedAt} on the draft->running transition', async () => {
     const now = new Date('2026-07-22T12:00:00.000Z');
@@ -298,6 +431,48 @@ describe('startExperiment — the only startAt/endAt writer', () => {
       expect(payload).not.toHaveProperty('startAt');
       expect(payload).not.toHaveProperty('endAt');
     }
+  });
+});
+
+describe('startExperiment — hypothesis-family ledger registration (R4 Phase 1 retrofit, Task 7)', () => {
+  const FAMILY_ID = 'experiment:sleep-hours-mood-same-day';
+
+  it('registers the candidate (candidateId = plan.hypothesisFamilyId) in the ledger, AFTER the status-transition write succeeds', async () => {
+    mocks.getDoc.mockResolvedValue({
+      exists: () => true,
+      data: () => ({ analysisPlan: { hypothesisFamilyId: FAMILY_ID } }),
+    });
+    const now = new Date('2026-07-22T12:00:00.000Z');
+    await startExperiment(db, UID, 'exp-1', 14, now);
+
+    expect(ledgerMocks.registerCandidates).toHaveBeenCalledTimes(1);
+    expect(ledgerMocks.registerCandidates).toHaveBeenCalledWith(
+      db, UID, FAMILY_ID, [FAMILY_ID], { now: '2026-07-22T12:00:00.000Z' },
+    );
+
+    // Ordering: the draft->running updateDoc must precede registerCandidates
+    // — a status-transition that never happens must never register a test.
+    const updateOrder = mocks.updateDoc.mock.invocationCallOrder[0];
+    const registerOrder = ledgerMocks.registerCandidates.mock.invocationCallOrder[0];
+    expect(updateOrder).toBeLessThan(registerOrder);
+  });
+
+  it('does not register a candidate for a legacy experiment whose stored plan has no hypothesisFamilyId', async () => {
+    mocks.getDoc.mockResolvedValue({ exists: () => true, data: () => ({ analysisPlan: {} }) });
+    await startExperiment(db, UID, 'exp-1', 14, new Date('2026-07-22T12:00:00.000Z'));
+    expect(ledgerMocks.registerCandidates).not.toHaveBeenCalled();
+  });
+
+  it('does not register a candidate (and does not throw) when the experiment doc is not found on the post-write read', async () => {
+    mocks.getDoc.mockResolvedValue({ exists: () => false, data: () => undefined });
+    await expect(startExperiment(db, UID, 'exp-1', 14, new Date('2026-07-22T12:00:00.000Z'))).resolves.toBeUndefined();
+    expect(ledgerMocks.registerCandidates).not.toHaveBeenCalled();
+  });
+
+  it('a durationDays validation failure never reaches the ledger at all', async () => {
+    await expect(startExperiment(db, UID, 'exp-1', 21, new Date())).rejects.toThrow();
+    expect(ledgerMocks.registerCandidates).not.toHaveBeenCalled();
+    expect(mocks.getDoc).not.toHaveBeenCalled();
   });
 });
 
@@ -543,5 +718,88 @@ describe('getExperimentPrefs / markExplainerSeen — settings/experimentPrefs (r
     const payload = mocks.setDoc.mock.calls[0][1];
     expect(Object.keys(payload).sort()).toEqual(['enabled', 'updatedAt']);
     expect(payload.optInAt).toBeUndefined();
+  });
+});
+
+describe('computeExperimentResult — legacy plans (no hypothesisFamilyId/ciLevel) compute byte-identically to the new plan shape (T2/Task 7 regression proof)', () => {
+  // Small, self-contained fixture (independent of computeResult.test.js's
+  // own GOLDEN fixture) — 14 days of perfectly-covered sleep/mood data, well
+  // above MIN_PAIRED_OBSERVATIONS/COVERAGE_FLOOR, so this exercises a real
+  // `status: 'ok'` estimate rather than a degenerate/insufficient one. The
+  // POINT of this test is not the specific numbers (computeResult.test.js
+  // already hand-verifies those) — it's that adding `hypothesisFamilyId` to
+  // the plan (this task's change) does not alter the computed result AT
+  // ALL, proving `computeExperimentResult` never reads that key.
+  const REG_DAY_MS = 24 * 60 * 60 * 1000;
+  function regIsoDay(y, m, d, hour = 12) {
+    return new Date(Date.UTC(y, m - 1, d, hour)).toISOString();
+  }
+  function buildRegressionEntries() {
+    const entries = [];
+    for (let i = 0; i < 14; i++) {
+      const day = i + 1;
+      const hours = 4 + (i % 7);
+      entries.push({
+        id: `reg-${day}`,
+        createdAt: regIsoDay(2026, 1, day),
+        healthContext: { sleep: { totalHours: hours } },
+        analysis: { mood_score: (hours * 10) / 100 },
+      });
+    }
+    return entries;
+  }
+  const REG_START = regIsoDay(2026, 1, 1, 0);
+  const REG_END = regIsoDay(2026, 1, 15, 0); // start + 14 days
+  const REG_NOW = new Date(regIsoDay(2026, 1, 20, 0));
+
+  function buildRegressionExperiment(analysisPlan) {
+    // Partial-start-day rule (see computeResult.test.js's baseExperiment
+    // doc comment): the real stored startAt is one day before the intended
+    // first full data day.
+    const shiftedStart = new Date(Date.parse(REG_START) - REG_DAY_MS).toISOString();
+    return {
+      id: 'exp-legacy-regression',
+      question: 'legacy plan regression',
+      template: 'sleep-hours-mood-same-day',
+      analysisPlan,
+      scope: null,
+      status: 'running',
+      startAt: shiftedStart,
+      endAt: REG_END,
+      durationDays: 14,
+      excludedObservations: [],
+      createdAt: shiftedStart,
+      updatedAt: shiftedStart,
+    };
+  }
+
+  /** Strips the one genuinely non-deterministic field (real-wall-clock `receipt.versions.generatedAt` — see computeResult.js's own module doc comment) before a deep-equality comparison. */
+  function stripGeneratedAt(result) {
+    const clone = JSON.parse(JSON.stringify(result));
+    if (clone?.receipt?.versions) delete clone.receipt.versions.generatedAt;
+    return clone;
+  }
+
+  it('a plan built by the CURRENT buildAnalysisPlan (hypothesisFamilyId present, no ciLevel/priorTestedCount) computes an identical result to a hand-stripped LEGACY plan (neither key present) — proves the new key is inert to computation', () => {
+    const entries = buildRegressionEntries();
+    // The real catalog template (not this file's minimal validTemplate()
+    // helper) — computeExperimentResult's outcome-unit gate requires the
+    // real `unit: 'mood_0_100'` MOOD_OUTCOME shape, exactly like
+    // computeResult.test.js's own fixtures use.
+    const template = getTemplateById('sleep-hours-mood-same-day');
+    // Fixed to UTC for determinism (matches computeResult.test.js's own
+    // fixture convention) — buildAnalysisPlan's real timezone snapshot is
+    // exercised elsewhere; this test isn't about timezone behavior.
+    const newPlan = { ...buildAnalysisPlan(template), timezone: 'UTC' };
+    expect(newPlan.hypothesisFamilyId).toBe('experiment:sleep-hours-mood-same-day');
+    expect(newPlan).not.toHaveProperty('ciLevel');
+
+    const { hypothesisFamilyId, ...legacyPlan } = newPlan; // simulates a pre-Task-7 stored plan
+
+    const newResult = computeExperimentResult({ experiment: buildRegressionExperiment(newPlan), entries, now: REG_NOW });
+    const legacyResult = computeExperimentResult({ experiment: buildRegressionExperiment(legacyPlan), entries, now: REG_NOW });
+
+    expect(newResult.status).toBe('ok'); // sanity: a real, meaningful result — not degenerate/insufficient
+    expect(stripGeneratedAt(newResult)).toEqual(stripGeneratedAt(legacyResult));
   });
 });

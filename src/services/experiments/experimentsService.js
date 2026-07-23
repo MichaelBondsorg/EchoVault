@@ -66,6 +66,7 @@ import {
 } from '../../config/firebase';
 import { APP_COLLECTION_ID } from '../../config/constants';
 import { MIN_PAIRED_OBSERVATIONS, COVERAGE_FLOOR } from './estimator';
+import { familyIdForExperiment, registerCandidates, readLedgerCounts, bonferroniCiLevel } from '../insights/testingLedger';
 
 const MAX_QUESTION_LENGTH = 200;
 const VALID_DURATIONS = [14, 28];
@@ -193,6 +194,29 @@ export function buildAnalysisPlan(template, params = {}) {
   if (Number.isFinite(template.minExposureContrast)) {
     plan.minExposureContrast = template.minExposureContrast;
   }
+  // Hypothesis-family testing ledger (R4 Phase 1 retrofit, DR stat-req 9) —
+  // ALWAYS stamped, deterministic from template id + tag alone (see
+  // `testingLedger.js`'s `familyIdForExperiment`: no tag -> 'experiment:{id}',
+  // a tag -> ':tag:{lowercased}'). This is what lets repeated experiments of
+  // the SAME hypothesis (same template+tag, possibly a different time
+  // window) share one ledger candidate instead of each independently
+  // inflating the family's multiple-testing burden (m).
+  plan.hypothesisFamilyId = familyIdForExperiment(template.id, params.tag ?? null);
+  // ciLevel is set here ONLY when the caller already knows the family's
+  // prior-tested count (finite, >= 1 — i.e. at least one candidate was
+  // tested before this one). Absence is intentional: `runAnalysisPlan`'s own
+  // `plan?.ciLevel ?? CI_LEVEL` fallback then applies the unadjusted 0.95
+  // default, which is exactly what every existing/legacy plan (predating
+  // this retrofit) already computes with — this keeps them byte-identical.
+  // In practice `createExperiment` (below) is where this actually gets
+  // computed for real, from a FRESH ledger read taken at create time; a
+  // caller building a plan ahead of that read (as this function's own
+  // signature allows) simply won't have a priorTestedCount yet and will
+  // correctly get no ciLevel here.
+  if (Number.isFinite(params.priorTestedCount) && params.priorTestedCount >= 1) {
+    // +1: this experiment itself is one of the m tested candidates.
+    plan.ciLevel = bonferroniCiLevel(params.priorTestedCount + 1);
+  }
   return plan;
 }
 
@@ -250,11 +274,38 @@ export async function createExperiment(db, uid, { question, template, analysisPl
     throw new Error(`createExperiment: durationDays must be one of ${VALID_DURATIONS.join(', ')}.`);
   }
 
+  // Hypothesis-family testing ledger (R4 Phase 1 retrofit): read the
+  // family's CURRENT tested count and freeze the Bonferroni-adjusted
+  // ciLevel onto the plan at create time — this IS the freeze moment; once
+  // this doc is written, plan-freeze forbids ever editing analysisPlan
+  // again, so whatever ciLevel is decided here is permanent for the
+  // experiment's whole life.
+  //
+  // FAIL-CLOSED (deliberate posture, not an oversight): if the ledger read
+  // throws (network error, permissions, etc.), this function does NOT
+  // catch it — the throw propagates and createExperiment fails outright.
+  // The alternative (swallow the error, fall back to the unadjusted 0.95
+  // default) would silently under-adjust for multiple testing, and because
+  // that ciLevel gets frozen into an immutable doc, a silent miscount could
+  // never be corrected later. A failed create, by contrast, costs the user
+  // nothing but a retry (no experiment doc was ever written). Match the
+  // repo's existing fail-closed conventions elsewhere (e.g. AI consent
+  // revocation) rather than fail-open here.
+  let finalAnalysisPlan = analysisPlan;
+  if (typeof analysisPlan.hypothesisFamilyId === 'string' && analysisPlan.hypothesisFamilyId) {
+    const counts = await readLedgerCounts(db, uid, [analysisPlan.hypothesisFamilyId]);
+    const priorTestedCount = counts.get(analysisPlan.hypothesisFamilyId) ?? 0;
+    if (Number.isFinite(priorTestedCount) && priorTestedCount >= 1) {
+      // +1: this experiment itself is one of the m tested candidates.
+      finalAnalysisPlan = { ...analysisPlan, ciLevel: bonferroniCiLevel(priorTestedCount + 1) };
+    }
+  }
+
   const now = nowIso();
   const payload = {
     question: trimmedQuestion,
     template: templateId,
-    analysisPlan,
+    analysisPlan: finalAnalysisPlan,
     scope: scope ?? null,
     status: 'draft',
     durationDays,
@@ -301,6 +352,26 @@ export async function startExperiment(db, uid, experimentId, durationDays, now =
     endAt,
     updatedAt: startAt,
   });
+
+  // Hypothesis-family testing ledger (R4 Phase 1 retrofit): register this
+  // experiment as a tested candidate ONLY now that it has actually started
+  // running — a draft that's created and never started (deleted, abandoned)
+  // must never count toward the family's multiple-testing burden. This is
+  // strictly AFTER the status-transition write above succeeds (a failed
+  // transition must not register a candidate either).
+  //
+  // This re-reads the just-updated doc rather than accepting an
+  // `analysisPlan` parameter here — the latter would change this function's
+  // signature and require updating every call site (out of this task's
+  // scope); reading it back keeps the existing single-file contract intact.
+  // A legacy experiment (created before this retrofit; no
+  // `hypothesisFamilyId` on its frozen plan) is silently skipped — it never
+  // joined the ledger and this retrofit does not retroactively enroll it.
+  const startedSnap = await getDoc(doc(db, experimentsPath(uid), experimentId));
+  const hypothesisFamilyId = startedSnap.exists() ? startedSnap.data()?.analysisPlan?.hypothesisFamilyId : null;
+  if (typeof hypothesisFamilyId === 'string' && hypothesisFamilyId) {
+    await registerCandidates(db, uid, hypothesisFamilyId, [hypothesisFamilyId], { now: startAt });
+  }
 }
 
 async function setStatus(db, uid, experimentId, status) {
