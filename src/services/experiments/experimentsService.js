@@ -51,6 +51,15 @@
  * Storage: artifacts/{APP_COLLECTION_ID}/users/{uid}/experiments/{autoId}
  *   {question, template, analysisPlan, scope, status, startAt?, endAt?,
  *    durationDays, excludedObservations, result?, createdAt, updatedAt}
+ *
+ * R4 Phase 3 Task 3 (action confirmation v1) adds a nested subcollection:
+ *   .../experiments/{experimentId}/confirmations/{dateKey}
+ *     {dateKey, done, createdAt}
+ *   — the explicit daily check-in for a tag-template experiment opted into
+ *   `analysisPlan.exposureMode: 'confirmed'` at create (frozen, like every
+ *   other plan field). See `setConfirmation`/`clearConfirmation`/
+ *   `listConfirmations` below and `computeResult.js`'s confirmed-mode series
+ *   builder.
  */
 import {
   collection,
@@ -62,6 +71,7 @@ import {
   updateDoc,
   deleteDoc,
   getDoc,
+  getDocs,
   setDoc,
 } from '../../config/firebase';
 import { APP_COLLECTION_ID } from '../../config/constants';
@@ -195,6 +205,21 @@ export function buildAnalysisPlan(template, params = {}) {
   // legacy fallback rather than silently writing `undefined` onto the plan.
   if (Number.isFinite(template.minExposureContrast)) {
     plan.minExposureContrast = template.minExposureContrast;
+  }
+  // exposureMode (R4 Phase 3 Task 3, action confirmation v1): opt-in
+  // confirmed-exposure daily check-ins. `params.exposureMode === 'confirmed'`
+  // is accepted ONLY for the tag-presence template — the same
+  // `template.splitMode === 'binary'` discriminator already used above (the
+  // only v1 template that declares it) — every other template ignores the
+  // param entirely, and a tag template with no `exposureMode`/any value
+  // other than `'confirmed'` stays passive BY OMISSION, never a written
+  // `'passive'` key, matching `splitMode`/`minExposureContrast`'s own
+  // "only carried when non-default" convention just above. This keeps every
+  // legacy/passive plan byte-identical to a plan built before this field
+  // existed. `computeResult.js` reads `plan.exposureMode === 'confirmed'` —
+  // anything else, including absence, is passive tag-scanning, unchanged.
+  if (template.splitMode === 'binary' && params?.exposureMode === 'confirmed') {
+    plan.exposureMode = 'confirmed';
   }
   // Hypothesis-family testing ledger (R4 Phase 1 retrofit, DR stat-req 9) —
   // ALWAYS stamped, deterministic from template id + tag alone (see
@@ -766,6 +791,118 @@ export async function writeAdjustedResult(db, uid, experimentId, resultField) {
 }
 
 /**
+ * Confirmations subcollection path — `experiments/{experimentId}/
+ * confirmations/{dateKey}` (R4 Phase 3 Task 3). Doc id equals the `dateKey`
+ * field, matching `firestore.rules`' nested `confirmations/{dateKey}` match
+ * block.
+ */
+function confirmationsPath(uid, experimentId) {
+  return `${experimentsPath(uid)}/${experimentId}/confirmations`;
+}
+
+/**
+ * Confirmed-exposure daily check-ins (R4 Phase 3 Task 3, action
+ * confirmation v1) — the explicit "did you do it" answer for one calendar
+ * day of a `analysisPlan.exposureMode === 'confirmed'` experiment. One doc
+ * per `dateKey`, `{dateKey, done, createdAt}`, char-exact to
+ * `firestore.rules`' nested `confirmations/{dateKey}` `hasOnly` list.
+ *
+ * A day with NO doc here is UNKNOWN, not "no" — `computeResult.js`'s
+ * confirmed-mode series builder OMITS a missing dateKey entirely (tri-state:
+ * done:true -> 1, done:false -> 0, no doc -> omitted). `setConfirmation`
+ * always writes a fresh `createdAt` (the doc's shape has no immutability
+ * requirement on that field — a re-answered day is simply overwritten, same
+ * "last write wins" posture as every other mutable field this module owns).
+ *
+ * RUNNING-STATUS-ONLY GUARD (client-enforced, mirrors
+ * `setObservationExcluded`'s stopped-guard above): a fresh read of the
+ * parent experiment doc gates the write BEFORE it's attempted, failing fast
+ * with a clear message rather than letting a status-guarded write reach
+ * Firestore's rules (which do not themselves restrict this subcollection by
+ * parent status — see `firestore.rules`' comment on that block) and bounce
+ * back some other way. Confirmations on a stopped/completed experiment are
+ * frozen history — once running ends, no further check-in (add or clear) is
+ * legal.
+ *
+ * @param {object} db
+ * @param {string} uid
+ * @param {string} experimentId
+ * @param {string} dateKey - 'YYYY-MM-DD'.
+ * @param {boolean} done
+ */
+export async function setConfirmation(db, uid, experimentId, dateKey, done) {
+  if (typeof experimentId !== 'string' || !experimentId) {
+    throw new Error('setConfirmation: experimentId is required.');
+  }
+  if (typeof dateKey !== 'string' || !dateKey) {
+    throw new Error('setConfirmation: dateKey is required.');
+  }
+  if (typeof done !== 'boolean') {
+    throw new Error('setConfirmation: done must be a boolean.');
+  }
+  const experimentSnap = await getDoc(doc(db, experimentsPath(uid), experimentId));
+  if (!experimentSnap.exists()) {
+    throw new Error(`setConfirmation: experiment ${experimentId} not found.`);
+  }
+  if (experimentSnap.data()?.status !== 'running') {
+    throw new Error('setConfirmation: can only check in while the experiment is running.');
+  }
+  await setDoc(doc(db, confirmationsPath(uid, experimentId), dateKey), {
+    dateKey,
+    done,
+    createdAt: nowIso(),
+  });
+}
+
+/**
+ * Un-answer a day — deletes its confirmation doc, restoring it to UNKNOWN
+ * (never "no"). Same running-status-only guard as `setConfirmation`.
+ *
+ * @param {object} db
+ * @param {string} uid
+ * @param {string} experimentId
+ * @param {string} dateKey
+ */
+export async function clearConfirmation(db, uid, experimentId, dateKey) {
+  if (typeof experimentId !== 'string' || !experimentId) {
+    throw new Error('clearConfirmation: experimentId is required.');
+  }
+  if (typeof dateKey !== 'string' || !dateKey) {
+    throw new Error('clearConfirmation: dateKey is required.');
+  }
+  const experimentSnap = await getDoc(doc(db, experimentsPath(uid), experimentId));
+  if (!experimentSnap.exists()) {
+    throw new Error(`clearConfirmation: experiment ${experimentId} not found.`);
+  }
+  if (experimentSnap.data()?.status !== 'running') {
+    throw new Error('clearConfirmation: can only clear a check-in while the experiment is running.');
+  }
+  await deleteDoc(doc(db, confirmationsPath(uid, experimentId), dateKey));
+}
+
+/**
+ * Read every confirmation doc for one experiment, unordered (caller sorts /
+ * indexes by `dateKey` as needed — `computeResult.js`'s series builder does
+ * its own dateKey-sorted mapping). No status guard — reading confirmations
+ * for a stopped/completed experiment is always allowed (frozen history is
+ * still readable).
+ *
+ * @param {object} db
+ * @param {string} uid
+ * @param {string} experimentId
+ * @returns {Promise<Array<{id:string, dateKey:string, done:boolean, createdAt:string}>>}
+ */
+export async function listConfirmations(db, uid, experimentId) {
+  if (typeof experimentId !== 'string' || !experimentId) {
+    throw new Error('listConfirmations: experimentId is required.');
+  }
+  const snap = await getDocs(collection(db, confirmationsPath(uid, experimentId)));
+  const list = [];
+  snap.forEach((d) => list.push({ id: d.id, ...d.data() }));
+  return list;
+}
+
+/**
  * Read `settings/experimentPrefs` (the revisitPrefs twin — see
  * firestore.rules' `settingId != 'experimentPrefs'` clause comment): records
  * only whether the user has seen the one-time "associations, not proof"
@@ -823,4 +960,7 @@ export default {
   writeAdjustedResult,
   getExperimentPrefs,
   markExplainerSeen,
+  setConfirmation,
+  clearConfirmation,
+  listConfirmations,
 };

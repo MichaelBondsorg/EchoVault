@@ -444,6 +444,18 @@ const ExperimentResultView = ({ uid, entries = [], experiment, onClose }) => {
             <li>{result.coverage?.exposure?.covered} of {result.coverage?.exposure?.total} days have {exposureLabel} data</li>
             <li>{result.coverage?.outcome?.covered} of {result.coverage?.outcome?.total} days have {outcomeLabel} data</li>
           </ul>
+          {/* Exposure-source disclosure (R4 Phase 3 Task 3, action
+              confirmation v1): a confirmed-exposure experiment's exposure
+              coverage comes from the daily check-in subcollection, not from
+              scanning journal entries for a tag — say so, using the STORED
+              result's own coverage count (`covered` days = days actually
+              answered, since a tri-state confirmation only ever contributes
+              a series value for an answered dateKey). */}
+          {experiment.analysisPlan?.exposureMode === 'confirmed' && (
+            <p className="text-xs text-[var(--muted-foreground)]">
+              From your daily check-ins — {result.coverage?.exposure?.covered ?? 0} days answered.
+            </p>
+          )}
           {sensitiveCount > 0 && (
             <p className="text-xs text-[var(--muted-foreground)]">
               {sensitiveCount} sensitive {sensitiveCount === 1 ? 'day' : 'days'} contributed to the statistics; details are hidden.

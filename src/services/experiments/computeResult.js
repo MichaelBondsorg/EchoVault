@@ -597,6 +597,48 @@ export function buildDaySeries(entries, valueForEntry, timeZone = 'UTC') {
   });
 }
 
+/**
+ * CONFIRMED-EXPOSURE series builder (R4 Phase 3 Task 3, action confirmation
+ * v1). When `analysisPlan.exposureMode === 'confirmed'`, the exposure
+ * day-series comes from the experiment's `confirmations` subcollection
+ * (explicit "did you do it" check-ins) instead of tag-scanning journal
+ * entries — TRI-STATE, never assumed-absent:
+ *   - `done: true`  -> `1` (a real, known "yes")
+ *   - `done: false` -> `0` (a real, known "no" — an explicit answer, not a
+ *     guess; kept in the series exactly like a tag-scan's real absent-tag
+ *     zero)
+ *   - no confirmation doc for a dateKey -> the day is OMITTED from the
+ *     series entirely (UNKNOWN, matching `buildDaySeries`'s own
+ *     never-coerce-missing-to-zero convention)
+ * Only confirmations whose `dateKey` falls inside the experiment's own
+ * window (the same half-open `[windowStartPseudoMs, windowEndPseudoMs)`
+ * bounds `computeCoverage`/`pairObservations` use elsewhere in this module)
+ * are counted — a stray confirmation from before start/after end (e.g. a
+ * leftover doc from a stopped-then-restarted flow) must not leak into the
+ * pairing or coverage math. A malformed confirmation (missing/non-string
+ * `dateKey`, non-boolean `done`) is silently dropped, matching this
+ * module's general "trust the shape, drop what doesn't fit" posture toward
+ * caller-supplied inputs. A duplicate `dateKey` (defensive; the real store
+ * has exactly one doc per dateKey) keeps the LAST value seen.
+ *
+ * @param {Array<{dateKey?:string, done?:boolean}>} confirmations
+ * @param {number} windowStartPseudoMs
+ * @param {number} windowEndPseudoMs
+ * @returns {{dateKey:string, value:number}[]} sorted by dateKey.
+ */
+export function buildConfirmationSeries(confirmations, windowStartPseudoMs, windowEndPseudoMs) {
+  const byDate = new Map();
+  for (const c of confirmations || []) {
+    if (!c || typeof c.dateKey !== 'string' || !c.dateKey) continue;
+    if (typeof c.done !== 'boolean') continue;
+    const pseudoMs = pseudoMsFromDateKey(c.dateKey);
+    if (pseudoMs === null) continue;
+    if (pseudoMs < windowStartPseudoMs || pseudoMs >= windowEndPseudoMs) continue; // outside the experiment window
+    byDate.set(c.dateKey, c.done ? 1 : 0);
+  }
+  return [...byDate.keys()].sort().map((dateKey) => ({ dateKey, value: byDate.get(dateKey) }));
+}
+
 /** Group entries by (local, `timeZone`) calendar dateKey (for receipt-source lookups — every entry on the day, not just ones with a usable value). */
 function groupEntriesByDateKey(entries, timeZone = 'UTC') {
   const map = new Map();
@@ -790,6 +832,15 @@ function buildInsufficientResult({ coverage, reasons, windowed, pairs, experimen
  *   `analysisPlan`, `scope`, `startAt`, `endAt`, `excludedObservations`).
  * @param {Array} args.entries - the user's journal entries (unfiltered by
  *   scope — this function applies strict scope filtering itself).
+ * @param {Array} [args.confirmations] - (R4 Phase 3 Task 3) the experiment's
+ *   `confirmations` subcollection docs (`{dateKey, done}`), loaded by the
+ *   caller (this function stays Firestore-free) — used ONLY when
+ *   `experiment.analysisPlan.exposureMode === 'confirmed'`, to build the
+ *   exposure series from explicit check-ins instead of tag-scanning
+ *   `entries` (see `buildConfirmationSeries`). Ignored entirely for every
+ *   passive/legacy plan — omitting it changes nothing for those, which is
+ *   what keeps passive-mode results byte-identical to before this param
+ *   existed.
  * @param {Date|string|number} args.now - REQUIRED; no internal `new Date()`
  *   default (mirrors `preflight.js`/`estimator.js`'s purity posture).
  * @returns {{status:'ok'|'insufficient', estimate?:object,
@@ -803,7 +854,7 @@ function buildInsufficientResult({ coverage, reasons, windowed, pairs, experimen
  *   hardening review, Important 1) — absent on an `insufficient` result,
  *   which never has an `estimate` to mirror.
  */
-export function computeExperimentResult({ experiment, entries = [], now } = {}) {
+export function computeExperimentResult({ experiment, entries = [], confirmations = [], now } = {}) {
   if (!experiment || typeof experiment !== 'object') {
     throw new Error('computeExperimentResult: a valid experiment is required.');
   }
@@ -841,6 +892,14 @@ export function computeExperimentResult({ experiment, entries = [], now } = {}) 
   const day1LocalKey = shiftLocalDateKey(startLocalKey, 1);
   const windowStartMs = localMidnightUtcMs(day1LocalKey, timeZone);
 
+  // Window bounds in PSEUDO-ms (dateKey-label space — see module doc
+  // comment) computed HERE, before series-building, so the CONFIRMED-mode
+  // exposure series (below) can be filtered to the experiment's own window
+  // exactly like `windowed` filters real entry timestamps just below. Also
+  // reused, unchanged, by the coverage computation further down.
+  const windowStartPseudoMs = pseudoMsFromDateKey(day1LocalKey);
+  const windowEndPseudoMs = pseudoMsFromDateKey(localDateKeyForMs(effectiveEndMs, timeZone));
+
   // --- scopeFilter -> date-window filter (day1 local midnight .. effectiveEnd) --
   const scoped = filterEntriesByScope(Array.isArray(entries) ? entries : [], experiment.scope ?? null);
   const windowed = scoped.filter((entry) => {
@@ -850,11 +909,22 @@ export function computeExperimentResult({ experiment, entries = [], now } = {}) 
 
   // --- build exposure/outcome day-series (shared series-builder, LOCAL
   // dateKeys in the frozen timezone) --------------------------------------
-  const exposureSeries = buildDaySeries(
-    windowed,
-    (entry) => exposureValueForEntry(entry, plan.exposure, plan.exposure?.tag),
-    timeZone,
-  );
+  // CONFIRMED-EXPOSURE MODE (R4 Phase 3 Task 3): when the frozen plan opted
+  // into daily check-ins, the exposure series comes from `confirmations`
+  // (tri-state — see `buildConfirmationSeries`'s doc comment) instead of
+  // tag-scanning `windowed` entries. Every other template/plan (passive,
+  // including every legacy plan with no `exposureMode` at all) is
+  // completely unaffected — this branch changes nothing about the
+  // `buildDaySeries` call for them, which is what keeps passive-mode
+  // results byte-identical.
+  const confirmedExposureMode = plan.exposureMode === 'confirmed';
+  const exposureSeries = confirmedExposureMode
+    ? buildConfirmationSeries(confirmations, windowStartPseudoMs, windowEndPseudoMs)
+    : buildDaySeries(
+      windowed,
+      (entry) => exposureValueForEntry(entry, plan.exposure, plan.exposure?.tag),
+      timeZone,
+    );
 
   // --- OUTCOME UNIT GATE (Michael review hardening, item 1): the frozen
   // plan MUST declare the recognized 0-100 mood unit before its outcome
@@ -875,11 +945,10 @@ export function computeExperimentResult({ experiment, entries = [], now } = {}) 
   const invalidObservationCount = countInvalidOutcomeObservations(windowed, plan.outcome);
 
   // --- coverage over the EXPERIMENT window (not preflight's 28d window) --
-  // Bounds are in PSEUDO-ms (dateKey-label space, see module doc comment)
-  // so they compare consistently against `computeCoverage`'s own (private,
-  // unchanged) dateKey parsing of the LOCAL series dateKeys above.
-  const windowStartPseudoMs = pseudoMsFromDateKey(day1LocalKey);
-  const windowEndPseudoMs = pseudoMsFromDateKey(localDateKeyForMs(effectiveEndMs, timeZone));
+  // `windowStartPseudoMs`/`windowEndPseudoMs` were computed above (before
+  // series-building, so the confirmed-mode branch could use them too) — see
+  // module doc comment for why these are dateKey-label-space bounds, not
+  // real wall-clock ms.
   const exposureCoverage = computeCoverage(exposureSeries, windowStartPseudoMs, windowEndPseudoMs);
   const outcomeCoverage = computeCoverage(outcomeSeries, windowStartPseudoMs, windowEndPseudoMs);
   const coverage = { exposure: exposureCoverage, outcome: outcomeCoverage };
@@ -1057,5 +1126,6 @@ export default {
   exposureValueForEntry,
   outcomeValueForEntry,
   buildDaySeries,
+  buildConfirmationSeries,
   computeExperimentResult,
 };

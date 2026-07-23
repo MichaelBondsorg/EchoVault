@@ -448,6 +448,28 @@ service cloud.firestore {
           && !request.resource.data.keys().hasAny(['result'])
           && !request.resource.data.keys().hasAny(['startAt', 'endAt']);
         allow update: if isOwner(userId) && experimentUpdateAllowed(resource.data, request.resource.data);
+
+        // NEW (R4 Phase 3 Task 3): confirmed-exposure daily check-ins
+        // ("action confirmation v1"). `exposureMode: 'confirmed'` is an
+        // opt-in choice frozen INSIDE the parent's `analysisPlan` map at
+        // create time — verified: `analysisPlan` is a top-level key on the
+        // parent's create hasOnly list above with no internal shape
+        // constraint, so this new field needs no change to that list. One
+        // doc per calendar day, `dateKey` is both the field and the doc id.
+        // `done: true/false` is a REAL answered day; a dateKey with NO doc
+        // here is UNKNOWN — never assumed "no" (see computeResult.js's
+        // confirmed-mode tri-state exposure series). Delete is allowed
+        // (un-answering a day restores UNKNOWN), matching
+        // `revisit_exclusions`' "delete = restore, no update-to-undo" shape
+        // above — except here an update (re-answering the same day) is also
+        // legal, since a check-in can legitimately change during the day.
+        match /confirmations/{dateKey} {
+          allow read, delete: if isOwner(userId);
+          allow create, update: if isOwner(userId)
+            && request.resource.data.keys().hasOnly(['dateKey', 'done', 'createdAt'])
+            && request.resource.data.dateKey is string
+            && request.resource.data.done is bool;
+        }
       }
 
       // R4 Phase 1: hypothesis-family testing ledger. Append-only in spirit:

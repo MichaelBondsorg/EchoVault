@@ -11,6 +11,7 @@ import {
   exposureValueForEntry,
   outcomeValueForEntry,
   buildDaySeries,
+  buildConfirmationSeries,
   localDateKeyForMs,
   NON_CAUSAL_FRAMING,
   INSUFFICIENCY_COPY,
@@ -56,6 +57,10 @@ function buildAnalysisPlan(template, params = {}) {
     // zone explicitly instead.
     timezone: 'UTC',
     ...(template.splitMode === 'binary' ? { splitMode: 'binary' } : {}),
+    // exposureMode (R4 Phase 3 Task 3) — mirrors experimentsService.js's own
+    // gating: only ever carried for a splitMode:'binary' (tag) template, and
+    // only when the caller actually asks for 'confirmed'.
+    ...(template.splitMode === 'binary' && params.exposureMode === 'confirmed' ? { exposureMode: 'confirmed' } : {}),
   };
 }
 
@@ -834,6 +839,209 @@ describe('computeExperimentResult — tag-source series (end-to-end)', () => {
     expect(result.estimate.meanHigh).toBeCloseTo(40, 10);
     expect(result.estimate.meanLow).toBeCloseTo(70, 10);
     expect(result.estimate.delta).toBeCloseTo(-30, 10);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Confirmed-exposure mode (R4 Phase 3 Task 3, action confirmation v1)
+// ---------------------------------------------------------------------------
+
+describe('buildConfirmationSeries — tri-state series builder (R4 Phase 3 Task 3)', () => {
+  const WINDOW_START = Date.UTC(2026, 6, 1); // pseudo ms for '2026-07-01'
+  const WINDOW_END = Date.UTC(2026, 6, 15); // pseudo ms for '2026-07-15' (half-open)
+
+  it('maps done:true -> 1 and done:false -> 0', () => {
+    const series = buildConfirmationSeries(
+      [
+        { dateKey: '2026-07-02', done: true },
+        { dateKey: '2026-07-03', done: false },
+      ],
+      WINDOW_START,
+      WINDOW_END,
+    );
+    expect(series).toEqual([
+      { dateKey: '2026-07-02', value: 1 },
+      { dateKey: '2026-07-03', value: 0 },
+    ]);
+  });
+
+  it('omits a missing dateKey entirely -- never assumes absent/0', () => {
+    const series = buildConfirmationSeries(
+      [{ dateKey: '2026-07-02', done: true }],
+      WINDOW_START,
+      WINDOW_END,
+    );
+    expect(series).toHaveLength(1);
+    expect(series.find((s) => s.dateKey === '2026-07-05')).toBeUndefined();
+  });
+
+  it('drops confirmations outside the [windowStart, windowEnd) bounds', () => {
+    const series = buildConfirmationSeries(
+      [
+        { dateKey: '2026-06-30', done: true }, // before window
+        { dateKey: '2026-07-15', done: true }, // at the (exclusive) end
+        { dateKey: '2026-07-10', done: false }, // inside
+      ],
+      WINDOW_START,
+      WINDOW_END,
+    );
+    expect(series).toEqual([{ dateKey: '2026-07-10', value: 0 }]);
+  });
+
+  it('drops malformed entries (missing dateKey, non-boolean done)', () => {
+    const series = buildConfirmationSeries(
+      [
+        { dateKey: '2026-07-05' }, // no done
+        { done: true }, // no dateKey
+        null,
+        { dateKey: '2026-07-06', done: 'yes' },
+      ],
+      WINDOW_START,
+      WINDOW_END,
+    );
+    expect(series).toEqual([]);
+  });
+
+  it('an empty/undefined confirmations list produces an empty series', () => {
+    expect(buildConfirmationSeries([], WINDOW_START, WINDOW_END)).toEqual([]);
+    expect(buildConfirmationSeries(undefined, WINDOW_START, WINDOW_END)).toEqual([]);
+  });
+});
+
+describe('computeExperimentResult — confirmed-exposure mode (R4 Phase 3 Task 3, end-to-end)', () => {
+  const TAG = '@habit:meditate';
+
+  function confirmedExperiment(overrides = {}) {
+    return baseExperiment({
+      template: TAG_TEMPLATE,
+      params: { tag: TAG, exposureMode: 'confirmed' },
+      startAt: isoDay(2026, 8, 1, 0),
+      endAt: isoDay(2026, 8, 15, 0),
+      durationDays: 14,
+      ...overrides,
+    });
+  }
+
+  it("plan carries exposureMode:'confirmed'", () => {
+    const experiment = confirmedExperiment();
+    expect(experiment.analysisPlan.exposureMode).toBe('confirmed');
+  });
+
+  it('pairs confirmed-mode exposure against mood, ignoring entry tags entirely', () => {
+    const entries = [];
+    const confirmations = [];
+    for (let day = 1; day <= 14; day++) {
+      const dateKey = dateKeyFor(2026, 8, day);
+      // Entries carry the OPPOSITE tag presence of the confirmation, on
+      // purpose -- if the confirmed-mode series builder were still
+      // tag-scanning entries, this test's expected means would flip.
+      entries.push({
+        id: `conf-${day}`,
+        createdAt: isoDay(2026, 8, day),
+        tags: day % 2 === 0 ? [] : [TAG],
+        analysis: { mood_score: (day % 2 === 0 ? 40 : 70) / 100 },
+      });
+      confirmations.push({ dateKey, done: day % 2 === 0 });
+    }
+    const experiment = confirmedExperiment();
+    const result = computeExperimentResult({ experiment, entries, confirmations, now: new Date(isoDay(2026, 9, 1, 0)) });
+
+    expect(result.status).toBe('ok');
+    expect(result.coverage.exposure).toEqual({ covered: 14, total: 14, label: '14 of 14 days' });
+    expect(result.estimate.n).toBe(14);
+    // median of 7 zeros + 7 ones = 0.5 -> high group (done:true, mood 40);
+    // low group (done:false, mood 70).
+    expect(result.estimate.meanHigh).toBeCloseTo(40, 10);
+    expect(result.estimate.meanLow).toBeCloseTo(70, 10);
+  });
+
+  it('a done:false day is a real known 0, not missing -- counted in coverage', () => {
+    const entries = [];
+    const confirmations = [];
+    for (let day = 1; day <= 14; day++) {
+      entries.push({
+        id: `conf2-${day}`,
+        createdAt: isoDay(2026, 8, day),
+        analysis: { mood_score: 0.5 },
+      });
+      confirmations.push({ dateKey: dateKeyFor(2026, 8, day), done: false });
+    }
+    const experiment = confirmedExperiment();
+    const result = computeExperimentResult({ experiment, entries, confirmations, now: new Date(isoDay(2026, 9, 1, 0)) });
+    expect(result.coverage.exposure).toEqual({ covered: 14, total: 14, label: '14 of 14 days' });
+  });
+
+  it('a missing confirmation day is UNKNOWN (omitted), never assumed "no" -- drops coverage, not biasing toward 0', () => {
+    const entries = [];
+    const confirmations = [];
+    for (let day = 1; day <= 14; day++) {
+      entries.push({
+        id: `conf3-${day}`,
+        createdAt: isoDay(2026, 8, day),
+        analysis: { mood_score: 0.5 },
+      });
+      // Only answer half the days.
+      if (day % 2 === 0) confirmations.push({ dateKey: dateKeyFor(2026, 8, day), done: true });
+    }
+    const experiment = confirmedExperiment();
+    const result = computeExperimentResult({ experiment, entries, confirmations, now: new Date(isoDay(2026, 9, 1, 0)) });
+    expect(result.coverage.exposure).toEqual({ covered: 7, total: 14, label: '7 of 14 days' });
+  });
+
+  it('no confirmations at all in confirmed mode -> the normal insufficiency path (honest outcome), not an error', () => {
+    const entries = [];
+    for (let day = 1; day <= 14; day++) {
+      entries.push({
+        id: `conf4-${day}`,
+        createdAt: isoDay(2026, 8, day),
+        analysis: { mood_score: 0.5 },
+      });
+    }
+    const experiment = confirmedExperiment();
+    const result = computeExperimentResult({ experiment, entries, confirmations: [], now: new Date(isoDay(2026, 9, 1, 0)) });
+    expect(result.status).toBe('insufficient');
+    expect(result.coverage.exposure).toEqual({ covered: 0, total: 14, label: '0 of 14 days' });
+    expect(result.reasons).toContain('exposure_coverage_below_floor');
+    expect(result.narrative.insufficiency).toBe(INSUFFICIENCY_COPY);
+    expect(result).not.toHaveProperty('estimate');
+  });
+
+  it('omitting confirmations entirely (not even passing the param) behaves the same as an empty list', () => {
+    const entries = [{ id: 'conf5', createdAt: isoDay(2026, 8, 5), analysis: { mood_score: 0.5 } }];
+    const experiment = confirmedExperiment();
+    const result = computeExperimentResult({ experiment, entries, now: new Date(isoDay(2026, 9, 1, 0)) });
+    expect(result.status).toBe('insufficient');
+  });
+});
+
+describe('computeExperimentResult — passive mode is byte-identical whether or not analysisPlan.exposureMode is absent (regression proof)', () => {
+  it('a plan with no exposureMode key produces the exact same result as before this field existed', () => {
+    const entries = [];
+    for (let day = 1; day <= 14; day++) {
+      entries.push({
+        id: `pass-${day}`,
+        createdAt: isoDay(2026, 8, day),
+        tags: day % 2 === 0 ? ['@habit:meditate'] : [],
+        analysis: { mood_score: (day % 2 === 0 ? 40 : 70) / 100 },
+      });
+    }
+    const experiment = baseExperiment({
+      template: TAG_TEMPLATE,
+      params: { tag: '@habit:meditate' },
+      startAt: isoDay(2026, 8, 1, 0),
+      endAt: isoDay(2026, 8, 15, 0),
+      durationDays: 14,
+    });
+    expect(experiment.analysisPlan).not.toHaveProperty('exposureMode');
+    // Passing an irrelevant `confirmations` array must have zero effect for
+    // a passive plan -- confirmed mode is opt-in, gated strictly on
+    // plan.exposureMode.
+    const withConfirmations = computeExperimentResult({
+      experiment, entries, confirmations: [{ dateKey: '2026-08-01', done: false }], now: new Date(isoDay(2026, 9, 1, 0)),
+    });
+    const without = computeExperimentResult({ experiment, entries, now: new Date(isoDay(2026, 9, 1, 0)) });
+    expect(stripGeneratedAt(withConfirmations)).toEqual(stripGeneratedAt(without));
+    expect(withConfirmations.status).toBe('ok');
   });
 });
 

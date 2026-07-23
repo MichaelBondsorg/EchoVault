@@ -1631,6 +1631,73 @@ describe('Experiments collection rules (owner isolation)', () => {
   });
 });
 
+// --- Experiment confirmations subcollection rules (R4 Phase 3 Task 3: -----
+// action confirmation v1 — daily "did you do it" check-ins for a
+// confirmed-exposure experiment). Nested under
+// experiments/{experimentId}/confirmations/{dateKey}.
+
+describe('Experiment confirmations subcollection rules', () => {
+  const validConfirmation = { dateKey: '2026-07-23', done: true, createdAt: 'now' };
+
+  it('allows the owner to create a well-formed confirmation, keyed by dateKey', async () => {
+    await seedExperiment('e-conf', 'running');
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    const ref = doc(db, userPath(USER_ID), 'experiments', 'e-conf', 'confirmations', '2026-07-23');
+    await assertSucceeds(setDoc(ref, validConfirmation));
+  });
+
+  it('allows the owner to read, update (re-answer), and delete their own confirmation', async () => {
+    await seedExperiment('e-conf-rw', 'running');
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    const ref = doc(db, userPath(USER_ID), 'experiments', 'e-conf-rw', 'confirmations', '2026-07-23');
+    await assertSucceeds(setDoc(ref, validConfirmation));
+    await assertSucceeds(getDoc(ref));
+    await assertSucceeds(setDoc(ref, { ...validConfirmation, done: false }));
+    await assertSucceeds(deleteDoc(ref));
+  });
+
+  it('allows done:false (a real, explicit "no")', async () => {
+    await seedExperiment('e-conf-no', 'running');
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    const ref = doc(db, userPath(USER_ID), 'experiments', 'e-conf-no', 'confirmations', '2026-07-23');
+    await assertSucceeds(setDoc(ref, { ...validConfirmation, done: false }));
+  });
+
+  it('denies an unexpected extra key', async () => {
+    await seedExperiment('e-conf-junk', 'running');
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    const ref = doc(db, userPath(USER_ID), 'experiments', 'e-conf-junk', 'confirmations', '2026-07-23');
+    await assertFails(setDoc(ref, { ...validConfirmation, note: 'hacked' }));
+  });
+
+  it('denies a non-boolean done', async () => {
+    await seedExperiment('e-conf-baddone', 'running');
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    const ref = doc(db, userPath(USER_ID), 'experiments', 'e-conf-baddone', 'confirmations', '2026-07-23');
+    await assertFails(setDoc(ref, { ...validConfirmation, done: 'yes' }));
+  });
+
+  it('denies a non-string dateKey', async () => {
+    await seedExperiment('e-conf-baddatekey', 'running');
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    const ref = doc(db, userPath(USER_ID), 'experiments', 'e-conf-baddatekey', 'confirmations', '2026-07-23');
+    await assertFails(setDoc(ref, { ...validConfirmation, dateKey: 20260723 }));
+  });
+
+  it('denies another user reading, creating, updating, or deleting a confirmation', async () => {
+    await seedExperiment('e-conf-cross', 'running');
+    const ownerDb = testEnv.authenticatedContext(USER_ID).firestore();
+    const ownerRef = doc(ownerDb, userPath(USER_ID), 'experiments', 'e-conf-cross', 'confirmations', '2026-07-23');
+    await assertSucceeds(setDoc(ownerRef, validConfirmation));
+
+    const db = testEnv.authenticatedContext(OTHER_USER_ID).firestore();
+    const ref = doc(db, userPath(USER_ID), 'experiments', 'e-conf-cross', 'confirmations', '2026-07-23');
+    await assertFails(getDoc(ref));
+    await assertFails(setDoc(ref, validConfirmation));
+    await assertFails(deleteDoc(ref));
+  });
+});
+
 // --- testing_ledger collection rules (R4 Phase 1: hypothesis-family --------
 // multiple-testing ledger) --------------------------------------------------
 

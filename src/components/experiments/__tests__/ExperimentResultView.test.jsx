@@ -177,6 +177,49 @@ describe('ExperimentResultView — ok result (golden fixture)', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Confirmed-exposure source disclosure (R4 Phase 3 Task 3, action
+// confirmation v1) — a confirmed-mode result states where its exposure
+// numbers came from; a passive-mode result never mentions check-ins.
+// ---------------------------------------------------------------------------
+
+describe('ExperimentResultView — confirmed-exposure source disclosure (R4 Phase 3 Task 3)', () => {
+  it('shows the daily-check-in disclosure with the N-days-answered count when analysisPlan.exposureMode is confirmed', () => {
+    const okResult = {
+      status: 'ok',
+      estimate: {
+        meanHigh: 70, meanLow: 55, delta: 15, ci: [5, 25], n: 14, pearsonR: 0.4,
+        nHigh: 7, nLow: 7, splitThreshold: null, exposureContrast: 1,
+        resampleDiscardCount: 0, stability: { signConsistent: true, deltaMin: 10, deltaMax: 20 },
+      },
+      coverage: {
+        exposure: { covered: 9, total: 14, label: '9 of 14 days' },
+        outcome: { covered: 14, total: 14, label: '14 of 14 days' },
+      },
+      receipt: { sources: [], scope: null, timeWindow: { start: GOLDEN_START, end: GOLDEN_END }, sampleSize: 14, missingness: null },
+      sensitiveObservationCount: 0,
+      invalidObservationCount: 0,
+      narrative: { summary: 'summary text', alternatives: [], whatThisDoesNotProve: [] },
+    };
+    const experiment = goldenExperiment({
+      analysisPlan: { ...goldenExperiment().analysisPlan, exposureMode: 'confirmed' },
+      result: okResult,
+    });
+    render(<ExperimentResultView uid={UID} entries={[]} experiment={experiment} onClose={vi.fn()} />);
+
+    expect(screen.getByText('From your daily check-ins — 9 days answered.')).toBeTruthy();
+  });
+
+  it('never shows the check-in disclosure for a passive-mode (no exposureMode) result', () => {
+    const entries = buildGoldenEntries();
+    const storedResult = computeExperimentResult({ experiment: goldenExperiment(), entries, now: GOLDEN_NOW });
+    const experiment = goldenExperiment({ result: storedResult });
+    render(<ExperimentResultView uid={UID} entries={entries} experiment={experiment} onClose={vi.fn()} />);
+
+    expect(screen.queryByText(/daily check-ins/i)).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Insufficiency: no estimate-shaped DOM
 // ---------------------------------------------------------------------------
 

@@ -26,6 +26,7 @@ const mocks = {
   updateDoc: vi.fn(async () => {}),
   deleteDoc: vi.fn(async () => {}),
   getDoc: vi.fn(async () => ({ exists: () => false, data: () => undefined })),
+  getDocs: vi.fn(async () => ({ forEach: () => {} })),
   setDoc: vi.fn(async () => {}),
 };
 
@@ -83,6 +84,9 @@ const {
   writeAdjustedResult,
   getExperimentPrefs,
   markExplainerSeen,
+  setConfirmation,
+  clearConfirmation,
+  listConfirmations,
 } = await import('../experimentsService.js');
 
 const { MIN_PAIRED_OBSERVATIONS, COVERAGE_FLOOR } = await import('../estimator.js');
@@ -282,6 +286,128 @@ describe('buildAnalysisPlan', () => {
   it('throws for an invalid template', () => {
     expect(() => buildAnalysisPlan(null)).toThrow();
     expect(() => buildAnalysisPlan({})).toThrow();
+  });
+});
+
+describe('buildAnalysisPlan — exposureMode (R4 Phase 3 Task 3, action confirmation v1)', () => {
+  function tagTemplateWith(overrides = {}) {
+    return validTemplate({
+      id: 'tag-presence-mood',
+      exposure: { source: 'tags', field: 'tags', label: 'tag presence' },
+      splitMode: 'binary',
+      ...overrides,
+    });
+  }
+
+  it("sets plan.exposureMode 'confirmed' for the tag template when params.exposureMode is 'confirmed'", () => {
+    const plan = buildAnalysisPlan(tagTemplateWith(), { tag: '@person:spencer', exposureMode: 'confirmed' });
+    expect(plan.exposureMode).toBe('confirmed');
+  });
+
+  it('omits exposureMode entirely (never writes "passive") for the tag template with no exposureMode param', () => {
+    const plan = buildAnalysisPlan(tagTemplateWith(), { tag: '@person:spencer' });
+    expect(plan).not.toHaveProperty('exposureMode');
+  });
+
+  it('omits exposureMode for the tag template with an unrecognized exposureMode value', () => {
+    const plan = buildAnalysisPlan(tagTemplateWith(), { tag: '@person:spencer', exposureMode: 'bogus' });
+    expect(plan).not.toHaveProperty('exposureMode');
+  });
+
+  it('ignores params.exposureMode entirely for a non-tag (no splitMode:"binary") template', () => {
+    const plan = buildAnalysisPlan(validTemplate(), { exposureMode: 'confirmed' });
+    expect(plan).not.toHaveProperty('exposureMode');
+  });
+
+  it('a legacy/passive plan is byte-identical to a plan built before exposureMode existed', () => {
+    const plan = buildAnalysisPlan(validTemplate());
+    expect(plan).toEqual({
+      templateId: 'sleep-hours-mood-same-day',
+      lag: 0,
+      exposure: { source: 'health', field: 'sleepHours', label: 'sleep hours' },
+      outcome: { field: 'analysis.mood_score', label: 'mood' },
+      minPairedObservations: MIN_PAIRED_OBSERVATIONS,
+      coverageFloor: COVERAGE_FLOOR,
+      confounders: ['Confounder one.', 'Confounder two.'],
+      whatThisDoesNotProve: ['Does not prove one.', 'Does not prove two.'],
+      timezone: resolveDeviceTimezone(),
+      hypothesisFamilyId: 'experiment:sleep-hours-mood-same-day',
+    });
+  });
+});
+
+describe('setConfirmation / clearConfirmation / listConfirmations — confirmations subcollection (R4 Phase 3 Task 3)', () => {
+  const CONFIRMATIONS_PATH = `${EXPERIMENTS_PATH}/exp-1/confirmations`;
+
+  function mockExperimentStatus(status) {
+    mocks.getDoc.mockResolvedValue({ exists: () => true, data: () => ({ status }) });
+  }
+
+  it('setConfirmation writes {dateKey, done, createdAt} to the doc keyed by dateKey while running', async () => {
+    mockExperimentStatus('running');
+    await setConfirmation(db, UID, 'exp-1', '2026-07-23', true);
+    expect(mocks.setDoc).toHaveBeenCalledTimes(1);
+    const [ref, payload] = mocks.setDoc.mock.calls[0];
+    expect(ref.__doc).toBe(`${CONFIRMATIONS_PATH}/2026-07-23`);
+    expect(Object.keys(payload).sort()).toEqual(['createdAt', 'dateKey', 'done']);
+    expect(payload.dateKey).toBe('2026-07-23');
+    expect(payload.done).toBe(true);
+    expect(typeof payload.createdAt).toBe('string');
+  });
+
+  it('setConfirmation accepts done:false (a real, explicit "no")', async () => {
+    mockExperimentStatus('running');
+    await setConfirmation(db, UID, 'exp-1', '2026-07-23', false);
+    expect(mocks.setDoc.mock.calls[0][1].done).toBe(false);
+  });
+
+  it('setConfirmation throws (client-side, before any write) when the experiment is not running', async () => {
+    mockExperimentStatus('stopped');
+    await expect(setConfirmation(db, UID, 'exp-1', '2026-07-23', true)).rejects.toThrow(/running/);
+    expect(mocks.setDoc).not.toHaveBeenCalled();
+  });
+
+  it('setConfirmation throws when the experiment does not exist', async () => {
+    mocks.getDoc.mockResolvedValue({ exists: () => false, data: () => undefined });
+    await expect(setConfirmation(db, UID, 'exp-1', '2026-07-23', true)).rejects.toThrow(/not found/);
+  });
+
+  it('setConfirmation throws for a non-boolean done', async () => {
+    mockExperimentStatus('running');
+    await expect(setConfirmation(db, UID, 'exp-1', '2026-07-23', 'yes')).rejects.toThrow(/boolean/);
+    expect(mocks.setDoc).not.toHaveBeenCalled();
+  });
+
+  it('clearConfirmation deletes the dateKey doc while running', async () => {
+    mockExperimentStatus('running');
+    await clearConfirmation(db, UID, 'exp-1', '2026-07-23');
+    expect(mocks.deleteDoc).toHaveBeenCalledTimes(1);
+    expect(mocks.deleteDoc.mock.calls[0][0].__doc).toBe(`${CONFIRMATIONS_PATH}/2026-07-23`);
+  });
+
+  it('clearConfirmation throws (client-side, before any write) when the experiment is stopped', async () => {
+    mockExperimentStatus('completed');
+    await expect(clearConfirmation(db, UID, 'exp-1', '2026-07-23')).rejects.toThrow(/running/);
+    expect(mocks.deleteDoc).not.toHaveBeenCalled();
+  });
+
+  it('listConfirmations reads every doc in the subcollection', async () => {
+    mocks.getDocs.mockResolvedValue({
+      forEach: (cb) => {
+        cb({ id: '2026-07-22', data: () => ({ dateKey: '2026-07-22', done: true, createdAt: 'x' }) });
+        cb({ id: '2026-07-23', data: () => ({ dateKey: '2026-07-23', done: false, createdAt: 'y' }) });
+      },
+    });
+    const list = await listConfirmations(db, UID, 'exp-1');
+    expect(mocks.collection.mock.calls[0][1]).toBe(CONFIRMATIONS_PATH);
+    expect(list).toEqual([
+      { id: '2026-07-22', dateKey: '2026-07-22', done: true, createdAt: 'x' },
+      { id: '2026-07-23', dateKey: '2026-07-23', done: false, createdAt: 'y' },
+    ]);
+  });
+
+  it('listConfirmations throws without an experimentId', async () => {
+    await expect(listConfirmations(db, UID, '')).rejects.toThrow(/experimentId/);
   });
 });
 
