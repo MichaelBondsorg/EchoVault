@@ -585,7 +585,14 @@ export async function writeResult(db, uid, experimentId, result) {
   // `hypothesisFamilyId` — no claim is written in any of those cases.
   // `writeClaim`'s doc id is deterministic (hypothesisFamilyId +
   // candidateId + version), so re-running `writeResult` for the same
-  // experiment/result is an idempotent upsert, never a duplicate.
+  // experiment/result targets the SAME doc id — but this is NOT a silent
+  // upsert: `writeClaim` calls `setDoc` with no `merge`, and against a
+  // doc that already exists, firestore.rules' create-only `affectedKeys`
+  // allow-list denies the write as an illegal update. That denial is
+  // caught by this same try/catch and only warned on — harmless in
+  // outcome (the claim already exists, nothing needs to change), but the
+  // mechanism is rules-denial hitting the contained catch below, not an
+  // upsert.
   if (experimentData) {
     try {
       const claimInput = buildExperimentResultClaim({
@@ -726,7 +733,20 @@ export async function writeAdjustedResult(db, uid, experimentId, resultField) {
         const existing = existingClaims.find((c) => c.claimType === 'experiment_result'
           && c.analysisPlan?.candidateId === claimInput.analysisPlan.candidateId
           && c.supersededByClaimId == null);
-        if (existing) {
+        // System-wide invariant (pipeline `claimsPipeline.js`, matrix row
+        // R4P1-j, PROJECT_STATUS ratified correction): a SUPPRESSED claim
+        // is never auto-touched by any pipeline path — suppression is a
+        // user decision (do_not_analyze feedback) that outlives evidence
+        // drift and is lifted only through the explicit user path. If
+        // Michael suppressed this candidate's prior claim, an adjusted
+        // (post-exclusion-toggle) recompute must NOT resurrect it via
+        // supersede — skip the claim write/supersede entirely, before
+        // touching `existing` at all. The experiment doc's own adjusted
+        // result has already saved above regardless. Superseding an
+        // EXPIRED prior remains allowed (documented revival path).
+        if (existing?.status === 'suppressed') {
+          // no-op: prior stays exactly as-is, no new claim is written
+        } else if (existing) {
           await supersedeClaim(db, uid, existing, {
             ...claimInput,
             version: existing.version + 1,

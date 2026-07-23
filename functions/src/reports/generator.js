@@ -315,9 +315,9 @@ export async function readNexusData(db, userBase) {
   }
 }
 
-// Mirrors the Shared-contracts rankScore's ORDERING (Task 6's client-side
-// `rankClaims.js` — not yet built as of this task — will compute the exact
-// same ordering for the in-app feed). Deliberately duplicated here rather
+// Mirrors the Shared-contracts rankScore's ORDERING (the client-side
+// `src/services/insights/claims/rankClaims.js` computes the same ordering
+// for the in-app feed). Deliberately duplicated here rather
 // than imported: this is a server package, ranking is presentational (not
 // an integrity surface), and parity between the two is NOT required (see
 // the R4 Phase 2 plan's self-review note under "Type consistency"). Ties

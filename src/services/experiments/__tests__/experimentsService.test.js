@@ -957,12 +957,13 @@ describe('writeAdjustedResult — experiment_result claim supersede (R4 Phase 2,
     expect(claimInput.parentClaimId).toBeNull();
   });
 
-  it('supersedes the existing non-superseded experiment_result claim, linking parentClaimId and bumping version', async () => {
+  it('supersedes the existing non-superseded VERIFIED experiment_result claim, linking parentClaimId and bumping version (existing behavior pinned)', async () => {
     mocks.getDoc.mockResolvedValue({ exists: () => true, data: () => CLAIM_EXPERIMENT_DATA });
     const existingClaim = {
       id: 'claim_experiment-sleep-hours-mood-same-day_abcd1234_v1',
       version: 1,
       claimType: 'experiment_result',
+      status: 'verified',
       supersededByClaimId: null,
       analysisPlan: { candidateId: 'experiment:sleep-hours-mood-same-day', hypothesisFamilyId: 'experiment:sleep-hours-mood-same-day' },
     };
@@ -1008,6 +1009,57 @@ describe('writeAdjustedResult — experiment_result claim supersede (R4 Phase 2,
     });
     expect(claimsServiceMocks.writeClaim).not.toHaveBeenCalled();
     expect(claimsServiceMocks.supersedeClaim).not.toHaveBeenCalled();
+  });
+
+  it('does NOT resurrect a SUPPRESSED prior claim: skips the claim write/supersede entirely, prior untouched, but the adjusted result still saves (invariant: claimsPipeline.js, matrix row R4P1-j)', async () => {
+    mocks.getDoc.mockResolvedValue({ exists: () => true, data: () => CLAIM_EXPERIMENT_DATA });
+    const suppressedClaim = {
+      id: 'claim_experiment-sleep-hours-mood-same-day_abcd1234_v1',
+      version: 1,
+      claimType: 'experiment_result',
+      status: 'suppressed',
+      supersededByClaimId: null,
+      analysisPlan: { candidateId: 'experiment:sleep-hours-mood-same-day', hypothesisFamilyId: 'experiment:sleep-hours-mood-same-day' },
+    };
+    claimsServiceMocks.listAllClaims.mockResolvedValueOnce([suppressedClaim]);
+    const adjusted = claimOkResult({ estimate: { ...claimOkResult().estimate, delta: 12 } });
+    const resultField = { original: claimOkResult(), adjusted, exclusionHistory: [] };
+
+    await writeAdjustedResult(db, UID, 'exp-1', resultField);
+
+    // Prior claim is untouched: no supersede, no fresh write.
+    expect(claimsServiceMocks.supersedeClaim).not.toHaveBeenCalled();
+    expect(claimsServiceMocks.writeClaim).not.toHaveBeenCalled();
+    expect(suppressedClaim.status).toBe('suppressed');
+    expect(suppressedClaim.supersededByClaimId).toBeNull();
+    // The experiment doc's own adjusted result still saves as today.
+    expect(mocks.updateDoc).toHaveBeenCalledTimes(1);
+    const payload = mocks.updateDoc.mock.calls[0][1];
+    expect(payload.result).toBe(resultField);
+  });
+
+  it('supersedes an EXPIRED prior claim (documented revival path preserved)', async () => {
+    mocks.getDoc.mockResolvedValue({ exists: () => true, data: () => CLAIM_EXPERIMENT_DATA });
+    const expiredClaim = {
+      id: 'claim_experiment-sleep-hours-mood-same-day_abcd1234_v1',
+      version: 1,
+      claimType: 'experiment_result',
+      status: 'expired',
+      supersededByClaimId: null,
+      analysisPlan: { candidateId: 'experiment:sleep-hours-mood-same-day', hypothesisFamilyId: 'experiment:sleep-hours-mood-same-day' },
+    };
+    claimsServiceMocks.listAllClaims.mockResolvedValueOnce([expiredClaim]);
+    const adjusted = claimOkResult({ estimate: { ...claimOkResult().estimate, delta: 12 } });
+    const resultField = { original: claimOkResult(), adjusted, exclusionHistory: [] };
+
+    await writeAdjustedResult(db, UID, 'exp-1', resultField);
+
+    expect(claimsServiceMocks.supersedeClaim).toHaveBeenCalledTimes(1);
+    expect(claimsServiceMocks.writeClaim).not.toHaveBeenCalled();
+    const [, , oldClaimArg, newClaimArg] = claimsServiceMocks.supersedeClaim.mock.calls[0];
+    expect(oldClaimArg).toBe(expiredClaim);
+    expect(newClaimArg.version).toBe(2);
+    expect(newClaimArg.parentClaimId).toBe(expiredClaim.id);
   });
 
   it('does NOT reject writeAdjustedResult when the claim supersede/read fails — the adjusted result save already committed; warns instead', async () => {
