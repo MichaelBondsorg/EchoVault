@@ -27,7 +27,10 @@ import { detectMetaPatterns, generateMetaPatternInsight } from './layer3/crossTh
 // remain, harmless).
 
 // Layer 4
-import { updateInterventionData, getInterventionData } from './layer4/interventionTracker';
+// interventionTracker.js deleted whole R4-P3 per P3-D1 (docs/superpowers/
+// plans/2026-07-23-r4-phase3-action-loop.md) — see tombstone below near
+// RISKY_CLAIMS_ENABLED's old location. Legacy Firestore intervention docs
+// may remain, harmless.
 import { generateRecommendations } from './layer4/recommendationEngine';
 
 // Gap detection
@@ -76,28 +79,20 @@ const displayMood100 = (raw) => {
 // consumer.
 
 // ============================================================
-// RISKY CLAIM SUPPRESSION (R4 Task 3 / ratified decision 4)
+// RISKY CLAIM SUPPRESSION — RETIRED (R4 Phase 3 Task 5 / P3-D1)
 // ============================================================
-// Fixing the Mood01 scale bugs throughout layer3/layer4 would, as a side
-// effect, "wake up" four claim types that have effectively been dead code
-// since they compared native 0-1 mood values against 0-100-scale
-// thresholds: personal counterfactuals, belief-dissonance insights,
-// intervention "this worked" OUTCOME claims, and personalized
-// recommendation reasoning. Michael ratified (2026-07-22, R4 decision 4,
-// docs/superpowers/plans/2026-07-22-r4-insight-integrity.md) that the
-// scale fix must NOT reactivate them — they need Phase 1-2 evidence rails
-// (typed claim store, verified synthesis) before they're trustworthy
-// again. This flag is the single seam that keeps them suppressed/relabeled
-// while the corrected code ships underneath, gated. Production always
-// uses this constant (false); the `riskyClaimsEnabled` override on
-// `generateInsights`'s `options` exists ONLY so tests can exercise the
-// scale-corrected behavior end-to-end without touching production
-// defaults. Flip this constant to true only when Phase 1-2 lands.
-// Exported so other Nexus surfaces with their own risky-claim-shaped
-// content (e.g. insightIntegration.js's `getTodayRecommendations`, found by
-// the T3 privacy sweep as an orphaned second recommendation pipeline) reuse
-// this single seam instead of duplicating a second gate constant.
-export const RISKY_CLAIMS_ENABLED = false;
+// `RISKY_CLAIMS_ENABLED` (and the `options.riskyClaimsEnabled` override
+// below) used to gate four claim types that compared native 0-1 mood
+// values against 0-100-scale thresholds once the Mood01 scale bugs were
+// fixed: personal counterfactuals, belief-dissonance insights, intervention
+// "this worked" OUTCOME claims, and personalized recommendation reasoning.
+// R4 Phase 3 deleted all four suppressed modules outright — counterfactual.js
+// and beliefDissonance.js (Task 4), interventionTracker.js and
+// recommendationEngine.js's personal-evidence path (Task 5, this one) — and
+// replaced their intent with the evidence-railed experiments/claims loop
+// (docs/superpowers/plans/2026-07-23-r4-phase3-action-loop.md, P3-D1).
+// Nothing suppressible remains, so the gate itself retires with them.
+// Legacy Firestore belief/intervention docs may remain, harmless.
 
 // ============================================================
 // PATTERN DISPLAY HELPERS
@@ -422,10 +417,9 @@ export const generateInsights = async (userId, options = {}) => {
   // Context Spaces into Nexus itself) — this just makes that seam ready.
   const scope = options.scope || null;
   const timeWindow = computeTimeWindow(30);
-  // Risky-claim suppression (R4 T3): test-only override, see
-  // RISKY_CLAIMS_ENABLED's doc comment above. No production caller passes
-  // this.
-  const riskyClaimsEnabled = options.riskyClaimsEnabled ?? RISKY_CLAIMS_ENABLED;
+  // `options.riskyClaimsEnabled` retired R4-P3 Task 5 per P3-D1 — see the
+  // tombstone comment above (formerly RISKY_CLAIMS_ENABLED's location).
+  // `options` itself stays (other callers use `options.scope`).
 
   try {
     // Source Exclusions (R2 Task 10): read ONCE here and thread the
@@ -460,7 +454,6 @@ export const generateInsights = async (userId, options = {}) => {
       baselines,
       whoopToday,
       whoopHistory,
-      interventionData,
       settings
     ] = await Promise.all([
       fetchRecentEntries(userId, 30, scope, excludedIds),
@@ -468,10 +461,10 @@ export const generateInsights = async (userId, options = {}) => {
       getBaselines(userId),
       whoopConnected ? getWhoopSummary().catch(() => null) : Promise.resolve(null),
       whoopConnected ? getWhoopHistory(30).catch(() => ({ available: false, days: [] })) : Promise.resolve({ available: false, days: [] }),
-      getInterventionData(userId),
-      // getBeliefs(userId) deleted R4-P3 per P3-D1 (superseded by
-      // claims+experiments; legacy Firestore belief docs may remain,
-      // harmless).
+      // getInterventionData(userId) deleted R4-P3 per P3-D1
+      // (interventionTracker.js deleted whole); getBeliefs(userId) deleted
+      // R4-P3 per P3-D1 (superseded by claims+experiments). Legacy
+      // Firestore belief/intervention docs may remain, harmless.
       getUserSettings(userId)
     ]);
 
@@ -526,15 +519,13 @@ export const generateInsights = async (userId, options = {}) => {
       // beliefData: beliefs deleted R4-P3 per P3-D1 (superseded by
       // claims+experiments; legacy Firestore belief docs may remain,
       // harmless).
-      // Ratified decision 4 (R4 T3): interventionTracker's effectiveness
-      // stats double as "this specific activity boosted your mood/HRV by
-      // X" OUTCOME claims once they reach a rendered insight — and this is
-      // exactly what feeds `buildSynthesisPrompt`'s "Most effective
-      // interventions" section into the (currently ungated) causal
-      // synthesis insight. Withheld while the gate is off; causal
-      // synthesis itself stays active, it just can't cite
-      // intervention-outcome numbers Phase 1-2 hasn't verified yet.
-      interventionData: riskyClaimsEnabled ? interventionData : null,
+      // interventionData: interventionTracker.js deleted whole R4-P3 per
+      // P3-D1 — this context key is no longer produced at all (not just
+      // withheld). `layer3/synthesizer.js`'s `buildSynthesisPrompt` still
+      // accepts an `interventionData` key generically if a caller passes
+      // one directly (see its own code + validationMatrix.test.js's R4
+      // Matrix row (b) denylist test, which still exercises that generic
+      // surface); orchestrator.js just never populates it anymore.
       blindSpots: gapResults.map(g => ({
         domain: g.domain,
         severity: g.gapScore,
@@ -614,16 +605,13 @@ export const generateInsights = async (userId, options = {}) => {
     // were gated off, so the refined beliefs were only ever saved, never
     // read back into a surfaced insight). Real waste removed.
 
-    // ========== LAYER 4: INTERVENTION OPTIMIZATION ==========
+    // ========== LAYER 4: IDEA GENERATION ==========
+    // updateInterventionData(userId, entries, whoopHistory) deleted R4-P3
+    // per P3-D1 — interventionTracker.js (the mention-based effectiveness
+    // tracker it fed) is deleted whole. Legacy Firestore intervention docs
+    // may remain, harmless.
 
-    // Update intervention effectiveness data
-    try {
-      await updateInterventionData(userId, entries, whoopHistory);
-    } catch (error) {
-      console.warn('[Orchestrator] Intervention update failed:', error.message);
-    }
-
-    // Generate recommendations
+    // Generate idea-to-try suggestions
     if (settings.features.interventionRecommendations?.enabled !== false) {
       try {
         const recommendations = await generateRecommendations(userId, {
@@ -632,18 +620,18 @@ export const generateInsights = async (userId, options = {}) => {
           // Mood01: was `|| 50`, a 0-100-scale fallback mixed with a
           // native 0-1 value, and never checked `.analysis?.mood_score`.
           recentMood: entries[0]?.mood ?? entries[0]?.analysis?.mood_score ?? 0.5,
-          timeOfDay: getTimeOfDay(),
-          riskyClaimsEnabled
+          timeOfDay: getTimeOfDay()
         });
 
         if (recommendations.length > 0) {
           insights.push({
             id: `recommendation_${Date.now()}`,
             type: 'intervention',
-            // Ratified decision 4: relabeled when personalized framing is
-            // suppressed, so the title doesn't imply a personalized
-            // recommendation the body no longer claims to be.
-            title: riskyClaimsEnabled ? 'Recommended Action' : 'An Idea to Try',
+            // R4-P3 per P3-D1: always the generic-idea title now — the
+            // personalized "Recommended Action" title (formerly gated on
+            // riskyClaimsEnabled) no longer exists; there is no
+            // personalized framing left for it to distinguish.
+            title: 'An Idea to Try',
             ...recommendations[0],
             priority: 1
           });

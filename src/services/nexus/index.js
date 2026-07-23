@@ -66,13 +66,11 @@ export {
 // beliefDissonance.js deleted R4-P3 per P3-D1 (superseded by
 // claims+experiments; legacy Firestore belief docs may remain, harmless).
 
-// Layer 4: Intervention Optimizer
-export {
-  detectInterventionsInEntry,
-  updateInterventionData,
-  getInterventionData
-} from './layer4/interventionTracker';
-
+// Layer 4: Idea Generator
+// interventionTracker.js (detectInterventionsInEntry, updateInterventionData,
+// getInterventionData) deleted whole R4-P3 per P3-D1
+// (docs/superpowers/plans/2026-07-23-r4-phase3-action-loop.md); legacy
+// Firestore intervention docs may remain, harmless.
 export {
   generateRecommendations
 } from './layer4/recommendationEngine';

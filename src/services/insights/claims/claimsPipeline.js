@@ -24,8 +24,10 @@ export const engineKeyFor = (spec) => ENGINE_BY_KIND[spec.kind] || spec.kind;
 // server-side) can author a claim's `wording` in place of the Phase-1
 // deterministic template, but ONLY when this constant is true. Production
 // always uses this constant (false); Phase 2 ships the writer path DARK
-// even with `insightClaims` ON, mirroring `RISKY_CLAIMS_ENABLED`'s pattern
-// in `src/services/nexus/orchestrator.js` — a single internal seam, no user
+// even with `insightClaims` ON, mirroring the same dark-internal-seam
+// pattern `RISKY_CLAIMS_ENABLED` used in `src/services/nexus/orchestrator.js`
+// before it retired R4-P3 (docs/superpowers/plans/2026-07-23-r4-phase3-
+// action-loop.md, P3-D1) — a single internal seam, no user
 // flag yet, flipped only after Michael eyeballs verifier behavior on real
 // data (see PROJECT_STATUS.md). The `llmWriterEnabled` override on
 // `generateClaims`'s `options` exists ONLY so tests can exercise the writer

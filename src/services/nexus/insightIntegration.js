@@ -8,13 +8,17 @@
  * - Nexus pattern detection (narrative + health + environment)
  * - Personal baselines
  * - Causal synthesis (LLM-powered insights)
- * - Intervention effectiveness tracking
+ *
+ * `getInterventionData` (layer4/interventionTracker.js) import removed
+ * R4-P3 Task 5 per P3-D1 (docs/superpowers/plans/2026-07-23-r4-phase3-
+ * action-loop.md) — interventionTracker.js is deleted whole. See
+ * `getTodayRecommendations` below for how the workout/pet_walk
+ * recommendations that used to key off it were resolved.
  */
 
 import { computeEnvironmentMoodCorrelations } from '../environment/environmentCorrelations';
 import { getTopContextPrompt, hasHighPriorityContext } from '../prompts/contextPrompts';
 import { getBaselines } from './layer2/baselineManager';
-import { getInterventionData } from './layer4/interventionTracker';
 // R4 T-p0closure (Important 1): these were previously loaded via require()
 // inside getTodayRecommendations — an ESM module using CommonJS require()
 // is exactly the class of bug that caused the documented prod white-screen
@@ -160,8 +164,8 @@ export const getTodayRecommendations = async (userId, entries, todayHealth, toda
     return { recommendations, message: 'Not enough data for personalized recommendations yet' };
   }
 
-  // Get intervention effectiveness
-  const interventions = await getInterventionData(userId);
+  // interventionTracker.js's getInterventionData(userId) call removed
+  // R4-P3 Task 5 per P3-D1 — the module is deleted whole.
 
   // Check current conditions
   const health = todayHealth ? extractHealthSignals(todayHealth) : null;
@@ -176,20 +180,20 @@ export const getTodayRecommendations = async (userId, entries, todayHealth, toda
       reasoning: 'Low recovery days benefit from lighter activity and extra rest'
     });
   } else if (health?.recoveryScore >= 67) {
-    // Check if exercise is effective for this user.
-    // R4 Phase 3 T1: this personalized intervention-outcome claim
-    // (previously RISKY_CLAIMS_ENABLED-gated, gate OFF in production) is
-    // retired outright — generic idea copy only, no personal-evidence
-    // number, no conditional.
-    const workoutEffectiveness = interventions?.interventions?.workout_day?.effectiveness?.global?.score;
-    if (workoutEffectiveness > 0.6) {
-      recommendations.push({
-        type: 'activity',
-        priority: 'medium',
-        action: 'Good day for a workout - your recovery is in the green zone',
-        reasoning: 'Worth trying — exercise can be a good use of a high-recovery day.'
-      });
-    }
+    // R4 Phase 3 T5 per P3-D1: this used to also require
+    // `interventions?.interventions?.workout_day?.effectiveness?.global?.score
+    // > 0.6` from the now-deleted interventionTracker.js before showing at
+    // all. The recovery-zone trigger is independent of that tracker (it
+    // reads today's real health data, not tracked history) and the copy
+    // was already fully generic — so this idea now renders unconditionally
+    // on the recovery trigger alone, same generic wording, no evidence
+    // claim added or removed.
+    recommendations.push({
+      type: 'activity',
+      priority: 'medium',
+      action: 'Good day for a workout - your recovery is in the green zone',
+      reasoning: 'Worth trying — exercise can be a good use of a high-recovery day.'
+    });
   }
 
   // Sunshine-based recommendations
@@ -216,27 +220,17 @@ export const getTodayRecommendations = async (userId, entries, todayHealth, toda
     });
   }
 
-  // Pet-walk effectiveness for mood.
-  // R4 T3 (DR finding 5, privacy sweep — an orphaned second recommendation
-  // pipeline the sweep found, not routed through orchestrator.js's own
-  // gate): was a pet-name-keyed intervention with a personalized-evidence
-  // claim ("<pet> walks improve your mood by X%") built from a
-  // Mood01-scale `moodDelta.mean` (native 0-1) compared/rendered as if it
-  // were already a 0-100 percentage — the exact scale bug class fixed
-  // elsewhere in R4 T3, here compounded with a personal literal. Key
-  // renamed to match `layer4/interventionTracker.js`'s generic `pet_walk`;
-  // R4 Phase 3 T1: the personalized-number branch (previously gated behind
-  // RISKY_CLAIMS_ENABLED, gate OFF in production) is retired outright —
-  // generic idea copy only.
-  const petWalkMoodDelta = interventions?.interventions?.pet_walk?.effectiveness?.global?.moodDelta?.mean;
-  if (Number.isFinite(petWalkMoodDelta) && petWalkMoodDelta > 0.05) {
-    recommendations.push({
-      type: 'activity',
-      priority: 'low',
-      action: 'A walk with your pet could boost your mood',
-      reasoning: 'Worth trying — you might find it helps.'
-    });
-  }
+  // Pet-walk recommendation DROPPED (not converted to a static generic
+  // idea) R4 Phase 3 T5 per P3-D1. Unlike the workout idea above, this
+  // recommendation had NO trigger independent of the deleted
+  // interventionTracker.js — its only condition was
+  // `interventions?.interventions?.pet_walk?.effectiveness?.global
+  // ?.moodDelta?.mean > 0.05`, which required tracked evidence that a pet
+  // walk happened at all. With no tracker, there is no honest signal left
+  // to decide even WHETHER to surface a pet-walk idea (most users don't
+  // have a pet); rendering it unconditionally would recommend a dog walk
+  // to users who don't own a dog, which is worse than the leaked-evidence
+  // problem this phase exists to fix. Dropped, not relabeled.
 
   return {
     recommendations: recommendations.sort((a, b) => {
@@ -245,7 +239,11 @@ export const getTodayRecommendations = async (userId, entries, todayHealth, toda
     }),
     basedOn: {
       entriesAnalyzed: entries.length,
-      interventionsTracked: Object.keys(interventions?.interventions || {}).length,
+      // interventionsTracked always 0 now — interventionTracker.js
+      // (the only source of this count) is deleted R4-P3 per P3-D1.
+      // InsightsPage.jsx only renders this line when > 0, so this is a
+      // silent no-op there, not a broken display.
+      interventionsTracked: 0,
       baselinesAvailable: !!baselines
     }
   };

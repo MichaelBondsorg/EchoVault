@@ -1,6 +1,6 @@
 /**
  * R4 T3d — dedicated coverage for `insightIntegration.js`'s `getTodayRecommendations`
- * pet-walk/workout/sunshine reasoning (coordinator Important finding: this
+ * workout/sunshine reasoning (coordinator Important finding: this
  * function is live-wired at `InsightsPage.jsx:124` and renders directly to
  * the user, but every consumer test mocks the whole module, so this
  * behavior itself had zero direct coverage).
@@ -13,6 +13,20 @@
  * gated): the module no longer imports `RISKY_CLAIMS_ENABLED` at all, so
  * there is nothing left to toggle. Tests below call `getTodayRecommendations`
  * directly against a single static import.
+ *
+ * R4 Phase 3 T5 (P3-D1): `interventionTracker.js` (and its `getInterventionData`
+ * call this module used to make) is deleted whole.
+ *   - The workout idea's `interventions?.interventions?.workout_day
+ *     ?.effectiveness?.global?.score > 0.6` inner gate is gone; the idea now
+ *     renders unconditionally on the (tracker-independent) recovery >= 67
+ *     trigger alone, same generic copy as before. Tests below updated
+ *     accordingly — no `getInterventionData` mock needed at all anymore.
+ *   - The pet_walk idea is DROPPED, not converted to a static generic idea:
+ *     its only trigger was tracked evidence from the deleted tracker (no pet
+ *     -ownership signal exists anywhere else), so there is no honest
+ *     condition left under which to show it. Its describe block below is
+ *     removed; the regression fixture no longer asserts on a pet_walk
+ *     recommendation.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { getTodayRecommendations } from '../insightIntegration';
@@ -50,108 +64,27 @@ vi.mock('../layer2/baselineManager', () => ({
   getBaselines: (...args) => mockGetBaselines(...args),
 }));
 
-const mockGetInterventionData = vi.fn();
-const mockUpdateInterventionData = vi.fn();
-vi.mock('../layer4/interventionTracker', () => ({
-  updateInterventionData: (...args) => mockUpdateInterventionData(...args),
-  getInterventionData: (...args) => mockGetInterventionData(...args),
-}));
-
 import { computeEnvironmentMoodCorrelations } from '../../environment/environmentCorrelations';
 
 beforeEach(() => {
   mockGetBaselines.mockReset();
-  mockGetInterventionData.mockReset();
-  mockUpdateInterventionData.mockReset();
   mockGenerateCausalSynthesis.mockReset();
   computeEnvironmentMoodCorrelations.mockReset();
   mockGetBaselines.mockResolvedValue({ calculatedAt: { toDate: () => new Date('2026-07-21') } });
 });
 
-function petWalkInterventions(moodDeltaMean, extra = {}) {
-  return {
-    interventions: {
-      pet_walk: { effectiveness: { global: { moodDelta: { mean: moodDeltaMean } } } },
-      ...extra,
-    },
-  };
-}
-
-function workoutIntervention(score, extra = {}) {
-  return {
-    interventions: {
-      workout_day: { effectiveness: { global: { score } } },
-      ...extra,
-    },
-  };
-}
-
 const GREEN_ZONE_HEALTH = { recovery: { score: 70 } };
 
-describe('getTodayRecommendations — pet_walk reasoning (R4 Phase 3 T1: personal branch deleted, not gated)', () => {
-  it('always generic copy: no personalized number, no percentage, no "Sterling"', async () => {
-    mockGetInterventionData.mockResolvedValue(petWalkInterventions(0.08));
-
+describe('getTodayRecommendations — pet_walk idea dropped (R4 Phase 3 T5 per P3-D1)', () => {
+  it('never returns a pet-walk recommendation — interventionTracker.js (its only trigger) is deleted', async () => {
     const result = await getTodayRecommendations('user-1', [], null, null);
     const rec = result.recommendations.find((r) => r.action?.toLowerCase().includes('pet'));
-
-    expect(rec).toBeTruthy();
-    expect(rec.reasoning).toBe('Worth trying — you might find it helps.');
-    expect(rec.reasoning).not.toMatch(/\d/); // no personalized number
-    expect(rec.reasoning).not.toMatch(/%/); // no percentage
-    expect(rec.reasoning.toLowerCase()).not.toContain('sterling');
-    expect(rec.action.toLowerCase()).not.toContain('sterling');
-  });
-
-  it('generic copy holds regardless of the size of the underlying (unused) moodDelta', async () => {
-    mockGetInterventionData.mockResolvedValue(petWalkInterventions(0.20));
-
-    const result = await getTodayRecommendations('user-1', [], null, null);
-    const rec = result.recommendations.find((r) => r.action?.toLowerCase().includes('pet'));
-
-    expect(rec.reasoning).toBe('Worth trying — you might find it helps.');
-  });
-
-  it('the renamed pet_walk key is consumed end-to-end from a fixture interventions doc; a stale pre-rename key is silently ignored (self-healing, not a bug)', async () => {
-    // A doc with BOTH the current key and a stale pre-rename key present —
-    // only `pet_walk` should ever be read (proves the rename actually
-    // changed the lookup path, not just the surrounding code).
-    mockGetInterventionData.mockResolvedValue(
-      petWalkInterventions(0.20, {
-        sterling_walk: { effectiveness: { global: { moodDelta: { mean: 0.99 } } } },
-      })
-    );
-
-    const result = await getTodayRecommendations('user-1', [], null, null);
-    const rec = result.recommendations.find((r) => r.action?.toLowerCase().includes('pet'));
-
-    expect(rec).toBeTruthy();
-    // If the stale key were still being read, this would be a wildly
-    // different (0.99-derived) recommendation set/ordering below.
-    expect(result.recommendations).toHaveLength(1);
-  });
-
-  it('below the significance threshold (delta <= 0.05), no pet-walk recommendation is pushed at all', async () => {
-    mockGetInterventionData.mockResolvedValue(petWalkInterventions(0.02));
-
-    const result = await getTodayRecommendations('user-1', [], null, null);
-    const rec = result.recommendations.find((r) => r.action?.toLowerCase().includes('pet'));
-
     expect(rec).toBeUndefined();
-  });
-
-  it('no interventions tracked at all -> no pet-walk recommendation, no crash', async () => {
-    mockGetInterventionData.mockResolvedValue({ interventions: {} });
-
-    const result = await getTodayRecommendations('user-1', [], null, null);
-    expect(result.recommendations).toEqual([]);
   });
 });
 
-describe('getTodayRecommendations — workout-effectiveness reasoning (R4 Phase 3 T1: personal branch deleted, not gated)', () => {
-  it('always generic copy: no personalized effectiveness number, no percentage', async () => {
-    mockGetInterventionData.mockResolvedValue(workoutIntervention(0.8));
-
+describe('getTodayRecommendations — workout-effectiveness reasoning (R4 Phase 3 T1: personal branch deleted, not gated; T5: tracker-dependent inner gate removed)', () => {
+  it('always generic copy, unconditional on the (deleted) tracker: no personalized effectiveness number, no percentage', async () => {
     const result = await getTodayRecommendations('user-1', [], GREEN_ZONE_HEALTH, null);
     const rec = result.recommendations.find((r) => r.type === 'activity' && r.action?.toLowerCase().includes('workout'));
 
@@ -161,19 +94,16 @@ describe('getTodayRecommendations — workout-effectiveness reasoning (R4 Phase 
     expect(rec.reasoning).not.toMatch(/%/); // no percentage
   });
 
-  it('generic copy holds regardless of the size of the underlying (unused) effectiveness score', async () => {
-    mockGetInterventionData.mockResolvedValue(workoutIntervention(0.95));
-
-    const result = await getTodayRecommendations('user-1', [], GREEN_ZONE_HEALTH, null);
+  it('the idea renders purely off the recovery >= 67 trigger — no interventionTracker data exists to gate it further', async () => {
+    const result = await getTodayRecommendations('user-1', [], { recovery: { score: 90 } }, null);
     const rec = result.recommendations.find((r) => r.type === 'activity' && r.action?.toLowerCase().includes('workout'));
 
+    expect(rec).toBeTruthy();
     expect(rec.reasoning).toBe('Worth trying — exercise can be a good use of a high-recovery day.');
   });
 
-  it('below the effectiveness threshold (score <= 0.6), no workout recommendation is pushed at all', async () => {
-    mockGetInterventionData.mockResolvedValue(workoutIntervention(0.5));
-
-    const result = await getTodayRecommendations('user-1', [], GREEN_ZONE_HEALTH, null);
+  it('below the recovery threshold (score < 67, and not red-zone), no workout recommendation is pushed', async () => {
+    const result = await getTodayRecommendations('user-1', [], { recovery: { score: 50 } }, null);
     const rec = result.recommendations.find((r) => r.type === 'activity' && r.action?.toLowerCase().includes('workout'));
 
     expect(rec).toBeUndefined();
@@ -182,7 +112,6 @@ describe('getTodayRecommendations — workout-effectiveness reasoning (R4 Phase 
 
 describe('getTodayRecommendations — sunshine reasoning (R4 Phase 3 T1: kills the live ungated percentage leak)', () => {
   it('always generic copy: no personalized mood-delta percentage, regardless of correlation strength', async () => {
-    mockGetInterventionData.mockResolvedValue({ interventions: {} });
     computeEnvironmentMoodCorrelations.mockReturnValue({
       sunshineMood: { strength: 'strong', highSunshineMood: 0.8, lowSunshineMood: 0.3 },
     });
@@ -206,21 +135,17 @@ describe('getTodayRecommendations — sunshine reasoning (R4 Phase 3 T1: kills t
  * R4 Phase 3 T1 — the core regression test for this task: a rich
  * health/environment fixture that fires every reasoning-bearing branch at
  * once (recovery red-zone self-care copy doesn't carry a number anyway, but
- * low-sleep, sunny-day sensitivity, workout, and pet_walk all fire together
- * here), asserting NO returned `reasoning` string anywhere contains a
- * percentage digit pattern, and that the three specific generic strings
- * appear verbatim. This is the RED case pre-fix: the sunshine assertion
- * fails against the old code because it renders
- * `Your mood is NN% higher on sunny days` ungated.
+ * low-sleep, sunny-day sensitivity, and workout all fire together here),
+ * asserting NO returned `reasoning` string anywhere contains a percentage
+ * digit pattern, and that the generic strings appear verbatim. This is the
+ * RED case pre-fix: the sunshine assertion fails against the old code
+ * because it renders `Your mood is NN% higher on sunny days` ungated.
+ *
+ * R4 Phase 3 T5: pet_walk removed from this fixture's expected branches —
+ * it is dropped outright, not one of the surviving generic ideas.
  */
 describe('getTodayRecommendations — no percentage leaks anywhere (R4 Phase 3 T1 regression fixture)', () => {
-  it('rich fixture (low sleep + sunny-day sensitivity + green-zone workout + pet_walk all firing): every reasoning string is free of digit-percent patterns, and the three generic strings render verbatim', async () => {
-    mockGetInterventionData.mockResolvedValue({
-      interventions: {
-        workout_day: { effectiveness: { global: { score: 0.9 } } },
-        pet_walk: { effectiveness: { global: { moodDelta: { mean: 0.35 } } } },
-      },
-    });
+  it('rich fixture (low sleep + sunny-day sensitivity + green-zone workout all firing): every reasoning string is free of digit-percent patterns, and the generic strings render verbatim', async () => {
     computeEnvironmentMoodCorrelations.mockReturnValue({
       sunshineMood: { strength: 'strong', highSunshineMood: 0.9, lowSunshineMood: 0.1 },
     });
@@ -234,7 +159,7 @@ describe('getTodayRecommendations — no percentage leaks anywhere (R4 Phase 3 T
 
     // Every branch actually fired — otherwise this fixture isn't exercising
     // what it claims to.
-    expect(result.recommendations.length).toBeGreaterThanOrEqual(4);
+    expect(result.recommendations.length).toBeGreaterThanOrEqual(3);
 
     for (const rec of result.recommendations) {
       expect(rec.reasoning).not.toMatch(/\d+\s*%/);
@@ -246,7 +171,7 @@ describe('getTodayRecommendations — no percentage leaks anywhere (R4 Phase 3 T
 
     expect(workoutRec.reasoning).toBe('Worth trying — exercise can be a good use of a high-recovery day.');
     expect(sunshineRec.reasoning).toBe("Sunshine tends to help some people's mood — worth getting outside if you can.");
-    expect(petRec.reasoning).toBe('Worth trying — you might find it helps.');
+    expect(petRec).toBeUndefined();
   });
 });
 
@@ -262,8 +187,6 @@ describe('getTodayRecommendations — no percentage leaks anywhere (R4 Phase 3 T
  */
 describe('getTodayRecommendations — formerly require()-d formatter symbols function correctly (R4 P0-closure Important 1)', () => {
   it('extractHealthSignals correctly derives recoveryScore from a real todayHealth object, driving the green-zone branch', async () => {
-    mockGetInterventionData.mockResolvedValue(workoutIntervention(0.8));
-
     const result = await getTodayRecommendations('user-1', [], { recovery: { score: 70 } }, null);
     const rec = result.recommendations.find((r) => r.type === 'activity' && r.action?.toLowerCase().includes('workout'));
 
@@ -271,8 +194,6 @@ describe('getTodayRecommendations — formerly require()-d formatter symbols fun
   });
 
   it('extractHealthSignals correctly derives sleepHours from a real todayHealth object, driving the low-sleep self-care branch', async () => {
-    mockGetInterventionData.mockResolvedValue({ interventions: {} });
-
     const result = await getTodayRecommendations('user-1', [], { sleep: { totalHours: 4.5 } }, null);
     const rec = result.recommendations.find((r) => r.type === 'self_care');
 
@@ -281,8 +202,6 @@ describe('getTodayRecommendations — formerly require()-d formatter symbols fun
   });
 
   it('extractEnvironmentSignals runs against a real todayEnvironment object without throwing (both formatter symbols exercised together)', async () => {
-    mockGetInterventionData.mockResolvedValue({ interventions: {} });
-
     await expect(
       getTodayRecommendations(
         'user-1',

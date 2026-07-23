@@ -1,26 +1,28 @@
 /**
- * R4 Task 3 — risky-claim suppression seam + the real crossThreadDetector
- * call chain (ratified decision 4:
- * docs/superpowers/plans/2026-07-22-r4-insight-integrity.md).
+ * R4 Phase 3 Task 5 (P3-D1) — was `orchestrator.riskyClaims.test.js`,
+ * retired/renamed: `RISKY_CLAIMS_ENABLED` and `interventionTracker.js` are
+ * both deleted (docs/superpowers/plans/2026-07-23-r4-phase3-action-loop.md).
+ * There is nothing left to gate ON, so the gate-ON test and the
+ * MIN_EVIDENCE_OCCURRENCES describe block (both exercised deleted code
+ * paths) are gone. What survives, relocated here:
  *
- * Two things this file proves that layer3/layer4 unit tests can't:
- *  1. With the internal RISKY_CLAIMS_ENABLED gate at its production value
- *     (false), none of the remaining risky claim types (an
- *     interventionData-fed causal_synthesis, and personalized
- *     recommendation wording) reach the persisted insight set — even
- *     though the underlying Mood01 scale fixes would otherwise make them
- *     fire. (Two of the original four risky claim types — counterfactual,
- *     belief_dissonance — were deleted whole-module R4-P3 per P3-D1;
- *     their suppression assertions here were removed with them, superseded
- *     by claims+experiments. Legacy Firestore belief docs may remain,
- *     harmless.)
- *  2. `generateInsights(userId, { riskyClaimsEnabled: true })` (test-only
- *     override) exercises the corrected code end to end, including the
- *     REAL `detectMetaPatterns`/`generateMetaPatternInsight` call chain
- *     (crossThreadDetector is NOT mocked here) — proving the
- *     `activeThreads`/`recentEntries` destructuring seam fix works against
- *     orchestrator's actual `synthesisContext` shape, not just a
- *     hand-rolled unit-test context object.
+ *  1. Ideas always surface generically: a recommendation insight is always
+ *     titled 'An Idea to Try', and never carries a score, expectedOutcome,
+ *     or personalized-evidence wording. There is no gate anymore — this is
+ *     the only behavior.
+ *  2. The real crossThreadDetector call chain (`detectMetaPatterns` +
+ *     `generateMetaPatternInsight`, NOT mocked here) through orchestrator's
+ *     actual `synthesisContext` shape. This assertion has nothing to do
+ *     with risky claims — it was co-located here (not in
+ *     `layer3/__tests__/crossThreadDetector.test.js`) because it needs
+ *     orchestrator's full mock harness (whoop, gapDetector, threadManager,
+ *     stateDetector, baselineManager, sourceExclusions, firestore) to
+ *     exercise the REAL context-shape seam end-to-end; crossThreadDetector's
+ *     own test file unit-tests the same fix directly against a hand-built
+ *     context, with none of that harness, so duplicating it there would add
+ *     mocking weight without new coverage. Kept here under its own
+ *     non-risky describe block per this task's relocation choice — not
+ *     dropped.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
@@ -80,28 +82,23 @@ vi.mock('../layer2/baselineManager', () => ({
   compareToBaseline: vi.fn(() => ({})),
 }));
 
-// Layer 3 synthesis is mocked so this file stays focused on (a) the
-// suppression gate and (b) the REAL crossThreadDetector call chain
-// (deliberately NOT mocked below). beliefDissonance.js / counterfactual.js
-// mocks deleted R4-P3 per P3-D1 (superseded by claims+experiments; legacy
-// Firestore belief docs may remain, harmless).
+// Layer 3 synthesis is mocked so this file stays focused on (a) the ideas
+// contract and (b) the REAL crossThreadDetector call chain (deliberately
+// NOT mocked below). beliefDissonance.js / counterfactual.js mocks deleted
+// R4-P3 per P3-D1 (superseded by claims+experiments; legacy Firestore
+// belief docs may remain, harmless).
 vi.mock('../layer3/synthesizer', () => ({
   INSIGHT_TYPES: {},
   generateCausalSynthesis: vi.fn(async () => ({ success: false })),
   generateNarrativeArcInsight: vi.fn(async () => null),
 }));
 
-vi.mock('../layer4/interventionTracker', () => ({
-  updateInterventionData: vi.fn(async () => {}),
-  getInterventionData: vi.fn(async () => ({
-    interventions: {
-      yoga: { category: 'physical', totalOccurrences: 10, effectiveness: { global: { score: 0.9, moodDelta: { mean: 0.2 } } } },
-    },
-  })),
-}));
+// layer4/interventionTracker.js mock deleted R4-P3 Task 5 per P3-D1 — the
+// module is deleted whole; recommendationEngine.js no longer imports it,
+// so `generateRecommendations` runs for real here with zero mocking.
 
 // callGemini mocked once, shared by the real synthesizer/crossThreadDetector
-// call chain exercised in the "gate on" test below.
+// call chain exercised in the meta-pattern test below.
 vi.mock('../../ai/gemini', () => ({
   callGemini: vi.fn(async () => JSON.stringify({
     title: 'The Waiting Room Loop',
@@ -117,13 +114,11 @@ vi.mock('../../insights/sourceExclusions', () => ({
 
 const { getDocs, setDoc } = await import('firebase/firestore');
 const { generateInsights } = await import('../orchestrator');
-const { generateRecommendations } = await import('../layer4/recommendationEngine');
 
 function buildEntries() {
   const now = Date.parse('2026-07-21T12:00:00.000Z');
   const DAY_MS = 24 * 60 * 60 * 1000;
-  // >=10 entries: both the belief-dissonance and causal-synthesis blocks
-  // gate on `entries.length >= 10`.
+  // >=10 entries: the causal-synthesis block gates on `entries.length >= 10`.
   return Array.from({ length: 10 }, (_, i) => ({
     id: `entry-${i}`,
     createdAt: new Date(now - i * DAY_MS).toISOString(),
@@ -136,19 +131,13 @@ function mockEntriesSnapshot(entries) {
   return { docs: entries.map((e) => ({ id: e.id, data: () => ({ ...e }) })) };
 }
 
-describe('generateInsights — risky-claim suppression seam (R4 T3, ratified decision 4)', () => {
+describe('generateInsights — ideas always generic (R4-P3 Task 5, RISKY_CLAIMS_ENABLED retired)', () => {
   beforeEach(() => {
     getDocs.mockReset();
     setDoc.mockClear();
   });
 
-  // The "gate OFF: no counterfactual or belief_dissonance insight reaches
-  // `active`" test was deleted here (R4-P3 per P3-D1) — those two insight
-  // types no longer exist at all post-deletion, so the assertion is moot;
-  // superseded by claims+experiments. Legacy Firestore belief docs may
-  // remain, harmless.
-
-  it('gate OFF: a surfaced recommendation is relabeled as a generic idea — no score, no personalized reasoning', async () => {
+  it('a surfaced recommendation is always titled "An Idea to Try" — no score, no expectedOutcome, no personalized reasoning', async () => {
     getDocs.mockResolvedValueOnce(mockEntriesSnapshot(buildEntries()));
 
     const result = await generateInsights('user-1');
@@ -157,18 +146,26 @@ describe('generateInsights — risky-claim suppression seam (R4 T3, ratified dec
     expect(idea).toBeTruthy();
     expect(idea.title).toBe('An Idea to Try');
     expect(idea.score).toBeUndefined();
+    expect(idea.expectedOutcome).toBeUndefined();
     expect(idea.reasoning).not.toMatch(/historically|your mood|your HRV/i);
   });
 
-  it('gate ON (test-only override): a surfaced recommendation is fully personalized ("Recommended Action"), proving the scale-corrected code works underneath the gate', async () => {
+  it('passing a (now-inert) riskyClaimsEnabled option changes nothing — the seam is retired, not just defaulted', async () => {
     getDocs.mockResolvedValueOnce(mockEntriesSnapshot(buildEntries()));
 
     const result = await generateInsights('user-1', { riskyClaimsEnabled: true });
-
-    // (counterfactual/belief_dissonance surfacing assertions removed here —
-    // R4-P3 per P3-D1, see file header.)
     const idea = result.insights.find((i) => i.type === 'intervention');
-    expect(idea.title).toBe('Recommended Action');
+
+    expect(idea.title).toBe('An Idea to Try');
+    expect(idea.score).toBeUndefined();
+    expect(idea.expectedOutcome).toBeUndefined();
+  });
+});
+
+describe('generateInsights — real call chain: crossThreadDetector meta-pattern (relocated from the former risky-claims file, non-risky)', () => {
+  beforeEach(() => {
+    getDocs.mockReset();
+    setDoc.mockClear();
   });
 
   it('real call chain: detectMetaPatterns + generateMetaPatternInsight (crossThreadDetector, NOT mocked) produce a meta_pattern insight through orchestrator\'s actual synthesisContext shape', async () => {
@@ -188,29 +185,5 @@ describe('generateInsights — risky-claim suppression seam (R4 T3, ratified dec
     expect(metaInsight.affectedThreads).toEqual(
       expect.arrayContaining(['thread-career', 'thread-relationship'])
     );
-  });
-});
-
-describe('generateRecommendations — MIN_EVIDENCE_OCCURRENCES (R4 T3, DR finding 7)', () => {
-  it('does not recommend an intervention with fewer than MIN_EVIDENCE_OCCURRENCES tracked occurrences, even with favorable context boosts', async () => {
-    const { getInterventionData } = await import('../layer4/interventionTracker');
-    getInterventionData.mockResolvedValueOnce({
-      interventions: {
-        // Only ONE tracked occurrence ever — old code would still start
-        // scoreRecommendation at a neutral 0.5 and could clear the
-        // recommend threshold via boosts alone.
-        gym: { category: 'physical', totalOccurrences: 1, effectiveness: { global: { score: 0.5 } } },
-      },
-    });
-
-    const recs = await generateRecommendations('user-1', {
-      currentState: { primary: 'stable' },
-      whoopToday: null,
-      recentMood: 0.5,
-      timeOfDay: 'morning',
-      riskyClaimsEnabled: true,
-    });
-
-    expect(recs.find((r) => r.intervention === 'gym')).toBeUndefined();
   });
 });

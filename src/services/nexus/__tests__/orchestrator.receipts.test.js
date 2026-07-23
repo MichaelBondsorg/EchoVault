@@ -88,12 +88,9 @@ vi.mock('../layer3/crossThreadDetector', () => ({
 
 // beliefDissonance.js / counterfactual.js mocks deleted R4-P3 per P3-D1
 // (superseded by claims+experiments; legacy Firestore belief docs may
-// remain, harmless).
-
-vi.mock('../layer4/interventionTracker', () => ({
-  updateInterventionData: vi.fn(async () => {}),
-  getInterventionData: vi.fn(async () => ({})),
-}));
+// remain, harmless). layer4/interventionTracker.js mock deleted R4-P3
+// Task 5 per P3-D1 — the module is deleted whole; orchestrator.js no
+// longer imports it.
 
 vi.mock('../layer4/recommendationEngine', () => ({
   generateRecommendations: vi.fn(async () => ([

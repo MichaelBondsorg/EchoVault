@@ -1,15 +1,15 @@
 /**
- * R4 Task 3 — recommendationEngine.js: DR finding 7 ("recommends without
- * personal evidence"), Mood01 threshold fix, deleted fabricated fallback
- * numbers, and the ratified-decision-4 generic-idea relabeling.
+ * R4 Phase 3 Task 5 (P3-D1) — recommendationEngine.js reduced to ideas-only.
+ *
+ * interventionTracker.js is deleted whole; there is no more personal
+ * evidence, score, effectiveness data, or predicted outcome anywhere in
+ * this engine. These tests replace the old MIN_EVIDENCE_OCCURRENCES /
+ * riskyClaimsEnabled / fabricated-fallback-number suite (all of which
+ * exercised deleted code) with coverage of the surviving contract: a
+ * static state -> idea map, generic reasoning, and timing, with no
+ * personal-evidence fields ever present on the output.
  */
-import { describe, it, expect, vi } from 'vitest';
-
-vi.mock('../interventionTracker', () => ({
-  getInterventionData: vi.fn(),
-}));
-
-import { getInterventionData } from '../interventionTracker';
+import { describe, it, expect } from 'vitest';
 import { generateRecommendations } from '../recommendationEngine';
 
 const baseContext = (overrides = {}) => ({
@@ -20,116 +20,76 @@ const baseContext = (overrides = {}) => ({
   ...overrides,
 });
 
-describe('generateRecommendations — MIN_EVIDENCE_OCCURRENCES gate (DR finding 7)', () => {
-  it('does not recommend an intervention tracked only once, even with a neutral effectiveness score', async () => {
-    getInterventionData.mockResolvedValueOnce({
-      interventions: {
-        gym: { category: 'physical', totalOccurrences: 1, effectiveness: { global: { score: 0.5 } } },
-      },
-    });
-
-    const recs = await generateRecommendations('user-1', baseContext({ riskyClaimsEnabled: true }));
-    expect(recs.find((r) => r.intervention === 'gym')).toBeUndefined();
-  });
-
-  it('DOES recommend an intervention with >= MIN_EVIDENCE_OCCURRENCES and a genuinely strong effectiveness score', async () => {
-    getInterventionData.mockResolvedValueOnce({
-      interventions: {
-        gym: { category: 'physical', totalOccurrences: 10, effectiveness: { global: { score: 0.9 } } },
-      },
-    });
-
-    const recs = await generateRecommendations('user-1', baseContext({ riskyClaimsEnabled: true }));
-    expect(recs.find((r) => r.intervention === 'gym')).toBeTruthy();
-  });
-});
-
-describe('generateRecommendations — Mood01 recentMood threshold', () => {
-  it('a native 0-1 recentMood of 0.30 (genuinely low) boosts acts_of_service, not a 0-100-scale comparison', async () => {
-    getInterventionData.mockResolvedValueOnce({
-      interventions: {
-        acts_of_service: { category: 'behavioral', totalOccurrences: 5, effectiveness: { global: { score: 0.5 } } },
-      },
-    });
-
-    const lowMoodRecs = await generateRecommendations('user-1', baseContext({
-      currentState: { primary: 'low_mood' },
-      recentMood: 0.30,
-      riskyClaimsEnabled: true,
-    }));
-    const neutralMoodRecs = await generateRecommendations('user-1', baseContext({
-      currentState: { primary: 'low_mood' },
-      recentMood: 0.60,
-      riskyClaimsEnabled: true,
-    }));
-
-    const lowScore = lowMoodRecs.find((r) => r.intervention === 'acts_of_service')?.score || 0;
-    const neutralScore = neutralMoodRecs.find((r) => r.intervention === 'acts_of_service')?.score || 0;
-    expect(lowScore).toBeGreaterThan(neutralScore);
-  });
-});
-
-describe('generateRecommendations — ratified decision 4: riskyClaimsEnabled gate', () => {
-  const interventionData = {
-    interventions: {
-      gym: { category: 'physical', totalOccurrences: 10, effectiveness: { global: { score: 0.9, moodDelta: { mean: 0.20 }, hrvDelta: { mean: 8 } } } },
-    },
-  };
-
-  it('defaults to false (generic idea) when riskyClaimsEnabled is omitted', async () => {
-    getInterventionData.mockResolvedValueOnce(interventionData);
+describe('generateRecommendations — ideas-only contract (no personal evidence)', () => {
+  it('returns generic ideas with no score, expectedOutcome, or confidence field', async () => {
     const recs = await generateRecommendations('user-1', baseContext());
-    const rec = recs.find((r) => r.intervention === 'gym');
-    expect(rec).toBeTruthy();
-    expect(rec.score).toBeUndefined();
-    expect(rec.expectedOutcome).toBeUndefined();
-    expect(rec.reasoning).not.toMatch(/historically|your mood|your HRV|points/i);
+
+    expect(recs.length).toBeGreaterThan(0);
+    for (const rec of recs) {
+      expect(rec.score).toBeUndefined();
+      expect(rec.expectedOutcome).toBeUndefined();
+      expect(rec.confidence).toBeUndefined();
+      expect(rec.reasoning).not.toMatch(/historically|your mood|your HRV|points|%/i);
+    }
   });
 
-  it('riskyClaimsEnabled: true surfaces the real score/reasoning/expectedOutcome', async () => {
-    getInterventionData.mockResolvedValueOnce(interventionData);
-    const recs = await generateRecommendations('user-1', baseContext({ riskyClaimsEnabled: true }));
-    const rec = recs.find((r) => r.intervention === 'gym');
-    expect(rec.score).toBeGreaterThan(0.5);
-    expect(rec.expectedOutcome).toBeTruthy();
+  it('caps at 3 ideas', async () => {
+    const recs = await generateRecommendations('user-1', baseContext({
+      currentState: { primary: 'career_waiting' },
+    }));
+    expect(recs.length).toBeLessThanOrEqual(3);
+  });
+
+  it('falls back to the "stable" idea set for an unrecognized state', async () => {
+    const recs = await generateRecommendations('user-1', baseContext({
+      currentState: { primary: 'totally_unknown_state' },
+    }));
+    expect(recs.length).toBeGreaterThan(0);
+  });
+
+  it('falls back to the "stable" idea set when currentState is absent entirely', async () => {
+    const recs = await generateRecommendations('user-1', baseContext({ currentState: undefined }));
+    expect(recs.length).toBeGreaterThan(0);
+  });
+
+  it('genericIdeaReasoning renders a readable, non-evidence-claiming sentence per intervention', async () => {
+    const recs = await generateRecommendations('user-1', baseContext({
+      currentState: { primary: 'career_rejection' },
+    }));
+    const rec = recs.find((r) => r.intervention === 'acts_of_service');
+    expect(rec).toBeTruthy();
+    expect(rec.reasoning).toBe('Acts of service could be worth trying right now.');
+  });
+
+  it('does not depend on interventionTracker.js at all — no getInterventionData mock exists anywhere in this file', async () => {
+    // No vi.mock for '../interventionTracker' anywhere in this file — if
+    // recommendationEngine.js still imported it, this file would need a
+    // Firestore/firebase mock to even load. Passing at all is the
+    // assertion.
+    const recs = await generateRecommendations('user-1', baseContext());
+    expect(Array.isArray(recs)).toBe(true);
   });
 });
 
-describe('generateRecommendations — no fabricated fallback numbers (decision 4: deleted outright)', () => {
-  it('never writes a hardcoded HRV/mood number when the real data is absent, even for a templated state/intervention pair', async () => {
-    // pet_walk in career_waiting has a hardcoded template that used to
-    // fall back to `|| 12`ms when hrvDelta was missing.
-    getInterventionData.mockResolvedValueOnce({
-      interventions: {
-        pet_walk: { category: 'relational', totalOccurrences: 10, effectiveness: { global: { score: 0.9 /* no hrvDelta */ } } },
-      },
-    });
+describe('generateRecommendations — different states yield different idea sets', () => {
+  it('career_waiting includes pet_walk; stable does not', async () => {
+    const waiting = await generateRecommendations('user-1', baseContext({ currentState: { primary: 'career_waiting' } }));
+    const stable = await generateRecommendations('user-1', baseContext({ currentState: { primary: 'stable' } }));
 
-    const recs = await generateRecommendations('user-1', baseContext({
-      currentState: { primary: 'career_waiting' },
-      riskyClaimsEnabled: true,
-    }));
-
-    const rec = recs.find((r) => r.intervention === 'pet_walk');
-    expect(rec).toBeTruthy();
-    expect(rec.reasoning).not.toContain('12ms');
-    expect(rec.reasoning).not.toMatch(/recovered your HRV by \d/);
+    expect(waiting.some((r) => r.intervention === 'pet_walk')).toBe(true);
+    expect(stable.some((r) => r.intervention === 'pet_walk')).toBe(false);
   });
+});
 
-  it('predictOutcome returns null (no invented +10-point default) when there is no real mood/HRV data', async () => {
-    getInterventionData.mockResolvedValueOnce({
-      interventions: {
-        creative: { category: 'behavioral', totalOccurrences: 10, effectiveness: { global: { score: 0.9 } } },
-      },
-    });
-
+describe('generateRecommendations — timing', () => {
+  it('provides a timing string per idea', async () => {
     const recs = await generateRecommendations('user-1', baseContext({
-      currentState: { primary: 'career_waiting' },
-      riskyClaimsEnabled: true,
+      currentState: { primary: 'stable' },
+      timeOfDay: 'morning',
     }));
-
-    const rec = recs.find((r) => r.intervention === 'creative');
-    expect(rec).toBeTruthy();
-    expect(rec.expectedOutcome).toBeNull();
+    for (const rec of recs) {
+      expect(typeof rec.timing).toBe('string');
+      expect(rec.timing.length).toBeGreaterThan(0);
+    }
   });
 });

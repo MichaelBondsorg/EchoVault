@@ -299,11 +299,9 @@ vi.mock('../services/nexus/layer3/crossThreadDetector', () => ({
 }));
 // beliefDissonance.js / counterfactual.js mocks deleted R4-P3 per P3-D1
 // (superseded by claims+experiments; legacy Firestore belief docs may
-// remain, harmless).
-vi.mock('../services/nexus/layer4/interventionTracker', () => ({
-  updateInterventionData: vi.fn(async () => {}),
-  getInterventionData: vi.fn(async () => ({})),
-}));
+// remain, harmless). layer4/interventionTracker.js mock deleted R4-P3
+// Task 5 per P3-D1 — the module is deleted whole; orchestrator.js no
+// longer imports it.
 vi.mock('../services/nexus/layer4/recommendationEngine', () => ({ generateRecommendations: vi.fn(async () => []) }));
 
 // Row (a)/(b) also need a controllable `getExcludedEntryIds` (R2 Task 10) —
@@ -2484,6 +2482,17 @@ describe('R4 Matrix row (b): no-personal-literals — GENERIC_TRIGGERS denylist 
     }
   });
 
+  // R4-P3 Task 5 disposition (P3-D1): this row calls `generateCausalSynthesis`
+  // directly with a hand-built `context` object — it never goes through
+  // `interventionTracker.js` (deleted whole) or `orchestrator.js` (which no
+  // longer produces an `interventionData` context key at all, see its own
+  // tombstone comment). `layer3/synthesizer.js`'s `buildSynthesisPrompt`
+  // still generically accepts an `interventionData` key from ANY caller
+  // (untouched by T5, still a live/surviving prompt-building surface), so
+  // this fixture continues to exercise a real code path and the denylist
+  // invariant it guards (personal-name leakage into the synthesis prompt)
+  // survives unchanged — re-pointing was unnecessary because this row was
+  // never coupled to the deleted module in the first place.
   it('the real synthesis prompt, built from a fully-populated context (threads/baselines/whoop/interventions), never contains a PERSONAL_TOKEN_DENYLIST token — captures the ACTUAL built prompt, not just the static template', async () => {
     const { PERSONAL_TOKEN_DENYLIST } = await import('../services/nexus/layer1/genericTriggers');
     const gemini = await import('../services/ai/gemini');
