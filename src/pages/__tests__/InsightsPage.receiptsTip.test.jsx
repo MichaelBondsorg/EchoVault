@@ -19,6 +19,9 @@ import { ownerStorageKey } from '../../services/storage/ownerScopedStorage';
 
 const getFlag = vi.fn();
 vi.mock('../../config/flags', () => ({ getFlag: (...a) => getFlag(...a) }));
+// useClaims imports db at module scope; mock the firebase boundary (real init
+// throws Messaging errors in jsdom as unhandled rejections).
+vi.mock('../../config/firebase', () => ({ db: { __db: true } }));
 
 const useNexusInsights = vi.fn();
 vi.mock('../../hooks/useNexusInsights', () => ({
