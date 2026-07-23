@@ -351,6 +351,61 @@ describe('generateClaims — retraction (ineligible candidate vs. live prior)', 
   });
 });
 
+describe('generateClaims — suppressed prior durability (eligible/supersede branch)', () => {
+  it('a suppressed prior is left untouched even when its still-eligible candidate\'s evidence drifts (>0.5 mood-point delta) — no new claim, no supersede, status/updatedAt unchanged; lifting suppression re-enables normal supersede on the next run', async () => {
+    // Run A: v1 written verified.
+    const first = await generateClaims(DB, UID, fixtures(STRONG), { timeZone: 'UTC', now: NOW });
+    expect(first.written).toBe(1);
+    const priorId = allClaimDocs()[0].id;
+
+    // User suppresses it ("Don't analyze this topic").
+    const suppressedAt = '2026-07-23T00:00:00.000Z';
+    await setClaimStatus(DB, UID, priorId, 'suppressed', { now: suppressedAt });
+
+    // Run B: evidence drifts (CONTRADICTING shrinks the gym effect by more
+    // than 0.5 mood points — the exact fixture claimsPipeline.test.js's own
+    // "meaningfully changed evidence supersedes" test proves triggers the
+    // supersede path) but the candidate STAYS eligible. Before the fix, this
+    // silently un-suppresses: the old doc gains supersededByClaimId and a
+    // new status:'verified' claim is written.
+    const laterNow = '2026-07-30T10:00:00.000Z';
+    const changedDays = [...STRONG, ...CONTRADICTING];
+    const second = await generateClaims(DB, UID, fixtures(changedDays), { timeZone: 'UTC', now: laterNow });
+
+    expect(second.eligible).toBe(1); // still analyzed as eligible...
+    expect(second.written).toBe(0); // ...but nothing written
+    expect(second.superseded).toBe(0);
+
+    const claims = allClaimDocs();
+    expect(claims).toHaveLength(1); // no new claim doc
+    const prior = claims.find((c) => c.id === priorId);
+    expect(prior.status).toBe('suppressed'); // untouched
+    expect(prior.supersededByClaimId).toBeNull(); // never superseded
+    expect(prior.updatedAt).toBe(suppressedAt); // no write touched it at all
+
+    // Lift: explicit user action flips it back to verified.
+    const liftedAt = '2026-07-31T00:00:00.000Z';
+    await setClaimStatus(DB, UID, priorId, 'verified', { now: liftedAt });
+
+    // Run C: same drifted evidence, prior now verified again -> normal
+    // supersede occurs. Proves the skip above is status-gated, not a
+    // permanent hole for this candidate.
+    const third = await generateClaims(DB, UID, fixtures(changedDays), { timeZone: 'UTC', now: '2026-08-01T00:00:00.000Z' });
+    expect(third.eligible).toBe(1);
+    expect(third.written).toBe(1);
+    expect(third.superseded).toBe(1);
+
+    const after = allClaimDocs();
+    expect(after).toHaveLength(2);
+    const oldDoc = after.find((c) => c.id === priorId);
+    const newDoc = after.find((c) => c.id !== priorId);
+    expect(oldDoc.supersededByClaimId).toBe(newDoc.id);
+    expect(newDoc.version).toBe(2);
+    expect(newDoc.parentClaimId).toBe(priorId);
+    expect(newDoc.status).toBe('verified');
+  });
+});
+
 describe('generateClaims — two-engine fixture (tag + health) in one run', () => {
   it('registers ONE call per engine family and freezes each candidate with its own family testedCount', async () => {
     // First 5 days also carry health.sleep data, clearing the health

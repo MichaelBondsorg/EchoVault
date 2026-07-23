@@ -230,7 +230,7 @@ vi.mock('firebase/firestore', () => ({
   limit: vi.fn(),
   getDocs: vi.fn(),
   deleteField: vi.fn(() => ({ __op: 'deleteField' })),
-  // R4 Phase 1 rows (a)-(i), bottom of file: claimsService.js/testingLedger.js/
+  // R4 Phase 1 rows (a)-(j), bottom of file: claimsService.js/testingLedger.js/
   // claimFeedback.js need updateDoc/writeBatch/runTransaction/addDoc, none of
   // which any row ABOVE this one calls — bare placeholders here, given a
   // real path-keyed implementation via that section's own wireClaimsFirestore()
@@ -2798,7 +2798,7 @@ describe('R4 Matrix row (i): versioned cutover — archives-not-deletes + stamps
 });
 
 // ===========================================================================
-// R4 Phase 1 rows (a)-(i): claim store / testing ledger / evidence builder /
+// R4 Phase 1 rows (a)-(j): claim store / testing ledger / evidence builder /
 // retraction / receipts / feedback taxonomy, covering
 // docs/superpowers/plans/2026-07-22-r4-phase1-insight-integrity.md (Task 11).
 //
@@ -3253,5 +3253,44 @@ describe('Matrix row: R4P1-i flag-off-inert', () => {
     const counts = await readLedgerCounts({}, 'user-matrix-r4p1i', [familyIdForBasic('activity')]);
     expect(counts.get(familyIdForBasic('activity'))).toBe(0); // no ledger doc was ever created
     expect(await listAllClaims({}, 'user-matrix-r4p1i')).toEqual([]); // no claim doc was ever created
+  });
+});
+
+// ---------------------------------------------------------------------------
+describe('Matrix row: R4P1-j suppressed-claim durability', () => {
+  beforeEach(wireClaimsFirestore);
+
+  it('a suppressed prior is untouched by a re-run whose candidate stays eligible but whose evidence has drifted — no new claim, no supersede, status/updatedAt unchanged (the reviewer scenario: "Don\'t analyze this topic" must not be silently un-suppressed by evidence drift)', async () => {
+    const { generateClaims } = await import('../services/insights/claims/claimsPipeline');
+    const { setClaimStatus, listAllClaims } = await import('../services/insights/claims/claimsService');
+
+    const first = await generateClaims({}, 'u-r4p1j', r4p1Fixtures(R4P1_STRONG), { timeZone: 'UTC', now: R4P1_NOW });
+    expect(first.written).toBe(1);
+    const before = await listAllClaims({}, 'u-r4p1j');
+    const priorId = before[0].id;
+
+    // User suppresses it ("Don't analyze this topic").
+    const suppressedAt = '2026-07-23T00:00:00.000Z';
+    await setClaimStatus({}, 'u-r4p1j', priorId, 'suppressed', { now: suppressedAt });
+
+    // Re-run with evidence that has drifted enough to trigger a supersede on
+    // an unsuppressed claim (same "meaningfully changed" fixture proven in
+    // claimsPipeline.test.js), but the candidate STAYS eligible.
+    const laterNow = '2026-07-30T10:00:00.000Z';
+    const contradicting = r4p1Mk(10, 11, '07', true, 0.55);
+    const second = await generateClaims(
+      {}, 'u-r4p1j', r4p1Fixtures([...R4P1_STRONG, ...contradicting]), { timeZone: 'UTC', now: laterNow },
+    );
+
+    expect(second.eligible).toBe(1); // still analyzed as eligible...
+    expect(second.written).toBe(0); // ...but nothing written
+    expect(second.superseded).toBe(0);
+
+    const claims = await listAllClaims({}, 'u-r4p1j');
+    expect(claims).toHaveLength(1); // no new claim doc
+    const prior = claims.find((c) => c.id === priorId);
+    expect(prior.status).toBe('suppressed');
+    expect(prior.supersededByClaimId).toBeNull();
+    expect(prior.updatedAt).toBe(suppressedAt); // no write touched it
   });
 });

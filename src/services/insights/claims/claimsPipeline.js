@@ -126,6 +126,14 @@ export async function generateClaims(db, uid, entries, { timeZone, now } = {}) {
       continue;
     }
     eligible += 1;
+    // Suppression is a user decision (do_not_analyze feedback), not a data
+    // judgment: it outlives evidence drift and is lifted only through the
+    // explicit user path (Control Center / feedback), after which the next
+    // run re-derives normally. A live SUPPRESSED prior must never be
+    // superseded just because re-eligible evidence moved — skip before
+    // evidenceEquivalent/supersede/writeClaim so no new claim is written,
+    // no supersede happens, and the prior's status/updatedAt are untouched.
+    if (prior && prior.status === 'suppressed') continue;
     if (!prior) {
       await writeClaim(db, uid, { ...result.claimInput, version: 1, parentClaimId: null });
       written += 1;
