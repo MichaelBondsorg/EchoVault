@@ -176,10 +176,19 @@ const firestoreMocks = {
   writeBatch: vi.fn(() => makeFirestoreBatch()),
 };
 const askJournalAIFn = vi.fn();
+// R4 Phase 2 row (d)/(g)/(i): writeClaimWordingFn (claimsPipeline.js's LLM
+// writer callable) and auth (analysis/index.js's buildVerifiedPatternsBlock
+// reads auth.currentUser.uid) — both new consumers of this same resolved
+// module. `authMock` is a single mutable object (not re-created per test) so
+// each row's beforeEach can just set `authMock.currentUser` directly.
+const writeClaimWordingFnMock = vi.fn();
+const authMock = { currentUser: null };
 vi.mock('../config/firebase', () => ({
   revokeAiProcessingFn: (...args) => revokeAiProcessingFn(...args),
   grantAiProcessingFn: (...args) => grantAiProcessingFn(...args),
   askJournalAIFn: (...args) => askJournalAIFn(...args),
+  writeClaimWordingFn: (...args) => writeClaimWordingFnMock(...args),
+  auth: authMock,
   // R2 row (a)/(b)/(g): the real orchestrator.js/EntryCard.jsx destructure
   // `db` from this module. Vitest's mock proxy throws on ANY accessed key
   // this factory doesn't return (even one nothing in this file dereferences
@@ -361,6 +370,55 @@ vi.mock('../utils/pdf', () => ({ loadJsPDF: vi.fn() }));
 // too would shadow those rows).
 vi.mock('../config/flags', () => ({ getFlag: vi.fn() }));
 vi.mock('../stores', () => ({ useUser: () => ({ uid: 'user-matrix-chapters' }) }));
+
+// R4 Phase 2 row (g): InsightsPage.jsx's own import graph, mirroring
+// InsightsPage.claims.test.jsx's established mock recipe (dedicated file)
+// ONLY for the specifiers no OTHER row in this file already needs real
+// (moderation/reportInsight, analytics/insightEngagement,
+// nexus/insightIntegration, the ReceiptSheet component, and the
+// useNexusInsights/useBasicInsights hooks themselves — none of these are
+// touched by any row above). Deliberately NOT mocked here (unlike
+// InsightsPage.claims.test.jsx's own recipe): nexus/insightDismissal,
+// basicInsights/feedbackLearning, services/dashboard, and
+// health/environment correlations — R2/R4 rows above already exercise
+// those SAME resolved modules for real (dismissalKeyFor/getDismissedKeys,
+// shouldShowInsight, recompute.js's invalidateDailySummary/etc,
+// computeHealthMoodCorrelations), so a blanket replacement here would
+// silently break them. Row (g) below never triggers InsightsPage's
+// dismiss/feedback actions, and calculateStreak/health-correlations are
+// left genuinely real (pure functions over `entries`) with a real
+// sufficiency-clearing fixture where the row needs correlations to render.
+// claimsService.js (used by useClaims.js) is likewise left REAL via this
+// file's existing wireClaimsFirestore() helper below — a deliberate
+// divergence from InsightsPage.claims.test.jsx, which mocks claimsService
+// directly; here it stays real so row (g) proves the actual Firestore-
+// shaped claim flow feeding the page, not a canned fixture.
+const useNexusInsightsMock = vi.fn();
+vi.mock('../hooks/useNexusInsights', () => ({ useNexusInsights: (...a) => useNexusInsightsMock(...a) }));
+const useBasicInsightsMock = vi.fn();
+vi.mock('../hooks/useBasicInsights', () => ({ useBasicInsights: (...a) => useBasicInsightsMock(...a) }));
+vi.mock('../services/moderation/reportInsight', () => ({ reportInsight: vi.fn().mockResolvedValue(true) }));
+vi.mock('../services/analytics/insightEngagement', () => ({ recordInsightEngagement: vi.fn().mockResolvedValue(true) }));
+const getTodayRecommendationsMock = vi.fn().mockResolvedValue(null);
+vi.mock('../services/nexus/insightIntegration', () => ({ getTodayRecommendations: (...a) => getTodayRecommendationsMock(...a) }));
+vi.mock('../components/insights/ReceiptSheet', () => ({ default: () => null }));
+
+// R4 Phase 2 row (h): functions/src/reports/narrative.js — cross-package
+// import, same precedent as the CAUSAL_RE parity test / this file's own
+// dismissalKey pair. shared/gemini.js's only export (callGemini) is mocked
+// wholesale (network boundary; no other functions/src module used for real
+// elsewhere in this file calls it at runtime). models/registry.js is NOT
+// safe to replace wholesale — R2/R4/Hardening rows above already pull in
+// functions/src/shared/constants.js for real (via generator.js/
+// selectRevisits.js's own import graphs), and THAT module destructures
+// MODEL_DEFAULTS from registry.js at its own top level — importOriginal
+// preserves WORKLOADS/MODEL_DEFAULTS/getModelSync/etc. genuinely real and
+// overrides only the one function (getModel) row (h) needs controllable.
+vi.mock('../../functions/src/shared/gemini.js', () => ({ callGemini: vi.fn() }));
+vi.mock('../../functions/src/models/registry.js', async (importOriginal) => {
+  const actual = await importOriginal();
+  return { ...actual, getModel: vi.fn() };
+});
 
 // localStorage backing store. src/test/setup.js replaces window.localStorage
 // with plain vi.fn() no-op stubs; drive them with an in-memory Map so the
@@ -3292,5 +3350,550 @@ describe('Matrix row: R4P1-j suppressed-claim durability', () => {
     expect(prior.status).toBe('suppressed');
     expect(prior.supersededByClaimId).toBeNull();
     expect(prior.updatedAt).toBe(suppressedAt); // no write touched it
+  });
+});
+
+// ===========================================================================
+// R4 Phase 2 rows (a)-(i): writer-dark default / verifier trust core / third
+// claim type (experiment_result) / unified ranked feed / claims-fed reports
+// + Ask Journal, covering
+// docs/superpowers/plans/2026-07-23-r4-phase2-trustworthy-synthesis.md
+// (Task 9).
+//
+// Real modules under test: src/services/insights/claims/{claimsPipeline,
+// claimSchema,evidenceBuilder,claimsService,rankClaims}.js,
+// src/services/experiments/experimentClaim.js,
+// functions/src/insights/claimVerifier.js (cross-package import — pure, no
+// Firestore/Admin SDK; verified by reading the file), functions/src/reports/
+// narrative.js (cross-package import; its own shared/gemini.js +
+// models/registry.js mocked as the network/registry boundary only, exactly
+// as narrative.test.js's own dedicated file does), src/pages/InsightsPage.jsx
+// + src/hooks/useClaims.js + src/components/insights/{ClaimFeed,
+// ClaimCard}.jsx, and src/services/analysis/index.js's
+// askJournalAI/buildVerifiedPatternsBlock. Shared R4P1 fixtures/helpers above
+// (wireClaimsFirestore, r4p1Fixtures, R4P1_STRONG, R4P1_NOW, r4p1Mk,
+// r4p1ValidClaimInput, R4P1_SPEC) are reused verbatim — row (a)'s written
+// claim and row (e)'s sensitive-day fixture are the SAME fixtures those
+// R4P1 rows above already pin.
+// ===========================================================================
+
+// ---------------------------------------------------------------------------
+describe('Matrix row: R4P2-a writer-dark-by-default', () => {
+  beforeEach(wireClaimsFirestore);
+
+  it('LLM_WRITER_ENABLED is false, a full pipeline run performs zero writeClaimWordingFn invocations, and the written wording is byte-equal to the Phase-1 deterministic template', async () => {
+    const { generateClaims, LLM_WRITER_ENABLED } = await import('../services/insights/claims/claimsPipeline');
+    const { listAllClaims } = await import('../services/insights/claims/claimsService');
+    expect(LLM_WRITER_ENABLED).toBe(false);
+
+    const expected = await r4p1ValidClaimInput(); // real evidenceBuilder run, same fixture
+
+    // No llmWriterEnabled override passed — this is the production default path.
+    const result = await generateClaims({}, 'u-r4p2a', r4p1Fixtures(R4P1_STRONG), { timeZone: 'UTC', now: R4P1_NOW });
+
+    expect(result.written).toBe(1);
+    expect(result.llmWordings).toBe(0);
+    expect(writeClaimWordingFnMock).not.toHaveBeenCalled();
+
+    const claims = await listAllClaims({}, 'u-r4p2a');
+    expect(claims).toHaveLength(1);
+    expect(claims[0].wording).toBe(expected.wording); // byte-equal to Phase-1's template output
+    expect(claims[0].provenance.wordingSource).toBe('deterministic_template_v1');
+  });
+});
+
+// ---------------------------------------------------------------------------
+describe('Matrix row: R4P2-b verifier-rejects-invention', () => {
+  const bundle = {
+    subject: 'gym', outcome: 'mood', direction: 'positive', claimType: 'pattern_to_watch',
+    numbers: {
+      exposedDayCount: 12, comparisonDayCount: 40, observedSpanDays: 60,
+      effectMoodPoints: 7.2, hiddenSensitiveSourceCount: 0,
+    },
+    limitations: ['Same-day association only.'],
+    excerpts: [],
+    deterministicWording: 'On days you logged gym, your recorded mood averaged 7.2 points higher '
+      + "(0-100 scale) than on days you didn't — 12 vs 40 days over 60 days.",
+  };
+
+  it('kills causal language ("boosts")', async () => {
+    const { verifyDeterministic } = await import('../../functions/src/insights/claimVerifier.js');
+    const result = verifyDeterministic('Going to the gym boosts your mood by 7.2 points.', bundle);
+    expect(result.pass).toBe(false);
+    expect(result.reasons).toContain('causal_language');
+  });
+
+  it('kills an unentailed number invented outside the bundle', async () => {
+    const { verifyDeterministic } = await import('../../functions/src/insights/claimVerifier.js');
+    const result = verifyDeterministic('On days you logged gym, your mood averaged 42 points higher.', bundle);
+    expect(result.pass).toBe(false);
+    expect(result.reasons).toContain('unentailed_numeral');
+  });
+
+  it('kills a direction flip — bundle direction is positive, wording claims lower', async () => {
+    const { verifyDeterministic } = await import('../../functions/src/insights/claimVerifier.js');
+    const result = verifyDeterministic('On days you logged gym, your mood was 7.2 points lower.', bundle);
+    expect(result.pass).toBe(false);
+    expect(result.reasons).toContain('direction_mismatch');
+  });
+
+  it('kills an oversized wording (over 320 chars / more than 2 sentences)', async () => {
+    const { verifyDeterministic, MAX_WORDING_CHARS } = await import('../../functions/src/insights/claimVerifier.js');
+    const oversized = 'On days you logged gym, your recorded mood ran higher. '.repeat(8);
+    expect(oversized.length).toBeGreaterThan(MAX_WORDING_CHARS);
+    const result = verifyDeterministic(oversized, bundle);
+    expect(result.pass).toBe(false);
+    expect(result.reasons).toContain('too_long');
+  });
+});
+
+// ---------------------------------------------------------------------------
+describe('Matrix row: R4P2-c verifier-fail-closed', () => {
+  const bundle = {
+    subject: 'gym', outcome: 'mood', direction: 'positive', claimType: 'pattern_to_watch',
+    numbers: {
+      exposedDayCount: 12, comparisonDayCount: 40, observedSpanDays: 60,
+      effectMoodPoints: 7.2, hiddenSensitiveSourceCount: 0,
+    },
+    limitations: [],
+    excerpts: [],
+    deterministicWording: 'On days you logged gym, your recorded mood averaged 7.2 points higher '
+      + "(0-100 scale) than on days you didn't — 12 vs 40 days over 60 days.",
+  };
+  const okWording = 'On days you logged gym, your recorded mood ran 7.2 points higher.';
+
+  it('an explicit entailed:false verdict from the model fails', async () => {
+    const { verifyWording } = await import('../../functions/src/insights/claimVerifier.js');
+    const callModel = vi.fn(async () => JSON.stringify({ entailed: false, offending: 'x' }));
+    const result = await verifyWording(okWording, bundle, { callModel });
+    expect(result.verdict).toBe('fail');
+    expect(result.reasons).toEqual(['llm_entailment_rejected']);
+  });
+
+  it('garbage (unparseable) model output fails closed', async () => {
+    const { verifyWording } = await import('../../functions/src/insights/claimVerifier.js');
+    const callModel = vi.fn(async () => 'not json at all');
+    const result = await verifyWording(okWording, bundle, { callModel });
+    expect(result.verdict).toBe('fail');
+    expect(result.reasons).toEqual(['llm_entailment_rejected']);
+  });
+
+  it('a thrown/rejected model call fails closed', async () => {
+    const { verifyWording } = await import('../../functions/src/insights/claimVerifier.js');
+    const callModel = vi.fn(async () => { throw new Error('network down'); });
+    const result = await verifyWording(okWording, bundle, { callModel });
+    expect(result.verdict).toBe('fail');
+    expect(result.reasons).toEqual(['llm_entailment_rejected']);
+  });
+
+  it('composition requires BOTH layers: a deterministic rejection short-circuits before the model is ever called', async () => {
+    const { verifyWording } = await import('../../functions/src/insights/claimVerifier.js');
+    const callModel = vi.fn(async () => JSON.stringify({ entailed: true, offending: null }));
+    const result = await verifyWording('Going to the gym boosts your mood.', bundle, { callModel });
+    expect(result.verdict).toBe('fail');
+    expect(result.reasons).toContain('causal_language');
+    expect(callModel).not.toHaveBeenCalled();
+  });
+
+  it('composition passes only when BOTH layers pass', async () => {
+    const { verifyWording } = await import('../../functions/src/insights/claimVerifier.js');
+    const callModel = vi.fn(async () => JSON.stringify({ entailed: true, offending: null }));
+    const result = await verifyWording(okWording, bundle, { callModel });
+    expect(result.verdict).toBe('pass');
+    expect(callModel).toHaveBeenCalledTimes(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+describe('Matrix row: R4P2-d fallback-never-blocks', () => {
+  beforeEach(wireClaimsFirestore);
+
+  it('writer path forced ON with a REJECTING callable still writes the eligible claim with deterministic wording and llmWordings:0', async () => {
+    writeClaimWordingFnMock.mockRejectedValueOnce(new Error('callable unavailable'));
+    const { generateClaims } = await import('../services/insights/claims/claimsPipeline');
+    const { listAllClaims } = await import('../services/insights/claims/claimsService');
+    const expected = await r4p1ValidClaimInput();
+
+    const result = await generateClaims(
+      {}, 'u-r4p2d', r4p1Fixtures(R4P1_STRONG),
+      { timeZone: 'UTC', now: R4P1_NOW, llmWriterEnabled: true },
+    );
+
+    expect(writeClaimWordingFnMock).toHaveBeenCalledTimes(1); // the writer path WAS attempted
+    expect(result.written).toBe(1); // still written despite the failing callable
+    expect(result.llmWordings).toBe(0); // fell back — never counted as an LLM wording
+
+    const claims = await listAllClaims({}, 'u-r4p2d');
+    expect(claims[0].wording).toBe(expected.wording); // deterministic wording, unchanged
+    expect(claims[0].provenance.wordingSource).toBe('deterministic_template_v1');
+  });
+
+  it('a callable that resolves with verdict:"fail" ALSO falls back — every eligible claim is still written', async () => {
+    writeClaimWordingFnMock.mockResolvedValueOnce({ data: { verdict: 'fail', wording: null, reasons: ['banned_phrase'] } });
+    const { generateClaims } = await import('../services/insights/claims/claimsPipeline');
+    const { listAllClaims } = await import('../services/insights/claims/claimsService');
+
+    const result = await generateClaims(
+      {}, 'u-r4p2d2', r4p1Fixtures(R4P1_STRONG),
+      { timeZone: 'UTC', now: R4P1_NOW, llmWriterEnabled: true },
+    );
+
+    expect(result.written).toBe(1);
+    expect(result.llmWordings).toBe(0);
+    const claims = await listAllClaims({}, 'u-r4p2d2');
+    expect(claims[0].provenance.wordingSource).toBe('deterministic_template_v1');
+  });
+});
+
+// ---------------------------------------------------------------------------
+describe('Matrix row: R4P2-e no-sensitive-in-bundle', () => {
+  it('a sensitive-day fixture: the writer bundle excerpts exclude the sensitive days while numbers.hiddenSensitiveSourceCount still counts them', async () => {
+    const { buildDailyObservations } = await import('../services/insights/observations');
+    const {
+      freezeCandidatePlan, buildEvidenceForCandidate, buildWriterBundle,
+    } = await import('../services/insights/claims/evidenceBuilder');
+
+    // Same reconciliation fixture family as R4P1-e above, but marking the
+    // LAST 2 days (2026-07-09/10 — the most recent of all 40, so they'd sort
+    // into buildReceipt's top-8-by-recency sources/excerpts if sensitivity
+    // filtering were broken) sensitive, rather than the first 2 — a stronger,
+    // non-vacuous proof than marking days that recency capping alone would
+    // already have excluded.
+    const days = R4P1_STRONG.map((d, i, arr) => (i >= arr.length - 2 ? { ...d, sensitive: true } : d));
+    const entries = r4p1Fixtures(days);
+    const observations = buildDailyObservations(entries, { timeZone: 'UTC' });
+    const entriesById = new Map(entries.map((e) => [e.id, e]));
+    const plan = freezeCandidatePlan({
+      familyId: 'basic:activity:mood', candidateId: 'tag:gym', exposureSpec: R4P1_SPEC,
+      candidateTestsCount: 1, timeZone: 'UTC', now: R4P1_NOW,
+    });
+    const result = buildEvidenceForCandidate({
+      observations, entriesById, exposureSpec: R4P1_SPEC, plan,
+    });
+    expect(result.eligible).toBe(true);
+    expect(result.claimInput.evidence.hiddenSensitiveSourceCount).toBe(2); // stats include it
+
+    const bundle = buildWriterBundle(result.claimInput);
+    expect(bundle.numbers.hiddenSensitiveSourceCount).toBe(2); // stats include it
+    expect(bundle.excerpts.length).toBeGreaterThan(0); // non-vacuous — visible excerpts DID make it through
+    expect(bundle.excerpts.some((e) => e.date?.startsWith('2026-07-09') || e.date?.startsWith('2026-07-10'))).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+describe('Matrix row: R4P2-f experiment-result-claims', () => {
+  const PLAN = {
+    templateId: 'sleep-hours-mood-same-day',
+    lag: 0,
+    exposure: { source: 'health', field: 'sleepHours', label: 'sleep hours' },
+    outcome: { field: 'analysis.mood_score', label: 'mood', unit: 'mood_0_100' },
+    minPairedObservations: 10,
+    coverageFloor: 0.5,
+    whatThisDoesNotProve: ['This does not show that sleep hours caused the change in mood.'],
+    timezone: 'UTC',
+    hypothesisFamilyId: 'experiment:sleep-hours-mood-same-day',
+  };
+  function r4p2fExperiment(overrides = {}) {
+    return {
+      question: 'Does sleep affect my mood?', analysisPlan: PLAN, durationDays: 14,
+      createdAt: '2026-07-01T00:00:00.000Z', ...overrides,
+    };
+  }
+  function r4p2fOkResult(overrides = {}) {
+    return {
+      status: 'ok',
+      estimate: {
+        delta: 10, ci: [4, 16], n: 20, nHigh: 10, nLow: 10, splitThreshold: 7,
+        exposureContrast: 2.5, stability: { signConsistent: true },
+      },
+      coverage: {
+        exposure: { covered: 20, total: 20, label: '20 of 20 days' },
+        outcome: { covered: 20, total: 20, label: '20 of 20 days' },
+      },
+      receipt: {
+        sources: [{ entryId: 'e1', date: '2026-07-10T00:00:00.000Z', excerpt: 'slept well' }],
+        scope: null,
+        timeWindow: { start: '2026-07-01T00:00:00.000Z', end: '2026-07-20T00:00:00.000Z' },
+        sampleSize: 20,
+        missingness: 'Exposure: 20 of 20 days. Outcome: 20 of 20 days.',
+      },
+      sensitiveObservationCount: 1,
+      narrative: {
+        summary: 'On days with more sleep hours than usual, mood averaged 10.0 points (0-100) higher than on '
+          + 'days with less. This is an association, not proof that one caused the other.',
+      },
+      ...overrides,
+    };
+  }
+
+  it('an "ok" result maps to a valid, non-causal experiment_result claim (buildClaim-validated end to end)', async () => {
+    const { buildExperimentResultClaim } = await import('../services/experiments/experimentClaim');
+    const { buildClaim, CAUSAL_RE } = await import('../services/insights/claims/claimSchema');
+    const claimInput = buildExperimentResultClaim({
+      experiment: r4p2fExperiment(), experimentId: 'exp-1', result: r4p2fOkResult(), now: '2026-07-22T12:00:00.000Z',
+    });
+    expect(claimInput.claimType).toBe('experiment_result');
+    expect(claimInput.direction).toBe('positive');
+    expect(claimInput.subject).toBe('sleep hours');
+    expect(CAUSAL_RE.test(claimInput.wording)).toBe(false);
+    expect(() => buildClaim(claimInput)).not.toThrow(); // schema-valid end to end
+  });
+
+  it('an insufficient result maps to null — insufficiency is never a claim', async () => {
+    const { buildExperimentResultClaim } = await import('../services/experiments/experimentClaim');
+    const claimInput = buildExperimentResultClaim({
+      experiment: r4p2fExperiment(), experimentId: 'exp-1',
+      result: { status: 'insufficient', reasons: ['below_minimum_paired'] },
+      now: '2026-07-22T12:00:00.000Z',
+    });
+    expect(claimInput).toBeNull();
+  });
+
+  it('an adjusted (post-exclusion) recomputation supersedes the original claim: v2, parentClaimId links v1, old claim marked superseded', async () => {
+    await wireClaimsFirestore();
+    const { buildExperimentResultClaim } = await import('../services/experiments/experimentClaim');
+    const { writeClaim, supersedeClaim, listAllClaims } = await import('../services/insights/claims/claimsService');
+
+    const originalInput = buildExperimentResultClaim({
+      experiment: r4p2fExperiment(), experimentId: 'exp-1', result: r4p2fOkResult(), now: '2026-07-22T12:00:00.000Z',
+    });
+    const original = await writeClaim({}, 'u-r4p2f', originalInput);
+
+    // Adjusted result: excluding one day nudges the estimate (still ok, still positive).
+    const adjustedInput = buildExperimentResultClaim({
+      experiment: r4p2fExperiment(), experimentId: 'exp-1',
+      result: r4p2fOkResult({
+        estimate: {
+          delta: 13.5, ci: [5, 20], n: 18, nHigh: 9, nLow: 9, splitThreshold: 7,
+          exposureContrast: 2.5, stability: { signConsistent: true },
+        },
+      }),
+      now: '2026-07-25T09:00:00.000Z',
+    });
+    const superseding = await supersedeClaim({}, 'u-r4p2f', original, {
+      ...adjustedInput, version: original.version + 1, parentClaimId: original.id,
+    });
+
+    expect(superseding.version).toBe(2);
+    expect(superseding.parentClaimId).toBe(original.id);
+    expect(superseding.evidence.effectMoodPoints).toBe(13.5);
+
+    const all = await listAllClaims({}, 'u-r4p2f');
+    const originalAfter = all.find((c) => c.id === original.id);
+    expect(originalAfter.supersededByClaimId).toBe(superseding.id);
+  });
+});
+
+// ---------------------------------------------------------------------------
+describe('Matrix row: R4P2-g single-feed-swap', () => {
+  const manyEntries = Array.from({ length: 6 }, (_, i) => ({
+    id: `e${i}`, content: 'entry', createdAt: '2026-07-18T10:00:00.000Z',
+  }));
+  // Real, sufficiency-clearing health fixture (same shape R4 row (e) above
+  // pins for computeHealthMoodCorrelations) — left to run through the REAL
+  // healthCorrelations.js (not mocked, see this section's header comment)
+  // so "Correlations stays present" is proven against genuine correlation
+  // math, not a canned return value.
+  const HEALTH_DAY_MS = 24 * 60 * 60 * 1000;
+  const healthNow = Date.parse('2026-07-21T12:00:00.000Z');
+  const healthEntries = [
+    ...Array.from({ length: 4 }, (_, i) => ({
+      id: `good-${i}`, createdAt: new Date(healthNow - i * HEALTH_DAY_MS).toISOString(),
+      analysis: { mood_score: 0.8 }, healthContext: { sleep: { totalHours: 8 } },
+    })),
+    ...Array.from({ length: 4 }, (_, i) => ({
+      id: `poor-${i}`, createdAt: new Date(healthNow - (i + 10) * HEALTH_DAY_MS).toISOString(),
+      analysis: { mood_score: 0.3 }, healthContext: { sleep: { totalHours: 5 } },
+    })),
+  ];
+
+  beforeEach(async () => {
+    await wireClaimsFirestore();
+    const { getFlag } = await import('../config/flags');
+    getFlag.mockReset();
+    useNexusInsightsMock.mockReset();
+    useBasicInsightsMock.mockReset();
+    getTodayRecommendationsMock.mockReset().mockResolvedValue(null);
+    useBasicInsightsMock.mockReturnValue({
+      insights: [{
+        id: 'basic-1', category: 'activity', insight: 'Legacy basic insight text.',
+        moodDelta: 5, strength: 'moderate', direction: 'positive', sampleSize: 10, entryIds: [],
+      }],
+      loading: false, generating: false, hasEnoughData: true, entriesNeeded: 0,
+      regenerate: vi.fn(), lastGeneratedFormatted: null,
+    });
+  });
+
+  it('flag ON: the unified ClaimFeed renders a REAL verified claim, AI Insights/Recommendations are absent, Correlations stays present', async () => {
+    const { getFlag } = await import('../config/flags');
+    getFlag.mockImplementation((name) => name === 'insightClaims');
+    useNexusInsightsMock.mockReturnValue({
+      insights: [{ id: 'nexus-1', type: 'pattern', title: 'Should never render', body: 'x', confidence: 0.9 }],
+      insightCount: 1, isCalibrating: false, calibrationProgress: 0, loading: false, refreshing: false,
+      error: null, dataStatus: null, refresh: vi.fn(), lastGenerated: null,
+    });
+    getTodayRecommendationsMock.mockResolvedValue({
+      recommendations: [{ action: 'Take a walk', priority: 'medium', type: 'activity' }],
+      basedOn: { entriesAnalyzed: 10, interventionsTracked: 0 },
+    });
+
+    const { writeClaim } = await import('../services/insights/claims/claimsService');
+    const claimInput = await r4p1ValidClaimInput();
+    await writeClaim({}, 'user-r4p2g', claimInput);
+
+    const InsightsPage = (await import('../pages/InsightsPage')).default;
+    render(React.createElement(InsightsPage, {
+      entries: healthEntries, userId: 'user-r4p2g', user: { uid: 'user-r4p2g' },
+    }));
+
+    expect(await screen.findByText(claimInput.wording)).toBeTruthy(); // ClaimFeed rendered the real, Firestore-shaped claim
+    expect(screen.queryByText('AI Insights')).toBeNull();
+    expect(screen.queryByText('Should never render')).toBeNull();
+    expect(screen.queryByText("Today's Recommendations")).toBeNull();
+    expect(getTodayRecommendationsMock).not.toHaveBeenCalled(); // no dark Firestore read for a hidden section
+    expect(useNexusInsightsMock).toHaveBeenCalledWith({ uid: 'user-r4p2g' }, expect.objectContaining({ enabled: false }));
+    expect(screen.getByText('Your Patterns')).toBeTruthy(); // CorrelationsSection stays
+  });
+
+  it('flag OFF: the legacy tree renders untouched — AI Insights from useNexusInsights, no ClaimFeed group header, no live claim read', async () => {
+    const { getFlag } = await import('../config/flags');
+    getFlag.mockReturnValue(false);
+    useNexusInsightsMock.mockReturnValue({
+      insights: [{ id: 'nexus-1', type: 'pattern', title: 'Legacy nexus insight', body: 'On days you did X, mood ran higher.', confidence: 0.9 }],
+      insightCount: 1, isCalibrating: false, calibrationProgress: 0, loading: false, refreshing: false,
+      error: null, dataStatus: null, refresh: vi.fn(), lastGenerated: null,
+    });
+    const { getDocs } = await import('firebase/firestore');
+    getDocs.mockClear();
+
+    const InsightsPage = (await import('../pages/InsightsPage')).default;
+    render(React.createElement(InsightsPage, {
+      entries: manyEntries, userId: 'user-r4p2g-off', user: { uid: 'user-r4p2g-off' },
+    }));
+
+    expect(await screen.findByText('Legacy basic insight text.')).toBeTruthy();
+    expect(screen.getByText('Legacy nexus insight')).toBeTruthy();
+    expect(screen.queryByText(/pattern to watch$/i)).toBeNull(); // no ClaimFeed group-summary header
+    expect(useNexusInsightsMock).toHaveBeenCalledWith({ uid: 'user-r4p2g-off' }, expect.objectContaining({ enabled: true }));
+    expect(getDocs).not.toHaveBeenCalled(); // useClaims' internal flag gate — listActiveClaims never reads Firestore
+  });
+});
+
+// ---------------------------------------------------------------------------
+describe('Matrix row: R4P2-h reports-claims-not-nexus-prose', () => {
+  it('the premium narrative prompt sent to Gemini contains verified-claim wording and NEVER a Nexus insight summary', async () => {
+    const { generatePremiumNarrative } = await import('../../functions/src/reports/narrative.js');
+    const { callGemini } = await import('../../functions/src/shared/gemini.js');
+    const { getModel } = await import('../../functions/src/models/registry.js');
+    callGemini.mockReset().mockResolvedValue('Generated narrative text.');
+    getModel.mockReset().mockResolvedValue('model-x');
+
+    const claim = {
+      id: 'c1', claimType: 'pattern_to_watch', status: 'verified', supersededByClaimId: null,
+      wording: 'On days you logged gym, your recorded mood averaged 7 points higher.',
+      limitations: ['Same-day association only, not causation.'],
+      evidence: {
+        exposedDayCount: 9, comparisonDayCount: 15, effectMoodPoints: 7.2, sourceEntryIds: ['e1', 'e2'],
+      },
+      createdAt: '2026-01-05T00:00:00.000Z',
+    };
+    const contextData = {
+      entries: [{ id: 'e1', date: '2026-01-15', text: 'Test entry' }],
+      analytics: {}, signals: { activeGoals: [], achievedGoals: [] },
+      // A populated nexus fixture — P2-D6 removed the old nexusInsightLabel
+      // seam that fed this prompt with unverified Nexus prose; its summary
+      // must NEVER reach the premium prompt again.
+      nexus: { patterns: [{ id: 'pattern_x', summary: 'NEXUS-SUMMARY-MUST-NEVER-APPEAR', title: 'Nexus Pattern' }] },
+      health: {},
+      claims: [claim],
+    };
+
+    await generatePremiumNarrative('monthly', contextData, 'test-key', { __fake: 'db' });
+
+    expect(callGemini.mock.calls.length).toBeGreaterThan(0);
+    for (const call of callGemini.mock.calls) {
+      const userPrompt = call[2];
+      expect(userPrompt).toContain(claim.wording);
+      expect(userPrompt).not.toContain('NEXUS-SUMMARY-MUST-NEVER-APPEAR');
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+describe('Matrix row: R4P2-i askjournal-claims-block', () => {
+  beforeEach(async () => {
+    await wireClaimsFirestore();
+    const { getFlag } = await import('../config/flags');
+    getFlag.mockReset();
+    authMock.currentUser = null;
+    askJournalAIFn.mockReset();
+    askJournalAIFn.mockResolvedValue({ data: { response: 'answer' } });
+  });
+
+  it('flag ON: context is PREPENDED with a capped (5), verified-only VERIFIED PATTERNS block — a candidate-status claim is excluded even though listActiveClaims itself would include it', async () => {
+    const { getFlag } = await import('../config/flags');
+    getFlag.mockImplementation((name) => name === 'insightClaims');
+    authMock.currentUser = { uid: 'user-r4p2i' };
+
+    const { writeClaim } = await import('../services/insights/claims/claimsService');
+    const base = await r4p1ValidClaimInput();
+    // 6 verified claims (one over the 5-cap) + 1 candidate-status claim that
+    // listActiveClaims WOULD surface (verified OR candidate) but
+    // buildVerifiedPatternsBlock's own re-filter must still exclude.
+    for (let i = 0; i < 6; i++) {
+      // eslint-disable-next-line no-await-in-loop
+      await writeClaim({}, 'user-r4p2i', {
+        ...base,
+        version: 1,
+        parentClaimId: null,
+        analysisPlan: { ...base.analysisPlan, candidateId: `tag:thing${i}` },
+        wording: `Claim wording number ${i}.`,
+      });
+    }
+    await writeClaim({}, 'user-r4p2i', {
+      ...base,
+      version: 1,
+      parentClaimId: null,
+      status: 'candidate',
+      analysisPlan: { ...base.analysisPlan, candidateId: 'tag:candidateonly' },
+      wording: 'A candidate-status claim that must never reach the prompt.',
+    });
+
+    const { askJournalAI } = await import('../services/analysis/index.js');
+    await askJournalAI([], 'What patterns hold up?', null, null);
+
+    const [call] = askJournalAIFn.mock.calls;
+    const context = call[0].entriesContext;
+    expect(context.startsWith('VERIFIED PATTERNS')).toBe(true); // prepended, not appended
+    expect(context).not.toContain('candidate-status claim that must never reach the prompt'); // verified-only re-filter
+    const mentionedCount = (context.match(/Claim wording number/g) || []).length;
+    expect(mentionedCount).toBe(5); // capped at 5
+  });
+
+  it('flag OFF: no VERIFIED PATTERNS block ever appears in the prompt context', async () => {
+    const { getFlag } = await import('../config/flags');
+    getFlag.mockReturnValue(false);
+    authMock.currentUser = { uid: 'user-r4p2i-off' };
+
+    const { askJournalAI } = await import('../services/analysis/index.js');
+    await askJournalAI([], 'What patterns hold up?', null, null);
+
+    const [call] = askJournalAIFn.mock.calls;
+    expect(call[0].entriesContext).not.toContain('VERIFIED PATTERNS');
+  });
+
+  it('a claims-load failure is CONTAINED — askJournalAI still succeeds using the plain entries context, no VERIFIED PATTERNS block', async () => {
+    const { getFlag } = await import('../config/flags');
+    getFlag.mockImplementation((name) => name === 'insightClaims');
+    authMock.currentUser = { uid: 'user-r4p2i-fail' };
+    const { getDocs } = await import('firebase/firestore');
+    getDocs.mockImplementationOnce(async () => { throw new Error('firestore down'); });
+
+    const { askJournalAI } = await import('../services/analysis/index.js');
+    const response = await askJournalAI([], 'What patterns hold up?', null, null);
+
+    expect(response).toBe('answer'); // askJournalAIFn still resolves normally
+    const [call] = askJournalAIFn.mock.calls;
+    expect(call[0].entriesContext).not.toContain('VERIFIED PATTERNS');
   });
 });

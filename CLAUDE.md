@@ -652,7 +652,16 @@ are immutable-with-lineage: a written claim's facts never change in place;
 a meaningfully changed re-derivation writes a new version and supersedes
 the old one, and a claim that stops clearing its evidence gates is
 `expired` (retracted, never deleted, revivable), never silently rewritten.
-Full detail: runbook's "R2 flags"/"R3 flag"/"R4"/"R4 Phase 1" sections.
+**R4 Phase 2** (plan:
+`docs/superpowers/plans/2026-07-23-r4-phase2-trustworthy-synthesis.md`)
+adds a two-pass server writer/verifier pair that may author a claim's
+`wording` only (never its evidence), gated dark by a code constant
+(`LLM_WRITER_ENABLED = false`) independent of the `insightClaims` flag
+itself, with an absolute fallback to Phase 1's deterministic template on any
+writer/verifier failure. It also collapses Quick Insights and AI Insights
+into one ranked `ClaimFeed`, and routes Ask Journal + reports through
+verified claims instead of Nexus prose. Full detail: runbook's "R2
+flags"/"R3 flag"/"R4"/"R4 Phase 1"/"R4 Phase 2" sections.
 
 ## Crash Reporting
 
