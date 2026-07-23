@@ -83,8 +83,13 @@ let mockDb;
  *   Important 3 — dismissal records); defaults to empty (no dismissals).
  * @param {Error} [opts.engagementError] - if set, the insight_engagement
  *   collection's get() rejects with this error instead of resolving.
+ * @param {Array<{id: string, data: object}>} [opts.claims] - docs in the
+ *   `insight_claims` collection (R4 Phase 2 Task 8); defaults to empty (no
+ *   verified claims).
+ * @param {Error} [opts.claimsError] - if set, the insight_claims
+ *   collection's get() rejects with this error instead of resolving.
  */
-function buildFakeDb({ entries = [], exclusions = [], entriesError = null, exclusionsError = null, nexusDoc = undefined, nexusError = null, engagement = [], engagementError = null } = {}) {
+function buildFakeDb({ entries = [], exclusions = [], entriesError = null, exclusionsError = null, nexusDoc = undefined, nexusError = null, engagement = [], engagementError = null, claims = [], claimsError = null } = {}) {
   const collectionRoutes = {};
   const docRoutes = {};
 
@@ -122,6 +127,9 @@ function buildFakeDb({ entries = [], exclusions = [], entriesError = null, exclu
       if (path.endsWith('/signal_states')) return makeQuery(fakeSnap([]));
       if (path.endsWith('/insight_engagement')) {
         return engagementError ? makeRejectingQuery(engagementError) : makeQuery(fakeSnap(engagement));
+      }
+      if (path.endsWith('/insight_claims')) {
+        return claimsError ? makeRejectingQuery(claimsError) : makeQuery(fakeSnap(claims));
       }
       collectionRoutes[path] = collectionRoutes[path] || makeQuery(fakeSnap([]));
       return collectionRoutes[path];
@@ -178,7 +186,34 @@ function engagementDoc(id, { dismissalKey, dismissed = true } = {}) {
   return { id, data: { dismissed, dismissalKey: dismissalKey ?? id, dismissedAt: { toDate: () => new Date('2026-01-01') }, insightId: null } };
 }
 
-import { readEntries, readNexusData, generateReport } from '../generator.js';
+// R4 Phase 2 Task 8 — a minimal verified-claim doc as written by the
+// client's claims pipeline (src/services/insights/claims/claimSchema.js's
+// buildClaim). Only the fields readVerifiedClaims/narrative.js's
+// formatClaimLine actually read are populated; the full buildClaim shape
+// (analysisPlan, receipt, etc.) is a client-pipeline concern out of scope
+// for this server-side read/rank test.
+function claimDoc(id, overrides = {}) {
+  return {
+    id,
+    data: {
+      claimType: 'pattern_to_watch',
+      status: 'verified',
+      supersededByClaimId: null,
+      wording: `Claim wording for ${id}.`,
+      limitations: [`Limitation for ${id}.`],
+      evidence: {
+        exposedDayCount: 9,
+        comparisonDayCount: 15,
+        effectMoodPoints: 5,
+        sourceEntryIds: [`${id}-e1`],
+      },
+      createdAt: '2026-01-05T00:00:00.000Z',
+      ...overrides,
+    },
+  };
+}
+
+import { readEntries, readNexusData, readVerifiedClaims, generateReport } from '../generator.js';
 import { getModel } from '../../models/registry.js';
 import { callGemini } from '../../shared/gemini.js';
 
@@ -424,6 +459,148 @@ describe('readNexusData — dismissal filtering (R4 P0-closure Important 3)', ()
   });
 });
 
+describe('readVerifiedClaims (R4 Phase 2 Task 8)', () => {
+  it('returns [] when the insight_claims collection is empty', async () => {
+    const db = buildFakeDb({ claims: [] });
+    const result = await readVerifiedClaims(db, USER_BASE);
+    expect(result).toEqual([]);
+  });
+
+  it('includes only status:"verified" AND supersededByClaimId:null claims', async () => {
+    const db = buildFakeDb({
+      claims: [
+        claimDoc('c_verified', { status: 'verified', supersededByClaimId: null }),
+        claimDoc('c_candidate', { status: 'candidate', supersededByClaimId: null }),
+        claimDoc('c_suppressed', { status: 'suppressed', supersededByClaimId: null }),
+        claimDoc('c_expired', { status: 'expired', supersededByClaimId: null }),
+        claimDoc('c_superseded', { status: 'verified', supersededByClaimId: 'c_verified_v2' }),
+      ],
+    });
+
+    const result = await readVerifiedClaims(db, USER_BASE);
+
+    expect(result.map((c) => c.id)).toEqual(['c_verified']);
+  });
+
+  it('ranks by claimType weight (experiment_result > pattern_to_watch > observation) first', async () => {
+    const db = buildFakeDb({
+      claims: [
+        claimDoc('c_observation', { claimType: 'observation', evidence: { exposedDayCount: 9, comparisonDayCount: 15, effectMoodPoints: 50, sourceEntryIds: [] } }),
+        claimDoc('c_pattern', { claimType: 'pattern_to_watch', evidence: { exposedDayCount: 9, comparisonDayCount: 15, effectMoodPoints: 1, sourceEntryIds: [] } }),
+        claimDoc('c_experiment', { claimType: 'experiment_result', evidence: { exposedDayCount: 9, comparisonDayCount: 15, effectMoodPoints: 0.1, sourceEntryIds: [] } }),
+      ],
+    });
+
+    const result = await readVerifiedClaims(db, USER_BASE);
+
+    // Highest claimType weight wins regardless of effect size.
+    expect(result.map((c) => c.id)).toEqual(['c_experiment', 'c_pattern', 'c_observation']);
+  });
+
+  it('within the same claimType, ranks by |effectMoodPoints| descending', async () => {
+    const db = buildFakeDb({
+      claims: [
+        claimDoc('c_small', { claimType: 'pattern_to_watch', evidence: { exposedDayCount: 9, comparisonDayCount: 15, effectMoodPoints: -2, sourceEntryIds: [] } }),
+        claimDoc('c_large', { claimType: 'pattern_to_watch', evidence: { exposedDayCount: 9, comparisonDayCount: 15, effectMoodPoints: 8, sourceEntryIds: [] } }),
+      ],
+    });
+
+    const result = await readVerifiedClaims(db, USER_BASE);
+
+    expect(result.map((c) => c.id)).toEqual(['c_large', 'c_small']);
+  });
+
+  it('within the same type and effect size, ranks by createdAt descending (most recent first)', async () => {
+    const db = buildFakeDb({
+      claims: [
+        claimDoc('c_old', { createdAt: '2026-01-01T00:00:00.000Z' }),
+        claimDoc('c_new', { createdAt: '2026-01-10T00:00:00.000Z' }),
+      ],
+    });
+
+    const result = await readVerifiedClaims(db, USER_BASE);
+
+    expect(result.map((c) => c.id)).toEqual(['c_new', 'c_old']);
+  });
+
+  it('caps the result at 5 claims', async () => {
+    const claims = Array.from({ length: 8 }, (_, i) => claimDoc(`c${i}`, {
+      evidence: { exposedDayCount: 9, comparisonDayCount: 15, effectMoodPoints: i, sourceEntryIds: [] },
+    }));
+    const db = buildFakeDb({ claims });
+
+    const result = await readVerifiedClaims(db, USER_BASE);
+
+    expect(result).toHaveLength(5);
+  });
+
+  it('degrades to [] (does not throw) and logs a warning when the read fails', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const db = buildFakeDb({ claimsError: new Error('claims boom') });
+
+    const result = await readVerifiedClaims(db, USER_BASE);
+
+    expect(result).toEqual([]);
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('Failed to read verified claims'),
+      'claims boom'
+    );
+    warnSpy.mockRestore();
+  });
+});
+
+describe('generateReport — verified claims feed the held_up section (R4 Phase 2 Task 8)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    getModel.mockResolvedValue('registry-insight-model-x');
+  });
+
+  it('weekly report\'s held_up section renders from a verified claim fixture, not nexus prose', async () => {
+    const nexusDoc = {
+      active: [{ id: 'pattern_x', type: 'pattern_correlation', title: 'Nexus Pattern', summary: 'NEXUS-PROSE-SHOULD-NOT-APPEAR', body: 'y' }],
+      history: [],
+    };
+    const db = buildFakeDb({
+      entries: [entryDoc('e1')],
+      nexusDoc,
+      claims: [claimDoc('c1', { wording: 'Verified claim wording.' })],
+    });
+
+    await generateReport('user1', 'weekly', PERIOD_START, PERIOD_END, null);
+
+    const readyCall = mockReportRefUpdate.mock.calls.find((args) => args[0]?.status === 'ready');
+    const { sections } = readyCall[0];
+    const heldUp = sections.find((s) => s.id === 'held_up');
+    expect(heldUp.narrative).toContain('Verified claim wording.');
+    expect(heldUp.narrative).not.toContain('NEXUS-PROSE-SHOULD-NOT-APPEAR');
+  });
+
+  it('weekly report\'s held_up section shows the explicit no-verified-patterns copy when there are zero claims', async () => {
+    const db = buildFakeDb({ entries: [entryDoc('e1')], claims: [] });
+
+    await generateReport('user1', 'weekly', PERIOD_START, PERIOD_END, null);
+
+    const readyCall = mockReportRefUpdate.mock.calls.find((args) => args[0]?.status === 'ready');
+    const { sections } = readyCall[0];
+    const heldUp = sections.find((s) => s.id === 'held_up');
+    expect(heldUp.narrative).toContain('No verified patterns');
+  });
+
+  it('a claims-read failure still generates the report (status "ready") with the empty-state held_up section', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const db = buildFakeDb({ entries: [entryDoc('e1')], claimsError: new Error('claims boom') });
+
+    await generateReport('user1', 'weekly', PERIOD_START, PERIOD_END, null);
+
+    const readyCall = mockReportRefUpdate.mock.calls.find((args) => args[0]?.status === 'ready');
+    expect(readyCall).toBeTruthy();
+    const { sections } = readyCall[0];
+    const heldUp = sections.find((s) => s.id === 'held_up');
+    expect(heldUp.narrative).toContain('No verified patterns');
+    warnSpy.mockRestore();
+  });
+});
+
 describe('generateReport — entryRefs receipts + metadata (weekly, real narrative.js)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -449,7 +626,7 @@ describe('generateReport — entryRefs receipts + metadata (weekly, real narrati
     const { sections, metadata } = readyCall[0];
 
     const summary = sections.find((s) => s.id === 'summary');
-    const insight = sections.find((s) => s.id === 'insight');
+    const heldUp = sections.find((s) => s.id === 'held_up');
     const moodTrend = sections.find((s) => s.id === 'mood_trend');
 
     // Excluded entry never appears anywhere.
@@ -457,7 +634,9 @@ describe('generateReport — entryRefs receipts + metadata (weekly, real narrati
       expect(section.entryRefs).not.toContain('excluded');
     }
     expect(summary.entryRefs).toEqual(['e1', 'e2', 'e3']);
-    expect(insight.entryRefs).toEqual(['e1', 'e2', 'e3']);
+    // No claims fixture in this test -> held_up falls back to the full
+    // period entry id list (zero-claims posture, R4 Phase 2 Task 8).
+    expect(heldUp.entryRefs).toEqual(['e1', 'e2', 'e3']);
     expect(moodTrend.entryRefs).toEqual(['e1', 'e3']);
 
     expect(metadata.scope).toBe('all_spaces');

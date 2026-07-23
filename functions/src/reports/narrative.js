@@ -61,14 +61,65 @@ export function selectRepresentativeEntries(entries, windowCount = NARRATIVE_SAM
 }
 
 /**
- * Best-effort human-readable label for a Nexus active-insight item. Real
- * items (see src/services/nexus/orchestrator.js's `saveInsights`/insight
- * builders) carry `summary`/`body`/`title`; `description`/`content` are
- * kept as trailing fallbacks for older/alternate shapes. Returns '' (never
- * null/undefined) so callers can safely `||`/`.filter(Boolean)` it.
+ * P2-D6: verified claims, not Nexus prose, feed the "What held up this
+ * period" section AND the premium narrative's pattern context. A prior
+ * `nexusInsightLabel` helper fed both seams from unverified Nexus insight
+ * prose (`readNexusData`'s `active` items) straight into either the weekly
+ * template or another LLM's prompt — this report was piping unverified LLM
+ * prose into another LLM (DR findings 8/11). It has been removed; `claims`
+ * (generator.js's `readVerifiedClaims` — ranked, capped at 5, `status ===
+ * 'verified'` only) is now the sole source for both.
  */
-function nexusInsightLabel(insight) {
-  return insight?.summary || insight?.body || insight?.title || insight?.description || insight?.content || '';
+
+/** Copy shown when zero verified claims exist for the period. Deliberately
+ * NEVER falls back to Nexus prose — an empty claims set means exactly that:
+ * nothing has cleared the evidence gates yet. */
+const NO_VERIFIED_CLAIMS_NARRATIVE =
+  'No verified patterns held up this period — Engram only surfaces associations your recorded days actually support.';
+
+/**
+ * Render one verified claim as report prose: its (already causal-language-
+ * checked, see claimSchema.js's buildClaim) `wording`, the day-count line,
+ * and its first limitation. All three come from the claim doc itself — no
+ * paraphrasing, no LLM involvement.
+ * @param {object} claim
+ * @returns {string}
+ */
+function formatClaimLine(claim) {
+  const exposed = claim.evidence?.exposedDayCount;
+  const comparison = claim.evidence?.comparisonDayCount;
+  const parts = [claim.wording, `(${exposed} vs ${comparison} days)`];
+  const firstLimitation = Array.isArray(claim.limitations) ? claim.limitations[0] : null;
+  if (firstLimitation) parts.push(firstLimitation);
+  return parts.join(' ');
+}
+
+/**
+ * Build the "What held up this period" section — the single top-ranked
+ * verified claim (claims arrives pre-ranked from
+ * generator.js's `readVerifiedClaims`), or the explicit no-claims copy.
+ * Shared by both `generateWeeklyTemplate` and `generatePremiumNarrative` so
+ * the two cadence families render this section identically.
+ * @param {Array<object>} claims - pre-ranked, capped verified claims
+ * @param {string[]} fallbackEntryRefs - used when there's no claim to cite
+ *   an entry-level receipt from (zero claims, or a claim missing
+ *   evidence.sourceEntryIds)
+ * @returns {object} section
+ */
+function buildHeldUpSection(claims, fallbackEntryRefs) {
+  const topClaim = Array.isArray(claims) && claims.length > 0 ? claims[0] : null;
+  const narrative = topClaim ? formatClaimLine(topClaim) : NO_VERIFIED_CLAIMS_NARRATIVE;
+  const claimEntryIds = topClaim && Array.isArray(topClaim.evidence?.sourceEntryIds)
+    ? topClaim.evidence.sourceEntryIds.filter(Boolean)
+    : null;
+  return {
+    id: 'held_up',
+    title: 'What held up this period',
+    narrative,
+    chartData: null,
+    entities: [],
+    entryRefs: (claimEntryIds && claimEntryIds.length > 0) ? claimEntryIds : fallbackEntryRefs,
+  };
 }
 
 /**
@@ -83,9 +134,15 @@ function nexusInsightLabel(insight) {
  *   entries (post source-exclusion filtering), used to populate entryRefs
  *   receipts. Optional/defaults to [] for backward compatibility with
  *   callers that only need narrative text.
+ * @param {Array<object>} [claims] - Verified claims (generator.js's
+ *   `readVerifiedClaims`, pre-ranked, capped at 5) — the ONLY source for
+ *   the "What held up this period" section (P2-D6). `nexusData` is no
+ *   longer read for that purpose; it's kept as a parameter for signature
+ *   stability with the call site (generator.js still reads it for other,
+ *   non-prompt purposes, e.g. report metadata.topInsights).
  * @returns {Array<object>} sections
  */
-export function generateWeeklyTemplate(analyticsData, nexusData, entries = []) {
+export function generateWeeklyTemplate(analyticsData, nexusData, entries = [], claims = []) {
   const { entryCount = 0, moodAvg, moodTrend, topTheme } = analyticsData;
 
   // Summary bullets
@@ -99,19 +156,14 @@ export function generateWeeklyTemplate(analyticsData, nexusData, entries = []) {
     bullets.push(`Your most common theme was "${topTheme}".`);
   }
 
-  // Pick one insight
-  const insight = nexusData?.insights?.[0] || null;
-  const insightText = insight
-    ? (nexusInsightLabel(insight) || 'No additional insights this week.')
-    : 'Keep journaling to unlock insights about your patterns.';
-
   // Receipts (entryRefs): which entries actually fed each section's builder.
   // - summary: a period-level aggregate (entry count, mood avg, top theme)
   //   computed over the whole period — not attributable to a subset, so it
   //   falls back to the full period id list.
-  // - insight: the featured nexus insight isn't tagged with its source
-  //   entry id(s) in the data this template receives — also falls back to
-  //   the full period id list (documented gap, not a finer-grained read).
+  // - held_up: buildHeldUpSection cites the claim's own
+  //   evidence.sourceEntryIds when a claim is present (real attribution,
+  //   an improvement over the old nexus-insight "no per-source id" gap),
+  //   falling back to the full period id list otherwise.
   // - mood_trend: determinable exactly. It's the same entries
   //   (moodScore != null) that generator.js used to build the sparkline
   //   chartData for this section.
@@ -130,14 +182,7 @@ export function generateWeeklyTemplate(analyticsData, nexusData, entries = []) {
       entities: [],
       entryRefs: periodEntryIds,
     },
-    {
-      id: 'insight',
-      title: 'Something You Might Not Have Noticed',
-      narrative: insightText,
-      chartData: null,
-      entities: [],
-      entryRefs: periodEntryIds,
-    },
+    buildHeldUpSection(claims, periodEntryIds),
     {
       id: 'mood_trend',
       title: 'Mood Trend',
@@ -254,6 +299,16 @@ export async function generatePremiumNarrative(cadence, contextData, apiKey, db)
     }
   }
 
+  // "What held up this period" (P2-D6): deterministic, rendered directly
+  // from verified claims — never LLM-authored, so it can never invent or
+  // paraphrase a claim's wording. Appended after the LLM-generated sections
+  // above (which separately receive claims wording as prompt CONTEXT via
+  // buildSectionPrompt, not as something they're asked to restate).
+  // synthesisContext carries `claims` through preSummarizeByMonth's
+  // `...contextData` spread unchanged, so this works uniformly across
+  // monthly/quarterly/annual.
+  sections.push(buildHeldUpSection(synthesisContext.claims || [], sourceEntryIds));
+
   return sections;
 }
 
@@ -274,7 +329,7 @@ async function generateSectionNarrative(config, cadence, contextData, apiKey, mo
 const MAX_PROMPT_CHARS = 28000 * 4;
 
 function buildSectionPrompt(config, cadence, contextData) {
-  const { entries, analytics, signals, nexus, health } = contextData;
+  const { entries, analytics, signals, health, claims } = contextData;
   const context = [];
 
   context.push(`Generate the "${config.title}" section for a ${cadence} life report.`);
@@ -284,9 +339,16 @@ function buildSectionPrompt(config, cadence, contextData) {
   if (analytics?.topThemes?.length) context.push(`Top themes: ${analytics.topThemes.join(', ')}`);
   if (signals?.activeGoals?.length) context.push(`Active goals: ${signals.activeGoals.map(g => g.title || g.description).join(', ')}`);
   if (signals?.achievedGoals?.length) context.push(`Achieved goals: ${signals.achievedGoals.map(g => g.title || g.description).join(', ')}`);
-  if (nexus?.patterns?.length) {
-    const patternLabels = nexus.patterns.map(nexusInsightLabel).filter(Boolean);
-    if (patternLabels.length) context.push(`Detected patterns: ${patternLabels.join('; ')}`);
+  // P2-D6: verified claims + deterministic stats replace the old Nexus
+  // "Detected patterns" injection (nexus.patterns via nexusInsightLabel) —
+  // that fed this LLM prose from ANOTHER, unverified LLM's output. `claims`
+  // is generator.js's `readVerifiedClaims` result: pre-ranked, capped at 5,
+  // `status === 'verified'` only, wording already causal-language-checked
+  // by claimSchema's buildClaim. Every line here is grounded in a specific
+  // claim's own numbers — nothing paraphrased or invented by this prompt.
+  if (claims?.length) {
+    const claimLines = claims.map(formatClaimLine);
+    context.push(`Verified patterns this period (associations only, never causal — treat as established fact, do not re-derive or contradict): ${claimLines.join('; ')}`);
   }
   if (health?.summary) context.push(`Health summary: ${health.summary}`);
 

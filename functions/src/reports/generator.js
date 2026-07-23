@@ -66,13 +66,14 @@ export async function generateReport(userId, cadence, periodStart, periodEnd, ge
     // invoked and would otherwise get stamped into metadata.model,
     // overstating what generated the report.
     const isWeekly = cadence === 'weekly';
-    const [analyticsData, nexusData, signalData, entriesData, healthData, model] = await Promise.all([
+    const [analyticsData, nexusData, signalData, entriesData, healthData, model, verifiedClaims] = await Promise.all([
       readAnalytics(db, userBase),
       readNexusData(db, userBase),
       readSignalData(db, userBase, periodStart, periodEnd),
       readEntries(db, userBase, periodStart, periodEnd, cadence),
       readHealthData(db, userBase),
       isWeekly ? Promise.resolve(null) : getModel(db, 'insight'),
+      readVerifiedClaims(db, userBase),
     ]);
 
     // Prepare chart data. Entry-level mood (`e.moodScore` from readEntries,
@@ -112,6 +113,11 @@ export async function generateReport(userId, cadence, periodStart, periodEnd, ge
       signals: signalData,
       nexus: nexusData,
       health: healthData,
+      // Verified claims (P2-D6): the ONLY source for the "What held up this
+      // period" section and for the premium narrative's pattern context —
+      // nexus prose (`nexus` above) no longer feeds either. Already
+      // ranked + capped at 5 by readVerifiedClaims.
+      claims: verifiedClaims,
     };
 
     // Generate sections
@@ -125,7 +131,7 @@ export async function generateReport(userId, cadence, periodStart, periodEnd, ge
       // (see privacy.js filterForPersonalView), and export/share paths
       // (pdfExport.applyRedactions) strip crisis-flagged entryRefs before
       // anything leaves the app.
-      sections = generateWeeklyTemplate(contextData.analytics, nexusData, entriesData);
+      sections = generateWeeklyTemplate(contextData.analytics, nexusData, entriesData, verifiedClaims);
       // Attach mood chart data to the mood_trend section
       const moodSection = sections.find(s => s.id === 'mood_trend');
       if (moodSection) moodSection.chartData = { type: 'sparkline', data: moodTrend };
@@ -228,10 +234,13 @@ async function readAnalytics(db, userBase) {
  * the console.error below), not paper over by silently dropping insights
  * the report would otherwise show.
  *
- * No additional type-based filtering happens here beyond what the report
- * templates already do (generateWeeklyTemplate picks `insights[0]`;
- * buildSectionPrompt in narrative.js reads `.patterns`) — a PARALLEL R4
- * task is adding a risky-claims suppression gate at the orchestrator seam
+ * No additional type-based filtering happens here. As of R4 Phase 2 (P2-D6)
+ * this `active` data no longer feeds the narrative LLM prompt or the weekly
+ * template's featured-insight pick — those seams now consume
+ * `readVerifiedClaims` (below) instead — but this function and its
+ * dismissal filtering stay for `metadata.topInsights` and any other
+ * remaining non-prompt Nexus usage. A PARALLEL R4 task is adding a
+ * risky-claims suppression gate at the orchestrator seam
  * (counterfactual / beliefDissonance / intervention-outcome /
  * personalized-recommendation claims), so by the time this doc is read,
  * `active` already reflects that gate. This function consumes `active`
@@ -303,6 +312,72 @@ export async function readNexusData(db, userBase) {
   } catch (e) {
     console.warn('[report] Failed to read nexus data:', e.message);
     return { insights: [], patterns: [] };
+  }
+}
+
+// Mirrors the Shared-contracts rankScore's ORDERING (Task 6's client-side
+// `rankClaims.js` — not yet built as of this task — will compute the exact
+// same ordering for the in-app feed). Deliberately duplicated here rather
+// than imported: this is a server package, ranking is presentational (not
+// an integrity surface), and parity between the two is NOT required (see
+// the R4 Phase 2 plan's self-review note under "Type consistency"). Ties
+// broken by |effectMoodPoints| then createdAt (recency) descending.
+const REPORT_CLAIM_TYPE_WEIGHT = { experiment_result: 3, pattern_to_watch: 2, observation: 1 };
+
+function rankClaimsForReport(claims) {
+  const createdAtMillis = (c) => {
+    const t = new Date(c.createdAt).getTime();
+    return Number.isFinite(t) ? t : 0;
+  };
+  return [...claims].sort((a, b) => {
+    const weightDiff = (REPORT_CLAIM_TYPE_WEIGHT[b.claimType] || 0) - (REPORT_CLAIM_TYPE_WEIGHT[a.claimType] || 0);
+    if (weightDiff !== 0) return weightDiff;
+    const effectDiff = Math.abs(b.evidence?.effectMoodPoints ?? 0) - Math.abs(a.evidence?.effectMoodPoints ?? 0);
+    if (effectDiff !== 0) return effectDiff;
+    return createdAtMillis(b) - createdAtMillis(a);
+  });
+}
+
+/**
+ * Read this user's verified, non-superseded insight claims for the report's
+ * "What held up this period" section and the premium narrative's pattern
+ * context (P2-D6). Claims live at `${userBase}/insight_claims` (Admin SDK —
+ * no firestore.rules concern server-side).
+ *
+ * Only `status === 'verified'` AND not superseded
+ * (`supersededByClaimId == null`, loose comparison mirroring the client's
+ * `claimsService.js`/`claimsPipeline.js` precedent) claims are eligible — a
+ * claim's own status is its complete suppression mechanism; unlike Nexus
+ * insights, claims need no separate dismissal-key filter (see this file's
+ * `readNexusData` doc comment for that contrast).
+ *
+ * Ranked by `rankClaimsForReport` (claimType weight, then |effectMoodPoints|,
+ * then recency) and capped at 5, matching the Shared-contracts ranked-feed
+ * cap.
+ *
+ * Read failure -> `[]` + `console.warn`, same posture as `readNexusData`:
+ * the report must still generate. A missing/failed claims read degrades to
+ * the explicit "no verified patterns this period" copy downstream (never a
+ * silent nexus-prose fallback — see narrative.js).
+ *
+ * @param {object} db
+ * @param {string} userBase
+ * @returns {Promise<Array<object>>}
+ */
+export async function readVerifiedClaims(db, userBase) {
+  try {
+    const snap = await db.collection(`${userBase}/insight_claims`).get();
+    const claims = [];
+    snap.forEach((doc) => {
+      const d = doc.data() || {};
+      if (d.status === 'verified' && d.supersededByClaimId == null) {
+        claims.push({ id: doc.id, ...d });
+      }
+    });
+    return rankClaimsForReport(claims).slice(0, 5);
+  } catch (e) {
+    console.warn('[report] Failed to read verified claims:', e.message);
+    return [];
   }
 }
 

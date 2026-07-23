@@ -19,6 +19,31 @@ import { getModel } from '../../models/registry.js';
 
 const fakeDb = { __fake: 'db' };
 
+// A minimal verified-claim fixture (P2-D6) — only the fields
+// formatClaimLine/buildHeldUpSection/buildSectionPrompt actually read.
+// readVerifiedClaims (generator.js) is what enforces the full
+// status/supersededByClaimId/ranking contract before a claim ever reaches
+// narrative.js, so these narrative-layer tests don't need buildClaim's full
+// shape (analysisPlan, receipt, etc.).
+function claimFixture(overrides = {}) {
+  return {
+    id: 'claim_gym_v1',
+    claimType: 'pattern_to_watch',
+    status: 'verified',
+    supersededByClaimId: null,
+    wording: 'On days you logged gym, your recorded mood averaged 7 points higher.',
+    limitations: ['Same-day association only, not causation.'],
+    evidence: {
+      exposedDayCount: 9,
+      comparisonDayCount: 15,
+      effectMoodPoints: 7.2,
+      sourceEntryIds: ['claim-e1', 'claim-e2'],
+    },
+    createdAt: '2026-01-05T00:00:00.000Z',
+    ...overrides,
+  };
+}
+
 describe('generateWeeklyTemplate', () => {
   it('produces 3 sections without calling Gemini', () => {
     const analytics = { entryCount: 5, moodAvg: 7.2, topTheme: 'personal growth' };
@@ -28,7 +53,7 @@ describe('generateWeeklyTemplate', () => {
 
     expect(sections).toHaveLength(3);
     expect(sections[0].id).toBe('summary');
-    expect(sections[1].id).toBe('insight');
+    expect(sections[1].id).toBe('held_up');
     expect(sections[2].id).toBe('mood_trend');
     expect(callGemini).not.toHaveBeenCalled();
   });
@@ -43,26 +68,53 @@ describe('generateWeeklyTemplate', () => {
     expect(sections[0].narrative).toContain('1 journal entry');
   });
 
-  it('uses fallback text when no insights available', () => {
-    const sections = generateWeeklyTemplate({ entryCount: 2 }, { insights: [] });
-    expect(sections[1].narrative).toContain('Keep journaling');
+  it('nexusData no longer feeds the held_up section — even a populated Nexus insights array is ignored (P2-D6)', () => {
+    const nexusWithInsights = { insights: [{ id: 'insight_1', summary: 'NEXUS-PROSE-SHOULD-NOT-APPEAR', title: 'x' }] };
+    const sections = generateWeeklyTemplate({ entryCount: 2 }, nexusWithInsights, [], []);
+    const heldUp = sections.find(s => s.id === 'held_up');
+    expect(heldUp.narrative).not.toContain('NEXUS-PROSE-SHOULD-NOT-APPEAR');
   });
 
-  it('reads the real Nexus active-item shape (summary/body/title), not just legacy content/description (R4 Task 4)', () => {
-    const receipt = { sources: [], scope: null, timeWindow: { start: null, end: null }, sampleSize: 0, missingness: null, versions: { generator: 'entity_correlation', computationVersion: 1, generatedAt: '2026-01-01T00:00:00.000Z', model: null, promptVersion: null } };
+  describe('held_up section — verified claims only (P2-D6)', () => {
+    it('zero claims -> explicit "no verified patterns" copy, never a nexus-prose fallback', () => {
+      const sections = generateWeeklyTemplate({ entryCount: 2 }, { insights: [{ summary: 'nexus prose' }] }, [], []);
+      const heldUp = sections.find(s => s.id === 'held_up');
+      expect(heldUp.narrative).toContain('No verified patterns');
+      expect(heldUp.narrative).not.toContain('nexus prose');
+    });
 
-    const withSummary = generateWeeklyTemplate(
-      { entryCount: 2 },
-      { insights: [{ id: 'entity_luna', type: 'entity_correlation', title: 'Luna Effect', summary: 'Luna boosts your mood by ~15%', body: 'longer body text', receipt }] }
-    );
-    expect(withSummary[1].narrative).toBe('Luna boosts your mood by ~15%');
+    it('renders the top-ranked claim\'s wording + day-count line + first limitation', () => {
+      const claim = claimFixture();
+      const sections = generateWeeklyTemplate({ entryCount: 2 }, {}, [], [claim]);
+      const heldUp = sections.find(s => s.id === 'held_up');
+      expect(heldUp.narrative).toContain(claim.wording);
+      expect(heldUp.narrative).toContain('9 vs 15 days');
+      expect(heldUp.narrative).toContain(claim.limitations[0]);
+    });
 
-    // Falls back to body when summary is absent.
-    const withBodyOnly = generateWeeklyTemplate(
-      { entryCount: 2 },
-      { insights: [{ id: 'calibration', type: 'calibration', title: 'Learning Your Baseline', body: 'Keep logging to unlock deeper insights.' }] }
-    );
-    expect(withBodyOnly[1].narrative).toBe('Keep logging to unlock deeper insights.');
+    it('uses only the FIRST claim when multiple are passed (single top-ranked claim per section)', () => {
+      const top = claimFixture({ wording: 'TOP claim wording.' });
+      const second = claimFixture({ id: 'claim_2', wording: 'SECOND claim wording.' });
+      const sections = generateWeeklyTemplate({ entryCount: 2 }, {}, [], [top, second]);
+      const heldUp = sections.find(s => s.id === 'held_up');
+      expect(heldUp.narrative).toContain('TOP claim wording.');
+      expect(heldUp.narrative).not.toContain('SECOND claim wording.');
+    });
+
+    it('entryRefs cites the claim\'s own evidence.sourceEntryIds when present', () => {
+      const claim = claimFixture();
+      const entries = [{ id: 'period-e1' }, { id: 'period-e2' }];
+      const sections = generateWeeklyTemplate({ entryCount: 2 }, {}, entries, [claim]);
+      const heldUp = sections.find(s => s.id === 'held_up');
+      expect(heldUp.entryRefs).toEqual(['claim-e1', 'claim-e2']);
+    });
+
+    it('entryRefs falls back to the full period id list when there are zero claims', () => {
+      const entries = [{ id: 'period-e1' }, { id: 'period-e2' }];
+      const sections = generateWeeklyTemplate({ entryCount: 2 }, {}, entries, []);
+      const heldUp = sections.find(s => s.id === 'held_up');
+      expect(heldUp.entryRefs).toEqual(['period-e1', 'period-e2']);
+    });
   });
 
   it('labels mood correctly', () => {
@@ -90,12 +142,12 @@ describe('generateWeeklyTemplate', () => {
       expect(sections[2].entryRefs).toEqual([]);
     });
 
-    it('summary and insight sections get the full period entry id list', () => {
+    it('summary and held_up (zero-claims fallback) sections get the full period entry id list', () => {
       const sections = generateWeeklyTemplate({ entryCount: 3 }, {}, entries);
       const summary = sections.find(s => s.id === 'summary');
-      const insight = sections.find(s => s.id === 'insight');
+      const heldUp = sections.find(s => s.id === 'held_up');
       expect(summary.entryRefs).toEqual(['e1', 'e2', 'e3']);
-      expect(insight.entryRefs).toEqual(['e1', 'e2', 'e3']);
+      expect(heldUp.entryRefs).toEqual(['e1', 'e2', 'e3']);
     });
 
     it('mood_trend section only references entries with a mood score', () => {
@@ -243,6 +295,68 @@ describe('generatePremiumNarrative', () => {
     }
     // Proves this is genuinely NOT the old first-8-chronological slice.
     expect(expectedIds).not.toEqual(entries.slice(0, 8).map(e => e.id));
+  });
+
+  describe('held_up section + claims-fed prompt (P2-D6)', () => {
+    it('appends a "held_up" section rendering the top verified claim, never LLM-authored', async () => {
+      callGemini.mockResolvedValue('Generated narrative text.');
+      const claim = claimFixture();
+      const contextData = {
+        entries: [{ id: 'e1', date: '2026-01-15', text: 'Test entry' }],
+        analytics: {}, signals: { activeGoals: [], achievedGoals: [] },
+        nexus: { patterns: [] }, health: {},
+        claims: [claim],
+      };
+
+      const sections = await generatePremiumNarrative('monthly', contextData, 'test-key', fakeDb);
+      const heldUp = sections.find(s => s.id === 'held_up');
+      expect(heldUp).toBeTruthy();
+      expect(heldUp.title).toBe('What held up this period');
+      expect(heldUp.narrative).toContain(claim.wording);
+      expect(heldUp.narrative).toContain('9 vs 15 days');
+      expect(heldUp.narrative).toContain(claim.limitations[0]);
+      // Deterministic — this section's text does not come from a Gemini call.
+      expect(heldUp.narrative).not.toBe('Generated narrative text.');
+    });
+
+    it('zero claims -> held_up renders the explicit "no verified patterns" copy, never a nexus-prose fallback', async () => {
+      callGemini.mockResolvedValue('Generated narrative text.');
+      const contextData = {
+        entries: [{ id: 'e1', date: '2026-01-15', text: 'Test entry' }],
+        analytics: {}, signals: { activeGoals: [], achievedGoals: [] },
+        nexus: { patterns: [{ id: 'pattern_x', summary: 'NEXUS-PROSE-SHOULD-NOT-APPEAR' }] },
+        health: {},
+        claims: [],
+      };
+
+      const sections = await generatePremiumNarrative('monthly', contextData, 'test-key', fakeDb);
+      const heldUp = sections.find(s => s.id === 'held_up');
+      expect(heldUp.narrative).toContain('No verified patterns');
+      expect(heldUp.narrative).not.toContain('NEXUS-PROSE-SHOULD-NOT-APPEAR');
+    });
+
+    it('feeds claims wording into the LLM prompt and NEVER a nexus fixture\'s summary (negative assertion)', async () => {
+      callGemini.mockResolvedValue('Generated narrative text.');
+      const claim = claimFixture();
+      const contextData = {
+        entries: [{ id: 'e1', date: '2026-01-15', text: 'Test entry' }],
+        analytics: {}, signals: { activeGoals: [], achievedGoals: [] },
+        // Populated nexus fixture — its summary must NEVER reach the prompt
+        // (P2-D6: nexusInsightLabel's "Detected patterns:" injection removed).
+        nexus: { patterns: [{ id: 'pattern_x', summary: 'NEXUS-FIXTURE-SUMMARY-TEXT', title: 'Nexus Pattern' }] },
+        health: {},
+        claims: [claim],
+      };
+
+      await generatePremiumNarrative('monthly', contextData, 'test-key', fakeDb);
+
+      expect(callGemini.mock.calls.length).toBeGreaterThan(0);
+      for (const call of callGemini.mock.calls) {
+        const userPrompt = call[2];
+        expect(userPrompt).not.toContain('NEXUS-FIXTURE-SUMMARY-TEXT');
+        expect(userPrompt).toContain(claim.wording);
+      }
+    });
   });
 
   describe('entryRefs — quarterly/annual union with month-sampled ids (finding 1, R4 Task 4)', () => {
