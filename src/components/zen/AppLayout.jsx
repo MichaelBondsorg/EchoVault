@@ -14,20 +14,31 @@ import SanctuaryWalkthrough from './SanctuaryWalkthrough';
 import { FABTooltip, useZenTooltips } from './ZenTooltips';
 
 // Pages
-import { HomePage, JournalPage, InsightsPage, SettingsPage } from '../../pages';
+// PERF-01: HomePage/JournalPage import directly from their source files (not
+// the `../../pages` barrel) so this static import can never re-pull in
+// InsightsPage/SettingsPage, which are route-level code-split below.
+// HomePage is the default "/" route and must stay eager (capture-first cold
+// launch); JournalPage is small (~290 lines) and a primary tab, so it stays
+// eager too — only the two heavier, secondary routes are split.
+import HomePage from '../../pages/HomePage';
+import JournalPage from '../../pages/JournalPage';
 
 // Screens (modals that overlay the entire app)
-import { UnifiedConversationWithSuspense as UnifiedConversation } from '../lazy';
+import {
+  UnifiedConversationWithSuspense as UnifiedConversation,
+  InsightsPageWithSuspense as InsightsPage,
+  SettingsPageWithSuspense as SettingsPage,
+  ExperimentsScreenWithSuspense as ExperimentsScreen,
+  RecipesScreenWithSuspense as RecipesScreen,
+  SessionPrepScreenWithSuspense as SessionPrepScreen,
+  InsightControlCenterWithSuspense as InsightControlCenter,
+} from '../lazy';
 
 import EntryComposer from '../capture/EntryComposer';
 import CaptureReliabilityCenter from '../capture/CaptureReliabilityCenter';
 import CapturedToast from '../capture/CapturedToast';
 import PrivacyCenter from '../privacy/PrivacyCenter';
 import SpaceManager from '../spaces/SpaceManager';
-import InsightControlCenter from '../insights/InsightControlCenter';
-import RecipesScreen from '../reflections/RecipesScreen';
-import SessionPrepScreen from '../reflections/SessionPrepScreen';
-import ExperimentsScreen from '../experiments/ExperimentsScreen';
 import { getFlag } from '../../config/flags';
 // PRIV-01: shared owner-scoped dismissed-prompt helpers (previously this
 // file had its own copy of this logic against an unowned global key — see

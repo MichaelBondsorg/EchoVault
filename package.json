@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build && node scripts/check-bundle-endpoints.js",
+    "build": "vite build && node scripts/check-bundle-endpoints.js && node scripts/check-bundle-budget.js",
     "preview": "vite preview",
     "generate:icons": "node scripts/generate-icons.js",
     "generate:splash": "node scripts/generate-splash.js",

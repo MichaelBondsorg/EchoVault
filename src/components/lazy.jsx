@@ -83,6 +83,23 @@ export const LazyReportViewer = lazy(() =>
   import('./reports/ReportViewer')
 );
 
+// PERF-01: route-level split for the /insights and /settings tabs
+// (react-router routes rendered in components/zen/AppLayout.jsx). Both are
+// imported directly from their source files — never through `../pages`'s
+// barrel — so the barrel re-export doesn't drag InsightsPage/SettingsPage's
+// weight back into whichever module eagerly imports HomePage/JournalPage.
+// InsightsPage.jsx is ~2,450 lines (the review's "insights-heavy views"
+// candidate) and is only reachable by navigating to the Insights tab, never
+// during cold launch/capture. SettingsPage.jsx (~750 lines) is likewise a
+// secondary tab, not the capture-ready path.
+export const LazyInsightsPage = lazy(() =>
+  import('../pages/InsightsPage')
+);
+
+export const LazySettingsPage = lazy(() =>
+  import('../pages/SettingsPage')
+);
+
 // ============================================
 // Lazy-loaded Settings
 // ============================================
@@ -115,6 +132,35 @@ export const LazyUnifiedConversation = lazy(() =>
   import('./chat/UnifiedConversation').then(module => ({
     default: module.default || module.UnifiedConversation
   }))
+);
+
+// ============================================
+// Lazy-loaded flag-gated overlays (PERF-01)
+//
+// Every one of these is mounted in components/zen/AppLayout.jsx behind
+// BOTH a feature flag (all default OFF per PROJECT_STATUS — see repo
+// CLAUDE.md's "R2"/"R3" flag notes) AND a `showX` boolean, so today they
+// render for nobody, yet their source was still being pulled into the main
+// entry chunk on every cold launch as a static import. ExperimentsScreen is
+// the review's explicitly named heavy candidate (~1,420 lines); the other
+// three are the same shape (reflection/insight overlays gated the same
+// way) and were split together for consistency and equal payoff.
+// ============================================
+
+export const LazyExperimentsScreen = lazy(() =>
+  import('./experiments/ExperimentsScreen')
+);
+
+export const LazyRecipesScreen = lazy(() =>
+  import('./reflections/RecipesScreen')
+);
+
+export const LazySessionPrepScreen = lazy(() =>
+  import('./reflections/SessionPrepScreen')
+);
+
+export const LazyInsightControlCenter = lazy(() =>
+  import('./insights/InsightControlCenter')
 );
 
 // ============================================
@@ -151,5 +197,11 @@ export const InsightsPanelWithSuspense = withSuspense(LazyInsightsPanel);
 export const ReportListWithSuspense = withSuspense(LazyReportList);
 export const ReportViewerWithSuspense = withSuspense(LazyReportViewer);
 export const UnifiedConversationWithSuspense = withSuspense(LazyUnifiedConversation);
+export const InsightsPageWithSuspense = withSuspense(LazyInsightsPage);
+export const SettingsPageWithSuspense = withSuspense(LazySettingsPage);
+export const ExperimentsScreenWithSuspense = withSuspense(LazyExperimentsScreen);
+export const RecipesScreenWithSuspense = withSuspense(LazyRecipesScreen);
+export const SessionPrepScreenWithSuspense = withSuspense(LazySessionPrepScreen);
+export const InsightControlCenterWithSuspense = withSuspense(LazyInsightControlCenter);
 
 export { LoadingFallback };
