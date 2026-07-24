@@ -3,6 +3,10 @@ import { render, screen, fireEvent, within } from '@testing-library/react';
 
 const getFlag = vi.fn();
 vi.mock('../../../../config/flags', () => ({ getFlag: (...a) => getFlag(...a) }));
+// The widget imports useClaims (INS-01), which imports config/firebase at
+// module scope — the REAL module throws at load when VITE_FIREBASE_API_KEY
+// is absent (CI has no .env; local runs mask this). Mock the boundary.
+vi.mock('../../../../config/firebase', () => ({ db: { __db: true } }));
 
 const navigate = vi.fn();
 vi.mock('react-router-dom', () => ({ useNavigate: () => navigate }));
