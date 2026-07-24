@@ -1,7 +1,7 @@
 import { initializeApp } from 'firebase/app';
 import {
   initializeAuth, getAuth, onAuthStateChanged, signOut, signInWithCustomToken,
-  GoogleAuthProvider, signInWithPopup, signInWithCredential, OAuthProvider,
+  GoogleAuthProvider, signInWithPopup, OAuthProvider,
   setPersistence, browserLocalPersistence, indexedDBLocalPersistence, inMemoryPersistence,
   createUserWithEmailAndPassword, signInWithEmailAndPassword, sendPasswordResetEmail,
   updateProfile,
@@ -99,7 +99,6 @@ export {
   signInWithCustomToken,
   GoogleAuthProvider,
   signInWithPopup,
-  signInWithCredential,
   OAuthProvider,
   setPersistence,
   indexedDBLocalPersistence,

@@ -119,7 +119,7 @@
     <a href="/" class="back-link">&larr; Back to Engram</a>
 
     <h1>Privacy Policy</h1>
-    <p class="updated">Last Updated: July 6, 2026</p>
+    <p class="updated">Last Updated: July 24, 2026</p>
 
     <h2>Introduction</h2>
     <p>Engram ("we", "our", or "us") is committed to protecting your privacy. This Privacy Policy explains how we collect, use, disclose, and safeguard your information when you use our mobile application and related services.</p>
@@ -143,8 +143,8 @@
     <ul>
       <li><strong>Wearable biometrics (WHOOP)</strong>: recovery, strain, sleep, and heart-rate metrics, retrieved via WHOOP's API with your authorization</li>
       <li><strong>Apple Health / Google Fit</strong>: sleep, heart rate, steps, and related metrics you permit the app to read</li>
-      <li><strong>Location</strong>: your approximate location (when granted) to attach weather/environmental context to an entry</li>
-      <li><strong>Weather</strong>: local weather and daylight data retrieved from the Open-Meteo service using your location</li>
+      <li><strong>Location</strong>: your approximate location (when granted), rounded to about 1km before use, to attach weather/environmental context to an entry</li>
+      <li><strong>Weather &amp; daylight</strong>: local weather retrieved from the Open-Meteo service and sunrise/sunset times retrieved from sunrise-sunset.org, both using your rounded location</li>
     </ul>
 
     <h3>Information Collected Automatically</h3>
@@ -200,7 +200,7 @@
     <p><strong>We never use your health, biometric, or journal data for advertising, and we do not share it with advertising networks or data brokers.</strong></p>
     <p>We may share your information only in these circumstances:</p>
     <ul>
-      <li><strong>Service Providers</strong>: With infrastructure and AI service providers (Google Firebase, OpenAI, Google Gemini, WHOOP, Open-Meteo) solely to operate the features you use</li>
+      <li><strong>Service Providers</strong>: With infrastructure and AI service providers (Google Firebase, OpenAI, Google Gemini, WHOOP, Open-Meteo, sunrise-sunset.org) solely to operate the features you use</li>
       <li><strong>Legal Requirements</strong>: If required by law or to protect our rights</li>
       <li><strong>With Your Consent</strong>: When you explicitly authorize sharing</li>
     </ul>
@@ -266,8 +266,13 @@
         </tr>
         <tr>
           <td>Open-Meteo</td>
-          <td>Weather &amp; daylight context</td>
+          <td>Weather context</td>
           <td><a href="https://open-meteo.com/en/terms" target="_blank">Open-Meteo Terms</a></td>
+        </tr>
+        <tr>
+          <td>sunrise-sunset.org</td>
+          <td>Daylight (sunrise/sunset) context</td>
+          <td><a href="https://sunrise-sunset.org/api" target="_blank">sunrise-sunset.org API</a></td>
         </tr>
         <tr>
           <td>Firebase Crashlytics</td>

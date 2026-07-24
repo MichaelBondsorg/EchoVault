@@ -320,6 +320,13 @@ export async function runFusedTranscription({
     return { error: 'API_ERROR' };
   }
   const whisperStartedAt = Date.now();
+  // Must mirror transcribeWithWhisper's own default so the manifest reports
+  // the model actually used when no registry override is threaded through.
+  const fallbackModelUsed = whisperModelId || 'whisper-1';
+  const logFallbackManifest = (ok) => logModelManifest({
+    workload: 'transcriptionFallback', modelId: fallbackModelUsed, ok,
+    durationMs: Date.now() - whisperStartedAt, fallback: true,
+  });
   try {
     const buffer = Buffer.from(base64, 'base64');
     const fileExt = mimeType.includes('webm') ? 'webm' : mimeType.includes('mp4') ? 'mp4' : 'wav';
@@ -333,19 +340,19 @@ export async function runFusedTranscription({
     });
 
     if (whisperResult === null) {
-      logModelManifest({ workload: 'transcriptionFallback', modelId: whisperModelId || 'whisper-1', ok: false, durationMs: Date.now() - whisperStartedAt, fallback: true });
+      logFallbackManifest(false);
       return { error: 'API_ERROR' };
     }
     const transcript = whisperResult?.text?.trim();
     if (!transcript) {
-      logModelManifest({ workload: 'transcriptionFallback', modelId: whisperModelId || 'whisper-1', ok: true, durationMs: Date.now() - whisperStartedAt, fallback: true });
+      logFallbackManifest(true);
       return { error: 'API_NO_CONTENT' }; // call succeeded, no speech detected
     }
-    logModelManifest({ workload: 'transcriptionFallback', modelId: whisperModelId || 'whisper-1', ok: true, durationMs: Date.now() - whisperStartedAt, fallback: true });
+    logFallbackManifest(true);
     // Whisper has no audio-aligned segmentation ability — chapters always null.
     return { rawTranscript: transcript, transcript, toneAnalysis: null, engine: 'whisper', chapters: null };
   } catch (error) {
-    logModelManifest({ workload: 'transcriptionFallback', modelId: whisperModelId || 'whisper-1', ok: false, durationMs: Date.now() - whisperStartedAt, fallback: true });
+    logFallbackManifest(false);
     return { error: 'API_EXCEPTION' };
   }
 }

@@ -132,7 +132,7 @@ function SummaryPage({ metadata }) {
       ),
       React.createElement(View, null,
         React.createElement(Text, { style: styles.metaLabel }, 'Average Mood'),
-        React.createElement(Text, { style: styles.metaValue }, meta.moodAvg != null ? meta.moodAvg.toFixed(1) : '—')
+        React.createElement(Text, { style: styles.metaValue }, meta.moodAvg != null ? `${meta.moodAvg.toFixed(1)} / 10` : '—')
       )
     ),
     meta.topInsights?.length ? React.createElement(View, { style: { marginBottom: 12 } },

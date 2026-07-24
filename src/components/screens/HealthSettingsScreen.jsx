@@ -993,8 +993,9 @@ const HealthSettingsScreen = ({ onClose }) => {
           >
             <Shield className="w-4 h-4 flex-shrink-0 mt-0.5" />
             <p>
-              Your health data stays on your device and is only used to show you personal insights.
-              We don't share it with anyone.
+              Your health data is stored in your private account and used only to add context to
+              your entries and insights — including AI analysis when you've given consent. It's
+              never shared for advertising or with other users.
             </p>
           </motion.div>
         )}

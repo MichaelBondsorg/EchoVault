@@ -478,8 +478,7 @@ export async function readVerifiedClaims(db, userBase) {
  * endpoints interval-overlap test (`claimStart <= periodEnd && claimEnd >=
  * periodStart`). A claim whose window only touches a period boundary
  * (e.g. `claimEnd === periodStart`) still counts; there is no minimum-
- * duration/proportion requirement. (Also documented in
- * `docs/quality/trustworthy-capture-runbook.md`'s REP-01 line.)
+ * duration/proportion requirement.
  *
  * Source of truth: `claim.receipt.timeWindow` (`{start, end}` ISO strings —
  * `src/services/insights/receipts.js`'s `buildReceipt` shape, binding per
