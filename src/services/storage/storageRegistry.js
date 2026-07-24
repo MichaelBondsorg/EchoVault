@@ -227,6 +227,28 @@ export const STORAGE_REGISTRY = Object.freeze([
     description: 'In-progress voice session transcript, kept only for reconnect-after-drop recovery.',
   },
   {
+    id: 'capture.backgroundUploads',
+    module: 'src/services/capture/backgroundUploadStore.js',
+    backend: 'localStorage',
+    ownerScope: OWNER_SCOPE.USER,
+    // Content-free breadcrumbs (operationId/draftId/status/errorCode/
+    // timestamps) — never transcript or audio content.
+    sensitivity: SENSITIVITY.LOW,
+    retentionMs: null,
+    expiryEnforcement: 'none',
+    // Retained across sign-out: these breadcrumbs let the SAME returning
+    // owner reconcile an upload that finished while signed out — the same
+    // durable-capture category as drafts/audio-vault in the ADR. Isolation
+    // from a DIFFERENT account comes entirely from the owner-scoped key.
+    // (CAP-01 review Important: entry added so the registry stays the
+    // single source of truth and the two-account contract test covers it;
+    // dark today behind nativeBackgroundUpload=false.)
+    signOutBehavior: SIGN_OUT_BEHAVIOR.RETAIN,
+    legacyMigration: LEGACY_MIGRATION.NONE,
+    ownerKeyFor: (uid) => `capture_bg_uploads::${uid}`,
+    description: 'Pending native background-upload breadcrumbs for launch-time reconcile (dark, CAP-01).',
+  },
+  {
     id: 'prompts.dismissed',
     module: 'src/services/prompts/activePrompts.js',
     backend: 'localStorage',
