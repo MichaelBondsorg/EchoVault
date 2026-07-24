@@ -11,9 +11,40 @@
 
 import { Capacitor } from '@capacitor/core';
 import { Preferences } from '@capacitor/preferences';
+import { auth } from '../../config/firebase';
 
-const HEALTH_CACHE_KEY = 'health_context_cache';
-const HEALTH_PERMISSION_KEY = 'health_permission_status';
+// Legacy (pre owner-scoping) global keys. Per ADR-0001 / PRIV-01
+// (docs/adr/0001-owner-scoped-local-data.md,
+// src/services/storage/storageRegistry.js), unowned local data is
+// quarantined (deleted) the first time it's discovered — never adopted by
+// whichever account happens to be signed in when it's next encountered.
+const LEGACY_HEALTH_CACHE_KEY = 'health_context_cache';
+const LEGACY_HEALTH_PERMISSION_KEY = 'health_permission_status';
+
+const healthCacheKey = (uid) => `health_context_cache::${uid}`;
+const healthPermissionKey = (uid) => `health_permission_status::${uid}`;
+
+/**
+ * Resolve the currently authenticated owner for cache scoping. Returns null
+ * (rather than throwing) so cache reads/writes fail safe to "no cache"
+ * instead of surfacing an auth error out of an unrelated lookup. No uid is
+ * ever cached at module scope — every call re-derives it from the live
+ * Firebase auth session. Mirrors src/services/health/whoop.js's identical
+ * helper.
+ */
+const currentUid = () => auth.currentUser?.uid || null;
+
+/**
+ * Delete an unowned legacy Preferences key if present. Best-effort — a
+ * failed removal just means we try again next time the key is encountered.
+ */
+const quarantineLegacyKey = async (legacyKey) => {
+  try {
+    await Preferences.remove({ key: legacyKey });
+  } catch {
+    // Nothing to recover if removal fails.
+  }
+};
 
 /**
  * Platform capabilities for health data
@@ -92,10 +123,13 @@ export const getHealthDataStrategy = async () => {
     };
   }
 
-  // Web platform - check for cached data
+  // Web platform - check for cached data. getCachedHealthData already
+  // removes (not just ignores) an expired owner-scoped cache on read — see
+  // its own doc comment — so a stale hit here can only mean "no usable
+  // cache", never "leftover expired data".
   const cachedData = await getCachedHealthData();
 
-  if (cachedData && !isCacheStale(cachedData)) {
+  if (cachedData) {
     return {
       strategy: 'cache',
       isAvailable: true,
@@ -120,15 +154,20 @@ export const getHealthDataStrategy = async () => {
 };
 
 /**
- * Cache health data for web access
- * Called after successful native health data fetch
+ * Cache health data for web access, scoped to the signed-in owner.
+ * Called after successful native health data fetch.
+ *
+ * No-ops (never falls back to a global key) when nobody is signed in —
+ * health data must never be written anywhere it can outlive its owner.
  *
  * @param {Object} healthData - Health summary to cache
  */
 export const cacheHealthData = async (healthData) => {
+  const uid = currentUid();
+  if (!uid) return;
   try {
     await Preferences.set({
-      key: HEALTH_CACHE_KEY,
+      key: healthCacheKey(uid),
       value: JSON.stringify({
         ...healthData,
         cachedAt: new Date().toISOString(),
@@ -141,12 +180,32 @@ export const cacheHealthData = async (healthData) => {
 };
 
 /**
- * Get cached health data
+ * Get this owner's cached health data. Returns null (never a different
+ * owner's or a pre-migration global value) when:
+ * - nobody is signed in (and quarantines any lingering legacy global cache),
+ * - this owner has never cached locally (same quarantine, on the scoped
+ *   miss — a legacy value is never adopted by the next signed-in account),
+ * - or the cache is older than the retention window, in which case it is
+ *   REMOVED (not merely ignored) so a stale hit can't reappear later.
  */
 export const getCachedHealthData = async () => {
+  const uid = currentUid();
+  if (!uid) {
+    await quarantineLegacyKey(LEGACY_HEALTH_CACHE_KEY);
+    return null;
+  }
   try {
-    const { value } = await Preferences.get({ key: HEALTH_CACHE_KEY });
-    return value ? JSON.parse(value) : null;
+    const { value } = await Preferences.get({ key: healthCacheKey(uid) });
+    if (!value) {
+      await quarantineLegacyKey(LEGACY_HEALTH_CACHE_KEY);
+      return null;
+    }
+    const cached = JSON.parse(value);
+    if (isCacheStale(cached)) {
+      await Preferences.remove({ key: healthCacheKey(uid) });
+      return null;
+    }
+    return cached;
   } catch (error) {
     console.error('Failed to get cached health data:', error);
     return null;
@@ -185,12 +244,15 @@ const getCacheAge = (cachedData) => {
 };
 
 /**
- * Store permission status
+ * Store permission status, scoped to the signed-in owner. No-ops when
+ * nobody is signed in.
  */
 export const setPermissionStatus = async (status) => {
+  const uid = currentUid();
+  if (!uid) return;
   try {
     await Preferences.set({
-      key: HEALTH_PERMISSION_KEY,
+      key: healthPermissionKey(uid),
       value: status
     });
   } catch (error) {
@@ -199,12 +261,23 @@ export const setPermissionStatus = async (status) => {
 };
 
 /**
- * Get stored permission status
+ * Get this owner's stored permission status. Quarantines (never adopts) a
+ * pre-migration legacy global value on a scoped miss, exactly like
+ * getCachedHealthData above.
  */
 export const getPermissionStatus = async () => {
+  const uid = currentUid();
+  if (!uid) {
+    await quarantineLegacyKey(LEGACY_HEALTH_PERMISSION_KEY);
+    return 'unknown';
+  }
   try {
-    const { value } = await Preferences.get({ key: HEALTH_PERMISSION_KEY });
-    return value || 'unknown';
+    const { value } = await Preferences.get({ key: healthPermissionKey(uid) });
+    if (!value) {
+      await quarantineLegacyKey(LEGACY_HEALTH_PERMISSION_KEY);
+      return 'unknown';
+    }
+    return value;
   } catch (error) {
     return 'unknown';
   }

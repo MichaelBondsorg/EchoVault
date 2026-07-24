@@ -1,6 +1,40 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { auth } from '../config/firebase';
 import { getRelayWsUrl, getRelayHttpUrl } from '../config/relay';
+import { ownerStorageKey } from '../services/storage/ownerScopedStorage';
+
+// PRIV-01 (docs/superpowers/plans/2026-07-24-full-product-review.md,
+// src/services/storage/storageRegistry.js's 'voice.transcript' row): the
+// in-progress transcript, kept only so a dropped connection can be restored,
+// must be owner-scoped, expire, and actually be removed — not persisted
+// forever under an unowned, per-session key. One static key per owner
+// (rather than the old `voice_transcript_${sessionId}` — at most one voice
+// session is ever active at a time) so logout can address and remove it by
+// name; the stored payload still carries its own sessionId so a restore
+// never applies a stale transcript to the wrong session.
+const VOICE_TRANSCRIPT_TTL_MS = 30 * 60 * 1000; // 30 minutes
+
+const voiceTranscriptKey = (uid) => ownerStorageKey(uid, 'voice/transcript');
+
+/** Legacy (pre owner-scoping) per-session key this transcript used to live under. */
+const legacyVoiceTranscriptKey = (sessionId) => `voice_transcript_${sessionId}`;
+
+/**
+ * Best-effort removal of the CURRENT session's legacy unowned key. Per
+ * ADR-0001, an unowned value is never adopted — this only ever deletes, it
+ * never migrates content forward. (An older legacy key from a prior session
+ * cannot be located this way, since its sessionId no longer matches
+ * anything live; it's simply orphaned and never read again — see the
+ * registry entry's comment.)
+ */
+const quarantineLegacyTranscript = (sessionId) => {
+  if (!sessionId) return;
+  try {
+    localStorage.removeItem(legacyVoiceTranscriptKey(sessionId));
+  } catch {
+    // Best-effort.
+  }
+};
 
 /**
  * Hook for managing voice relay connection
@@ -22,6 +56,14 @@ export const useVoiceRelay = () => {
   const localTranscriptRef = useRef('');
   const sequenceIdRef = useRef(0);
   const tokenRefreshIntervalRef = useRef(null);
+  // `connect` is memoized with an empty dep array, so the `ws.onmessage`
+  // closure it installs is permanently bound to the `handleMessage`
+  // reference from the render that first called connect() — later
+  // re-renders' updated `sessionId` REACT STATE never reaches that frozen
+  // closure. Mirrors the existing localTranscriptRef/sequenceIdRef pattern
+  // just below (refs are stable across renders) so the persisted transcript
+  // always carries the CURRENT session id, not whatever it was at mount.
+  const sessionIdRef = useRef(null);
 
   /**
    * Initialize audio context and microphone
@@ -171,6 +213,7 @@ export const useVoiceRelay = () => {
   const handleMessage = useCallback((message) => {
     switch (message.type) {
       case 'session_ready':
+        sessionIdRef.current = message.sessionId;
         setSessionId(message.sessionId);
         setMode(message.mode);
         setStatus('connected');
@@ -191,14 +234,25 @@ export const useVoiceRelay = () => {
         localTranscriptRef.current += message.delta;
         sequenceIdRef.current = message.sequenceId;
 
-        // Persist to local storage
-        try {
-          localStorage.setItem(`voice_transcript_${sessionId}`, JSON.stringify({
-            content: localTranscriptRef.current,
-            sequenceId: sequenceIdRef.current,
-          }));
-        } catch (e) {
-          console.warn('Failed to persist transcript locally');
+        // Persist to local storage, scoped to the signed-in owner. No-ops
+        // (never falls back to an unowned key) when nobody is signed in —
+        // in-memory transcript state (used for the rest of this live
+        // session) is untouched either way.
+        {
+          const uid = auth.currentUser?.uid;
+          if (uid) {
+            try {
+              localStorage.setItem(voiceTranscriptKey(uid), JSON.stringify({
+                sessionId: sessionIdRef.current,
+                content: localTranscriptRef.current,
+                sequenceId: sequenceIdRef.current,
+                savedAt: Date.now(),
+              }));
+              quarantineLegacyTranscript(sessionIdRef.current);
+            } catch (e) {
+              console.warn('Failed to persist transcript locally');
+            }
+          }
         }
         break;
 
@@ -434,6 +488,22 @@ export const useVoiceRelay = () => {
       wsRef.current = null;
     }
 
+    // Sign-out/end-of-session cleanup for the persisted reconnect transcript
+    // (PRIV-01 signOutBehavior: 'remove' — see storageRegistry.js). This is
+    // the intentional-teardown path (endSession/unmount), never fired by an
+    // unexpected socket drop, so it can't interfere with a real
+    // reconnect-after-drop's later tryRestoreSession call.
+    {
+      const uid = auth.currentUser?.uid;
+      if (uid) {
+        try {
+          localStorage.removeItem(voiceTranscriptKey(uid));
+        } catch {
+          // Best-effort.
+        }
+      }
+    }
+
     setStatus('disconnected');
     setSessionId(null);
     setMode(null);
@@ -442,6 +512,7 @@ export const useVoiceRelay = () => {
     setSessionAnalysis(null);
     localTranscriptRef.current = '';
     sequenceIdRef.current = 0;
+    sessionIdRef.current = null;
   }, []);
 
   /**
@@ -455,21 +526,45 @@ export const useVoiceRelay = () => {
   };
 
   /**
-   * Try to restore session from local storage
+   * Try to restore session from local storage. Owner-scoped (reads only the
+   * signed-in owner's own persisted transcript — never another account's),
+   * and an expired entry is REMOVED here, not merely ignored (PRIV-01
+   * acceptance: expired transcript values must actually be deleted on
+   * read). The stored sessionId must also match the CURRENT session, so a
+   * stale entry from a previous session (already past its natural
+   * usefulness even if not yet expired) is never misapplied.
    */
   const tryRestoreSession = useCallback(() => {
     if (!sessionId || wsRef.current?.readyState !== WebSocket.OPEN) return;
 
+    const uid = auth.currentUser?.uid;
+    if (!uid) return;
+
+    const key = voiceTranscriptKey(uid);
     try {
-      const stored = localStorage.getItem(`voice_transcript_${sessionId}`);
-      if (stored) {
-        const { content, sequenceId } = JSON.parse(stored);
-        wsRef.current.send(JSON.stringify({
-          type: 'restore_transcript',
-          content,
-          sequenceId,
-        }));
+      const stored = localStorage.getItem(key);
+      if (!stored) return;
+
+      const { sessionId: storedSessionId, content, sequenceId, savedAt } = JSON.parse(stored);
+
+      if (!savedAt || Date.now() - savedAt > VOICE_TRANSCRIPT_TTL_MS) {
+        localStorage.removeItem(key);
+        return;
       }
+
+      if (storedSessionId !== sessionId) {
+        // Not this session's transcript (e.g. a fresh session started
+        // before the old one's entry expired) — remove rather than leave a
+        // mismatched entry sitting around indefinitely.
+        localStorage.removeItem(key);
+        return;
+      }
+
+      wsRef.current.send(JSON.stringify({
+        type: 'restore_transcript',
+        content,
+        sequenceId,
+      }));
     } catch (e) {
       console.warn('Failed to restore transcript');
     }
@@ -520,6 +615,7 @@ export const useVoiceRelay = () => {
     startRecording,
     endTurn,
     endSession,
+    tryRestoreSession,
     clearError: () => setError(null),
     clearTranscript: () => setTranscript([]),
     clearGuidedComplete: () => setGuidedComplete(null),

@@ -397,8 +397,9 @@ const UnifiedConversation = ({
       // current no-embedding/no-semantic-match behavior — Tier 4 just no-ops.
       const queryEmbedding = await generateQueryEmbeddings(text);
 
-      // Get session buffer for recent entry context
-      const sessionBuffer = getSessionBuffer();
+      // Get session buffer for recent entry context (PRIV-01: owner-scoped —
+      // see services/memory/sessionBuffer.js)
+      const sessionBuffer = getSessionBuffer(userId);
 
       // Get companion context with tiered retrieval
       const contextResult = await getCompanionContext({

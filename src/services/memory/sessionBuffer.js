@@ -9,19 +9,66 @@
  *
  * This context is passed directly to the chat component as "volatile memory"
  * until the Cloud Function commits the permanent memory update.
+ *
+ * PRIV-01 (docs/superpowers/plans/2026-07-24-full-product-review.md,
+ * src/services/storage/storageRegistry.js's 'memory.sessionBuffer' row):
+ * this buffer carries raw entry text and analysis, so every function below
+ * now REQUIRES an owner uid and reads/writes an owner-scoped key —
+ * `ownerStorageKey(uid, 'session/buffer')` — instead of the old global
+ * `engram_session_buffer` key. No production write call to the legacy key
+ * was ever found (see git history / the plan's evidence), so there is
+ * nothing to migrate forward: `quarantineLegacySessionBuffer` below simply
+ * deletes it, unconditionally, once — it is never claimed by whichever
+ * account happens to be signed in.
  */
+import { ownerStorageKey } from '../storage/ownerScopedStorage';
 
-const SESSION_BUFFER_KEY = 'engram_session_buffer';
 const BUFFER_EXPIRY_MS = 5 * 60 * 1000; // 5 minutes - enough for Cloud Function to process
 
+// Legacy (pre owner-scoping) global key.
+const LEGACY_SESSION_BUFFER_KEY = 'engram_session_buffer';
+
+const sessionBufferKey = (uid) => ownerStorageKey(uid, 'session/buffer');
+
 /**
- * Store a recent entry in the session buffer
- * Called immediately after saving an entry
+ * Delete the legacy unowned global buffer key from both storages,
+ * unconditionally. Safe to call repeatedly (idempotent) and safe to call
+ * with no owner known yet — this is a quarantine, not a per-owner
+ * operation. Called once at module load ("startup") and again from the
+ * auth login handler ("login") per PRIV-01's required fix; either call
+ * alone is sufficient, both together are cheap and idempotent.
+ */
+export const quarantineLegacySessionBuffer = () => {
+  try {
+    if (typeof sessionStorage !== 'undefined') {
+      sessionStorage.removeItem(LEGACY_SESSION_BUFFER_KEY);
+    }
+  } catch {
+    // Best-effort.
+  }
+  try {
+    if (typeof localStorage !== 'undefined') {
+      localStorage.removeItem(LEGACY_SESSION_BUFFER_KEY);
+    }
+  } catch {
+    // Best-effort.
+  }
+};
+
+// "At startup": runs once, the first time this module is imported.
+quarantineLegacySessionBuffer();
+
+/**
+ * Store a recent entry in the session buffer, scoped to the given owner.
+ * Called immediately after saving an entry.
  *
+ * @param {string} ownerUid - Required. The signed-in owner's uid.
  * @param {Object} entry - The entry that was just saved
  * @param {Object} analysis - The analysis results from the entry
  */
-export const setSessionBuffer = (entry, analysis) => {
+export const setSessionBuffer = (ownerUid, entry, analysis) => {
+  if (!ownerUid) return null;
+
   const buffer = {
     recentEntry: {
       id: entry.id,
@@ -39,13 +86,14 @@ export const setSessionBuffer = (entry, analysis) => {
     createdAt: new Date().toISOString()
   };
 
+  const key = sessionBufferKey(ownerUid);
   try {
     // Prefer sessionStorage (cleared on tab close, survives refresh)
     if (typeof sessionStorage !== 'undefined') {
-      sessionStorage.setItem(SESSION_BUFFER_KEY, JSON.stringify(buffer));
+      sessionStorage.setItem(key, JSON.stringify(buffer));
     } else if (typeof localStorage !== 'undefined') {
       // Fallback to localStorage with explicit expiry check
-      localStorage.setItem(SESSION_BUFFER_KEY, JSON.stringify(buffer));
+      localStorage.setItem(key, JSON.stringify(buffer));
     }
   } catch (e) {
     console.warn('Failed to set session buffer:', e);
@@ -55,20 +103,26 @@ export const setSessionBuffer = (entry, analysis) => {
 };
 
 /**
- * Get the session buffer if it hasn't expired
+ * Get the session buffer if it hasn't expired, scoped to the given owner.
+ * An expired buffer is REMOVED here (not merely ignored), so a stale hit
+ * can never reappear later.
  *
+ * @param {string} ownerUid - Required. The signed-in owner's uid.
  * @returns {Object|null} The session buffer or null if expired/not found
  */
-export const getSessionBuffer = () => {
+export const getSessionBuffer = (ownerUid) => {
+  if (!ownerUid) return null;
+
+  const key = sessionBufferKey(ownerUid);
   try {
     let bufferStr = null;
 
     if (typeof sessionStorage !== 'undefined') {
-      bufferStr = sessionStorage.getItem(SESSION_BUFFER_KEY);
+      bufferStr = sessionStorage.getItem(key);
     }
 
     if (!bufferStr && typeof localStorage !== 'undefined') {
-      bufferStr = localStorage.getItem(SESSION_BUFFER_KEY);
+      bufferStr = localStorage.getItem(key);
     }
 
     if (!bufferStr) return null;
@@ -77,7 +131,7 @@ export const getSessionBuffer = () => {
 
     // Check expiry
     if (isExpired(buffer.expiresAt)) {
-      clearSessionBuffer();
+      clearSessionBuffer(ownerUid);
       return null;
     }
 
@@ -102,16 +156,21 @@ export const isExpired = (expiresAt) => {
 };
 
 /**
- * Clear the session buffer
- * Called when memory extraction Cloud Function confirms completion
+ * Clear the session buffer for the given owner.
+ * Called when memory extraction Cloud Function confirms completion (and by
+ * sign-out — see clearOwnerCaches.js — and by an expired read above).
+ *
+ * @param {string} ownerUid - Required. The signed-in owner's uid.
  */
-export const clearSessionBuffer = () => {
+export const clearSessionBuffer = (ownerUid) => {
+  if (!ownerUid) return;
+  const key = sessionBufferKey(ownerUid);
   try {
     if (typeof sessionStorage !== 'undefined') {
-      sessionStorage.removeItem(SESSION_BUFFER_KEY);
+      sessionStorage.removeItem(key);
     }
     if (typeof localStorage !== 'undefined') {
-      localStorage.removeItem(SESSION_BUFFER_KEY);
+      localStorage.removeItem(key);
     }
   } catch (e) {
     console.warn('Failed to clear session buffer:', e);
@@ -121,28 +180,33 @@ export const clearSessionBuffer = () => {
 /**
  * Check if the session buffer contains a specific entry
  *
+ * @param {string} ownerUid - Required. The signed-in owner's uid.
  * @param {string} entryId - The entry ID to check
  * @returns {boolean} True if the entry is in the buffer
  */
-export const hasEntryInBuffer = (entryId) => {
-  const buffer = getSessionBuffer();
+export const hasEntryInBuffer = (ownerUid, entryId) => {
+  const buffer = getSessionBuffer(ownerUid);
   return buffer?.recentEntry?.id === entryId;
 };
 
 /**
  * Update the session buffer expiry
  * Useful if the user is actively chatting
+ *
+ * @param {string} ownerUid - Required. The signed-in owner's uid.
  */
-export const extendBufferExpiry = () => {
-  const buffer = getSessionBuffer();
+export const extendBufferExpiry = (ownerUid) => {
+  if (!ownerUid) return;
+  const buffer = getSessionBuffer(ownerUid);
   if (buffer) {
     buffer.expiresAt = new Date(Date.now() + BUFFER_EXPIRY_MS).toISOString();
 
+    const key = sessionBufferKey(ownerUid);
     try {
       if (typeof sessionStorage !== 'undefined') {
-        sessionStorage.setItem(SESSION_BUFFER_KEY, JSON.stringify(buffer));
+        sessionStorage.setItem(key, JSON.stringify(buffer));
       } else if (typeof localStorage !== 'undefined') {
-        localStorage.setItem(SESSION_BUFFER_KEY, JSON.stringify(buffer));
+        localStorage.setItem(key, JSON.stringify(buffer));
       }
     } catch (e) {
       console.warn('Failed to extend session buffer:', e);
@@ -215,5 +279,6 @@ export default {
   hasEntryInBuffer,
   extendBufferExpiry,
   formatBufferForContext,
-  isExpired
+  isExpired,
+  quarantineLegacySessionBuffer
 };

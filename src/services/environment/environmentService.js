@@ -10,12 +10,41 @@
 
 import { Geolocation } from '@capacitor/geolocation';
 import { Preferences } from '@capacitor/preferences';
+import { auth } from '../../config/firebase';
 import { getCurrentWeather, getDailyWeatherHistory, getWeatherIcon } from './apis/weather';
 import { getSunTimes, isAfterSunset, isBeforeSunrise, getDaylightRemaining } from './apis/sunTimes';
 
-const LOCATION_CACHE_KEY = 'env_location_cache';
+// Legacy (pre owner-scoping) global key. Per ADR-0001 / PRIV-01
+// (docs/adr/0001-owner-scoped-local-data.md,
+// src/services/storage/storageRegistry.js), unowned local data is
+// quarantined (deleted) the first time it's discovered — never adopted by
+// whichever account happens to be signed in when it's next encountered.
+const LEGACY_LOCATION_CACHE_KEY = 'env_location_cache';
+const locationCacheKey = (uid) => `env_location_cache::${uid}`;
 const CACHE_DURATION_MS = 30 * 60 * 1000; // 30 minutes
 const GEOLOCATION_TIMEOUT_MS = 5000; // 5 second timeout for permission checks
+
+/**
+ * Resolve the currently authenticated owner for cache scoping. Returns null
+ * (rather than throwing) so cache reads/writes fail safe to "no cache"
+ * instead of surfacing an auth error out of an unrelated lookup. No uid is
+ * ever cached at module scope — every call re-derives it from the live
+ * Firebase auth session. Mirrors src/services/health/whoop.js's identical
+ * helper.
+ */
+const currentUid = () => auth.currentUser?.uid || null;
+
+/**
+ * Delete an unowned legacy Preferences key if present. Best-effort — a
+ * failed removal just means we try again next time the key is encountered.
+ */
+const quarantineLegacyKey = async (legacyKey) => {
+  try {
+    await Preferences.remove({ key: legacyKey });
+  } catch {
+    // Nothing to recover if removal fails.
+  }
+};
 
 /**
  * Wrap a promise with a timeout
@@ -73,11 +102,16 @@ export const getCurrentLocation = async () => {
       cached: false
     };
 
-    // Cache the location
-    await Preferences.set({
-      key: LOCATION_CACHE_KEY,
-      value: JSON.stringify(location)
-    });
+    // Cache the location, scoped to the signed-in owner. No-ops (never
+    // falls back to a global key) when nobody is signed in — the freshly
+    // fetched location is still returned to the caller either way.
+    const uid = currentUid();
+    if (uid) {
+      await Preferences.set({
+        key: locationCacheKey(uid),
+        value: JSON.stringify(location)
+      });
+    }
 
     return location;
   } catch (error) {
@@ -92,17 +126,33 @@ export const getCurrentLocation = async () => {
 };
 
 /**
- * Get cached location if available and not too old
+ * Get this owner's cached location, if available and not too old. Returns
+ * null (never a different owner's or a pre-migration global value) when:
+ * - nobody is signed in (and quarantines any lingering legacy global cache),
+ * - this owner has never cached locally (same quarantine, on the scoped
+ *   miss — a legacy value is never adopted by the next signed-in account),
+ * - or the cache is older than the retention window, in which case it is
+ *   REMOVED (not merely ignored) so a stale hit can't reappear later.
  */
 const getCachedLocation = async () => {
+  const uid = currentUid();
+  if (!uid) {
+    await quarantineLegacyKey(LEGACY_LOCATION_CACHE_KEY);
+    return null;
+  }
   try {
-    const { value } = await Preferences.get({ key: LOCATION_CACHE_KEY });
-    if (!value) return null;
+    const { value } = await Preferences.get({ key: locationCacheKey(uid) });
+    if (!value) {
+      await quarantineLegacyKey(LEGACY_LOCATION_CACHE_KEY);
+      return null;
+    }
 
     const cached = JSON.parse(value);
 
-    // Check if cache is still valid (24 hours for location)
+    // Check if cache is still valid (24 hours for location). An expired
+    // cache is deleted, not just ignored, so it can never resurface later.
     if (Date.now() - cached.timestamp > 24 * 60 * 60 * 1000) {
+      await Preferences.remove({ key: locationCacheKey(uid) });
       return null;
     }
 

@@ -3,6 +3,10 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Mic, PenLine, ChevronLeft, ChevronRight, X } from 'lucide-react';
 import { Card, SectionLabel } from '../../cloud';
 import { getQuickContextInsights } from '../../../services/nexus/insightIntegration';
+// PRIV-01: shared owner-scoped dismissed-prompt helpers (previously this
+// file had its own copy of this logic against an unowned global key — see
+// src/services/prompts/activePrompts.js's header comment).
+import { getDismissedPromptKeys, dismissReflectionPrompt as dismissReflectionPromptForOwner } from '../../../services/prompts/activePrompts';
 
 /**
  * PromptWidget - "Reflect" card for the Home screen (CLOUD-DESIGN-SPEC.md
@@ -14,6 +18,7 @@ import { getQuickContextInsights } from '../../../services/nexus/insightIntegrat
  * logic below is unchanged from the pre-Cloud widget.
  */
 const PromptWidget = ({
+  user = null,
   entries = [],
   category,
   onWritePrompt,
@@ -26,17 +31,11 @@ const PromptWidget = ({
   const [currentIndex, setCurrentIndex] = useState(0);
   const [dismissedQuestions, setDismissedQuestions] = useState(new Set());
 
-  // Load dismissed questions from localStorage
+  // Load this owner's dismissed questions (PRIV-01: owner-scoped, never a
+  // global key — see services/prompts/activePrompts.js).
   useEffect(() => {
-    const stored = localStorage.getItem(`reflections_dismissed_${category}`);
-    if (stored) {
-      try {
-        setDismissedQuestions(new Set(JSON.parse(stored)));
-      } catch (e) {
-        console.error('Failed to parse dismissed questions:', e);
-      }
-    }
-  }, [category]);
+    setDismissedQuestions(getDismissedPromptKeys(user?.uid, category));
+  }, [category, user?.uid]);
 
   // Get context-aware prompts based on health/environment
   const contextInsights = useMemo(() => {
@@ -150,18 +149,13 @@ const PromptWidget = ({
   }, [questions.length, isEditing]);
 
   const dismissQuestion = useCallback((question) => {
-    const key = question.toLowerCase();
-    setDismissedQuestions(prev => {
-      const next = new Set(prev);
-      next.add(key);
-      localStorage.setItem(`reflections_dismissed_${category}`, JSON.stringify([...next]));
-      return next;
-    });
+    dismissReflectionPromptForOwner(question, category, user?.uid);
+    setDismissedQuestions(prev => new Set(prev).add(question.toLowerCase()));
     // Move to next question
     if (questions.length > 1) {
       setCurrentIndex(prev => prev % (questions.length - 1));
     }
-  }, [category, questions.length]);
+  }, [category, user?.uid, questions.length]);
 
   const goNext = () => setCurrentIndex(prev => (prev + 1) % questions.length);
   const goPrev = () => setCurrentIndex(prev => (prev - 1 + questions.length) % questions.length);

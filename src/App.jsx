@@ -62,6 +62,7 @@ import {
   flushConsentOutbox,
 } from './services/consent/consentService';
 import { clearOwnerCaches } from './services/storage/clearOwnerCaches';
+import { quarantineLegacySessionBuffer } from './services/memory/sessionBuffer';
 import { deleteNativeDraft, recoverNativeDrafts } from './services/capture/nativeCaptureAdapter';
 import { prepareDurableRecording } from './services/capture/prepareDurableRecording';
 import {
@@ -627,6 +628,11 @@ export default function App() {
     return onAuthStateChanged(auth, (user) => {
       console.log('[Engram] Auth state changed:', user ? `User: ${user.uid}` : 'No user');
       if (user) {
+        // PRIV-01: quarantine (delete, never adopt) the legacy unowned
+        // session-buffer key at login, in addition to the same sweep this
+        // module already runs once at import/app-startup — see
+        // sessionBuffer.js's own comment.
+        quarantineLegacySessionBuffer();
         // Fire-and-forget: feature flags must never block first paint.
         // getFlag() falls back to defaults/localStorage until this
         // resolves. Triggered here (not before auth) because config/flags
@@ -1181,7 +1187,7 @@ export default function App() {
           console.log('Entry classification:', classification);
 
           // Get active reflection prompts for AI detection of answered prompts
-          const pendingPrompts = getActiveReflectionPrompts(entries, cat);
+          const pendingPrompts = getActiveReflectionPrompts(entries, cat, user?.uid);
           console.log('[Analysis] Pending prompts for detection:', pendingPrompts.length);
 
           console.time('⏱️ AI Analysis (parallel)');
@@ -1203,7 +1209,7 @@ export default function App() {
           if (insight?.addressedPrompts?.length > 0) {
             console.log('[Analysis] AI detected addressed prompts:', insight.addressedPrompts);
             insight.addressedPrompts.forEach(prompt => {
-              dismissReflectionPrompt(prompt, cat);
+              dismissReflectionPrompt(prompt, cat, user?.uid);
             });
           }
 

@@ -1,5 +1,20 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
+// PRIV-01: environmentService.js now resolves the owner uid from the live
+// Firebase auth session (mirrors whoop.js's established pattern) to scope
+// its location cache. Mock config/firebase directly (rather than letting
+// the real module initialize) — same approach as
+// src/services/health/__tests__/hasWorkoutNull.test.js /
+// whoop.cache.test.js. A signed-in uid (not null) keeps this file's
+// existing cache-fallback path exercised exactly as before: per the
+// Preferences mock's own comment below, this suite relies on the aliased
+// @capacitor/geolocation/@capacitor/preferences mocks colliding to force
+// getCurrentLocation through its catch-and-fall-back-to-cache branch, which
+// now requires a resolvable owner uid to read the (owner-scoped) cache key.
+vi.mock('../../../config/firebase', () => ({
+  auth: { currentUser: { uid: 'test-user-env-null' } },
+}));
+
 // Grant permission + return a fixed position so getCurrentLocation resolves.
 vi.mock('@capacitor/geolocation', () => ({
   Geolocation: {

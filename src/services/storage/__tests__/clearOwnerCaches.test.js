@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { ownerStorageKey } from '../ownerScopedStorage';
 
 // In-memory Capacitor Preferences so clearOwnerCaches' enumeration/removal
 // logic is actually exercised (the default test mock is a no-op).
@@ -12,6 +13,21 @@ vi.mock('@capacitor/preferences', () => ({
   },
 }));
 
+// setup.js replaces window.localStorage/sessionStorage with plain vi.fn()
+// no-op stubs; drive them with in-memory Maps (PRIV-01 tests below).
+let localStore;
+let sessionStore;
+function wireStorage() {
+  localStore = new Map();
+  sessionStore = new Map();
+  localStorage.getItem.mockImplementation((key) => (localStore.has(key) ? localStore.get(key) : null));
+  localStorage.setItem.mockImplementation((key, value) => { localStore.set(key, String(value)); });
+  localStorage.removeItem.mockImplementation((key) => { localStore.delete(key); });
+  sessionStorage.getItem.mockImplementation((key) => (sessionStore.has(key) ? sessionStore.get(key) : null));
+  sessionStorage.setItem.mockImplementation((key, value) => { sessionStore.set(key, String(value)); });
+  sessionStorage.removeItem.mockImplementation((key) => { sessionStore.delete(key); });
+}
+
 const { clearOwnerCaches } = await import('../clearOwnerCaches.js');
 
 const OWNER_A = 'user-a';
@@ -20,6 +36,7 @@ const OWNER_B = 'user-b';
 describe('clearOwnerCaches', () => {
   beforeEach(() => {
     store.clear();
+    wireStorage();
   });
 
   it('removes the callers known owner-scoped WHOOP keys', async () => {
@@ -80,5 +97,64 @@ describe('clearOwnerCaches', () => {
 
   it('does not throw when there is nothing to clear', async () => {
     await expect(clearOwnerCaches(OWNER_A)).resolves.not.toThrow();
+  });
+
+  // PRIV-01: clearOwnerCaches is now registry-driven for every
+  // ownerScope:'user' + signOutBehavior:'remove' entry in storageRegistry.js
+  // — including localStorage/sessionStorage-backed ones the generic
+  // Preferences suffix sweep above can never reach.
+  describe('PRIV-01 registry-driven sign-out removal', () => {
+    it('removes the owner-scoped voice transcript (localStorage)', async () => {
+      const key = ownerStorageKey(OWNER_A, 'voice/transcript');
+      localStore.set(key, JSON.stringify({ sessionId: 's1', content: 'hi', savedAt: Date.now() }));
+
+      await clearOwnerCaches(OWNER_A);
+
+      expect(localStore.has(key)).toBe(false);
+    });
+
+    it('removes the owner-scoped session buffer from both sessionStorage and localStorage', async () => {
+      const key = ownerStorageKey(OWNER_A, 'session/buffer');
+      sessionStore.set(key, JSON.stringify({ recentEntry: { id: 'e1' } }));
+      localStore.set(key, JSON.stringify({ recentEntry: { id: 'e1' } }));
+
+      await clearOwnerCaches(OWNER_A);
+
+      expect(sessionStore.has(key)).toBe(false);
+      expect(localStore.has(key)).toBe(false);
+    });
+
+    it('removes the owner-scoped health cache and location cache (Preferences)', async () => {
+      store.set(`health_context_cache::${OWNER_A}`, JSON.stringify({ available: true }));
+      store.set(`health_permission_status::${OWNER_A}`, 'granted');
+      store.set(`env_location_cache::${OWNER_A}`, JSON.stringify({ latitude: 1 }));
+
+      await clearOwnerCaches(OWNER_A);
+
+      expect(store.has(`health_context_cache::${OWNER_A}`)).toBe(false);
+      expect(store.has(`health_permission_status::${OWNER_A}`)).toBe(false);
+      expect(store.has(`env_location_cache::${OWNER_A}`)).toBe(false);
+    });
+
+    it('never touches owner Bs registry-driven keys when clearing owner A', async () => {
+      const keyA = ownerStorageKey(OWNER_A, 'voice/transcript');
+      const keyB = ownerStorageKey(OWNER_B, 'voice/transcript');
+      localStore.set(keyA, 'a-transcript');
+      localStore.set(keyB, 'b-transcript');
+
+      await clearOwnerCaches(OWNER_A);
+
+      expect(localStore.has(keyA)).toBe(false);
+      expect(localStore.has(keyB)).toBe(true);
+    });
+
+    it('does NOT remove the owner-scoped dismissed-prompt state — retained across sign-out', async () => {
+      const key = ownerStorageKey(OWNER_A, 'prompts/dismissed/personal');
+      localStore.set(key, JSON.stringify(['some dismissed question']));
+
+      await clearOwnerCaches(OWNER_A);
+
+      expect(localStore.has(key)).toBe(true);
+    });
   });
 });

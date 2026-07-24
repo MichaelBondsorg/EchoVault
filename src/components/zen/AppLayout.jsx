@@ -29,6 +29,10 @@ import RecipesScreen from '../reflections/RecipesScreen';
 import SessionPrepScreen from '../reflections/SessionPrepScreen';
 import ExperimentsScreen from '../experiments/ExperimentsScreen';
 import { getFlag } from '../../config/flags';
+// PRIV-01: shared owner-scoped dismissed-prompt helpers (previously this
+// file had its own copy of this logic against an unowned global key — see
+// src/services/prompts/activePrompts.js's header comment).
+import { getDismissedPromptKeys, dismissReflectionPrompt as dismissReflectionPromptForOwner } from '../../services/prompts/activePrompts';
 
 /**
  * AppLayout - Main application shell with Zen & Bento navigation
@@ -131,13 +135,9 @@ const AppLayout = ({
     const twoWeeksAgo = new Date(now);
     twoWeeksAgo.setDate(twoWeeksAgo.getDate() - 14);
 
-    // Load dismissed questions from localStorage
-    const dismissedKey = `reflections_dismissed_${category}`;
-    let dismissed = new Set();
-    try {
-      const stored = localStorage.getItem(dismissedKey);
-      if (stored) dismissed = new Set(JSON.parse(stored));
-    } catch (e) { /* ignore */ }
+    // Load this owner's dismissed questions (PRIV-01: owner-scoped, never a
+    // global key — see services/prompts/activePrompts.js).
+    const dismissed = getDismissedPromptKeys(user?.uid, category);
 
     const categoryEntries = entries.filter(e => e.category === category);
     const allQuestions = [];
@@ -172,7 +172,7 @@ const AppLayout = ({
         return true;
       })
       .slice(0, 10);
-  }, [entries, category]);
+  }, [entries, category, user?.uid]);
 
   // Reset reflection index when modal opens or questions change
   useEffect(() => {
@@ -199,21 +199,10 @@ const AppLayout = ({
     setDaySummary({ isOpen: false, date: null, dayData: null });
   };
 
-  // Function to dismiss a reflection prompt (add to localStorage)
+  // Dismiss a reflection prompt (PRIV-01: owner-scoped, shared with
+  // activePrompts.js/PromptWidget.jsx — see that module's header comment).
   const dismissReflectionPrompt = (prompt) => {
-    if (!prompt || !category) return;
-    const key = `reflections_dismissed_${category}`;
-    try {
-      const stored = localStorage.getItem(key);
-      const dismissed = stored ? JSON.parse(stored) : [];
-      const promptKey = prompt.toLowerCase();
-      if (!dismissed.includes(promptKey)) {
-        dismissed.push(promptKey);
-        localStorage.setItem(key, JSON.stringify(dismissed));
-      }
-    } catch (e) {
-      console.error('Failed to dismiss reflection:', e);
-    }
+    dismissReflectionPromptForOwner(prompt, category, user?.uid);
   };
 
   // Direct handlers for FAB actions - show modal immediately

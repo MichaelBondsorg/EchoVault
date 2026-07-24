@@ -216,7 +216,9 @@ export const getCompanionContext = async ({
   // ==========================================
   // TIER 2: Session Buffer (volatile memory)
   // ==========================================
-  const buffer = sessionBuffer || getSessionBuffer();
+  // PRIV-01: getSessionBuffer now requires an owner uid (owner-scoped key —
+  // see services/memory/sessionBuffer.js). userId is this call's owner.
+  const buffer = sessionBuffer || getSessionBuffer(userId);
 
   if (buffer?.recentEntry && !isExpired(buffer.expiresAt)) {
     // Strict scoping (R1 precedent): when scoped, the just-captured entry is
