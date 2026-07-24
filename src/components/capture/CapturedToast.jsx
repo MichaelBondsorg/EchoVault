@@ -245,7 +245,7 @@ const CapturedToast = () => {
           )}
         </div>
         {errorId === current.id && (
-          <p className="text-xs text-honey-700 dark:text-honey-300">
+          <p className="text-xs text-accent-deep">
             Couldn&apos;t save that — try again.
           </p>
         )}

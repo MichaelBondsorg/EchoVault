@@ -375,7 +375,7 @@ const OpenLoopsWidget = ({
               </div>
 
               {errorIds.has(loop.id) && (
-                <p className="mt-1 text-[10px] text-honey-700 dark:text-honey-300">
+                <p className="mt-1 text-[10px] text-accent-deep">
                   Couldn&apos;t save that — try again.
                 </p>
               )}
@@ -431,7 +431,7 @@ const OpenLoopsWidget = ({
                       </button>
                     </div>
                     {errorIds.has(loop.id) && (
-                      <p className="mt-0.5 text-[10px] text-honey-700 dark:text-honey-300">
+                      <p className="mt-0.5 text-[10px] text-accent-deep">
                         Couldn&apos;t save that — try again.
                       </p>
                     )}

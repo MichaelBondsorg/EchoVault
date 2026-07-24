@@ -224,7 +224,7 @@ const IntentSuggestionTray = ({ entryId }) => {
               )}
             </div>
             {errorId === suggestion.id && (
-              <p className="mt-1 text-xs text-honey-700 dark:text-honey-300">
+              <p className="mt-1 text-xs text-accent-deep">
                 Couldn&apos;t save that — try again.
               </p>
             )}
