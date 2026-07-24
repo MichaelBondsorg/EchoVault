@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content" />
     <!-- Standard PWA meta tag (required for modern browsers) -->
     <meta name="mobile-web-app-capable" content="yes" />
     <!-- Apple-specific PWA meta tags (for Safari compatibility) -->
@@ -74,19 +74,10 @@
     </style>
   </head>
   <body>
-    <script>
-      (function() {
-        document.documentElement.dataset.accent = localStorage.getItem('engram-accent') || 'blue';
-        var d = localStorage.getItem('engram-dark-mode');
-        var isDark = d === 'dark' || (d !== 'light' && window.matchMedia('(prefers-color-scheme: dark)').matches);
-        if (isDark) {
-          document.documentElement.classList.add('dark');
-          document.documentElement.style.colorScheme = 'dark';
-        } else {
-          document.documentElement.style.colorScheme = 'light';
-        }
-      })();
-    </script>
+    <!-- Externalized (SEC-01) so the deployed CSP's script-src can be
+         'self' with no inline-script hash to keep in sync. See
+         public/boot-theme.js. -->
+    <script src="/boot-theme.js"></script>
     <div id="root"></div>
     <script type="module" src="/src/main.jsx"></script>
   </body>
