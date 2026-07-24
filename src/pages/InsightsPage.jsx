@@ -2236,7 +2236,9 @@ const NexusInsightCard = ({ insight, isExpanded, onToggleExpand, onDismiss, onRe
         role={hasExpandableContent ? 'button' : undefined}
         tabIndex={hasExpandableContent ? 0 : undefined}
         aria-expanded={hasExpandableContent ? isExpanded : undefined}
-        aria-controls={hasExpandableContent ? panelId : undefined}
+        // Panel is conditionally rendered — aria-controls must only
+        // reference an id present in the DOM, so it drops while collapsed.
+        aria-controls={hasExpandableContent && isExpanded ? panelId : undefined}
         aria-label={hasExpandableContent ? cardTitle : undefined}
       >
         <div className="flex items-start gap-3">

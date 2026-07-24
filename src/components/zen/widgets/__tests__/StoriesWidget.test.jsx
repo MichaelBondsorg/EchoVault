@@ -27,6 +27,9 @@ describe('StoriesWidget - A11Y-02: story row semantics', () => {
     const row = screen.getByRole('button', { name: 'Big Project' });
     expect(row.getAttribute('tabindex')).toBe('0');
     expect(row.getAttribute('aria-expanded')).toBe('false');
+    // The panel is AnimatePresence-unmounted while collapsed, so
+    // aria-controls must be absent (it may only reference an id in the DOM).
+    expect(row.getAttribute('aria-controls')).toBeNull();
   });
 
   it('clicking the row expands it (aria-expanded flips to true) and shows the date range', () => {
@@ -64,6 +67,15 @@ describe('StoriesWidget - A11Y-02: story row semantics', () => {
     render(<StoriesWidget entries={entries} category="work" />);
     const rowA = screen.getByRole('button', { name: 'Project Alpha' });
     const rowB = screen.getByRole('button', { name: 'Project Beta' });
-    expect(rowA.getAttribute('aria-controls')).not.toBe(rowB.getAttribute('aria-controls'));
+    // aria-controls is only present while a row is expanded (the panel is
+    // unmounted otherwise), and only one story expands at a time — so
+    // capture each row's panel id during its own expansion.
+    fireEvent.click(rowA);
+    const idA = rowA.getAttribute('aria-controls');
+    fireEvent.click(rowB); // collapses A, expands B
+    const idB = rowB.getAttribute('aria-controls');
+    expect(idA).toBeTruthy();
+    expect(idB).toBeTruthy();
+    expect(idA).not.toBe(idB);
   });
 });

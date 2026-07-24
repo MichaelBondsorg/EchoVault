@@ -172,7 +172,9 @@ const StoriesWidget = ({
                 role="button"
                 tabIndex={isEditing ? -1 : 0}
                 aria-expanded={isExpanded}
-                aria-controls={panelId}
+                // Panel is AnimatePresence-unmounted while collapsed —
+                // aria-controls must only reference an id present in the DOM.
+                aria-controls={isExpanded ? panelId : undefined}
                 aria-label={story.name}
                 whileHover={{ scale: isEditing ? 1 : 1.01 }}
               >

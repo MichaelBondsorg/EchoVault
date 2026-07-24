@@ -34,6 +34,12 @@ const GlassCard = ({
   const isClickable = interactive && typeof onClick === 'function' && !isEditing;
   const handleKeyDown = (e) => {
     if (!isClickable) return;
+    // Keydown bubbles from nested REAL interactive children (e.g. the
+    // "Why am I seeing this?" button inside NexusInsightsWidget's cards)
+    // even when their click handlers stopPropagation. Without this guard,
+    // preventDefault() below would kill the nested button's native
+    // Enter/Space activation and hijack it into the card's onClick.
+    if (e.target !== e.currentTarget) return;
     if (e.key === 'Enter' || e.key === ' ') {
       e.preventDefault();
       onClick(e);

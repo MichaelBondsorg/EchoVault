@@ -425,11 +425,14 @@ describe('OpenLoopsWidget - upcoming footer', () => {
 
     const toggle = screen.getByText('+1 upcoming').closest('button');
     expect(toggle.getAttribute('aria-expanded')).toBe('false');
-    const controlsId = toggle.getAttribute('aria-controls');
-    expect(controlsId).toBeTruthy();
+    // Collapsed: the <ul> is unmounted, so aria-controls must be absent
+    // (it may only reference an id present in the DOM).
+    expect(toggle.getAttribute('aria-controls')).toBeNull();
 
     fireEvent.click(toggle);
     expect(toggle.getAttribute('aria-expanded')).toBe('true');
+    const controlsId = toggle.getAttribute('aria-controls');
+    expect(controlsId).toBeTruthy();
     expect(document.getElementById(controlsId)).toBeTruthy();
     expect(document.getElementById(controlsId).textContent).toMatch(/renew passport/);
   });

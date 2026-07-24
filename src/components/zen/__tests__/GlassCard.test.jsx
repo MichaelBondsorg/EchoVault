@@ -67,6 +67,30 @@ describe('GlassCard - A11Y-02: keyboard/role semantics for interactive+onClick c
     expect(container.querySelector('[role="button"]')).toBeNull();
   });
 
+  it('Enter/Space on a NESTED real button never hijacks into the card onClick (keydown bubbles past stopPropagation-on-click)', () => {
+    // Regression (A11Y-02 review Critical): NexusInsightsWidget nests a real
+    // <button> ("Why am I seeing this?") inside an interactive GlassCard.
+    // The nested button's click handler stopPropagation()s, but keydown
+    // bubbles anyway — without the e.target !== e.currentTarget guard the
+    // card preventDefault()ed the button's native activation and navigated.
+    const cardClick = vi.fn();
+    const nestedClick = vi.fn();
+    render(
+      <GlassCard interactive onClick={cardClick}>
+        <button type="button" onClick={(e) => { e.stopPropagation(); nestedClick(); }}>
+          Why am I seeing this?
+        </button>
+      </GlassCard>
+    );
+    const nested = screen.getByText('Why am I seeing this?');
+    const enterEvent = fireEvent.keyDown(nested, { key: 'Enter' });
+    fireEvent.keyDown(nested, { key: ' ' });
+    expect(cardClick).not.toHaveBeenCalled();
+    // preventDefault must NOT have been called on the bubbled event — the
+    // browser's native button activation depends on it going through.
+    expect(enterEvent).toBe(true); // fireEvent returns false if preventDefault was called
+  });
+
   it('is inert (no role/tabIndex, no key activation) while isEditing', () => {
     const onClick = vi.fn();
     const { container } = render(

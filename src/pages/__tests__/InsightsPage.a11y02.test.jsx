@@ -122,6 +122,9 @@ describe('InsightsPage — NexusInsightCard disclosure header (A11Y-02)', () => 
     const header = screen.getByRole('button', { name: 'Evening walks lift your mood' });
     expect(header.getAttribute('tabindex')).toBe('0');
     expect(header.getAttribute('aria-expanded')).toBe('false');
+    // Panel is conditionally rendered — aria-controls must be absent while
+    // collapsed (it may only reference an id present in the DOM).
+    expect(header.getAttribute('aria-controls')).toBeNull();
   });
 
   it('clicking the header flips aria-expanded to true and reveals the body via aria-controls', () => {

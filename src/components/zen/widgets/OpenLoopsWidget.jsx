@@ -409,7 +409,9 @@ const OpenLoopsWidget = ({
               type="button"
               onClick={() => setShowUpcoming((v) => !v)}
               aria-expanded={showUpcoming}
-              aria-controls={upcomingPanelId}
+              // The <ul> only mounts while expanded — aria-controls must only
+              // reference an id present in the DOM.
+              aria-controls={showUpcoming ? upcomingPanelId : undefined}
               className="relative flex items-center gap-1 text-[10px] text-faint hover:text-muted-foreground transition-colors before:absolute before:-inset-3.5 before:content-['']"
             >
               <ChevronDown size={12} className={showUpcoming ? 'rotate-180 transition-transform' : 'transition-transform'} />
