@@ -1,12 +1,17 @@
 # Trustworthy capture — physical-device validation matrix
 
 Companion to `src/__tests__/validationMatrix.test.js` (the automatable rows).
-The rows below can only be validated on real hardware — iOS backgrounding,
-lock-screen behavior, and force-quit recovery are not observable in a
-simulator or in Vitest/jsdom. Run this checklist on a physical iPhone before
-enabling any capture-durability flag in production, and again whenever
-`src/services/capture/**`, `ios/App/App/Capture/**`, or the native capture
-plugin change.
+Every row below is blocked-by-device — it needs real hardware chrome (iOS
+backgrounding, lock-screen behavior, force-quit recovery, real Dynamic Type/
+VoiceOver/Reduce Motion) that a simulator or Vitest/jsdom cannot reproduce,
+so none of it runs in CI; each row's own "Depends on"/setup text states
+exactly what device-only behavior it needs and why. Run rows 1-8 on a
+physical iPhone before enabling any capture-durability flag in production,
+and again whenever `src/services/capture/**`, `ios/App/App/Capture/**`, or
+the native capture plugin change. Run rows 9-10 (added by the capture-sheet/
+A11Y-02 work — no capture-durability flag involved) whenever the New Entry
+capture sheet layout or the a11y semantics of Home/Insights/tasks/loops
+change.
 
 Source plan: `docs/superpowers/plans/2026-07-20-trustworthy-capture-and-intelligence.md`
 (Task D3). Runbook: `docs/quality/trustworthy-capture-runbook.md`.

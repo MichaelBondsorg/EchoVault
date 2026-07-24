@@ -16,6 +16,10 @@ const FORBIDDEN = ['gemini-2.0-flash', 'gemini-2.0-flash-exp'];
 const ROOTS = [
   join(process.cwd(), 'functions'),
   join(process.cwd(), 'relay-server', 'src'),
+  // QA-01: frontend tree included so a model literal bypassing the registry
+  // on the client side fails too (MOD-02's own report flagged this gap —
+  // its 4 dead-arg call sites were exactly this class).
+  join(process.cwd(), 'src'),
 ];
 
 const SKIP_DIRS = new Set(['node_modules', 'dist', '__tests__', 'coverage']);

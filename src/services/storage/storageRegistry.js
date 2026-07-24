@@ -77,6 +77,65 @@ export const LEGACY_MIGRATION = Object.freeze({
   NONE: 'none',
 });
 
+/**
+ * QA-01 (docs/superpowers/plans/2026-07-24-full-product-review.md, PRIV-01
+ * reviewer mandate): a second, deliberately separate "entry type" from
+ * `STORAGE_REGISTRY` above. `STORAGE_REGISTRY` models a LIVE, owner-scoped
+ * key with a per-uid `ownerKeyFor` — `storageRegistry.test.js` iterates it
+ * unconditionally and calls `ownerKeyFor('user-a')`/`ownerKeyFor('user-b')`
+ * on every entry, asserting a distinct key per uid. A prefix-swept, already-
+ * dead legacy key family (nothing currently writes it; a sweep only ever
+ * deletes whatever it finds) has no such per-uid key and would fail that
+ * shape check, so it is NOT a `STORAGE_REGISTRY` row (this was already
+ * called out, before this array existed, in both
+ * `sessionBuffer.js`'s `sweepLegacyVoiceTranscripts` and
+ * `legacyAudioBackupSweep.js`'s own header comments).
+ *
+ * `LEGACY_PREFIX_SWEEPS` is the source of truth those two sweeps' prefixes
+ * are declared in instead, and what `storageKeyLint.test.js` (the QA-01
+ * hard-blocker registry-enforcement lint) treats as pre-authorized: any
+ * `localStorage` call site using a literal key that STARTS WITH one of
+ * these prefixes is allowed, matching the sweep's own `.startsWith(...)`
+ * quarantine logic exactly.
+ */
+export const LEGACY_PREFIX_SWEEPS = Object.freeze([
+  {
+    id: 'legacyPrefix.voiceTranscript',
+    type: 'legacyPrefix',
+    prefix: 'voice_transcript_',
+    module: 'src/services/memory/sessionBuffer.js (sweepLegacyVoiceTranscripts), src/hooks/useVoiceRelay.js (legacyVoiceTranscriptKey)',
+    description: 'Pre-owner-scoping per-session voice transcript keys (one per session, never removed pre-PRIV-01); swept unconditionally at startup/login, never read.',
+  },
+  {
+    id: 'legacyPrefix.audioBackup',
+    type: 'legacyPrefix',
+    prefix: 'echov_audio_backup_',
+    module: 'src/services/storage/legacyAudioBackupSweep.js (quarantineLegacyAudioBackups)',
+    description: 'Dead useBackgroundAudio hook\'s unowned raw-audio backups (feature removed; no live writer). Quarantined unconditionally at startup, never read.',
+  },
+]);
+
+/**
+ * QA-01 storage-key lint allowlist: pre-existing, genuinely non-sensitive,
+ * intentionally-global (not owner-scoped) literal `localStorage` keys that
+ * predate this lint and don't belong in `STORAGE_REGISTRY` (that registry's
+ * schema is for SENSITIVE, owner-scoped state only — see the module
+ * docstring above; `ownerKeyFor` has no meaning for a device-wide UI
+ * preference or "have I seen this tip" flag). Not a security/privacy
+ * exemption — the lint's actual purpose is "no NEW ad-hoc key sneaks in
+ * without being declared somewhere"; these are the already-declared,
+ * already-shipping ones.
+ *
+ * Each entry's `key` must match EXACTLY what's passed to
+ * `localStorage.setItem/getItem/removeItem` as a literal at the call site.
+ */
+export const KNOWN_LITERAL_KEYS = Object.freeze([
+  { key: 'recentPrompts', module: 'src/utils/prompts.js', reason: 'Device-wide "recently shown reflection prompts" de-dupe list; not owner-scoped, not sensitive.' },
+  { key: 'entityManagement.tipsDismissed', module: 'src/pages/EntityManagementPage.jsx', reason: 'Device-wide dismissible-tips-banner flag; matches the WhatsNewModal/page-tips pattern documented in CLAUDE.md.' },
+  { key: 'engram_audio_vault_index', module: 'src/services/audio/audioVault.js', reason: 'Legacy (pre-owner-scoping) audio-vault index key, read once at startup for quarantine only — never written to again.' },
+  { key: 'engram:quarantine:audio-index', module: 'src/services/audio/audioVault.js', reason: 'Quarantine landing key the legacy audio-vault index above is moved into (marks the device as already-migrated); never read back.' },
+]);
+
 // Personalized prompt state is filed per journaling category — a closed,
 // small set (see src/stores/uiStore.js's `category` default plus every
 // category toggle in the app, e.g. EntryCard.jsx's work/personal switch).
@@ -250,6 +309,8 @@ export function highSensitivityUserKeys() {
 
 export default {
   STORAGE_REGISTRY,
+  LEGACY_PREFIX_SWEEPS,
+  KNOWN_LITERAL_KEYS,
   OWNER_SCOPE,
   SENSITIVITY,
   SIGN_OUT_BEHAVIOR,

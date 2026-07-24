@@ -2,7 +2,20 @@ import { defineConfig } from 'vitest/config';
 import react from '@vitejs/plugin-react';
 import path from 'path';
 
+// QA-01 CI-parity: `npm run test:ci-parity` sets CI_PARITY=1, which points
+// Vite's env-file lookup at an intentionally empty directory instead of the
+// repo root — so `import.meta.env.VITE_*` resolves to undefined locally,
+// exactly like a GitHub Actions checkout (no .env file ever exists there,
+// and the hosting workflow's `test` job never exports VITE_* either). This
+// is what previously masked a CI-only module-load throw (missing
+// VITE_FIREBASE_API_KEY in src/config/firebase.js) behind a passing local
+// `npm test` — local .env supplied the value that CI never has.
+const envDir = process.env.CI_PARITY === '1'
+  ? path.resolve(__dirname, '.ci-parity-empty-env')
+  : undefined;
+
 export default defineConfig({
+  envDir,
   plugins: [react()],
   resolve: {
     alias: {

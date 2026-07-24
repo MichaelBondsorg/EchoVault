@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import {
   STORAGE_REGISTRY,
+  LEGACY_PREFIX_SWEEPS,
+  KNOWN_LITERAL_KEYS,
   OWNER_SCOPE,
   SENSITIVITY,
   SIGN_OUT_BEHAVIOR,
@@ -75,5 +77,40 @@ describe('storageRegistry.js (PRIV-01)', () => {
       'memory.sessionBuffer',
       'voice.transcript',
     ]);
+  });
+});
+
+describe('LEGACY_PREFIX_SWEEPS (QA-01 / PRIV-01 mandate)', () => {
+  it('every entry declares a non-empty id, type, prefix and module', () => {
+    expect(LEGACY_PREFIX_SWEEPS.length).toBeGreaterThan(0);
+    for (const entry of LEGACY_PREFIX_SWEEPS) {
+      expect(entry.id).toBeTruthy();
+      expect(entry.type).toBe('legacyPrefix');
+      expect(typeof entry.prefix).toBe('string');
+      expect(entry.prefix.length).toBeGreaterThan(0);
+      expect(entry.module).toBeTruthy();
+      expect(entry.description).toBeTruthy();
+    }
+  });
+
+  it('declares the two known legacy sweep prefixes', () => {
+    const prefixes = LEGACY_PREFIX_SWEEPS.map((e) => e.prefix).sort();
+    expect(prefixes).toEqual(['echov_audio_backup_', 'voice_transcript_']);
+  });
+});
+
+describe('KNOWN_LITERAL_KEYS (QA-01 storage-key lint allowlist)', () => {
+  it('every entry declares a non-empty key, module and reason', () => {
+    expect(KNOWN_LITERAL_KEYS.length).toBeGreaterThan(0);
+    for (const entry of KNOWN_LITERAL_KEYS) {
+      expect(entry.key).toBeTruthy();
+      expect(entry.module).toBeTruthy();
+      expect(entry.reason).toBeTruthy();
+    }
+  });
+
+  it('has no duplicate keys', () => {
+    const keys = KNOWN_LITERAL_KEYS.map((e) => e.key);
+    expect(new Set(keys).size).toBe(keys.length);
   });
 });
