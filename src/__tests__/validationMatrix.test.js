@@ -1058,23 +1058,39 @@ describe('Matrix row: Reassigning a space only ever touches spaceId + updatedAt'
 // ===========================================================================
 describe('Matrix row: Closing/answering an open loop never touches the source entry', () => {
   it('answerLoop only updates the intent doc + appends a user_decisions record — no /entries/ write of any kind', async () => {
+    // INT-02 made the two writes ONE atomic batch (intent update + decision
+    // set). The invariant is unchanged — only intent + user_decisions refs,
+    // never /entries/ — but it is now asserted against the batch ops.
+    const batch = { update: vi.fn(), set: vi.fn(), delete: vi.fn(), commit: vi.fn(async () => {}) };
+    firestoreMocks.writeBatch.mockReturnValueOnce(batch);
+
     const { answerLoop } = await import('../services/intents/intentClient.js');
 
     await answerLoop({}, 'user-1', 'intent-1', 'entry-42');
 
-    expect(firestoreMocks.updateDoc).toHaveBeenCalledTimes(1);
-    const [ref, payload] = firestoreMocks.updateDoc.mock.calls[0];
+    expect(batch.commit).toHaveBeenCalledTimes(1);
+    expect(batch.update).toHaveBeenCalledTimes(1);
+    const [ref, payload] = batch.update.mock.calls[0];
     expect(ref.__doc).toBe('artifacts/echo-vault-v5-fresh/users/user-1/intents/intent-1');
     expect(ref.__doc).not.toContain('/entries/');
     expect(payload.state).toBe('completed_state');
     expect(payload.outcome).toEqual(expect.objectContaining({ kind: 'answered', answerEntryId: 'entry-42' }));
 
     // The decision append targets user_decisions — again never /entries/.
-    expect(firestoreMocks.addDoc).toHaveBeenCalledTimes(1);
-    const [colRef, decision] = firestoreMocks.addDoc.mock.calls[0];
-    expect(colRef.__col).toBe('artifacts/echo-vault-v5-fresh/users/user-1/user_decisions');
+    expect(batch.set).toHaveBeenCalledTimes(1);
+    const [decisionRef, decision] = batch.set.mock.calls[0];
+    const decisionPath = decisionRef.__doc || decisionRef.__col;
+    expect(String(decisionPath)).toContain('/user_decisions');
+    expect(String(decisionPath)).not.toContain('/entries/');
     expect(decision.action).toBe('answered');
     expect(decision.targetId).toBe('intent-1');
+
+    // No stray writes outside the batch, and nothing ever touched /entries/.
+    expect(firestoreMocks.updateDoc).not.toHaveBeenCalled();
+    expect(firestoreMocks.addDoc).not.toHaveBeenCalled();
+    for (const call of [...batch.update.mock.calls, ...batch.set.mock.calls]) {
+      expect(String(call[0].__doc || call[0].__col)).not.toContain('/entries/');
+    }
   });
 });
 

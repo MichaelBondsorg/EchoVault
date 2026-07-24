@@ -13,8 +13,8 @@ import { Button, Pebble, LinenWaveBackground } from './components/cloud';
 import {
   auth, db,
   onAuthStateChanged, signOut, signInWithCustomToken,
-  GoogleAuthProvider, signInWithPopup, signInWithCredential, OAuthProvider,
-  exchangeGoogleTokenFn, exchangeAppleTokenFn,
+  GoogleAuthProvider, signInWithPopup, OAuthProvider,
+  exchangeAppleTokenFn,
   createUserWithEmailAndPassword, signInWithEmailAndPassword,
   sendPasswordResetEmail, updateProfile,
   // MFA support
@@ -24,6 +24,10 @@ import {
   Timestamp, deleteDoc, doc, updateDoc, limit, setDoc,
   runTransaction, increment
 } from './config/firebase';
+import {
+  signInWithNativeGoogle,
+  NATIVE_GOOGLE_AUTH_FAILURE_REASONS,
+} from './services/auth/nativeGoogleAuth';
 import { Capacitor, registerPlugin } from '@capacitor/core';
 import { App as CapacitorApp } from '@capacitor/app';
 import {
@@ -2263,185 +2267,56 @@ export default function App() {
   };
 
   // Handle sign-in with logging - supports both web and native
+  // AUTH-01: native Google sign-in runs through one explicit state machine
+  // (src/services/auth/nativeGoogleAuth.js) — idle -> native_bridge ->
+  // credential_exchange -> awaiting_sdk_user -> authenticated | failed.
+  // `authenticated` is only ever reported once the Firebase SDK itself
+  // confirms the user; the "restart the app" copy below now only fires from
+  // the machine's terminal failed(sdk_confirmation_timeout) state, and is
+  // honest about not knowing whether sign-in actually completed — it no
+  // longer claims success it can't back up.
   const handleSignIn = async () => {
     console.log('[Engram] Sign-in button clicked, attempting Google sign-in...');
     const isNative = Capacitor.isNativePlatform();
 
-    try {
-      if (isNative) {
-        // Native iOS/Android: Use Capacitor social login plugin via registerPlugin
-        console.log('[Engram] Using native Google Sign-In...');
-        const SocialLogin = registerPlugin('SocialLogin');
+    if (isNative) {
+      const result = await signInWithNativeGoogle();
 
-        // Initialize with iOS client ID
-        // Note: webClientId is needed for Firebase idToken, iosClientId for native iOS
-        await SocialLogin.initialize({
-          google: {
-            webClientId: import.meta.env.VITE_GOOGLE_WEB_CLIENT_ID,
-            iOSClientId: import.meta.env.VITE_GOOGLE_IOS_CLIENT_ID,
-            iOSServerClientId: import.meta.env.VITE_GOOGLE_IOS_SERVER_CLIENT_ID,
-          }
-        });
-
-        const response = await SocialLogin.login({
-          provider: 'google',
-          options: {
-            scopes: ['email', 'profile']
-          }
-        });
-
-        console.log('[Engram] Native sign-in response:', response);
-
-        if (response?.result?.idToken) {
-          console.log('[Engram] Got idToken, using Cloud Function to exchange for Firebase token...');
-
-          try {
-            // Use direct fetch to Cloud Function instead of httpsCallable
-            // httpsCallable may also hang in WKWebView like signInWithCredential
-            console.log('[Engram] Calling exchangeGoogleToken via fetch...');
-
-            const functionUrl = 'https://us-central1-echo-vault-app.cloudfunctions.net/exchangeGoogleToken';
-
-            const fetchResponse = await fetch(functionUrl, {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-              },
-              body: JSON.stringify({
-                data: { idToken: response.result.idToken }
-              })
-            });
-
-            console.log('[Engram] Fetch response status:', fetchResponse.status);
-
-            if (!fetchResponse.ok) {
-              const errorText = await fetchResponse.text();
-              console.error('[Engram] Cloud Function error:', errorText);
-              throw new Error(`Cloud Function failed: ${fetchResponse.status} - ${errorText}`);
-            }
-
-            const exchangeResult = await fetchResponse.json();
-            console.log('[Engram] Cloud Function returned:', exchangeResult.result?.user?.email);
-
-            // Firebase callable functions wrap the response in { result: ... }
-            const resultData = exchangeResult.result || exchangeResult;
-
-            if (!resultData?.customToken) {
-              console.error('[Engram] No custom token in response:', exchangeResult);
-              throw new Error('Cloud Function did not return a custom token');
-            }
-
-            // Try signInWithCustomToken with initializeAuth (should work now)
-            // If it still hangs, fall back to REST API
-            console.log('[Engram] Signing in with custom token...');
-
-            let signInCompleted = false;
-            let signInError = null;
-            let signInResult = null;
-
-            // Start signInWithCustomToken (non-blocking)
-            signInWithCustomToken(auth, resultData.customToken)
-              .then((result) => {
-                signInCompleted = true;
-                signInResult = result;
-                console.log('[Engram] signInWithCustomToken resolved! User:', result.user?.uid);
-              })
-              .catch((err) => {
-                signInCompleted = true;
-                signInError = err;
-                console.error('[Engram] signInWithCustomToken rejected:', err.code, err.message);
-              });
-
-            // Wait up to 5 seconds for SDK sign-in
-            console.log('[Engram] Waiting for SDK sign-in (5s timeout)...');
-            for (let i = 0; i < 10; i++) {
-              await new Promise(resolve => setTimeout(resolve, 500));
-              if (signInCompleted || auth.currentUser) break;
-            }
-
-            // If SDK worked, we're done
-            if (auth.currentUser) {
-              console.log('[Engram] Sign-in successful via SDK! User:', auth.currentUser.email);
-            } else if (signInCompleted && signInResult) {
-              console.log('[Engram] Sign-in completed! User:', signInResult.user?.email);
-            } else if (signInError) {
-              throw signInError;
-            } else {
-              // SDK is hanging - use REST API fallback (Gemini's suggestion)
-              console.log('[Engram] SDK hanging, trying REST API fallback...');
-
-              const API_KEY = import.meta.env.VITE_FIREBASE_API_KEY;
-              if (!API_KEY) {
-                throw new Error('Firebase API key is required for authentication');
-              }
-              const restUrl = `https://identitytoolkit.googleapis.com/v1/accounts:signInWithCustomToken?key=${API_KEY}`;
-
-              const restResponse = await fetch(restUrl, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  token: resultData.customToken,
-                  returnSecureToken: true,
-                }),
-              });
-
-              const restData = await restResponse.json();
-              console.log('[Engram] REST API response:', restData.localId ? 'success' : 'failed');
-
-              if (restData.error) {
-                throw new Error(restData.error.message);
-              }
-
-              // REST API worked - we have idToken and refreshToken
-              // Store them and wait for auth state to update
-              console.log('[Engram] REST API returned tokens, user:', restData.localId);
-
-              // The auth state listener should pick up the change
-              // Wait a bit more for it
-              for (let i = 0; i < 10; i++) {
-                await new Promise(resolve => setTimeout(resolve, 500));
-                if (auth.currentUser) {
-                  console.log('[Engram] User detected after REST:', auth.currentUser.uid);
-                  break;
-                }
-              }
-
-              if (!auth.currentUser) {
-                // Last resort: show success anyway since REST worked
-                console.warn('[Engram] Auth state not updated but REST succeeded');
-                alert('Sign-in successful! Please restart the app if it doesn\'t update.');
-              }
-            }
-
-          } catch (fbError) {
-            console.error('[Engram] Firebase auth failed:', fbError);
-            console.error('[Engram] Error details:', fbError?.message, fbError?.code);
-
-            // Handle specific Cloud Function errors
-            if (fbError.code === 'functions/unauthenticated') {
-              alert('Google token verification failed. Please try signing in again.');
-            } else if (fbError.code === 'functions/internal') {
-              alert('Server error during sign-in. Please try again.');
-            } else {
-              alert(`Sign-in failed: ${fbError?.message || String(fbError)}`);
-            }
-            throw fbError;
-          }
-        } else if (response?.result?.accessToken?.token) {
-          // Fallback: some configurations return accessToken instead
-          console.log('[Engram] No idToken, accessToken not supported with Cloud Function approach');
-          alert('Sign-in configuration error. Please contact support.');
-          throw new Error('accessToken sign-in not supported');
-        } else {
-          console.error('[Engram] No idToken or accessToken in response');
-          throw new Error('No ID token or access token received from Google Sign-In');
-        }
-      } else {
-        // Web: Use popup-based sign-in
-        console.log('[Engram] Using web popup sign-in...');
-        const result = await signInWithPopup(auth, new GoogleAuthProvider());
-        console.log('[Engram] Sign-in successful:', result.user?.uid);
+      if (result.status === 'authenticated') {
+        console.log('[Engram] Native Google sign-in complete');
+        return;
       }
+
+      const { reason, error } = result;
+      const REASONS = NATIVE_GOOGLE_AUTH_FAILURE_REASONS;
+
+      if (reason === REASONS.SDK_CONFIRMATION_TIMEOUT) {
+        // The custom-token exchange succeeded but the SDK never confirmed
+        // the session within budget — unlike the old code, this is surfaced
+        // as an honest "not sure it worked" prompt, not a success message.
+        alert("Sign-in may still be completing. If the app doesn't update in a few seconds, please restart it.");
+      } else if (error?.code === 'functions/unauthenticated') {
+        alert('Google token verification failed. Please try signing in again.');
+      } else if (error?.code === 'functions/internal') {
+        alert('Server error during sign-in. Please try again.');
+      } else if (reason === REASONS.BRIDGE_ACCESS_TOKEN_ONLY) {
+        alert('Sign-in configuration error. Please contact support.');
+      } else if (reason === REASONS.BRIDGE_NO_TOKEN) {
+        alert('No sign-in token received from Google. Please try again.');
+      } else if (reason === REASONS.BRIDGE_ERROR && /cancel/i.test(error?.message || '')) {
+        console.log('[Engram] User cancelled native Google sign-in');
+      } else {
+        alert(`Sign-in failed: ${error?.message || 'please try again.'}`);
+      }
+      return;
+    }
+
+    // Web: unchanged popup-based sign-in (already reports success only via
+    // the Firebase SDK's own promise resolution — out of AUTH-01's scope).
+    try {
+      console.log('[Engram] Using web popup sign-in...');
+      const result = await signInWithPopup(auth, new GoogleAuthProvider());
+      console.log('[Engram] Sign-in successful:', result.user?.uid);
     } catch (error) {
       console.error('[Engram] Sign-in error:', error.code || error.name, error.message);
       if (error.code === 'auth/popup-blocked') {
