@@ -96,7 +96,7 @@ const ClaimFeed = ({
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
       >
-        <Layers size={40} className="mx-auto text-faint mb-3" />
+        <Layers size={40} className="mx-auto text-decorative mb-3" />
         <p className="text-secondary-foreground font-medium">Nothing verified yet</p>
         <p className="text-muted-foreground text-sm mt-2">
           Engram only surfaces what your recorded days actually support. Keep journaling — a

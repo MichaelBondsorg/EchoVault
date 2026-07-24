@@ -303,7 +303,7 @@ const GroundingExercise = ({
                   placeholder={`I can ${currentStep.sense}...`}
                   className={`
                     flex-1 px-4 py-3 bg-card border-2 border-border
-                    rounded-xl text-foreground placeholder-faint
+                    rounded-xl text-foreground placeholder:text-[var(--text-placeholder)]
                     focus:outline-none ${colorClasses.focusBorder}
                     transition-colors
                   `}
@@ -370,7 +370,7 @@ export const GroundingExerciseCompact = ({ onStart }) => (
       <div className="text-foreground font-medium">5-4-3-2-1 Grounding</div>
       <div className="text-muted-foreground text-sm">Anchor to present moment using your senses</div>
     </div>
-    <ChevronRight className="text-faint ml-auto" size={20} />
+    <ChevronRight className="text-decorative ml-auto" size={20} />
   </button>
 );
 

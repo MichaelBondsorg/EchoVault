@@ -384,7 +384,7 @@ const SettingsPage = ({
           {isLoading ? (
             <Loader2 size={18} className="animate-spin text-muted-foreground" aria-hidden="true" />
           ) : item.onClick ? (
-            <ChevronRight size={18} className="text-faint" aria-hidden="true" />
+            <ChevronRight size={18} className="text-decorative" aria-hidden="true" />
           ) : null}
         </div>
       </button>

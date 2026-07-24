@@ -102,7 +102,7 @@ const SafetyPlanScreen = ({ plan, onUpdate, onClose }) => {
               value={newItem}
               onChange={(e) => setNewItem(e.target.value)}
               placeholder="Add new item..."
-              className="flex-1 rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-faint focus:border-accent focus:outline-none"
+              className="flex-1 rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-[var(--text-placeholder)] focus:border-accent focus:outline-none"
               autoFocus
             />
             <Button onClick={() => addItem(section)} className="px-4">

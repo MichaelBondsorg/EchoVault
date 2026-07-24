@@ -767,7 +767,7 @@ const UnifiedConversation = ({
               setTimeout(() => messagesEndRef.current?.scrollIntoView({ block: 'end' }), 350);
             }}
             placeholder="Message your companion…"
-            className="flex-1 min-h-[44px] bg-card border border-border rounded-full px-[18px] py-3 text-[13.5px] text-foreground placeholder:text-faint focus:outline-none focus:ring-2 focus:ring-accent"
+            className="flex-1 min-h-[44px] bg-card border border-border rounded-full px-[18px] py-3 text-[13.5px] text-foreground placeholder:text-[var(--text-placeholder)] focus:outline-none focus:ring-2 focus:ring-accent"
           />
 
           <button
@@ -809,7 +809,7 @@ const UnifiedConversation = ({
     // onto the same Cloud palette for consistency, without inventing D2's
     // spec-specific signature elements.
     const statusColors = {
-      disconnected: 'bg-faint',
+      disconnected: 'bg-decorative',
       connecting: 'bg-accent animate-pulse',
       connected: 'bg-accent',
       speaking: 'bg-accent-deep animate-pulse',
@@ -933,7 +933,7 @@ const UnifiedConversation = ({
                 {voiceIsRecording ? (
                   <MicOff size={36} className="text-background animate-pulse" aria-hidden="true" />
                 ) : voiceStatus === 'speaking' ? (
-                  <Mic size={36} className="text-faint" aria-hidden="true" />
+                  <Mic size={36} className="text-decorative" aria-hidden="true" />
                 ) : (
                   <Mic size={36} className="text-background" aria-hidden="true" />
                 )}
@@ -1303,7 +1303,7 @@ const TextInputForSession = ({ placeholder, onSubmit, optional }) => {
         onChange={e => setText(e.target.value)}
         placeholder={placeholder}
         rows={4}
-        className="w-full bg-card border border-border rounded-xl px-4 py-3 text-foreground placeholder:text-faint focus:outline-none focus:ring-2 focus:ring-accent resize-none"
+        className="w-full bg-card border border-border rounded-xl px-4 py-3 text-foreground placeholder:text-[var(--text-placeholder)] focus:outline-none focus:ring-2 focus:ring-accent resize-none"
       />
 
       <div className="flex gap-3 mt-4">

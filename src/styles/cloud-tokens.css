@@ -5,8 +5,41 @@
   --divider: #f2f0ea;
   --foreground: #1e1d19;
   --secondary-foreground: #4a4842;
-  --muted-foreground: #8a867b;
-  --faint: #b0aca1;
+
+  /* A11Y-01 (2026-07-24 product review): purpose-split text tiers, computed
+     against BOTH documented backgrounds a text token can sit on
+     (--card #ffffff and --background #f7f6f2 in light; the equivalent
+     block below covers dark). See src/__tests__/tokenContrast.test.js for
+     the enforced ratios, and .superpowers/sdd/task-a11y01-report.md for
+     full before/after numbers.
+       --text-secondary:   readable secondary text (captions, timestamps,
+                            helper copy, card metadata). >=4.5:1 required.
+       --text-placeholder: input placeholders / disabled affordances only.
+                            >=3:1 target (WCAG's normal-text floor does not
+                            apply to placeholder/disabled text, but we still
+                            hold a floor so it stays legible).
+       --text-decorative:  non-text ornaments (illustrative icons next to
+                            redundant text, disabled icon glyphs, purely
+                            decorative status dots). Unconstrained by design
+                            — WCAG 1.4.11 non-text contrast does not apply to
+                            pure decoration or to disabled controls. */
+  --text-secondary: #6d6a61;   /* ~5.0:1 on --background, ~5.4:1 on --card */
+  --text-placeholder: #8a867b; /* ~3.36:1 on --background, ~3.64:1 on --card */
+  --text-decorative: #b0aca1;  /* unconstrained; former --faint value */
+
+  /* `muted-foreground` and `faint` are the long-established Tailwind utility
+     names (`text-muted-foreground`, `text-faint`, `placeholder-faint`, ...)
+     consumed in ~50 component files. Both were previously distinct raw
+     colors that failed the 4.5:1 normal-text floor (muted-foreground
+     ~3.64:1/3.36:1; faint ~2.27:1/2.1:1) despite being used for real,
+     must-read text (timestamps, captions, helper copy) in the large
+     majority of call sites, not just decoration. Repointing BOTH at the
+     compliant --text-secondary value fixes contrast globally for every
+     existing usage with zero component edits. The genuinely-decorative and
+     genuinely-placeholder minority of call sites were migrated to
+     --text-decorative / --text-placeholder directly (see report). */
+  --muted-foreground: var(--text-secondary);
+  --faint: var(--text-secondary);
   --primary: #1e1d19;
   --primary-foreground: #f7f6f2;
   --destructive: #b0665a;
@@ -76,8 +109,18 @@
   --divider: #292a2e;
   --foreground: #f0f0ee;
   --secondary-foreground: #b9b8b2;
-  --muted-foreground: #96979a;
-  --faint: #6a6b6e;
+
+  /* A11Y-01: dark-theme counterpart of the :root block above. Dark
+     --muted-foreground was already >=4.5:1 (~5.6:1/6.2:1), so
+     --text-secondary reuses it unchanged; dark --faint (~3.09:1/3.4:1)
+     failed the same normal-text floor as light --faint and is bumped the
+     same way. */
+  --text-secondary: #96979a;   /* ~5.64:1 on --card, ~6.2:1 on --background */
+  --text-placeholder: #6a6b6e; /* ~3.09:1 on --card, ~3.4:1 on --background */
+  --text-decorative: #6a6b6e;  /* unconstrained; former --faint value */
+
+  --muted-foreground: var(--text-secondary);
+  --faint: var(--text-secondary);
   --primary: var(--accent-btn);
   --primary-foreground: var(--accent-btn-fg);
   --destructive-wash: #2a1c1a;

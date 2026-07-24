@@ -32,8 +32,14 @@ export default {
         divider: 'var(--divider)',
         foreground: 'var(--foreground)',
         'secondary-foreground': 'var(--secondary-foreground)',
+        // A11Y-01: `muted-foreground`/`faint` are now both compliant
+        // (>=4.5:1 normal-text) readable-secondary colors — see
+        // src/styles/cloud-tokens.css. `decorative` is the new,
+        // unconstrained tier for non-text ornaments; genuinely-decorative
+        // call sites were migrated to it explicitly (see task-a11y01-report.md).
         'muted-foreground': 'var(--muted-foreground)',
         faint: 'var(--faint)',
+        decorative: 'var(--text-decorative)',
         destructive: 'var(--destructive)',
 
         // Core Surface Colors

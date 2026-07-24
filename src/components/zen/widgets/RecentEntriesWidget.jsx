@@ -70,7 +70,7 @@ const RecentEntriesWidget = ({
             >
               <span
                 className="mt-[5px] h-2 w-2 flex-none rounded-full"
-                style={{ background: i === 0 ? 'var(--accent)' : 'var(--faint)' }}
+                style={{ background: i === 0 ? 'var(--accent)' : 'var(--text-decorative)' }}
                 aria-hidden="true"
               />
               <div className="min-w-0 flex-1">

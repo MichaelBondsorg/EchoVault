@@ -135,7 +135,7 @@ const JournalPage = ({
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
           placeholder="Search entries..."
-          className="min-h-11 w-full rounded-full border border-border bg-card py-2.5 pl-10 pr-4 text-sm text-foreground placeholder-faint focus:outline-none focus:ring-2 focus:ring-accent"
+          className="min-h-11 w-full rounded-full border border-border bg-card py-2.5 pl-10 pr-4 text-sm text-foreground placeholder:text-[var(--text-placeholder)] focus:outline-none focus:ring-2 focus:ring-accent"
         />
       </div>
 

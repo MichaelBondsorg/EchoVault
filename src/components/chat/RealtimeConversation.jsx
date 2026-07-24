@@ -174,7 +174,7 @@ const RealtimeConversation = ({ entries, onClose, category, onSaveEntry }) => {
   // statusColors mapping already established for the identical
   // useVoiceRelay status set in UnifiedConversation.jsx's renderVoice() (D1).
   const statusColors = {
-    disconnected: 'bg-faint',
+    disconnected: 'bg-decorative',
     connecting: 'bg-accent animate-pulse',
     connected: 'bg-accent',
     speaking: 'bg-accent-deep animate-pulse',
@@ -367,7 +367,7 @@ const RealtimeConversation = ({ entries, onClose, category, onSaveEntry }) => {
                   value={editableTitle}
                   onChange={(e) => setEditableTitle(e.target.value)}
                   placeholder="Entry title..."
-                  className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-faint focus:border-accent focus:outline-none"
+                  className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-[var(--text-placeholder)] focus:border-accent focus:outline-none"
                 />
               </div>
             )}
@@ -526,7 +526,7 @@ const RealtimeConversation = ({ entries, onClose, category, onSaveEntry }) => {
                 {isRecording ? (
                   <MicOff size={36} className="animate-pulse text-background" aria-hidden="true" />
                 ) : status === 'speaking' ? (
-                  <Mic size={36} className="text-faint" aria-hidden="true" />
+                  <Mic size={36} className="text-decorative" aria-hidden="true" />
                 ) : (
                   <Mic size={36} className="text-background" aria-hidden="true" />
                 )}

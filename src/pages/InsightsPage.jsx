@@ -626,7 +626,7 @@ const InsightsPage = ({
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
             >
-              <Brain size={40} className="mx-auto text-faint mb-3" />
+              <Brain size={40} className="mx-auto text-decorative mb-3" />
               <p className="text-secondary-foreground font-medium">
                 No insights yet
               </p>
