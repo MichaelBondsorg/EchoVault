@@ -4,6 +4,9 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Sparkles, ChevronRight, Loader2, Brain, AlertCircle, TrendingUp, Target, Lightbulb } from 'lucide-react';
 import GlassCard from '../GlassCard';
 import { useNexusInsights } from '../../../hooks/useNexusInsights';
+import { useClaims } from '../../../hooks/useClaims';
+import { rankClaims } from '../../../services/insights/claims/rankClaims';
+import { badgeLabelFor } from '../../insights/ClaimCard';
 import { getFlag } from '../../../config/flags';
 import ReceiptSheet from '../../insights/ReceiptSheet';
 
@@ -130,10 +133,108 @@ const MiniInsightCard = ({ insight, index, onWhyThis }) => {
   );
 };
 
+// claimType -> icon/gradient styling for the compact Home widget card,
+// paralleling INSIGHT_STYLES above. Keys mirror ClaimCard.jsx's own
+// CLAIM_TYPE_BADGE map (claimSchema.js's CLAIM_TYPES) so every claimType the
+// backend can produce has a deliberate style, not a silent fallback.
+const CLAIM_STYLES = {
+  experiment_result: {
+    icon: Target,
+    gradient: 'from-sage-400/20 to-sage-500/20',
+    iconColor: 'text-sage-600',
+  },
+  pattern_to_watch: {
+    icon: TrendingUp,
+    gradient: 'from-lavender-400/20 to-lavender-500/20',
+    iconColor: 'text-lavender-600',
+  },
+  observation: {
+    icon: Lightbulb,
+    gradient: 'from-honey-400/20 to-honey-500/20',
+    iconColor: 'text-honey-600',
+  },
+};
+
+/**
+ * MiniClaimCard — the compact Home widget's claims-mode content (INS-01,
+ * 2026-07-24 review brief). Renders the SAME `claim.wording` and the SAME
+ * `badgeLabelFor(claim)` label `ClaimCard.jsx` renders on the Insights page
+ * (imported, not re-derived) — the acceptance gate is "same claim, same
+ * title/state/language" on Home vs Insights, so the two surfaces share the
+ * exact badge-label function and read the claim's own wording field
+ * directly rather than reformatting it.
+ *
+ * Deliberately reuses the legacy MiniInsightCard's own established trigger
+ * language ("Why am I seeing this?") rather than ClaimCard's two-button
+ * "See days"/"Feedback" row — this compact tile has room for one action,
+ * and it opens the exact same `ReceiptSheet` (claimType branch) that both
+ * of ClaimCard's buttons open on the Insights page, so the receipt content
+ * itself — not just the trigger label — is what's held identical between
+ * the two surfaces. `e.stopPropagation()` matches MiniInsightCard's own
+ * button (see that component above): without it, a tap on this trigger
+ * would bubble into GlassCard's onClick and navigate to /insights before
+ * the sheet ever opened.
+ */
+const MiniClaimCard = ({ claim, onWhyThis }) => {
+  const style = CLAIM_STYLES[claim.claimType] || CLAIM_STYLES.observation;
+  const Icon = style.icon;
+
+  return (
+    <motion.div
+      className={`
+        p-3 rounded-xl
+        bg-gradient-to-br ${style.gradient}
+        border border-white/30
+      `}
+      initial={{ opacity: 0, x: -10 }}
+      animate={{ opacity: 1, x: 0 }}
+    >
+      <div className="flex items-start gap-2">
+        <div className={`mt-0.5 ${style.iconColor}`}>
+          <Icon size={14} />
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="text-xs font-medium text-warm-700">
+            {badgeLabelFor(claim)}
+          </p>
+          <p className="text-xs text-warm-500 line-clamp-2 mt-0.5">
+            {claim.wording}
+          </p>
+          {onWhyThis && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onWhyThis(claim);
+              }}
+              className="relative mt-1 inline-flex min-h-[28px] items-center text-[11px] font-medium text-warm-600 underline decoration-warm-300 underline-offset-2 before:absolute before:-inset-2 before:content-['']"
+            >
+              Why am I seeing this?
+            </button>
+          )}
+        </div>
+      </div>
+    </motion.div>
+  );
+};
+
 /**
  * NexusInsightsWidget - Displays Nexus insights on the dashboard
  *
- * Shows top 2 insights with tap to see more
+ * Shows top 2 insights with tap to see more.
+ *
+ * INS-01 (2026-07-24 review brief, P0): when `insightClaims` is ON, this
+ * widget stops invoking `useNexusInsights` for display and instead renders
+ * the single top-ranked VERIFIED claim (`useClaims` + the shared
+ * `rankClaims` feed ordering — same function ClaimFeed/InsightsPage use),
+ * in the compact `MiniClaimCard` above. This closes the gap the review
+ * named: Home used to keep showing legacy Nexus insights (including
+ * whatever the old engine's stale cache held) while the Insights page had
+ * already cut over to the verified-claim feed — same claim, same badge
+ * label, same wording, same receipt sheet on both surfaces now. When the
+ * flag is OFF, every line below the flag check renders byte-identically to
+ * the pre-INS-01 widget — no claims data is ever read in that case (see
+ * `useClaims.js`'s own internal flag gate).
  */
 const NexusInsightsWidget = ({
   user,
@@ -143,20 +244,60 @@ const NexusInsightsWidget = ({
   entries = [],
 }) => {
   const navigate = useNavigate();
+  const insightClaimsOn = getFlag('insightClaims');
 
+  // Called unconditionally (rules of hooks), but `enabled: false` short-
+  // circuits every internal fetch/generation effect when claims mode is on
+  // — mirrors InsightsPage.jsx's own `useNexusInsights(user, { ...,
+  // enabled: !getFlag('insightClaims') })` call exactly, so this widget
+  // never queries or generates Nexus for display once the cutover is on
+  // (acceptance gate: "zero current UI queries or generates Nexus for
+  // proactive display").
   const {
     insights,
     isCalibrating,
     calibrationProgress,
     loading,
     error,
-  } = useNexusInsights(user, { autoRefresh: false });
+  } = useNexusInsights(user, { autoRefresh: false, enabled: !insightClaimsOn });
 
   // Take top 2 insights for the widget
   const displayInsights = (insights || []).slice(0, 2);
 
+  // Claim-backed Home widget content (INS-01). Always called (rules of
+  // hooks) — the hook itself never reads Firestore unless
+  // getFlag('insightClaims') is on (useClaims.js), so mounting it flag-OFF
+  // is a no-op for `listActiveClaims` call counts, matching InsightsPage's
+  // own `useClaims(user)` call site.
+  const { claims, loading: claimsLoading, refresh: refreshClaims } = useClaims(user);
+
+  // Same ranking the unified ClaimFeed uses (claimType weight > |effect
+  // size| > recency) — "top-ranked" means the same #1 claim a user would
+  // see first on the Insights page's ClaimFeed, not a separately-ordered
+  // pick. One card (compact single-card presentation per the plan
+  // decision), not the top 2 the legacy branch below shows — a single
+  // verified claim is a stronger, more legible Home signal than a partial
+  // list of them in this tile's footprint.
+  const topClaim = useMemo(() => {
+    if (!insightClaimsOn) return null;
+    return rankClaims(claims, { now: Date.now() })[0] || null;
+  }, [insightClaimsOn, claims]);
+
   const receiptsOn = getFlag('insightReceipts');
   const [receiptInsight, setReceiptInsight] = useState(null);
+
+  // Mirrors InsightsPage.jsx's own `handleReceiptFeedback`: a claim
+  // feedback submission (e.g. `do_not_analyze`) can change the claim's
+  // status, and `useClaims` only ever surfaces `status === 'verified'`
+  // claims — re-running `refresh` is what actually drops a
+  // now-suppressed claim from this widget without a remount. Legacy
+  // (non-claim) insight feedback never sets `.claimType`, so this is a
+  // harmless no-op on that path.
+  const handleReceiptFeedback = () => {
+    if (receiptInsight?.claimType) {
+      refreshClaims();
+    }
+  };
 
   // Synchronous entryId -> entry lookup for ReceiptSheet's source rows
   // (v1: never fetches a missing entry from Firestore — see ReceiptSheet's
@@ -203,14 +344,43 @@ const NexusInsightsWidget = ({
             <Sparkles size={16} className="text-honey-500" />
             <span className="text-xs font-medium">AI Insights</span>
           </div>
-          {!isEditing && displayInsights.length > 0 && (
+          {!isEditing && (insightClaimsOn ? Boolean(topClaim) : displayInsights.length > 0) && (
             <ChevronRight size={16} className="text-warm-400" />
           )}
         </div>
 
         {/* Content */}
         <div className="flex-1 flex flex-col">
-          {loading ? (
+          {insightClaimsOn ? (
+            // INS-01 claims-mode content — see the widget's own doc comment
+            // above. `claimsLoading`/empty/present mirror the legacy
+            // branch's own loading/empty/populated shapes below, just
+            // sourced from `useClaims` instead of `useNexusInsights`.
+            claimsLoading ? (
+              <div className="flex-1 flex items-center justify-center">
+                <Loader2 size={20} className="animate-spin text-warm-400" />
+              </div>
+            ) : topClaim ? (
+              <div className="space-y-2">
+                <AnimatePresence>
+                  <MiniClaimCard
+                    key={topClaim.id}
+                    claim={topClaim}
+                    onWhyThis={setReceiptInsight}
+                  />
+                </AnimatePresence>
+              </div>
+            ) : (
+              <div className="flex-1 flex flex-col items-center justify-center text-center px-2">
+                <div className="w-10 h-10 rounded-full bg-warm-100 flex items-center justify-center mb-2">
+                  <Sparkles size={18} className="text-warm-400" />
+                </div>
+                <p className="text-xs text-warm-500">
+                  Keep journaling — a verified pattern will show up here once your data supports one.
+                </p>
+              </div>
+            )
+          ) : loading ? (
             <div className="flex-1 flex items-center justify-center">
               <Loader2 size={20} className="animate-spin text-warm-400" />
             </div>
@@ -274,13 +444,19 @@ const NexusInsightsWidget = ({
       </div>
       </GlassCard>
 
-      {receiptsOn && (
+      {/* Mounted whenever EITHER insightReceipts OR insightClaims is on —
+          same rationale as InsightsPage.jsx's ReceiptSheet mount guard
+          (F1, closure-wave final review): gating solely on insightReceipts
+          would leave MiniClaimCard's "Why am I seeing this?" trigger as a
+          silent no-op with insightClaims ON and insightReceipts OFF. */}
+      {(receiptsOn || insightClaimsOn) && (
         <ReceiptSheet
           insight={receiptInsight}
           entriesById={entriesById}
           uid={user?.uid}
           open={Boolean(receiptInsight)}
           onClose={() => setReceiptInsight(null)}
+          onFeedback={handleReceiptFeedback}
         />
       )}
     </>

@@ -70,7 +70,11 @@ beforeEach(() => {
 });
 
 describe('NexusInsightsWidget — insightReceipts flag OFF', () => {
-  beforeEach(() => getFlag.mockReturnValue(false));
+  // Flag-aware (not a blanket mockReturnValue): insightClaims stays false
+  // throughout this file so every test here exercises the legacy Nexus
+  // branch — INS-01's own claims-mode behavior has its own test file
+  // (NexusInsightsWidget.claims.test.jsx).
+  beforeEach(() => getFlag.mockImplementation(() => false));
 
   it('renders no "Why am I seeing this?" trigger', () => {
     render(<NexusInsightsWidget user={USER} entries={ENTRIES} />);
@@ -84,7 +88,9 @@ describe('NexusInsightsWidget — insightReceipts flag OFF', () => {
 });
 
 describe('NexusInsightsWidget — insightReceipts flag ON', () => {
-  beforeEach(() => getFlag.mockReturnValue(true));
+  // insightClaims stays false here too — only insightReceipts is ON, so
+  // this still exercises the legacy branch (with its receipt trigger).
+  beforeEach(() => getFlag.mockImplementation((flag) => flag === 'insightReceipts'));
 
   it('renders the trigger and opens the sheet in two taps (card -> trigger -> sources visible)', () => {
     render(<NexusInsightsWidget user={USER} entries={ENTRIES} />);

@@ -88,7 +88,10 @@ const USER = { uid: 'user-1' };
 beforeEach(() => {
   vi.clearAllMocks();
   navigate.mockReset();
-  getFlag.mockReturnValue(true);
+  // insightReceipts ON, insightClaims OFF — this file exercises the legacy
+  // Nexus branch's real-portal bubbling regression specifically; INS-01's
+  // claims-mode branch has its own coverage (NexusInsightsWidget.claims.test.jsx).
+  getFlag.mockImplementation((flag) => flag === 'insightReceipts');
   useNexusInsightsMock.mockReturnValue({
     insights: [INSIGHT],
     isCalibrating: false,
