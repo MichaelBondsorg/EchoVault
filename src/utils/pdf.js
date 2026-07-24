@@ -1,35 +1,21 @@
-// PDF LOADER (lazy-loads jsPDF from CDN)
+// PDF LOADER
+//
+// jsPDF is bundled as a normal dependency (see package.json — pinned exact,
+// SEC-01) but loaded via a dynamic import so it never enters the main
+// bundle: Vite/Rollup emits it as its own chunk that only downloads when a
+// PDF export actually runs. This replaced a runtime <script src="..."> tag
+// that fetched jspdf.umd.min.js from a third-party CDN with no Subresource
+// Integrity — arbitrary third-party code execution on every load of this
+// module, and a host the CSP would otherwise have had to allow in
+// script-src.
 let jsPDFPromise = null;
 
 export const loadJsPDF = () => {
   if (typeof window === 'undefined') {
     return Promise.reject(new Error('PDF export is only available in the browser'));
   }
-  if (window.jspdf && window.jspdf.jsPDF) {
-    return Promise.resolve(window.jspdf.jsPDF);
+  if (!jsPDFPromise) {
+    jsPDFPromise = import('jspdf').then((mod) => mod.jsPDF ?? mod.default);
   }
-  if (jsPDFPromise) return jsPDFPromise;
-
-  jsPDFPromise = new Promise((resolve, reject) => {
-    const existing = document.querySelector('script[data-jspdf]');
-    if (existing) {
-      existing.addEventListener('load', () => {
-        if (window.jspdf && window.jspdf.jsPDF) resolve(window.jspdf.jsPDF);
-        else reject(new Error('jsPDF global not found after script load'));
-      });
-      existing.addEventListener('error', () => reject(new Error('Failed to load jsPDF script')));
-      return;
-    }
-    const script = document.createElement('script');
-    script.src = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js';
-    script.async = true;
-    script.dataset.jspdf = 'true';
-    script.onload = () => {
-      if (window.jspdf && window.jspdf.jsPDF) resolve(window.jspdf.jsPDF);
-      else reject(new Error('jsPDF global not found after script load'));
-    };
-    script.onerror = () => reject(new Error('Failed to load jsPDF script'));
-    document.body.appendChild(script);
-  });
   return jsPDFPromise;
 };

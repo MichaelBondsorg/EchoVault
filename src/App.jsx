@@ -136,40 +136,11 @@ import DetectedStrip from './components/entries/DetectedStrip';
 import { AppLayout } from './components/zen';
 import QuickLogModal from './components/zen/QuickLogModal';
 
-// --- PDF LOADER (lazy-loads jsPDF from CDN) ---
-let jsPDFPromise = null;
-const loadJsPDF = () => {
-  if (typeof window === 'undefined') {
-    return Promise.reject(new Error('PDF export is only available in the browser'));
-  }
-  if (window.jspdf && window.jspdf.jsPDF) {
-    return Promise.resolve(window.jspdf.jsPDF);
-  }
-  if (jsPDFPromise) return jsPDFPromise;
-
-  jsPDFPromise = new Promise((resolve, reject) => {
-    const existing = document.querySelector('script[data-jspdf]');
-    if (existing) {
-      existing.addEventListener('load', () => {
-        if (window.jspdf && window.jspdf.jsPDF) resolve(window.jspdf.jsPDF);
-        else reject(new Error('jsPDF global not found after script load'));
-      });
-      existing.addEventListener('error', () => reject(new Error('Failed to load jsPDF script')));
-      return;
-    }
-    const script = document.createElement('script');
-    script.src = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js';
-    script.async = true;
-    script.dataset.jspdf = 'true';
-    script.onload = () => {
-      if (window.jspdf && window.jspdf.jsPDF) resolve(window.jspdf.jsPDF);
-      else reject(new Error('jsPDF global not found after script load'));
-    };
-    script.onerror = () => reject(new Error('Failed to load jsPDF script'));
-    document.body.appendChild(script);
-  });
-  return jsPDFPromise;
-};
+// PDF export uses `loadJsPDF` from `./utils/pdf` (dynamic `import('jspdf')`,
+// SEC-01) via TherapistExportScreen/sessionPrep — this file never generates
+// PDFs directly, so no loader lives here. (Previously a byte-for-byte
+// duplicate CDN-injecting loader was defined here but never called; removed
+// as dead code rather than converted.)
 
 // Analysis functions (classifyEntry, analyzeEntry, generateInsight, etc.) imported from services/analysis
 
@@ -2836,7 +2807,7 @@ export default function App() {
                       onChange={(e) => setMfaCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
                       required
                       autoFocus
-                      className="w-full px-4 py-3 rounded-xl border border-border bg-card text-foreground placeholder-faint focus:outline-none focus:ring-2 focus:ring-accent transition-all text-center text-2xl tracking-widest font-mono"
+                      className="w-full px-4 py-3 rounded-xl border border-border bg-card text-foreground placeholder:text-[var(--text-placeholder)] focus:outline-none focus:ring-2 focus:ring-accent transition-all text-center text-2xl tracking-widest font-mono"
                     />
 
                     {authError && (
@@ -2880,7 +2851,7 @@ export default function App() {
                         placeholder="Name (optional)"
                         value={displayName}
                         onChange={(e) => setDisplayName(e.target.value)}
-                        className="w-full min-h-11 px-4 py-2.5 rounded-xl border border-border bg-card text-sm text-foreground placeholder-faint focus:outline-none focus:ring-2 focus:ring-accent transition-all"
+                        className="w-full min-h-11 px-4 py-2.5 rounded-xl border border-border bg-card text-sm text-foreground placeholder:text-[var(--text-placeholder)] focus:outline-none focus:ring-2 focus:ring-accent transition-all"
                       />
                     )}
 
@@ -2890,7 +2861,7 @@ export default function App() {
                       value={email}
                       onChange={(e) => setEmail(e.target.value)}
                       required
-                      className="w-full min-h-11 px-4 py-2.5 rounded-xl border border-border bg-card text-sm text-foreground placeholder-faint focus:outline-none focus:ring-2 focus:ring-accent transition-all"
+                      className="w-full min-h-11 px-4 py-2.5 rounded-xl border border-border bg-card text-sm text-foreground placeholder:text-[var(--text-placeholder)] focus:outline-none focus:ring-2 focus:ring-accent transition-all"
                     />
 
                     {authMode !== 'reset' && (
@@ -2902,7 +2873,7 @@ export default function App() {
                           onChange={(e) => setPassword(e.target.value)}
                           required
                           minLength={6}
-                          className="w-full min-h-11 px-4 py-2.5 pr-10 rounded-xl border border-border bg-card text-sm text-foreground placeholder-faint focus:outline-none focus:ring-2 focus:ring-accent transition-all"
+                          className="w-full min-h-11 px-4 py-2.5 pr-10 rounded-xl border border-border bg-card text-sm text-foreground placeholder:text-[var(--text-placeholder)] focus:outline-none focus:ring-2 focus:ring-accent transition-all"
                         />
                         <button
                           type="button"

@@ -64,12 +64,18 @@
 	<false/>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<!-- SEC-01: NSAllowsArbitraryLoads / NSAllowsArbitraryLoadsInWebContent
+	     removed. Every host this app talks to (Firebase, Google identity/
+	     functions, Open-Meteo, sunrise-sunset.org, the Cloud Run voice
+	     relay) is HTTPS/WSS, so the ATS default (TLS 1.2+, no exceptions)
+	     applies with zero per-domain carve-outs needed. NSAllowsLocalNetworking
+	     is kept — it only permits requests to literal local/link-local
+	     addresses (still under standard ATS TLS rules) and Capacitor's
+	     capacitor.config.ts does not enable a cleartext dev server
+	     (`server.cleartext`/`server.url` are both commented out), so there
+	     is no cleartext dev-server exception to scope here either. -->
 	<key>NSAppTransportSecurity</key>
 	<dict>
-		<key>NSAllowsArbitraryLoads</key>
-		<true/>
-		<key>NSAllowsArbitraryLoadsInWebContent</key>
-		<true/>
 		<key>NSAllowsLocalNetworking</key>
 		<true/>
 	</dict>

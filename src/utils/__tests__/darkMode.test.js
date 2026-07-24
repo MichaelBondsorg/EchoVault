@@ -193,11 +193,17 @@ describe('darkMode utility', () => {
 });
 
 describe('FOUC prevention script in index.html', () => {
+  // SEC-01: this used to be an inline <script> block; it's now externalized
+  // to public/boot-theme.js (loaded via a plain blocking <script src>) so
+  // the deployed CSP's script-src can be 'self' with no inline-script hash
+  // to keep in sync every time this logic changes.
   const htmlPath = path.resolve(__dirname, '../../../index.html');
   const html = fs.readFileSync(htmlPath, 'utf-8');
+  const bootScriptPath = path.resolve(__dirname, '../../../public/boot-theme.js');
+  const bootScript = fs.readFileSync(bootScriptPath, 'utf-8');
 
-  it('contains an inline script before the root div', () => {
-    const scriptIndex = html.indexOf('<script>');
+  it('loads the externalized boot script, synchronously, before the root div', () => {
+    const scriptIndex = html.indexOf('<script src="/boot-theme.js">');
     const rootIndex = html.indexOf('<div id="root">');
     expect(scriptIndex).toBeGreaterThan(-1);
     expect(rootIndex).toBeGreaterThan(-1);
@@ -205,14 +211,14 @@ describe('FOUC prevention script in index.html', () => {
   });
 
   it('references engram-dark-mode localStorage key', () => {
-    expect(html).toMatch(/engram-dark-mode/);
+    expect(bootScript).toMatch(/engram-dark-mode/);
   });
 
   it('references matchMedia for prefers-color-scheme', () => {
-    expect(html).toMatch(/prefers-color-scheme.*dark/);
+    expect(bootScript).toMatch(/prefers-color-scheme.*dark/);
   });
 
   it('adds dark class to documentElement', () => {
-    expect(html).toMatch(/classList\.add.*dark/);
+    expect(bootScript).toMatch(/classList\.add.*dark/);
   });
 });

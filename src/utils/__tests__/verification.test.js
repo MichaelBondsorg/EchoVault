@@ -225,17 +225,28 @@ describe('Verification: Typography Audit', () => {
 
 describe('Verification: Dark Mode Infrastructure', () => {
   it('should have FOUC prevention script in index.html before React mount point', () => {
+    // SEC-01: the inline <script> that used to carry this logic was
+    // externalized to public/boot-theme.js so the deployed CSP's
+    // script-src can be 'self' with no inline-script hash to maintain.
+    // index.html now just needs to load it, synchronously, before #root.
     const html = fs.readFileSync(path.join(SRC_DIR, 'index.html'), 'utf-8');
 
-    const scriptIdx = html.indexOf('engram-dark-mode');
+    const scriptIdx = html.indexOf('boot-theme.js');
     const rootIdx = html.indexOf('id="root"');
 
     expect(scriptIdx).toBeGreaterThan(-1);
     expect(rootIdx).toBeGreaterThan(-1);
     expect(scriptIdx).toBeLessThan(rootIdx);
+    // Must be a plain blocking classic script — no async/defer/type=module —
+    // so it still runs before #root paints, same as the inline version did.
+    const scriptTagMatch = html.match(/<script[^>]*src="\/boot-theme\.js"[^>]*>/);
+    expect(scriptTagMatch).not.toBeNull();
+    expect(scriptTagMatch[0]).not.toMatch(/\basync\b|\bdefer\b|type=["']module["']/);
 
-    expect(html).toContain('localStorage');
-    expect(html).toContain('matchMedia');
+    const bootScript = fs.readFileSync(path.join(SRC_DIR, 'public/boot-theme.js'), 'utf-8');
+    expect(bootScript).toContain('engram-dark-mode');
+    expect(bootScript).toContain('localStorage');
+    expect(bootScript).toContain('matchMedia');
   });
 
   it('should have dark mode toggle using 3-state storage', () => {
@@ -353,5 +364,32 @@ describe('Verification: Build Check', () => {
     expect(html).not.toContain('fonts.googleapis.com');
     expect(html).not.toContain('fonts.gstatic.com');
     expect(html).toContain("font-family: 'Geist Sans', Geist, Inter");
+  });
+});
+
+// ─── SEC-01: No Runtime CDN Script Injection ───────────────────────
+
+describe('Verification: No Runtime CDN Script Injection', () => {
+  it('should not reference cdnjs.cloudflare.com anywhere in application source', () => {
+    // jsPDF used to be injected at runtime via a <script src="https://
+    // cdnjs.cloudflare.com/..."> tag with no Subresource Integrity — a
+    // supply-chain/CSP hole closed by bundling jspdf as a pinned
+    // dependency (package.json) loaded via a lazy `import('jspdf')`
+    // (src/utils/pdf.js). This assertion is the regression guard: nothing
+    // under src/ may re-introduce a CDN <script> injection.
+    const matches = grepSrc('cdnjs\\.cloudflare\\.com').filter(m => !isTestFile(m.file));
+    expect(matches).toEqual([]);
+  });
+
+  it('should declare jspdf as a pinned, exact-version dependency', () => {
+    const pkg = JSON.parse(fs.readFileSync(path.join(SRC_DIR, 'package.json'), 'utf-8'));
+    expect(pkg.dependencies.jspdf).toBe('2.5.1');
+  });
+
+  it('should load jsPDF via dynamic import, not a global/window lookup', () => {
+    const pdfUtil = fs.readFileSync(path.join(SRC_PATH, 'utils/pdf.js'), 'utf-8');
+    expect(pdfUtil).toContain("import('jspdf')");
+    expect(pdfUtil).not.toContain('window.jspdf');
+    expect(pdfUtil).not.toContain('document.createElement(\'script\')');
   });
 });

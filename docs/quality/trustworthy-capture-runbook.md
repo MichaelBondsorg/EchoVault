@@ -1496,3 +1496,183 @@ ExperimentResultView}.test.jsx`, `src/services/experiments/__tests__/
 `functions/src/insights/__tests__/writeClaimWordingHandler.test.js`,
 `src/hooks/__tests__/useNexusInsights.test.js`,
 `src/config/__tests__/flags.test.js`.
+
+## SEC-01 (transport + browser hardening)
+
+Closes the product review's SEC-01 finding: iOS ATS allowed arbitrary
+network/web-content loads, jsPDF was injected at runtime from a third-party
+CDN with no Subresource Integrity, and Firebase Hosting shipped no CSP or
+standard security headers. Four independent changes, no flag (this is not a
+product feature — it ships enforcing, immediately, in the next hosting
+deploy).
+
+### 1. Bundled jsPDF
+
+`jspdf@2.5.1` (pinned exact, matching the version the CDN loader requested)
+is now a normal `package.json` dependency. `src/utils/pdf.js`'s `loadJsPDF()`
+loads it via a lazy `import('jspdf')` instead of injecting a
+`<script src="https://.../jspdf.umd.min.js">` tag and polling
+`window.jspdf`. Because it's a dynamic import Vite/Rollup still emits it as
+its own chunk (`dist/assets/jspdf.es.min-*.js`, ~356 KB / ~116 KB gzip at
+time of writing) — it is not in the main bundle and only downloads when a
+PDF export (`TherapistExportScreen`, `sessionPrep.js`) actually runs, so
+this is CSP-motivated, not a bundle-size regression.
+
+`src/App.jsx` had a byte-for-byte duplicate of the old CDN loader
+(`loadJsPDF`, local to that file) that was never called anywhere in the
+file — the real call sites (`TherapistExportScreen.jsx`, `sessionPrep.js`)
+always imported from `src/utils/pdf.js`. It was deleted as dead code rather
+than converted.
+
+Regression guard: `src/utils/__tests__/verification.test.js` →
+`Verification: No Runtime CDN Script Injection` asserts (a) zero
+`cdnjs.cloudflare.com` references anywhere under `src/` (excluding test
+files, which necessarily mention the string to test for its absence), (b)
+`jspdf` is pinned to an exact version in `package.json`, (c) `pdf.js` uses
+`import('jspdf')` and contains neither `window.jspdf` nor a
+`document.createElement('script')` call.
+
+### 2. Firebase Hosting headers (`firebase.json`)
+
+Added a `hosting.headers` block matching every route (`**`). Full CSP
+string and the justification for every directive:
+
+| Directive | Value | Why |
+|---|---|---|
+| `default-src` | `'self'` | Safe default; every other directive below is an explicit, narrower carve-out. |
+| `script-src` | `'self'` | No inline scripts remain (see §4) and no third-party script host is loaded (jsPDF is now bundled, §1). No `'unsafe-eval'` — production Vite/esbuild output doesn't need it. |
+| `style-src` | `'self' 'unsafe-inline'` | React's `style={{...}}` (23 files) and every animation library in use (`framer-motion` in 71 files, `@dnd-kit`, `@xyflow/react`) set styles via the CSSOM (`element.style.x = ...`), which Chrome/Safari/Firefox do **not** gate behind `style-src` — only the declarative `style="..."` HTML attribute and `<style>`/`<link rel=stylesheet>` elements are. A repo-wide grep found no `dangerouslySetInnerHTML` writing a `style=` attribute and no `setAttribute('style', ...)`; the one `el.style.cssText = ...` site (`useWakeLock.js`) is also a CSSOM write, not an attribute write. So `'unsafe-inline'` is *not* required by any first-party code path found. It's kept anyway as a deliberate, low-risk hedge: style-only injection is a far weaker vector than script injection (no code execution, no data exfil beyond CSS-based side channels), and several dependencies (Radix portals, `@xyflow/react` node positioning) couldn't be exhaustively verified for attribute-style writes without live testing, which isn't available pre-deploy. Tightening this later (once verified in a real browser) is a safe follow-up, never a blocking one. |
+| `img-src` | `'self' data: blob:'` | All app imagery is bundled/same-origin; icons are `lucide-react` components, not `<img>` tags. `data:`/`blob:` cover export/download flows (`URL.createObjectURL` in `diagnosticExport.js`, `TherapistExportScreen.jsx`, `InsightsPage.jsx`) and any inline data-URI assets. No third-party image host is fetched (grepped for `photoURL`/`googleusercontent` — unused; Google profile photos are never rendered). |
+| `font-src` | `'self'` | All fonts are self-hosted via `@fontsource/geist-sans` and `@fontsource/newsreader`, imported into `src/index.css` and bundled — no `fonts.googleapis.com`/`fonts.gstatic.com` (enforced separately by `src/utils/__tests__/fontLoading.test.js`, pre-existing). |
+| `media-src` | `'self' blob:'` | `new Audio(audioUrl)` in `Chat.jsx`/`UnifiedConversation.jsx` plays a `URL.createObjectURL` blob URL from `synthesizeSpeech()` (`src/utils/audio.js`). That function is currently a stub returning `null` (TTS was moved behind a Cloud Function that doesn't exist yet — `if (audioUrl)` never true today), so this is dormant, but scoped now rather than left to silently break TTS the day it's re-enabled. |
+| `connect-src` | `'self'` + the hosts below | See host inventory method below. |
+| `frame-src` | `'self' https://echo-vault-app.firebaseapp.com` | Firebase Auth's web SDK opens a hidden same-origin-policy helper iframe against the configured `authDomain` (`echo-vault-app.firebaseapp.com`) for redirect-result/network-independent auth state; `signInWithPopup` (Google, Apple) itself opens a top-level popup window, which is **not** governed by `frame-src` (that only restricts `<iframe>`/`<frame>` embeds, not `window.open`), so no additional host is needed there. |
+| `object-src` | `'none'` | No `<object>`/`<embed>`/Flash usage anywhere in the app. |
+| `base-uri` | `'self'` | Blocks `<base>` tag injection from redirecting relative-URL resolution. |
+| `form-action` | `'self'` | No third-party form posts anywhere in the app (Firebase Auth/Functions calls are all `fetch`/SDK-driven, not `<form>` submissions). |
+| `frame-ancestors` | `'none'` | Engram is never meant to be embedded in another site's frame; also covered redundantly by `X-Frame-Options: DENY` for older browsers that don't parse CSP2. |
+| `upgrade-insecure-requests` | (no value) | Belt-and-suspenders — Hosting already serves HTTPS-only, but this also upgrades any stray `http://` link/asset reference instead of silently failing under the (already-strict) `connect-src`/`img-src` allowlists. |
+
+**`connect-src` host inventory method**: every host was found by grepping
+`src/` for `https://`, `wss://`, `ws://`, `fetch(`, `new WebSocket(`, and
+tracing every Firebase SDK surface actually imported/called (`firebase/app`,
+`firebase/auth`, `firebase/firestore`, `firebase/functions`,
+`firebase/messaging`) to the Google API host each one talks to on the wire,
+not just the ones with a literal string in `src/`. Result, with source:
+
+| Host | Why |
+|---|---|
+| `https://firestore.googleapis.com` | Firestore reads/writes/listen channel (`firebase/firestore`, used throughout `src/repositories/`, `src/services/`). |
+| `https://identitytoolkit.googleapis.com` | Firebase Auth's REST surface, used internally by `firebase/auth` for every sign-in/sign-up/password flow, and called directly in `App.jsx` (`signInWithCustomToken` REST fallback, line ~2413). |
+| `https://securetoken.googleapis.com` | Firebase Auth ID-token refresh, used internally by `firebase/auth` — no direct call site in `src/`, but every authenticated session depends on it. |
+| `https://us-central1-echo-vault-app.cloudfunctions.net` | `getFunctions(app)` (no region override → default `us-central1`) backs every `httpsCallable` (`analyzeJournalEntryFn`, `transcribeAudioFn`, `askJournalAIFn`, etc.), and `App.jsx` also `fetch()`s this host directly for `exchangeGoogleToken`/`exchangeAppleToken`. |
+| `https://firebaseinstallations.googleapis.com` | Firebase Installations (FID) — required by `firebase/messaging`'s `getToken()`, called from `src/services/notifications/tokenManager.js` (`registerWebToken`) whenever a user grants notification permission on web. |
+| `https://fcmregistrations.googleapis.com` | FCM web push token registration, same call site as above. |
+| `https://api.open-meteo.com` | `src/services/environment/apis/weather.js` (`OPEN_METEO_BASE`) — current/historical weather for entry environmental context. |
+| `https://api.sunrise-sunset.org` | `src/services/environment/apis/sunTimes.js` (`SUNRISE_SUNSET_API`) — sunrise/sunset times, same feature. |
+| `https://echovault-voice-relay-2wotujlctq-uc.a.run.app` (https) | `src/services/health/whoop.js` `fetch()`s `getRelayHttpUrl()` (derived from the wss URL below) for Whoop OAuth/token-exchange proxying through the relay server. |
+| `wss://echovault-voice-relay-2wotujlctq-uc.a.run.app` (wss) | `src/config/relay.js` `getRelayWsUrl()` — the voice-relay websocket used by `useVoiceRelay.js` for live transcription. Host value from `.env.example`'s `VITE_VOICE_RELAY_URL`; matches `PROJECT_STATUS.md`'s note that CI defaults hosting builds to this same public prod URL. |
+
+**Explicitly excluded** (verified absent, not just unmentioned): Firebase
+Storage (`firebasestorage.googleapis.com`) — `storageBucket` is configured
+in `firebaseConfig` but `firebase/storage`/`getStorage()` is never imported
+anywhere in `src/`, so no client-side Storage traffic exists to allow.
+`accounts.google.com`/`www.gstatic.com/recaptcha` — `RecaptchaVerifier` is
+imported in `App.jsx`/`config/firebase.js` but never instantiated (`new
+RecaptchaVerifier(...)` has zero call sites); phone-based MFA is not wired
+up (only TOTP, which needs no reCAPTCHA). **If phone MFA is completed
+later, this CSP will need `frame-src`/`script-src` additions for
+`www.google.com`/`www.gstatic.com` before it works** — flagged as a residual
+risk below.
+
+### 3. iOS ATS (`ios/App/App/Info.plist`)
+
+Removed `NSAllowsArbitraryLoads` and `NSAllowsArbitraryLoadsInWebContent`.
+No per-domain ATS exceptions were added because every host the app talks to
+(the full `connect-src` inventory above) is HTTPS/WSS and none needed a TLS
+downgrade or non-standard cert exception. `NSAllowsLocalNetworking` was
+kept — it only permits requests to literal local/link-local addresses under
+standard ATS TLS rules, and doesn't reintroduce arbitrary remote-host
+access. `capacitor.config.ts`'s `server.cleartext`/`server.url` (the
+Capacitor live-reload dev-server settings) are both commented out in the
+committed config, so there was no cleartext dev-server exception to scope —
+if a developer uncomments them locally for live reload, that's a local
+Info.plist/build concern, not something this shipped config should carve an
+exception for.
+
+### 4. Inline boot/theme script → externalized
+
+`index.html`'s inline `<script>` (sets `data-accent` and the `dark` class
+on `<html>` from `localStorage`/`matchMedia`, before first paint, to avoid
+a flash of the wrong theme) is now `public/boot-theme.js`, loaded via a
+plain blocking `<script src="/boot-theme.js">` in the same position
+(non-`async`/`defer`/`module`, so it still runs before `#root` — verified
+by `src/utils/__tests__/verification.test.js` and
+`src/utils/__tests__/darkMode.test.js`). **Chose externalization over a
+`sha256-` CSP hash** because a hash is a maintenance trap: the moment
+anyone edits this script without also recomputing and updating the hash in
+`firebase.json`, the deployed app white-screens (CSP silently blocks the
+now-mismatched inline script, and this file's only job is applying the
+theme class before React mounts — a broken boot script looks like a
+launch-time crash, not an obvious CSP violation, unless someone thinks to
+check DevTools). Externalizing needs zero `firebase.json` changes ever
+again for this script and keeps `script-src` at a flat `'self'`.
+
+### 5. Release-validation script
+
+`scripts/check-security-headers.mjs` — curls a deployed Hosting URL
+(defaults to `https://echo-vault-app.web.app/`, accepts an override as
+`argv[2]`) and asserts `Content-Security-Policy` (checks for key directive
+fragments, not a byte-exact match, so it doesn't need editing every time
+a host is added/removed), `Referrer-Policy`, `Permissions-Policy`,
+`X-Content-Type-Options`, and `X-Frame-Options` are all present with
+acceptable values. **Not wired into CI** — deliberately: it's only
+meaningful against an already-deployed URL, which by definition CI has
+already finished with, and there's no deployed-URL secret CI would need
+that isn't just the public prod URL anyway. Run it by hand right after
+`firebase deploy --only hosting`:
+
+```bash
+node scripts/check-security-headers.mjs
+```
+
+### Residual risk / what this doesn't prove
+
+- **CSP correctness can't be fully proven pre-deploy.** Static analysis
+  (grepping `src/` for hosts, tracing SDK surfaces to their known
+  endpoints) is thorough but not equivalent to loading the deployed app in
+  a real browser and watching the DevTools console for CSP violation
+  reports. Run `scripts/check-security-headers.mjs` for header *presence*
+  immediately post-deploy, then manually exercise: sign-in (Google + Apple
+  popup), entry save/analyze, voice recording + relay connection, weather/
+  environment context, PDF export (Session Prep + Therapist Export), push
+  notification permission grant, and dark-mode toggle — the surfaces this
+  CSP's `connect-src`/`frame-src`/`media-src` carve-outs were built for.
+  Any DevTools "Refused to connect/load" error means a host was missed.
+- **Phone-based MFA is unaccounted for.** `RecaptchaVerifier` exists in the
+  codebase but is never instantiated; if phone MFA ships later, this CSP
+  will need `script-src`/`frame-src` additions for reCAPTCHA
+  (`www.google.com`, `www.gstatic.com`) before it works, and that will
+  fail closed (broken MFA sign-in), not open.
+- **`style-src 'unsafe-inline'` is a deliberate hedge, not a proven
+  requirement.** First-party code doesn't need it (verified by CSSOM vs.
+  attribute analysis above); it's kept because third-party UI dependencies
+  (`@radix-ui/*`, `@xyflow/react`, `@dnd-kit/*`) weren't exhaustively
+  verified in a live browser. Tightening it to drop `'unsafe-inline'` is a
+  safe, low-priority follow-up once verified against real traffic — never
+  worth blocking this rollout on.
+- **The relay host is a literal string, not a config-driven value**, in
+  both the CSP and this table. If `VITE_VOICE_RELAY_URL`/the Cloud Run
+  service URL ever changes, `firebase.json`'s `connect-src` needs a manual
+  update — there's no automated check tying the two together (the existing
+  `scripts/check-bundle-endpoints.js` only guards against a *forbidden*
+  (`ws://`/localhost) endpoint leaking into the bundle, not against the
+  CSP drifting from whatever legitimate endpoint is configured).
+- **Self-review**: the highest-risk directive here is `connect-src`,
+  because an omitted host fails closed (a feature silently breaks) rather
+  than open (a security hole) — the safer failure mode, but still a
+  real regression risk for Michael's first post-deploy session. The
+  `firebase.json` change was scoped to `**` (every route) rather than
+  excluding `/boot-theme.js`/static assets, which is simpler and correct
+  (headers apply per-response, not per-file-type, and none of the headers
+  added are script/asset-type-specific).
