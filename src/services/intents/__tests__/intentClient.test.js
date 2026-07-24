@@ -104,7 +104,9 @@ describe('subscribeActiveTaskIntents', () => {
 // The exact key set firestore.rules' user_decisions create rule allows via
 // hasOnly(...). A future field added to decisionPayload() without a matching
 // rules change should fail loudly here, not silently at write time in prod.
-const DECISION_RULES_ALLOWED_KEYS = ['targetId', 'targetType', 'action', 'reasonCode', 'createdAt', 'reversible'];
+// 'versions' (INT-02 item 1) is optional — see the "versions snapshot" describe
+// blocks below for its presence/absence behavior.
+const DECISION_RULES_ALLOWED_KEYS = ['targetId', 'targetType', 'action', 'reasonCode', 'createdAt', 'reversible', 'versions'];
 
 // The exact key set firestore.rules' intents update rule allows via
 // affectedKeys().hasOnly(...) (functions/src/intents/intentSchema.js
@@ -131,7 +133,10 @@ describe('keepIntent', () => {
 
     const [, decision] = batch.set.mock.calls[0];
     expect(decision).toMatchObject({ targetId: 'i1', targetType: 'intent', action: 'kept', reasonCode: null, reversible: true });
-    expect(Object.keys(decision).sort()).toEqual([...DECISION_RULES_ALLOWED_KEYS].sort());
+    // No versions arg was passed to keepIntent, so the key is omitted
+    // entirely (not just `undefined`) — never a superset of the allowlist.
+    expect('versions' in decision).toBe(false);
+    expect(Object.keys(decision).every((k) => DECISION_RULES_ALLOWED_KEYS.includes(k))).toBe(true);
 
     // Neither op happens as a standalone (unbatched) write.
     expect(mocks.updateDoc).not.toHaveBeenCalled();
@@ -151,6 +156,22 @@ describe('keepIntent', () => {
     await keepIntent(db, UID, 'i1');
     await expect(keepIntent(db, UID, 'i1')).resolves.toBeUndefined();
     expect(mocks.writeBatch).toHaveBeenCalledTimes(2);
+  });
+
+  // INT-02 item 1: the caller (a component that already has the subscribed
+  // intent doc in memory) may pass that doc's `versions` field through as a
+  // 4th arg; it's copied verbatim onto the decision doc.
+  it('copies a supplied versions snapshot onto the decision doc', async () => {
+    const versions = { extraction: 1, model: 'gemini-3.5-flash', prompt: 1, schema: 2 };
+    await keepIntent(db, UID, 'i1', versions);
+    const [, decision] = batchInstances[0].set.mock.calls[0];
+    expect(decision.versions).toEqual(versions);
+  });
+
+  it('omits versions when the caller passes undefined (legacy intent with no versions field)', async () => {
+    await keepIntent(db, UID, 'i1', undefined);
+    const [, decision] = batchInstances[0].set.mock.calls[0];
+    expect('versions' in decision).toBe(false);
   });
 });
 
@@ -183,6 +204,14 @@ describe('dismissIntent', () => {
       return batch;
     });
     await expect(dismissIntent(db, UID, 'i2')).rejects.toThrow('permission-denied');
+  });
+
+  it('copies a supplied versions snapshot onto the decision doc alongside reasonCode', async () => {
+    const versions = { extraction: 1, model: 'gemini-3.5-flash', prompt: 1, schema: 1 };
+    await dismissIntent(db, UID, 'i2', 'misheard', versions);
+    const [, decision] = batchInstances[0].set.mock.calls[0];
+    expect(decision).toMatchObject({ reasonCode: 'misheard' });
+    expect(decision.versions).toEqual(versions);
   });
 });
 
@@ -334,6 +363,13 @@ describe('snoozeLoop', () => {
     expect(decision).toMatchObject({ targetId: 'loop-1', action: 'snoozed', reversible: true });
     expect(batch.commit).toHaveBeenCalledTimes(1);
   });
+
+  it('copies a supplied versions snapshot onto the decision doc', async () => {
+    const versions = { extraction: 1, model: 'gemini-3.5-flash', prompt: 1, schema: 1 };
+    await snoozeLoop(db, UID, 'loop-1', '2026-07-25T00:00:00.000Z', versions);
+    const [, decision] = batchInstances[0].set.mock.calls[0];
+    expect(decision.versions).toEqual(versions);
+  });
 });
 
 describe('answerLoop', () => {
@@ -367,6 +403,13 @@ describe('answerLoop', () => {
     const [, update] = batchInstances[0].update.mock.calls[0];
     expect(update.outcome.answerEntryId).toBeNull();
   });
+
+  it('copies a supplied versions snapshot onto the decision doc', async () => {
+    const versions = { extraction: 1, model: 'gemini-3.5-flash', prompt: 1, schema: 1 };
+    await answerLoop(db, UID, 'loop-2', 'entry-99', versions);
+    const [, decision] = batchInstances[0].set.mock.calls[0];
+    expect(decision.versions).toEqual(versions);
+  });
 });
 
 describe('closeLoop', () => {
@@ -392,6 +435,13 @@ describe('closeLoop', () => {
     for (const args of mocks.doc.mock.calls) {
       if (args.length > 1) expect(args[1]).not.toMatch(/entries/);
     }
+  });
+
+  it('copies a supplied versions snapshot onto the decision doc', async () => {
+    const versions = { extraction: 1, model: 'gemini-3.5-flash', prompt: 1, schema: 1 };
+    await closeLoop(db, UID, 'loop-3', versions);
+    const [, decision] = batchInstances[0].set.mock.calls[0];
+    expect(decision.versions).toEqual(versions);
   });
 });
 

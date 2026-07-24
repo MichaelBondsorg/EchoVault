@@ -593,6 +593,35 @@ describe('user_decisions collection rules', () => {
     await assertFails(addDoc(collection(db, userPath(USER_ID), 'user_decisions'), validDecision));
   });
 
+  // INT-02 item 1: versions is an optional map snapshot copied from the
+  // intent's own `versions` field at action time.
+  it('allows the owner to create a decision WITH a versions map', async () => {
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    await assertSucceeds(addDoc(collection(db, userPath(USER_ID), 'user_decisions'), {
+      ...validDecision,
+      versions: { extraction: 1, model: 'gemini-3.5-flash', prompt: 1, schema: 2 },
+    }));
+  });
+
+  it('allows the owner to create a legacy decision with NO versions field (backward compat)', async () => {
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    await assertSucceeds(addDoc(collection(db, userPath(USER_ID), 'user_decisions'), validDecision));
+  });
+
+  it('denies a decision whose versions value is not a map', async () => {
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    await assertFails(addDoc(collection(db, userPath(USER_ID), 'user_decisions'), { ...validDecision, versions: 'v1' }));
+  });
+
+  it('still denies an unexpected extra key alongside a well-formed versions map', async () => {
+    const db = testEnv.authenticatedContext(USER_ID).firestore();
+    await assertFails(addDoc(collection(db, userPath(USER_ID), 'user_decisions'), {
+      ...validDecision,
+      versions: { extraction: 1 },
+      escalate: true,
+    }));
+  });
+
   it('denies update and delete of a decision', async () => {
     let decisionId;
     await testEnv.withSecurityRulesDisabled(async (context) => {

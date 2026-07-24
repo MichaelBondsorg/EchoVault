@@ -144,7 +144,103 @@ describe('CapturedToast - Undo', () => {
 
     fireEvent.click(screen.getByText('Undo'));
 
-    expect(dismissIntent).toHaveBeenCalledWith({ __db: true }, 'user-1', 'new-1');
+    expect(dismissIntent).toHaveBeenCalledWith({ __db: true }, 'user-1', 'new-1', null, undefined);
+    expect(screen.queryByText(/Captured:/)).toBeNull();
+  });
+
+  it('passes the intent\'s versions snapshot through to dismissIntent (INT-02 item 1)', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2024, 0, 15, 10, 0, 0, 0));
+    withSubscribe();
+    render(<CapturedToast />);
+
+    const versions = { extraction: 1, model: 'gemini-3.5-flash', prompt: 1, schema: 2 };
+    vi.setSystemTime(new Date(2024, 0, 15, 10, 0, 1, 0));
+    act(() => {
+      emit([intent({ id: 'new-1', versions, createdAt: new Date(2024, 0, 15, 10, 0, 1, 0).toISOString() })]);
+    });
+
+    fireEvent.click(screen.getByText('Undo'));
+
+    expect(dismissIntent).toHaveBeenCalledWith({ __db: true }, 'user-1', 'new-1', null, versions);
+  });
+});
+
+describe('CapturedToast - INT-02 item 2: failure handling', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('Undo failure restores the row and shows a quiet, non-alarming failure message', async () => {
+    dismissIntent.mockRejectedValueOnce(new Error('offline'));
+    withSubscribe();
+    render(<CapturedToast />);
+
+    act(() => {
+      emit([intent({ id: 'new-1', createdAt: new Date(Date.now() + 1).toISOString() })]);
+    });
+    expect(screen.getByText('Captured: call the dentist')).toBeTruthy();
+
+    fireEvent.click(screen.getByText('Undo'));
+    // Optimistic advance happens synchronously.
+    expect(screen.queryByText(/Captured:/)).toBeNull();
+
+    await vi.waitFor(() => {
+      expect(screen.getByText('Captured: call the dentist')).toBeTruthy();
+    });
+    const message = screen.getByText(/couldn.t save/i);
+    expect(message).toBeTruthy();
+    expect(message.textContent).not.toMatch(/error|fail|alert/i);
+  });
+
+  it('Edit-confirm failure restores the row with the just-typed text (not lost)', async () => {
+    setIntentUserText.mockRejectedValueOnce(new Error('offline'));
+    withSubscribe();
+    render(<CapturedToast />);
+
+    act(() => {
+      emit([intent({ id: 'new-1', createdAt: new Date(Date.now() + 1).toISOString() })]);
+    });
+
+    fireEvent.click(screen.getByText('Edit'));
+    const input = screen.getByLabelText('Edit captured text');
+    fireEvent.change(input, { target: { value: 'call the dentist tomorrow' } });
+    fireEvent.click(screen.getByText('Save'));
+
+    await vi.waitFor(() => {
+      expect(screen.getByText('Captured: call the dentist tomorrow')).toBeTruthy();
+      expect(screen.getByText(/couldn.t save/i)).toBeTruthy();
+    });
+  });
+
+  it('a successful Undo leaves no failure message behind', async () => {
+    withSubscribe();
+    render(<CapturedToast />);
+
+    act(() => {
+      emit([intent({ id: 'new-1', createdAt: new Date(Date.now() + 1).toISOString() })]);
+    });
+
+    fireEvent.click(screen.getByText('Undo'));
+    await vi.waitFor(() => expect(dismissIntent).toHaveBeenCalled());
+    expect(screen.queryByText(/couldn.t save/i)).toBeNull();
+  });
+
+  it('a retry after a restored failure fires exactly one more dismissIntent call (no leftover in-flight state blocks it)', async () => {
+    dismissIntent.mockRejectedValueOnce(new Error('offline'));
+    withSubscribe();
+    render(<CapturedToast />);
+
+    act(() => {
+      emit([intent({ id: 'new-1', createdAt: new Date(Date.now() + 1).toISOString() })]);
+    });
+
+    fireEvent.click(screen.getByText('Undo'));
+    await vi.waitFor(() => expect(screen.getByText(/couldn.t save/i)).toBeTruthy());
+    expect(dismissIntent).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByText('Undo'));
+    await vi.waitFor(() => expect(dismissIntent).toHaveBeenCalledTimes(2));
     expect(screen.queryByText(/Captured:/)).toBeNull();
   });
 });

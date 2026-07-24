@@ -43,6 +43,16 @@ function captureText(intent) {
  * Non-modal: no backdrop, fixed to the bottom above the tab bar, and the
  * wrapper is `pointer-events-none` so it never intercepts clicks outside its
  * own card — never blocks the EntryBar/composer.
+ *
+ * INT-02 part 2 item 2 (same pattern as IntentSuggestionTray, part 1): Undo
+ * (dismissIntent) and Edit-Save (setIntentUserText) are removed
+ * optimistically for a snappy feel, but the underlying mutation is now
+ * awaited. On success the optimistic advance simply stands. On failure the
+ * item is restored to the FRONT of the queue (so it becomes `current`
+ * again) and a quiet, non-alarming inline message appears — same amber/
+ * honey tone as IntentSuggestionTray/PendingAudioBanner, never red. Its
+ * `versions` field (INT-02 item 1) is passed through to dismissIntent so
+ * the paired decision doc carries the intent's model/policy snapshot.
  */
 const CapturedToast = () => {
   const flagOn = getFlag('intentExtraction');
@@ -58,6 +68,10 @@ const CapturedToast = () => {
   const [queue, setQueue] = useState([]);
   const [editing, setEditing] = useState(false);
   const [editText, setEditText] = useState('');
+  // INT-02 item 2: id currently mid-mutation (guards a re-entrant call for
+  // the same item) and the id currently showing the quiet failure message.
+  const [busyIds, setBusyIds] = useState(() => new Set());
+  const [errorId, setErrorId] = useState(null);
 
   const current = queue[0] || null;
 
@@ -105,6 +119,41 @@ const CapturedToast = () => {
     setEditText('');
   }, []);
 
+  const markBusy = (id) => setBusyIds((prev) => new Set(prev).add(id));
+  const clearBusy = (id) => setBusyIds((prev) => {
+    if (!prev.has(id)) return prev;
+    const next = new Set(prev);
+    next.delete(id);
+    return next;
+  });
+
+  // Re-add `item` to the FRONT of the queue (making it `current` again)
+  // after its mutation failed. Guards against a duplicate insert if it
+  // somehow already came back.
+  const restoreToFront = (item) => {
+    setQueue((prev) => (prev.some((q) => q.id === item.id) ? prev : [item, ...prev]));
+  };
+
+  /**
+   * Advance past `item` optimistically, then await `mutate`. On failure,
+   * restore it to the front of the queue and flag the quiet failure state;
+   * on success, leave the optimistic advance standing. Marks `item` busy for
+   * the duration so a re-entrant call for the same id is blocked.
+   */
+  const runAction = async (item, mutate) => {
+    setErrorId((prev) => (prev === item.id ? null : prev));
+    markBusy(item.id);
+    advance();
+    try {
+      await mutate();
+    } catch {
+      restoreToFront(item);
+      setErrorId(item.id);
+    } finally {
+      clearBusy(item.id);
+    }
+  };
+
   // Arms the timer appropriate to the current mode whenever the head-of-queue
   // item or edit mode changes: a 6s auto-dismiss in the confirm view, or a
   // 30s abandonment safety net while editing. Re-running on every `editing`
@@ -120,8 +169,8 @@ const CapturedToast = () => {
   }, [current, editing, advance, cancelEdit]);
 
   const handleUndo = () => {
-    if (uid && current) dismissIntent(db, uid, current.id);
-    advance();
+    if (!uid || !current || busyIds.has(current.id)) return;
+    runAction(current, () => dismissIntent(db, uid, current.id, null, current.versions));
   };
 
   const handleEditStart = () => {
@@ -130,60 +179,75 @@ const CapturedToast = () => {
   };
 
   const handleEditConfirm = () => {
-    if (uid && current) setIntentUserText(db, uid, current.id, editText);
-    advance();
+    if (!uid || !current || busyIds.has(current.id)) return;
+    const text = editText;
+    const item = current;
+    runAction({ ...item, userText: text }, () => setIntentUserText(db, uid, item.id, text));
   };
 
   if (!flagOn) return null;
   if (!current) return null;
 
+  const busy = busyIds.has(current.id);
+
   return (
     <div className="fixed bottom-24 left-0 right-0 z-40 flex justify-center px-4 pointer-events-none">
-      <Card className="pointer-events-auto flex w-full max-w-md items-center gap-3 px-4 py-3">
-        {editing ? (
-          <>
-            <input
-              autoFocus
-              value={editText}
-              onChange={(e) => setEditText(e.target.value)}
-              aria-label="Edit captured text"
-              className="min-w-0 flex-1 border-b border-border bg-transparent text-sm text-foreground outline-none"
-            />
-            <button
-              type="button"
-              onClick={handleEditConfirm}
-              className="shrink-0 text-sm font-medium text-accent-deep"
-            >
-              Save
-            </button>
-            <button
-              type="button"
-              onClick={cancelEdit}
-              className="shrink-0 text-sm font-medium text-muted-foreground"
-            >
-              Cancel
-            </button>
-          </>
-        ) : (
-          <>
-            <p className="min-w-0 flex-1 truncate text-sm text-foreground">
-              Captured: {captureText(current)}
-            </p>
-            <button
-              type="button"
-              onClick={handleUndo}
-              className="shrink-0 text-sm font-medium text-accent-deep"
-            >
-              Undo
-            </button>
-            <button
-              type="button"
-              onClick={handleEditStart}
-              className="shrink-0 text-sm font-medium text-muted-foreground"
-            >
-              Edit
-            </button>
-          </>
+      <Card className="pointer-events-auto flex w-full max-w-md flex-col gap-1 px-4 py-3">
+        <div className="flex items-center gap-3">
+          {editing ? (
+            <>
+              <input
+                autoFocus
+                value={editText}
+                onChange={(e) => setEditText(e.target.value)}
+                aria-label="Edit captured text"
+                className="min-w-0 flex-1 border-b border-border bg-transparent text-sm text-foreground outline-none"
+              />
+              <button
+                type="button"
+                onClick={handleEditConfirm}
+                disabled={busy}
+                className="shrink-0 text-sm font-medium text-accent-deep disabled:opacity-50"
+              >
+                Save
+              </button>
+              <button
+                type="button"
+                onClick={cancelEdit}
+                disabled={busy}
+                className="shrink-0 text-sm font-medium text-muted-foreground disabled:opacity-50"
+              >
+                Cancel
+              </button>
+            </>
+          ) : (
+            <>
+              <p className="min-w-0 flex-1 truncate text-sm text-foreground">
+                Captured: {captureText(current)}
+              </p>
+              <button
+                type="button"
+                onClick={handleUndo}
+                disabled={busy}
+                className="shrink-0 text-sm font-medium text-accent-deep disabled:opacity-50"
+              >
+                Undo
+              </button>
+              <button
+                type="button"
+                onClick={handleEditStart}
+                disabled={busy}
+                className="shrink-0 text-sm font-medium text-muted-foreground disabled:opacity-50"
+              >
+                Edit
+              </button>
+            </>
+          )}
+        </div>
+        {errorId === current.id && (
+          <p className="text-xs text-honey-700 dark:text-honey-300">
+            Couldn&apos;t save that — try again.
+          </p>
         )}
       </Card>
     </div>

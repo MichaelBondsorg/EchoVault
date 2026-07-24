@@ -123,7 +123,7 @@ describe('OpenLoopsWidget - snooze', () => {
     fireEvent.click(screen.getByLabelText('Snooze'));
     fireEvent.click(screen.getByText('Tomorrow'));
 
-    expect(snoozeLoop).toHaveBeenCalledWith({ __db: true }, 'user-1', 'l1', expect.any(String));
+    expect(snoozeLoop).toHaveBeenCalledWith({ __db: true }, 'user-1', 'l1', expect.any(String), undefined);
     expect(screen.queryByText('call the dentist')).toBeNull();
   });
 
@@ -171,7 +171,7 @@ describe('OpenLoopsWidget - close & dismiss', () => {
     dueWith([loop({ id: 'l1', sourceSpan: { text: 'call the dentist' } })]);
     render(<OpenLoopsWidget />);
     fireEvent.click(screen.getByLabelText('Close'));
-    expect(closeLoop).toHaveBeenCalledWith({ __db: true }, 'user-1', 'l1');
+    expect(closeLoop).toHaveBeenCalledWith({ __db: true }, 'user-1', 'l1', undefined);
     expect(screen.queryByText('call the dentist')).toBeNull();
   });
 
@@ -179,8 +179,19 @@ describe('OpenLoopsWidget - close & dismiss', () => {
     dueWith([loop({ id: 'l1', sourceSpan: { text: 'call the dentist' } })]);
     render(<OpenLoopsWidget />);
     fireEvent.click(screen.getByLabelText("Don't revisit"));
-    expect(dismissIntent).toHaveBeenCalledWith({ __db: true }, 'user-1', 'l1');
+    expect(dismissIntent).toHaveBeenCalledWith({ __db: true }, 'user-1', 'l1', null, undefined);
     expect(screen.queryByText('call the dentist')).toBeNull();
+  });
+
+  // INT-02 item 1: the widget already holds the subscribed intent doc, so it
+  // passes that doc's `versions` field through to each action verbatim.
+  it('passes the loop\'s versions snapshot through to snoozeLoop/closeLoop/dismissIntent', () => {
+    const versions = { extraction: 1, model: 'gemini-3.5-flash', prompt: 1, schema: 2 };
+    dueWith([loop({ id: 'l1', sourceSpan: { text: 'call the dentist' }, versions })]);
+    render(<OpenLoopsWidget />);
+
+    fireEvent.click(screen.getByLabelText('Close'));
+    expect(closeLoop).toHaveBeenCalledWith({ __db: true }, 'user-1', 'l1', versions);
   });
 });
 
@@ -211,7 +222,7 @@ describe('OpenLoopsWidget - answer wiring', () => {
     const onSaved = onAnswerLoop.mock.calls[0][1];
     onSaved('AbCdEf123456'); // a real Firestore auto-id shape, never a sentinel string
 
-    expect(answerLoop).toHaveBeenCalledWith({ __db: true }, 'user-1', 'l1', 'AbCdEf123456');
+    expect(answerLoop).toHaveBeenCalledWith({ __db: true }, 'user-1', 'l1', 'AbCdEf123456', undefined);
   });
 
   it('never writes the legacy "saved" sentinel into answerEntryId, but still closes the loop', () => {
@@ -223,7 +234,7 @@ describe('OpenLoopsWidget - answer wiring', () => {
     const onSaved = onAnswerLoop.mock.calls[0][1];
     onSaved('saved'); // defensive: AppLayout no longer emits this, but guard it anyway
 
-    expect(answerLoop).toHaveBeenCalledWith({ __db: true }, 'user-1', 'l1', null);
+    expect(answerLoop).toHaveBeenCalledWith({ __db: true }, 'user-1', 'l1', null, undefined);
   });
 
   it('closes the loop with no linked id on the "deferred" sentinel (crisis flow)', () => {
@@ -235,7 +246,7 @@ describe('OpenLoopsWidget - answer wiring', () => {
     const onSaved = onAnswerLoop.mock.calls[0][1];
     onSaved('deferred');
 
-    expect(answerLoop).toHaveBeenCalledWith({ __db: true }, 'user-1', 'l1', null);
+    expect(answerLoop).toHaveBeenCalledWith({ __db: true }, 'user-1', 'l1', null, undefined);
   });
 
   it('I1: does NOT call answerLoop when the save failed (false) — the loop stays due', () => {
@@ -262,6 +273,19 @@ describe('OpenLoopsWidget - answer wiring', () => {
 
     expect(answerLoop).not.toHaveBeenCalled();
     expect(screen.getByText('call the dentist')).toBeTruthy();
+  });
+
+  it('passes the loop\'s versions snapshot through to answerLoop', () => {
+    const versions = { extraction: 1, model: 'gemini-3.5-flash', prompt: 1, schema: 2 };
+    dueWith([loop({ id: 'l1', sourceSpan: { text: 'call the dentist' }, versions })]);
+    const onAnswerLoop = vi.fn();
+    render(<OpenLoopsWidget onAnswerLoop={onAnswerLoop} />);
+    fireEvent.click(screen.getByLabelText('Answer'));
+
+    const onSaved = onAnswerLoop.mock.calls[0][1];
+    onSaved('AbCdEf123456');
+
+    expect(answerLoop).toHaveBeenCalledWith({ __db: true }, 'user-1', 'l1', 'AbCdEf123456', versions);
   });
 
   it('does nothing if onAnswerLoop is not provided', () => {
@@ -388,6 +412,119 @@ describe('OpenLoopsWidget - upcoming footer', () => {
     // upcoming one is rendered last.
     const dismissButtons = screen.getAllByLabelText("Don't revisit");
     fireEvent.click(dismissButtons[dismissButtons.length - 1]);
-    expect(dismissIntent).toHaveBeenCalledWith({ __db: true }, 'user-1', 'u1');
+    expect(dismissIntent).toHaveBeenCalledWith({ __db: true }, 'user-1', 'u1', null, undefined);
+  });
+});
+
+describe('OpenLoopsWidget - INT-02 item 3: failure handling', () => {
+  it('Close failure restores the row and shows a quiet, non-alarming failure message', async () => {
+    closeLoop.mockRejectedValueOnce(new Error('offline'));
+    dueWith([loop({ id: 'l1', sourceSpan: { text: 'call the dentist' } })]);
+    render(<OpenLoopsWidget />);
+
+    fireEvent.click(screen.getByLabelText('Close'));
+    // Optimistic removal happens synchronously.
+    expect(screen.queryByText('call the dentist')).toBeNull();
+
+    await vi.waitFor(() => {
+      expect(screen.getByText('call the dentist')).toBeTruthy();
+    });
+    const message = screen.getByText(/couldn.t save/i);
+    expect(message).toBeTruthy();
+    expect(message.textContent).not.toMatch(/error|fail|alert/i);
+  });
+
+  it('Snooze failure restores the row and shows the failure message', async () => {
+    snoozeLoop.mockRejectedValueOnce(new Error('offline'));
+    dueWith([loop({ id: 'l1', sourceSpan: { text: 'call the dentist' } })]);
+    render(<OpenLoopsWidget />);
+
+    fireEvent.click(screen.getByLabelText('Snooze'));
+    fireEvent.click(screen.getByText('Tomorrow'));
+    expect(screen.queryByText('call the dentist')).toBeNull();
+
+    await vi.waitFor(() => {
+      expect(screen.getByText('call the dentist')).toBeTruthy();
+      expect(screen.getByText(/couldn.t save/i)).toBeTruthy();
+    });
+  });
+
+  it('Dismiss (due) failure restores the row and shows the failure message', async () => {
+    dismissIntent.mockRejectedValueOnce(new Error('permission-denied'));
+    dueWith([loop({ id: 'l1', sourceSpan: { text: 'call the dentist' } })]);
+    render(<OpenLoopsWidget />);
+
+    fireEvent.click(screen.getByLabelText("Don't revisit"));
+    expect(screen.queryByText('call the dentist')).toBeNull();
+
+    await vi.waitFor(() => {
+      expect(screen.getByText('call the dentist')).toBeTruthy();
+      expect(screen.getByText(/couldn.t save/i)).toBeTruthy();
+    });
+  });
+
+  it('Dismiss (upcoming) failure restores the row and shows the failure message', async () => {
+    dismissIntent.mockRejectedValueOnce(new Error('permission-denied'));
+    dueWith([loop({ id: 'l1', sourceSpan: { text: 'call the dentist' } })]);
+    subscribeUpcomingOpenLoops.mockImplementation((_db, _uid, cb) => {
+      cb([{ id: 'u1', sourceSpan: { text: 'renew passport' }, targetAt: new Date().toISOString() }]);
+      return () => {};
+    });
+    render(<OpenLoopsWidget />);
+    fireEvent.click(screen.getByText('+1 upcoming'));
+
+    const dismissButtons = screen.getAllByLabelText("Don't revisit");
+    fireEvent.click(dismissButtons[dismissButtons.length - 1]);
+    expect(screen.queryByText('renew passport')).toBeNull();
+
+    await vi.waitFor(() => {
+      expect(screen.getByText('renew passport')).toBeTruthy();
+      expect(screen.getByText(/couldn.t save/i)).toBeTruthy();
+    });
+  });
+
+  it('Answer failure leaves the (never-removed) row visible with a quiet failure message', async () => {
+    answerLoop.mockRejectedValueOnce(new Error('offline'));
+    dueWith([loop({ id: 'l1', sourceSpan: { text: 'call the dentist' } })]);
+    const onAnswerLoop = vi.fn();
+    render(<OpenLoopsWidget onAnswerLoop={onAnswerLoop} />);
+    fireEvent.click(screen.getByLabelText('Answer'));
+
+    const onSaved = onAnswerLoop.mock.calls[0][1];
+    onSaved('entry-1');
+
+    expect(screen.getByText('call the dentist')).toBeTruthy();
+    await vi.waitFor(() => {
+      expect(screen.getByText(/couldn.t save/i)).toBeTruthy();
+    });
+  });
+
+  it('a successful action leaves no failure message behind', async () => {
+    dueWith([loop({ id: 'l1', sourceSpan: { text: 'call the dentist' } })]);
+    render(<OpenLoopsWidget />);
+
+    fireEvent.click(screen.getByLabelText('Close'));
+    await vi.waitFor(() => expect(closeLoop).toHaveBeenCalled());
+    expect(screen.queryByText(/couldn.t save/i)).toBeNull();
+  });
+
+  it('one row\'s failure does not disable or flag an unrelated row (per-id busy/error state)', async () => {
+    closeLoop.mockRejectedValueOnce(new Error('offline'));
+    dueWith([
+      loop({ id: 'l1', sourceSpan: { text: 'call the dentist' } }),
+      loop({ id: 'l2', sourceSpan: { text: 'water the plants' } }),
+    ]);
+    render(<OpenLoopsWidget />);
+
+    fireEvent.click(screen.getAllByLabelText('Close')[0]);
+    expect(screen.queryByText('call the dentist')).toBeNull();
+    // l2's row is untouched and its Close button stays enabled.
+    expect(screen.getByLabelText('Close')).not.toBeDisabled();
+
+    await vi.waitFor(() => {
+      expect(screen.getByText('call the dentist')).toBeTruthy();
+    });
+    // Only l1's row shows the failure message.
+    expect(screen.getAllByText(/couldn.t save/i)).toHaveLength(1);
   });
 });

@@ -268,4 +268,36 @@ describe('buildUserDecision', () => {
     const d = buildUserDecision({ targetId: 'i1', action: 'not_a_task', reasonCode: 'misheard' });
     expect(d.reasonCode).toBe('misheard');
   });
+
+  // INT-02 item 1: versions is an optional map-of-scalars snapshot copied
+  // from the intent's own `versions` field at action time. Additive-only,
+  // mirroring buildIntent's assertion-key omission pattern: when absent,
+  // OMIT the key entirely (never `versions: null`) so legacy decisions stay
+  // untouched and backward compat holds.
+  it('omits versions entirely when not supplied (backward compat)', () => {
+    const d = buildUserDecision({ targetId: 'i1', action: 'kept' });
+    expect('versions' in d).toBe(false);
+  });
+
+  it('carries a versions map when supplied', () => {
+    const d = buildUserDecision({ targetId: 'i1', action: 'kept', versions: { extraction: 1, model: 'gemini-3.5-flash', prompt: 1, schema: 2 } });
+    expect(d.versions).toEqual({ extraction: 1, model: 'gemini-3.5-flash', prompt: 1, schema: 2 });
+  });
+
+  it('rejects a non-object versions', () => {
+    expect(() => buildUserDecision({ targetId: 'i1', action: 'kept', versions: 'v1' })).toThrow(/versions/);
+  });
+
+  it('rejects an array as versions', () => {
+    expect(() => buildUserDecision({ targetId: 'i1', action: 'kept', versions: [1, 2] })).toThrow(/versions/);
+  });
+
+  it('rejects a versions map with a non-scalar value', () => {
+    expect(() => buildUserDecision({ targetId: 'i1', action: 'kept', versions: { nested: { a: 1 } } })).toThrow(/versions/);
+  });
+
+  it('treats null versions the same as omitted', () => {
+    const d = buildUserDecision({ targetId: 'i1', action: 'kept', versions: null });
+    expect('versions' in d).toBe(false);
+  });
 });

@@ -26,6 +26,13 @@
  * decision row. Preventing that second row on a double-tap is a UI concern
  * (disable the control while the batch is in flight), deliberately not
  * solved here.
+ *
+ * INT-02 part 2 item 1: every action function below also takes an optional
+ * trailing `versions` arg — the intent doc's own `versions` field, as held
+ * by the calling component from its live subscription — copied onto the
+ * paired user_decisions row. See decisionPayload() for the omit-when-absent
+ * behavior that keeps this backward compatible with legacy intents that
+ * predate the field.
  */
 import {
   collection,
@@ -222,21 +229,21 @@ export function subscribeRecentActiveIntents(db, uid, cb, onError) {
  * Build a user_decisions payload. Field shape is intentionally identical to
  * (and must stay in lockstep with) functions/src/intents/intentSchema.js
  * buildUserDecision and firestore.rules' user_decisions create allowlist
- * (targetId/targetType/action/reasonCode/createdAt/reversible, hasOnly —
- * NOT duplicated via import because functions/src is a separate Cloud
- * Functions bundle, not part of the client build).
+ * (targetId/targetType/action/reasonCode/createdAt/reversible/versions,
+ * hasOnly — NOT duplicated via import because functions/src is a separate
+ * Cloud Functions bundle, not part of the client build).
  *
- * NOTE (INT-02 item 3, not yet wired): the review also asks for the
- * intent's `versions` snapshot (model/policy provenance) to be copied onto
- * the decision doc. The current firestore.rules `user_decisions` create
- * rule hasOnly(['targetId','targetType','action','reasonCode','createdAt',
- * 'reversible']) — adding a `versions` key today would fail rules on every
- * write. Landing that requires a coordinated firestore.rules +
- * functions/src/intents/intentSchema.js change, which is outside this
- * change's touched-files scope; see the task report for the exact diff.
+ * `versions` (INT-02 item 1) is optional — the caller (a tray/toast/widget
+ * component that already holds the subscribed intent doc in memory) may
+ * pass that doc's own `versions` field through so the decision row is
+ * self-describing about which extraction produced the intent it decided on.
+ * Omitted entirely (never `versions: null`/`undefined` written into the
+ * object) when the caller doesn't supply one — legacy intents extracted
+ * before this field existed have no `versions` to copy, and that must stay
+ * a no-op, not a write of a bogus value.
  */
-function decisionPayload({ targetId, action, reasonCode = null, createdAt }) {
-  return {
+function decisionPayload({ targetId, action, reasonCode = null, createdAt, versions }) {
+  const payload = {
     targetId,
     targetType: 'intent',
     action,
@@ -244,6 +251,8 @@ function decisionPayload({ targetId, action, reasonCode = null, createdAt }) {
     createdAt: createdAt || nowIso(),
     reversible: true,
   };
+  if (versions !== undefined && versions !== null) payload.versions = versions;
+  return payload;
 }
 
 /**
@@ -265,33 +274,53 @@ async function commitIntentDecision(db, uid, id, intentUpdate, decision) {
   await batch.commit();
 }
 
-/** Keep a suggested intent: suggested -> active (+ 'kept' decision), one batch. */
-export async function keepIntent(db, uid, id) {
+/**
+ * Keep a suggested intent: suggested -> active (+ 'kept' decision), one batch.
+ * @param {object} db
+ * @param {string} uid
+ * @param {string} id
+ * @param {object} [versions] - the intent doc's own `versions` field
+ *   (INT-02 item 1), copied onto the decision when the caller has it.
+ */
+export async function keepIntent(db, uid, id, versions) {
   const now = nowIso();
   await commitIntentDecision(
     db, uid, id,
     { state: 'active', updatedAt: now },
-    decisionPayload({ targetId: id, action: 'kept', createdAt: now }),
+    decisionPayload({ targetId: id, action: 'kept', createdAt: now, versions }),
   );
 }
 
-/** Dismiss an intent: any -> dismissed (+ 'not_a_task' decision), one batch. */
-export async function dismissIntent(db, uid, id, reasonCode = null) {
+/**
+ * Dismiss an intent: any -> dismissed (+ 'not_a_task' decision), one batch.
+ * @param {object} db
+ * @param {string} uid
+ * @param {string} id
+ * @param {string|null} [reasonCode]
+ * @param {object} [versions] - see {@link keepIntent}.
+ */
+export async function dismissIntent(db, uid, id, reasonCode = null, versions) {
   const now = nowIso();
   await commitIntentDecision(
     db, uid, id,
     { state: 'dismissed', updatedAt: now },
-    decisionPayload({ targetId: id, action: 'not_a_task', reasonCode, createdAt: now }),
+    decisionPayload({ targetId: id, action: 'not_a_task', reasonCode, createdAt: now, versions }),
   );
 }
 
-/** Complete an active intent: active -> completed_state (+ 'completed' decision), one batch. */
-export async function completeIntent(db, uid, id) {
+/**
+ * Complete an active intent: active -> completed_state (+ 'completed' decision), one batch.
+ * @param {object} db
+ * @param {string} uid
+ * @param {string} id
+ * @param {object} [versions] - see {@link keepIntent}.
+ */
+export async function completeIntent(db, uid, id, versions) {
   const now = nowIso();
   await commitIntentDecision(
     db, uid, id,
     { state: 'completed_state', updatedAt: now },
-    decisionPayload({ targetId: id, action: 'completed', createdAt: now }),
+    decisionPayload({ targetId: id, action: 'completed', createdAt: now, versions }),
   );
 }
 
@@ -305,13 +334,14 @@ export async function completeIntent(db, uid, id) {
  * @param {string} uid
  * @param {string} id
  * @param {string} untilIso
+ * @param {object} [versions] - see {@link keepIntent}.
  */
-export async function snoozeLoop(db, uid, id, untilIso) {
+export async function snoozeLoop(db, uid, id, untilIso, versions) {
   const now = nowIso();
   await commitIntentDecision(
     db, uid, id,
     { snoozedUntil: untilIso, updatedAt: now },
-    decisionPayload({ targetId: id, action: 'snoozed', createdAt: now }),
+    decisionPayload({ targetId: id, action: 'snoozed', createdAt: now, versions }),
   );
 }
 
@@ -325,13 +355,14 @@ export async function snoozeLoop(db, uid, id, untilIso) {
  * @param {string} uid
  * @param {string} id
  * @param {string|null} [answerEntryId]
+ * @param {object} [versions] - see {@link keepIntent}.
  */
-export async function answerLoop(db, uid, id, answerEntryId = null) {
+export async function answerLoop(db, uid, id, answerEntryId = null, versions) {
   const closedAt = nowIso();
   await commitIntentDecision(
     db, uid, id,
     { state: 'completed_state', outcome: { closedAt, kind: 'answered', answerEntryId }, updatedAt: closedAt },
-    decisionPayload({ targetId: id, action: 'answered', createdAt: closedAt }),
+    decisionPayload({ targetId: id, action: 'answered', createdAt: closedAt, versions }),
   );
 }
 
@@ -343,13 +374,14 @@ export async function answerLoop(db, uid, id, answerEntryId = null) {
  * @param {object} db
  * @param {string} uid
  * @param {string} id
+ * @param {object} [versions] - see {@link keepIntent}.
  */
-export async function closeLoop(db, uid, id) {
+export async function closeLoop(db, uid, id, versions) {
   const closedAt = nowIso();
   await commitIntentDecision(
     db, uid, id,
     { state: 'completed_state', outcome: { closedAt, kind: 'closed', answerEntryId: null }, updatedAt: closedAt },
-    decisionPayload({ targetId: id, action: 'closed', createdAt: closedAt }),
+    decisionPayload({ targetId: id, action: 'closed', createdAt: closedAt, versions }),
   );
 }
 

@@ -114,26 +114,49 @@ describe('IntentSuggestionTray - display text', () => {
 });
 
 describe('IntentSuggestionTray - actions', () => {
-  it('Keep calls keepIntent with (db, uid, id) and hides the row', () => {
+  it('Keep calls keepIntent with (db, uid, id, versions) and hides the row', () => {
     suggestedWith([intent({ id: 'intent-1', sourceSpan: { text: 'call the vet' } })]);
     render(<IntentSuggestionTray entryId="e1" />);
 
     fireEvent.click(screen.getByText('Keep'));
 
-    expect(keepIntent).toHaveBeenCalledWith({ __db: true }, 'user-1', 'intent-1');
+    expect(keepIntent).toHaveBeenCalledWith({ __db: true }, 'user-1', 'intent-1', undefined);
     expect(setIntentUserText).not.toHaveBeenCalled();
     expect(screen.queryByText('call the vet')).toBeNull();
   });
 
-  it('No thanks calls dismissIntent with (db, uid, id) and hides the row', () => {
+  it('No thanks calls dismissIntent with (db, uid, id, null, versions) and hides the row', () => {
     suggestedWith([intent({ id: 'intent-1', sourceSpan: { text: 'call the vet' } })]);
     render(<IntentSuggestionTray entryId="e1" />);
 
     fireEvent.click(screen.getByText('No thanks'));
 
-    expect(dismissIntent).toHaveBeenCalledWith({ __db: true }, 'user-1', 'intent-1');
+    expect(dismissIntent).toHaveBeenCalledWith({ __db: true }, 'user-1', 'intent-1', null, undefined);
     expect(keepIntent).not.toHaveBeenCalled();
     expect(screen.queryByText('call the vet')).toBeNull();
+  });
+
+  // INT-02 part 2 item 1: the tray already holds the subscribed intent doc,
+  // so it passes that doc's `versions` field through to keepIntent/
+  // dismissIntent verbatim (intentClient copies it onto the paired decision).
+  it('passes the suggestion\'s versions snapshot through to keepIntent', () => {
+    const versions = { extraction: 1, model: 'gemini-3.5-flash', prompt: 1, schema: 2 };
+    suggestedWith([intent({ id: 'intent-1', sourceSpan: { text: 'call the vet' }, versions })]);
+    render(<IntentSuggestionTray entryId="e1" />);
+
+    fireEvent.click(screen.getByText('Keep'));
+
+    expect(keepIntent).toHaveBeenCalledWith({ __db: true }, 'user-1', 'intent-1', versions);
+  });
+
+  it('passes the suggestion\'s versions snapshot through to dismissIntent', () => {
+    const versions = { extraction: 1, model: 'gemini-3.5-flash', prompt: 1, schema: 2 };
+    suggestedWith([intent({ id: 'intent-1', sourceSpan: { text: 'call the vet' }, versions })]);
+    render(<IntentSuggestionTray entryId="e1" />);
+
+    fireEvent.click(screen.getByText('No thanks'));
+
+    expect(dismissIntent).toHaveBeenCalledWith({ __db: true }, 'user-1', 'intent-1', null, versions);
   });
 
   it('Edit shows an inline input prefilled with the display text', () => {
@@ -159,7 +182,7 @@ describe('IntentSuggestionTray - actions', () => {
     });
 
     expect(setIntentUserText).toHaveBeenCalledWith({ __db: true }, 'user-1', 'intent-1', 'call the vet tomorrow');
-    expect(keepIntent).toHaveBeenCalledWith({ __db: true }, 'user-1', 'intent-1');
+    expect(keepIntent).toHaveBeenCalledWith({ __db: true }, 'user-1', 'intent-1', undefined);
     // setIntentUserText must be called before keepIntent (userText persisted before activation).
     expect(setIntentUserText.mock.invocationCallOrder[0]).toBeLessThan(keepIntent.mock.invocationCallOrder[0]);
     expect(screen.queryByText('call the vet tomorrow')).toBeNull();

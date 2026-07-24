@@ -136,6 +136,19 @@ function resolveAnswerOutcome(savedResult) {
  * document visibility (foregrounding) and every 5 minutes while visible, so a
  * loop that crosses its `targetAt` while the app stays open — migrating from
  * upcoming to due — appears/moves without needing a full remount.
+ *
+ * INT-02 part 2 item 3 (same pattern as IntentSuggestionTray/CapturedToast):
+ * snooze/close/dismiss remove a row optimistically, but the underlying
+ * intentClient batched mutation is now awaited; on failure the row is
+ * restored and a quiet, non-alarming inline message appears under it. Answer
+ * never removed the row optimistically to begin with (the live subscription
+ * naturally drops it once the batch commits), so it just surfaces the same
+ * quiet failure message on the still-visible row if `answerLoop` rejects.
+ * Since this widget can show several loops at once, busy/error state is
+ * tracked per-id (`busyIds`/`errorIds`, both Sets) rather than a single
+ * scalar — one row's in-flight action must never disable or flag another
+ * row. Each mutation also forwards the loop's own `versions` field (INT-02
+ * item 1) so the paired decision doc carries its model/policy snapshot.
  */
 const OpenLoopsWidget = ({
   size = '2x1',
@@ -151,6 +164,11 @@ const OpenLoopsWidget = ({
   const [upcomingLoops, setUpcomingLoops] = useState([]);
   const [showUpcoming, setShowUpcoming] = useState(false);
   const [snoozeMenuId, setSnoozeMenuId] = useState(null);
+  // INT-02 item 3: ids with an action currently in flight, and ids currently
+  // showing the quiet failure message — both per-loop, since several loops
+  // can be mid-action independently.
+  const [busyIds, setBusyIds] = useState(() => new Set());
+  const [errorIds, setErrorIds] = useState(() => new Set());
 
   // I2 (+ upcoming-list follow-up): subscribeDueOpenLoops/
   // subscribeUpcomingOpenLoops each bake `now` into their Firestore query at
@@ -180,37 +198,107 @@ const OpenLoopsWidget = ({
     setDueLoops((prev) => prev.filter((l) => l.id !== id));
   };
 
+  // Re-add `loop` after its mutation failed. Guards against a duplicate
+  // insert if it somehow already came back (e.g. a live subscription refire).
+  const restoreDueLocally = (loop) => {
+    setDueLoops((prev) => (prev.some((l) => l.id === loop.id) ? prev : [...prev, loop]));
+  };
+
+  const restoreUpcomingLocally = (loop) => {
+    setUpcomingLoops((prev) => (prev.some((l) => l.id === loop.id) ? prev : [...prev, loop]));
+  };
+
+  const markBusy = (id) => setBusyIds((prev) => new Set(prev).add(id));
+  const clearBusy = (id) => setBusyIds((prev) => {
+    if (!prev.has(id)) return prev;
+    const next = new Set(prev);
+    next.delete(id);
+    return next;
+  });
+  const markError = (id) => setErrorIds((prev) => new Set(prev).add(id));
+  const clearError = (id) => setErrorIds((prev) => {
+    if (!prev.has(id)) return prev;
+    const next = new Set(prev);
+    next.delete(id);
+    return next;
+  });
+
+  /**
+   * Run `mutate` (already db/uid-bound) for `loop`, awaited. `optimistic`
+   * (if given) runs synchronously first for a snappy feel; on failure
+   * `restore` (if given) re-adds the row and the quiet failure state is
+   * flagged; on success nothing further happens. Marks `loop.id` busy for
+   * the duration so a re-entrant call for the same row is blocked.
+   */
+  const runAction = async (loop, mutate, { optimistic, restore } = {}) => {
+    clearError(loop.id);
+    markBusy(loop.id);
+    optimistic?.();
+    try {
+      await mutate();
+    } catch {
+      restore?.(loop);
+      markError(loop.id);
+    } finally {
+      clearBusy(loop.id);
+    }
+  };
+
   const handleAnswer = (loop) => {
-    if (!uid) return;
+    if (!uid || busyIds.has(loop.id)) return;
     onAnswerLoop?.(loopText(loop), (savedResult) => {
       // I1: only close the loop when the answer entry actually saved (a real
       // id, or the documented "saved with no id available" cases) — a save
       // failure must leave the loop due, with no error UI beyond whatever
       // the save path itself already surfaced (e.g. App.jsx's alert()).
       const { shouldClose, entryId } = resolveAnswerOutcome(savedResult);
-      if (shouldClose) answerLoop(db, uid, loop.id, entryId);
+      if (!shouldClose) return;
+      // No optimistic removal here (never was): the live subscription drops
+      // the loop from `dueLoops` once the batch actually commits. On
+      // failure the loop is simply still due — the quiet message surfaces
+      // on the still-visible row.
+      runAction(loop, () => answerLoop(db, uid, loop.id, entryId, loop.versions));
     });
   };
 
   const handleSnoozeOption = (loop, optionKey) => {
-    if (uid) snoozeLoop(db, uid, loop.id, snoozeUntilIso(optionKey));
+    if (!uid || busyIds.has(loop.id)) return;
     setSnoozeMenuId(null);
-    removeDueLocally(loop.id);
+    runAction(
+      loop,
+      () => snoozeLoop(db, uid, loop.id, snoozeUntilIso(optionKey), loop.versions),
+      { optimistic: () => removeDueLocally(loop.id), restore: restoreDueLocally },
+    );
   };
 
   const handleClose = (loop) => {
-    if (uid) closeLoop(db, uid, loop.id);
-    removeDueLocally(loop.id);
+    if (!uid || busyIds.has(loop.id)) return;
+    runAction(
+      loop,
+      () => closeLoop(db, uid, loop.id, loop.versions),
+      { optimistic: () => removeDueLocally(loop.id), restore: restoreDueLocally },
+    );
   };
 
   const handleDismissDue = (loop) => {
-    if (uid) dismissIntent(db, uid, loop.id);
-    removeDueLocally(loop.id);
+    if (!uid || busyIds.has(loop.id)) return;
+    runAction(
+      loop,
+      () => dismissIntent(db, uid, loop.id, null, loop.versions),
+      { optimistic: () => removeDueLocally(loop.id), restore: restoreDueLocally },
+    );
   };
 
   const handleDismissUpcoming = (loop) => {
-    if (uid) dismissIntent(db, uid, loop.id);
-    setUpcomingLoops((prev) => prev.filter((l) => l.id !== loop.id));
+    if (!uid || busyIds.has(loop.id)) return;
+    runAction(
+      loop,
+      () => dismissIntent(db, uid, loop.id, null, loop.versions),
+      {
+        optimistic: () => setUpcomingLoops((prev) => prev.filter((l) => l.id !== loop.id)),
+        restore: restoreUpcomingLocally,
+      },
+    );
   };
 
   if (!flagsOn) return null;
@@ -227,7 +315,9 @@ const OpenLoopsWidget = ({
         </div>
 
         <ul className="space-y-2">
-          {visibleLoops.map((loop, index) => (
+          {visibleLoops.map((loop, index) => {
+            const busy = busyIds.has(loop.id);
+            return (
             <motion.li
               key={loop.id}
               className="border-b border-divider pb-2 last:border-b-0 last:pb-0"
@@ -246,7 +336,8 @@ const OpenLoopsWidget = ({
                     onClick={() => handleAnswer(loop)}
                     title="Answer"
                     aria-label="Answer"
-                    className="w-6 h-6 rounded flex items-center justify-center text-muted-foreground hover:text-accent-deep transition-colors"
+                    disabled={busy}
+                    className="w-6 h-6 rounded flex items-center justify-center text-muted-foreground hover:text-accent-deep transition-colors disabled:opacity-50"
                   >
                     <MessageSquare size={14} />
                   </button>
@@ -255,7 +346,8 @@ const OpenLoopsWidget = ({
                     onClick={() => setSnoozeMenuId((cur) => (cur === loop.id ? null : loop.id))}
                     title="Snooze"
                     aria-label="Snooze"
-                    className="w-6 h-6 rounded flex items-center justify-center text-muted-foreground hover:text-accent-deep transition-colors"
+                    disabled={busy}
+                    className="w-6 h-6 rounded flex items-center justify-center text-muted-foreground hover:text-accent-deep transition-colors disabled:opacity-50"
                   >
                     <Clock size={14} />
                   </button>
@@ -264,7 +356,8 @@ const OpenLoopsWidget = ({
                     onClick={() => handleClose(loop)}
                     title="Close"
                     aria-label="Close"
-                    className="w-6 h-6 rounded flex items-center justify-center text-muted-foreground hover:text-accent-deep transition-colors"
+                    disabled={busy}
+                    className="w-6 h-6 rounded flex items-center justify-center text-muted-foreground hover:text-accent-deep transition-colors disabled:opacity-50"
                   >
                     <Check size={14} />
                   </button>
@@ -273,12 +366,19 @@ const OpenLoopsWidget = ({
                     onClick={() => handleDismissDue(loop)}
                     title="Don't revisit"
                     aria-label="Don't revisit"
-                    className="w-6 h-6 rounded flex items-center justify-center text-faint hover:text-muted-foreground transition-colors"
+                    disabled={busy}
+                    className="w-6 h-6 rounded flex items-center justify-center text-faint hover:text-muted-foreground transition-colors disabled:opacity-50"
                   >
                     <X size={14} />
                   </button>
                 </div>
               </div>
+
+              {errorIds.has(loop.id) && (
+                <p className="mt-1 text-[10px] text-honey-700 dark:text-honey-300">
+                  Couldn&apos;t save that — try again.
+                </p>
+              )}
 
               {snoozeMenuId === loop.id && (
                 <div role="menu" className="mt-1.5 flex gap-1.5">
@@ -297,7 +397,8 @@ const OpenLoopsWidget = ({
                 </div>
               )}
             </motion.li>
-          ))}
+            );
+          })}
         </ul>
 
         {upcomingLoops.length > 0 && (
@@ -314,18 +415,26 @@ const OpenLoopsWidget = ({
             {showUpcoming && (
               <ul className="mt-1.5 space-y-1">
                 {upcomingLoops.map((loop) => (
-                  <li key={loop.id} className="flex items-center justify-between gap-2 text-[10px] text-faint">
-                    <span className="line-clamp-1 flex-1">{loopText(loop)}</span>
-                    <span className="shrink-0">{formatUpcomingDate(loop.targetAt)}</span>
-                    <button
-                      type="button"
-                      onClick={() => handleDismissUpcoming(loop)}
-                      title="Don't revisit"
-                      aria-label="Don't revisit"
-                      className="w-5 h-5 rounded flex items-center justify-center shrink-0 text-faint hover:text-muted-foreground transition-colors"
-                    >
-                      <X size={12} />
-                    </button>
+                  <li key={loop.id}>
+                    <div className="flex items-center justify-between gap-2 text-[10px] text-faint">
+                      <span className="line-clamp-1 flex-1">{loopText(loop)}</span>
+                      <span className="shrink-0">{formatUpcomingDate(loop.targetAt)}</span>
+                      <button
+                        type="button"
+                        onClick={() => handleDismissUpcoming(loop)}
+                        title="Don't revisit"
+                        aria-label="Don't revisit"
+                        disabled={busyIds.has(loop.id)}
+                        className="w-5 h-5 rounded flex items-center justify-center shrink-0 text-faint hover:text-muted-foreground transition-colors disabled:opacity-50"
+                      >
+                        <X size={12} />
+                      </button>
+                    </div>
+                    {errorIds.has(loop.id) && (
+                      <p className="mt-0.5 text-[10px] text-honey-700 dark:text-honey-300">
+                        Couldn&apos;t save that — try again.
+                      </p>
+                    )}
                   </li>
                 ))}
               </ul>

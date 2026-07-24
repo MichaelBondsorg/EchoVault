@@ -123,12 +123,12 @@ const IntentSuggestionTray = ({ entryId }) => {
 
   const handleKeep = (suggestion) => {
     if (!uid || busyIds.has(suggestion.id)) return;
-    runAction(suggestion, () => keepIntent(db, uid, suggestion.id));
+    runAction(suggestion, () => keepIntent(db, uid, suggestion.id, suggestion.versions));
   };
 
   const handleDismiss = (suggestion) => {
     if (!uid || busyIds.has(suggestion.id)) return;
-    runAction(suggestion, () => dismissIntent(db, uid, suggestion.id));
+    runAction(suggestion, () => dismissIntent(db, uid, suggestion.id, null, suggestion.versions));
   };
 
   const startEdit = (suggestion) => {
@@ -152,7 +152,7 @@ const IntentSuggestionTray = ({ entryId }) => {
     // need to be re-typed), even though it was never persisted.
     runAction({ ...suggestion, userText: text }, async () => {
       await setIntentUserText(db, uid, suggestion.id, text);
-      await keepIntent(db, uid, suggestion.id);
+      await keepIntent(db, uid, suggestion.id, suggestion.versions);
     });
   };
 

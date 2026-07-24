@@ -395,14 +395,43 @@ export function validateUserIntentUpdate(before, after) {
   return isClientTransitionAllowed(before.state, after.state);
 }
 
+// INT-02 item 1: validate an optional versions snapshot copied onto a
+// user_decisions doc from the intent's own `versions` field at action time.
+// Non-throwing on absence (null/undefined both mean "not supplied" and
+// return undefined so the caller omits the key); throws on anything present
+// but malformed — a map whose values are each a scalar (string/number/
+// boolean), mirroring validateAttributes' one-key-at-a-time shape check.
+function validateVersions(versions) {
+  if (versions === undefined || versions === null) return undefined;
+  if (typeof versions !== 'object' || Array.isArray(versions)) {
+    throw new Error('decision: versions must be a map of scalars');
+  }
+  const out = {};
+  for (const [key, value] of Object.entries(versions)) {
+    if (typeof value !== 'string' && typeof value !== 'number' && typeof value !== 'boolean') {
+      throw new Error(`decision: versions.${key} must be a scalar (string/number/boolean)`);
+    }
+    out[key] = value;
+  }
+  return out;
+}
+
 /**
  * Validate + construct a user_decisions document (append-only audit of a user's
  * keep/dismiss/complete action). Throws on malformed input.
+ *
+ * `versions` (INT-02 item 1) is optional: when supplied it's the intent's
+ * own `versions` snapshot (model/policy provenance) at action time, copied
+ * verbatim onto the decision so an audit row is self-describing about which
+ * extraction produced the intent it decided on. Additive-only — omitted
+ * entirely (never `versions: null`) when absent, so a legacy decision shape
+ * and firestore.rules' pre-existing hasOnly allowlist both stay untouched.
  */
-export function buildUserDecision({ targetId, action, reasonCode = null, createdAt }) {
+export function buildUserDecision({ targetId, action, reasonCode = null, createdAt, versions }) {
   if (typeof targetId !== 'string' || !targetId.trim()) throw new Error('decision: targetId is required');
   if (!DECISION_ACTIONS.includes(action)) throw new Error(`decision: unknown action "${action}"`);
-  return {
+  const validatedVersions = validateVersions(versions);
+  const doc = {
     targetId,
     targetType: 'intent',
     action,
@@ -410,6 +439,8 @@ export function buildUserDecision({ targetId, action, reasonCode = null, created
     createdAt: createdAt || new Date().toISOString(),
     reversible: true,
   };
+  if (validatedVersions !== undefined) doc.versions = validatedVersions;
+  return doc;
 }
 
 export default {

@@ -340,9 +340,14 @@ service cloud.firestore {
         allow create: if isOwner(userId)
           && request.resource.data.targetType == 'intent'
           && request.resource.data.keys().hasAll(['targetId', 'targetType', 'action', 'createdAt', 'reversible'])
-          && request.resource.data.keys().hasOnly(['targetId', 'targetType', 'action', 'reasonCode', 'createdAt', 'reversible'])
+          && request.resource.data.keys().hasOnly(['targetId', 'targetType', 'action', 'reasonCode', 'createdAt', 'reversible', 'versions'])
           && request.resource.data.action in ['kept', 'dismissed', 'not_a_task', 'completed', 'snoozed', 'answered', 'closed']
-          && request.resource.data.reversible == true;
+          && request.resource.data.reversible == true
+          // versions (INT-02 item 1) is optional — a decision on a legacy
+          // intent extracted before this field existed omits it entirely
+          // (backward compat); when present it must be a map (the
+          // intent's `versions` snapshot at action time).
+          && (!('versions' in request.resource.data) || request.resource.data.versions is map);
       }
 
       // FCM tokens subcollection (write-only, no client reads or deletes)
