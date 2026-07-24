@@ -10,6 +10,22 @@
  * Storage:
  *   artifacts/{APP}/users/{uid}/intents/{id}
  *   artifacts/{APP}/users/{uid}/user_decisions/{autoId}
+ *
+ * INT-02 (atomic + failure-visible actions): every action below that pairs an
+ * intent-state change with a user_decisions append does so via ONE
+ * `writeBatch` — commitIntentDecision() — so the two writes land together or
+ * not at all (never "state flipped, no audit row" or the reverse). The
+ * exported functions still return the underlying promise so callers MUST
+ * await + handle rejection (no fire-and-forget); on a commit failure nothing
+ * was written, so the caller's own optimistic UI state is the only thing to
+ * roll back. Repeat-safety is structural, not a dedup check here:
+ * firestore.rules' intentTransitionAllowed (mirrored in
+ * functions/src/intents/intentSchema.js isClientTransitionAllowed) permits
+ * `from == to`, so re-running e.g. dismissIntent on an already-dismissed
+ * intent commits cleanly — it just appends a second (harmless, append-only)
+ * decision row. Preventing that second row on a double-tap is a UI concern
+ * (disable the control while the batch is in flight), deliberately not
+ * solved here.
  */
 import {
   collection,
@@ -21,6 +37,7 @@ import {
   onSnapshot,
   updateDoc,
   addDoc,
+  writeBatch,
 } from '../../config/firebase';
 import { APP_COLLECTION_ID } from '../../config/constants';
 
@@ -201,40 +218,88 @@ export function subscribeRecentActiveIntents(db, uid, cb, onError) {
   );
 }
 
-/** Append a reversible user_decisions record. Shape matches firestore.rules. */
-async function appendDecision(db, uid, { targetId, action, reasonCode = null }) {
-  await addDoc(collection(db, decisionsPath(uid)), {
+/**
+ * Build a user_decisions payload. Field shape is intentionally identical to
+ * (and must stay in lockstep with) functions/src/intents/intentSchema.js
+ * buildUserDecision and firestore.rules' user_decisions create allowlist
+ * (targetId/targetType/action/reasonCode/createdAt/reversible, hasOnly —
+ * NOT duplicated via import because functions/src is a separate Cloud
+ * Functions bundle, not part of the client build).
+ *
+ * NOTE (INT-02 item 3, not yet wired): the review also asks for the
+ * intent's `versions` snapshot (model/policy provenance) to be copied onto
+ * the decision doc. The current firestore.rules `user_decisions` create
+ * rule hasOnly(['targetId','targetType','action','reasonCode','createdAt',
+ * 'reversible']) — adding a `versions` key today would fail rules on every
+ * write. Landing that requires a coordinated firestore.rules +
+ * functions/src/intents/intentSchema.js change, which is outside this
+ * change's touched-files scope; see the task report for the exact diff.
+ */
+function decisionPayload({ targetId, action, reasonCode = null, createdAt }) {
+  return {
     targetId,
     targetType: 'intent',
     action,
     reasonCode: reasonCode ?? null,
-    createdAt: nowIso(),
+    createdAt: createdAt || nowIso(),
     reversible: true,
-  });
+  };
 }
 
-/** Keep a suggested intent: suggested -> active (+ 'kept' decision). */
+/**
+ * INT-02: commit an intent-state update and its paired user_decisions append
+ * as ONE Firestore batch. Either both writes land or neither does — callers
+ * must await this and treat a rejection as "nothing changed" (safe to
+ * restore any optimistic UI state).
+ *
+ * @param {object} db
+ * @param {string} uid
+ * @param {string} id
+ * @param {object} intentUpdate - fields to merge onto the intent doc.
+ * @param {object} decision - a decisionPayload() result.
+ */
+async function commitIntentDecision(db, uid, id, intentUpdate, decision) {
+  const batch = writeBatch(db);
+  batch.update(doc(db, intentsPath(uid), id), intentUpdate);
+  batch.set(doc(collection(db, decisionsPath(uid))), decision);
+  await batch.commit();
+}
+
+/** Keep a suggested intent: suggested -> active (+ 'kept' decision), one batch. */
 export async function keepIntent(db, uid, id) {
-  await updateDoc(doc(db, intentsPath(uid), id), { state: 'active', updatedAt: nowIso() });
-  await appendDecision(db, uid, { targetId: id, action: 'kept' });
+  const now = nowIso();
+  await commitIntentDecision(
+    db, uid, id,
+    { state: 'active', updatedAt: now },
+    decisionPayload({ targetId: id, action: 'kept', createdAt: now }),
+  );
 }
 
-/** Dismiss an intent: any -> dismissed (+ 'not_a_task' decision). */
+/** Dismiss an intent: any -> dismissed (+ 'not_a_task' decision), one batch. */
 export async function dismissIntent(db, uid, id, reasonCode = null) {
-  await updateDoc(doc(db, intentsPath(uid), id), { state: 'dismissed', updatedAt: nowIso() });
-  await appendDecision(db, uid, { targetId: id, action: 'not_a_task', reasonCode });
+  const now = nowIso();
+  await commitIntentDecision(
+    db, uid, id,
+    { state: 'dismissed', updatedAt: now },
+    decisionPayload({ targetId: id, action: 'not_a_task', reasonCode, createdAt: now }),
+  );
 }
 
-/** Complete an active intent: active -> completed_state (+ 'completed' decision). */
+/** Complete an active intent: active -> completed_state (+ 'completed' decision), one batch. */
 export async function completeIntent(db, uid, id) {
-  await updateDoc(doc(db, intentsPath(uid), id), { state: 'completed_state', updatedAt: nowIso() });
-  await appendDecision(db, uid, { targetId: id, action: 'completed' });
+  const now = nowIso();
+  await commitIntentDecision(
+    db, uid, id,
+    { state: 'completed_state', updatedAt: now },
+    decisionPayload({ targetId: id, action: 'completed', createdAt: now }),
+  );
 }
 
 /**
  * Snooze an open loop until a future instant: no state change, just
- * `snoozedUntil` (+ a reversible 'snoozed' decision). Client-filtered out of
- * {@link subscribeDueOpenLoops} until that instant passes.
+ * `snoozedUntil` (+ a reversible 'snoozed' decision), one batch.
+ * Client-filtered out of {@link subscribeDueOpenLoops} until that instant
+ * passes.
  *
  * @param {object} db
  * @param {string} uid
@@ -242,15 +307,19 @@ export async function completeIntent(db, uid, id) {
  * @param {string} untilIso
  */
 export async function snoozeLoop(db, uid, id, untilIso) {
-  await updateDoc(doc(db, intentsPath(uid), id), { snoozedUntil: untilIso, updatedAt: nowIso() });
-  await appendDecision(db, uid, { targetId: id, action: 'snoozed' });
+  const now = nowIso();
+  await commitIntentDecision(
+    db, uid, id,
+    { snoozedUntil: untilIso, updatedAt: now },
+    decisionPayload({ targetId: id, action: 'snoozed', createdAt: now }),
+  );
 }
 
 /**
  * Close an open loop because it was answered by another entry: active ->
- * completed_state, with `outcome.kind = 'answered'` (+ 'answered' decision).
- * Writes only the intent doc — the source entry (answerEntryId just records
- * its id) is never touched.
+ * completed_state, with `outcome.kind = 'answered'` (+ 'answered' decision),
+ * one batch. Writes only the intent doc — the source entry (answerEntryId
+ * just records its id) is never touched.
  *
  * @param {object} db
  * @param {string} uid
@@ -259,18 +328,17 @@ export async function snoozeLoop(db, uid, id, untilIso) {
  */
 export async function answerLoop(db, uid, id, answerEntryId = null) {
   const closedAt = nowIso();
-  await updateDoc(doc(db, intentsPath(uid), id), {
-    state: 'completed_state',
-    outcome: { closedAt, kind: 'answered', answerEntryId },
-    updatedAt: closedAt,
-  });
-  await appendDecision(db, uid, { targetId: id, action: 'answered' });
+  await commitIntentDecision(
+    db, uid, id,
+    { state: 'completed_state', outcome: { closedAt, kind: 'answered', answerEntryId }, updatedAt: closedAt },
+    decisionPayload({ targetId: id, action: 'answered', createdAt: closedAt }),
+  );
 }
 
 /**
  * Close an open loop with no answering entry (user closed it directly):
  * active -> completed_state, with `outcome.kind = 'closed'` (+ 'closed'
- * decision).
+ * decision), one batch.
  *
  * @param {object} db
  * @param {string} uid
@@ -278,12 +346,11 @@ export async function answerLoop(db, uid, id, answerEntryId = null) {
  */
 export async function closeLoop(db, uid, id) {
   const closedAt = nowIso();
-  await updateDoc(doc(db, intentsPath(uid), id), {
-    state: 'completed_state',
-    outcome: { closedAt, kind: 'closed', answerEntryId: null },
-    updatedAt: closedAt,
-  });
-  await appendDecision(db, uid, { targetId: id, action: 'closed' });
+  await commitIntentDecision(
+    db, uid, id,
+    { state: 'completed_state', outcome: { closedAt, kind: 'closed', answerEntryId: null }, updatedAt: closedAt },
+    decisionPayload({ targetId: id, action: 'closed', createdAt: closedAt }),
+  );
 }
 
 /**

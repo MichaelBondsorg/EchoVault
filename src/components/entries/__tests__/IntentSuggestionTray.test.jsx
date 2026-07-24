@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, act } from '@testing-library/react';
 
 const getFlag = vi.fn();
 vi.mock('../../../config/flags', () => ({ getFlag: (...a) => getFlag(...a) }));
@@ -178,6 +178,94 @@ describe('IntentSuggestionTray - actions', () => {
     expect(setIntentUserText).not.toHaveBeenCalled();
     expect(dismissIntent).not.toHaveBeenCalled();
     expect(screen.getByText('call the vet')).toBeTruthy();
+  });
+});
+
+describe('IntentSuggestionTray - INT-02 failure handling', () => {
+  it('Keep failure restores the row and shows a quiet, non-alarming failure message', async () => {
+    keepIntent.mockRejectedValueOnce(new Error('offline'));
+    suggestedWith([intent({ id: 'intent-1', sourceSpan: { text: 'call the vet' } })]);
+    render(<IntentSuggestionTray entryId="e1" />);
+
+    fireEvent.click(screen.getByText('Keep'));
+    // Optimistic removal happens synchronously.
+    expect(screen.queryByText('call the vet')).toBeNull();
+
+    await vi.waitFor(() => {
+      expect(screen.getByText('call the vet')).toBeTruthy();
+    });
+    const message = screen.getByText(/couldn.t save/i);
+    expect(message).toBeTruthy();
+    expect(message.textContent).not.toMatch(/error|fail|alert/i);
+  });
+
+  it('Dismiss failure restores the row and shows the failure message', async () => {
+    dismissIntent.mockRejectedValueOnce(new Error('permission-denied'));
+    suggestedWith([intent({ id: 'intent-1', sourceSpan: { text: 'call the vet' } })]);
+    render(<IntentSuggestionTray entryId="e1" />);
+
+    fireEvent.click(screen.getByText('No thanks'));
+    expect(screen.queryByText('call the vet')).toBeNull();
+
+    await vi.waitFor(() => {
+      expect(screen.getByText('call the vet')).toBeTruthy();
+      expect(screen.getByText(/couldn.t save/i)).toBeTruthy();
+    });
+  });
+
+  it('Edit-confirm failure restores the row with the just-typed text (not lost)', async () => {
+    keepIntent.mockRejectedValueOnce(new Error('offline'));
+    suggestedWith([intent({ id: 'intent-1', userText: null, sourceSpan: { text: 'call the vet' } })]);
+    render(<IntentSuggestionTray entryId="e1" />);
+
+    fireEvent.click(screen.getByText('Edit'));
+    const input = screen.getByDisplayValue('call the vet');
+    fireEvent.change(input, { target: { value: 'call the vet tomorrow' } });
+    fireEvent.click(screen.getByText('Save'));
+
+    await vi.waitFor(() => {
+      expect(screen.getByText('call the vet tomorrow')).toBeTruthy();
+      expect(screen.getByText(/couldn.t save/i)).toBeTruthy();
+    });
+  });
+
+  it('a successful action leaves no failure message behind', async () => {
+    suggestedWith([intent({ id: 'intent-1', sourceSpan: { text: 'call the vet' } })]);
+    render(<IntentSuggestionTray entryId="e1" />);
+
+    fireEvent.click(screen.getByText('Keep'));
+    await vi.waitFor(() => expect(keepIntent).toHaveBeenCalled());
+    expect(screen.queryByText(/couldn.t save/i)).toBeNull();
+  });
+
+  it('guards against a re-entrant call for the same row while its action is still in flight (e.g. a subscription refire mid-commit)', async () => {
+    let resolveKeep;
+    keepIntent.mockImplementationOnce(() => new Promise((resolve) => { resolveKeep = resolve; }));
+    let deliver;
+    subscribeSuggestedIntentsForEntry.mockImplementation((_db, _uid, _entryId, cb) => {
+      deliver = cb;
+      cb([intent({ id: 'intent-1', sourceSpan: { text: 'call the vet' } })]);
+      return () => {};
+    });
+    render(<IntentSuggestionTray entryId="e1" />);
+
+    fireEvent.click(screen.getByText('Keep'));
+    expect(keepIntent).toHaveBeenCalledTimes(1);
+
+    // The live subscription refires mid-flight and re-delivers the doc
+    // (its state hasn't changed yet — the batch commit is still pending) —
+    // the row genuinely reappears in the DOM.
+    act(() => {
+      deliver([intent({ id: 'intent-1', sourceSpan: { text: 'call the vet' } })]);
+    });
+    expect(screen.getByText('call the vet')).toBeTruthy();
+
+    // A second tap on it while busy must NOT fire a second keepIntent.
+    fireEvent.click(screen.getByText('Keep'));
+    expect(keepIntent).toHaveBeenCalledTimes(1);
+
+    resolveKeep();
+    await vi.waitFor(() => {}); // let the in-flight promise settle
   });
 });
 
