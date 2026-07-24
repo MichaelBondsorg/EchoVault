@@ -168,7 +168,8 @@ const IntentSuggestionTray = ({ entryId }) => {
                   <input
                     value={editText}
                     onChange={(e) => setEditText(e.target.value)}
-                    className="min-h-11 flex-1 rounded-lg border border-border bg-card px-2 py-1 text-sm text-foreground focus:outline-none focus:border-accent"
+                    aria-label="Edit suggestion text"
+                    className="min-h-11 flex-1 rounded-lg border border-border bg-card px-2 py-1 text-base text-foreground focus:outline-none focus:border-accent"
                     autoFocus
                   />
                   <button

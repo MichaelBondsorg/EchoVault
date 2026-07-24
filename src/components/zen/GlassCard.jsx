@@ -21,8 +21,24 @@ const GlassCard = ({
   isEditing = false,
   interactive = false,
   style = {},
+  onClick,
   ...props
 }) => {
+  // A11Y-02: an interactive card with an onClick (e.g. NexusInsightsWidget's
+  // tap-to-navigate) was a plain clickable div — no keyboard equivalent, no
+  // button semantics, no announced role. When both are present, promote the
+  // card to a real button-like control: Enter/Space activates it, and
+  // screen readers announce it as a button. Non-interactive/edit-mode cards
+  // (the majority of GlassCard usages) are unaffected — they render exactly
+  // as before.
+  const isClickable = interactive && typeof onClick === 'function' && !isEditing;
+  const handleKeyDown = (e) => {
+    if (!isClickable) return;
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      onClick(e);
+    }
+  };
   // Size classes for the 2-column Bento grid
   const sizeClasses = {
     '1x1': 'col-span-1 aspect-square',      // Square, half width
@@ -61,6 +77,10 @@ const GlassCard = ({
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: -20, scale: 0.95 }}
       transition={{ duration: 0.3, ease: 'easeOut' }}
+      onClick={onClick}
+      onKeyDown={handleKeyDown}
+      role={isClickable ? 'button' : undefined}
+      tabIndex={isClickable ? 0 : undefined}
       {...props}
     >
       {/* Card content */}

@@ -12,7 +12,7 @@ import { recordInsightDismissal } from '../services/nexus/insightDismissal';
 import { useNexusInsights } from '../hooks/useNexusInsights';
 import { useBasicInsights } from '../hooks/useBasicInsights';
 import { useClaims } from '../hooks/useClaims';
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, useId } from 'react';
 import { recordFeedbackAndLearn } from '../services/basicInsights/feedbackLearning';
 import { rebuildInsights, describeRebuildResult } from '../services/insights/rebuildInsights';
 import { db } from '../config/firebase';
@@ -2184,6 +2184,9 @@ const NexusInsightCard = ({ insight, isExpanded, onToggleExpand, onDismiss, onRe
 
   const style = getInsightStyle();
   const Icon = style.icon;
+  // A11Y-02: stable id for the expandable region so the clickable header can
+  // reference it via aria-controls.
+  const panelId = useId();
 
   // Check if this insight has expandable content
   const hasExpandableContent = Boolean(
@@ -2199,6 +2202,24 @@ const NexusInsightCard = ({ insight, isExpanded, onToggleExpand, onDismiss, onRe
     insight.evidence?.statistical?.confidence ||
     insight.recommendation?.confidence;
 
+  // A11Y-02: accessible name for the card's own disclosure control (kept
+  // short and non-redundant with the nested action buttons' own labels,
+  // which name-from-content would otherwise pull in).
+  const cardTitle = getStringContent(insight.title, insight.intervention) || style.label;
+
+  // A11Y-02: the header row toggles expansion, but also hosts real <button>
+  // action controls (Why/Report/Dismiss) — each must stop the click from
+  // bubbling to the toggle, and Enter/Space on the toggle itself must not
+  // fire while focus is actually on one of those nested buttons (handled by
+  // e.target === e.currentTarget below).
+  const handleHeaderKeyDown = (e) => {
+    if (!hasExpandableContent || e.target !== e.currentTarget) return;
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      onToggleExpand?.();
+    }
+  };
+
   return (
     <motion.div
       layout
@@ -2207,10 +2228,16 @@ const NexusInsightCard = ({ insight, isExpanded, onToggleExpand, onDismiss, onRe
       exit={{ opacity: 0, x: -100 }}
       className={`bg-card border ${style.border} rounded-2xl overflow-hidden`}
     >
-      {/* Main Card - Clickable */}
+      {/* Main Card header - Clickable disclosure when expandable */}
       <div
         className={`p-4 ${hasExpandableContent ? 'cursor-pointer' : ''}`}
         onClick={hasExpandableContent ? onToggleExpand : undefined}
+        onKeyDown={handleHeaderKeyDown}
+        role={hasExpandableContent ? 'button' : undefined}
+        tabIndex={hasExpandableContent ? 0 : undefined}
+        aria-expanded={hasExpandableContent ? isExpanded : undefined}
+        aria-controls={hasExpandableContent ? panelId : undefined}
+        aria-label={hasExpandableContent ? cardTitle : undefined}
       >
         <div className="flex items-start gap-3">
           <div className={`p-2 ${style.iconBg} rounded-xl flex-shrink-0`}>
@@ -2234,7 +2261,8 @@ const NexusInsightCard = ({ insight, isExpanded, onToggleExpand, onDismiss, onRe
                 {/* R2 Task 11: "Why am I seeing this?" — flag-gated provenance trigger */}
                 {onWhyThis && getFlag('insightReceipts') && (
                   <button
-                    onClick={(e) => onWhyThis(e)}
+                    type="button"
+                    onClick={(e) => { e.stopPropagation(); onWhyThis(e); }}
                     className="p-2 hover:bg-divider rounded-full transition-colors min-w-[44px] min-h-[44px] flex items-center justify-center"
                     aria-label="Why am I seeing this?"
                     title="Why am I seeing this?"
@@ -2245,7 +2273,8 @@ const NexusInsightCard = ({ insight, isExpanded, onToggleExpand, onDismiss, onRe
                 {/* Report AI-generated content (Play AI-content policy) */}
                 {onReport && (
                   <button
-                    onClick={onReport}
+                    type="button"
+                    onClick={(e) => { e.stopPropagation(); onReport(e); }}
                     className="p-2 hover:bg-divider rounded-full transition-colors min-w-[44px] min-h-[44px] flex items-center justify-center"
                     aria-label="Report this insight as inappropriate"
                     title="Report this insight"
@@ -2255,7 +2284,8 @@ const NexusInsightCard = ({ insight, isExpanded, onToggleExpand, onDismiss, onRe
                 )}
                 {/* INT-003: Increased tap target size for accessibility (44x44px minimum) */}
                 <button
-                  onClick={onDismiss}
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); onDismiss(e); }}
                   className="p-2 hover:bg-divider rounded-full transition-colors min-w-[44px] min-h-[44px] flex items-center justify-center"
                   aria-label="Dismiss insight"
                 >
@@ -2318,6 +2348,7 @@ const NexusInsightCard = ({ insight, isExpanded, onToggleExpand, onDismiss, onRe
       <AnimatePresence>
         {isExpanded && hasExpandableContent && (
           <motion.div
+            id={panelId}
             initial={{ height: 0, opacity: 0 }}
             animate={{ height: 'auto', opacity: 1 }}
             exit={{ height: 0, opacity: 0 }}

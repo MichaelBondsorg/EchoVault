@@ -201,7 +201,7 @@ const CapturedToast = () => {
                 value={editText}
                 onChange={(e) => setEditText(e.target.value)}
                 aria-label="Edit captured text"
-                className="min-w-0 flex-1 border-b border-border bg-transparent text-sm text-foreground outline-none"
+                className="min-w-0 flex-1 border-b border-border bg-transparent text-base text-foreground outline-none"
               />
               <button
                 type="button"

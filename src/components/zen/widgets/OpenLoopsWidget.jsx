@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useId } from 'react';
 import { motion } from 'framer-motion';
 import { Clock, MessageSquare, Check, X, ChevronDown } from 'lucide-react';
 import GlassCard from '../GlassCard';
@@ -181,6 +181,8 @@ const OpenLoopsWidget = ({
   // whenever the tab/app comes back to the foreground, and every 5 minutes
   // while it stays foregrounded.
   const refreshNonce = useFreshnessTick();
+  // A11Y-02: id for the "+N upcoming" disclosure's controlled list.
+  const upcomingPanelId = useId();
 
   useEffect(() => {
     if (!flagsOn || !uid) return undefined;
@@ -337,7 +339,7 @@ const OpenLoopsWidget = ({
                     title="Answer"
                     aria-label="Answer"
                     disabled={busy}
-                    className="w-6 h-6 rounded flex items-center justify-center text-muted-foreground hover:text-accent-deep transition-colors disabled:opacity-50"
+                    className="relative w-6 h-6 rounded flex items-center justify-center text-muted-foreground hover:text-accent-deep transition-colors disabled:opacity-50 before:absolute before:-inset-2.5 before:content-['']"
                   >
                     <MessageSquare size={14} />
                   </button>
@@ -347,7 +349,7 @@ const OpenLoopsWidget = ({
                     title="Snooze"
                     aria-label="Snooze"
                     disabled={busy}
-                    className="w-6 h-6 rounded flex items-center justify-center text-muted-foreground hover:text-accent-deep transition-colors disabled:opacity-50"
+                    className="relative w-6 h-6 rounded flex items-center justify-center text-muted-foreground hover:text-accent-deep transition-colors disabled:opacity-50 before:absolute before:-inset-2.5 before:content-['']"
                   >
                     <Clock size={14} />
                   </button>
@@ -357,7 +359,7 @@ const OpenLoopsWidget = ({
                     title="Close"
                     aria-label="Close"
                     disabled={busy}
-                    className="w-6 h-6 rounded flex items-center justify-center text-muted-foreground hover:text-accent-deep transition-colors disabled:opacity-50"
+                    className="relative w-6 h-6 rounded flex items-center justify-center text-muted-foreground hover:text-accent-deep transition-colors disabled:opacity-50 before:absolute before:-inset-2.5 before:content-['']"
                   >
                     <Check size={14} />
                   </button>
@@ -367,7 +369,7 @@ const OpenLoopsWidget = ({
                     title="Don't revisit"
                     aria-label="Don't revisit"
                     disabled={busy}
-                    className="w-6 h-6 rounded flex items-center justify-center text-faint hover:text-muted-foreground transition-colors disabled:opacity-50"
+                    className="relative w-6 h-6 rounded flex items-center justify-center text-faint hover:text-muted-foreground transition-colors disabled:opacity-50 before:absolute before:-inset-2.5 before:content-['']"
                   >
                     <X size={14} />
                   </button>
@@ -406,14 +408,16 @@ const OpenLoopsWidget = ({
             <button
               type="button"
               onClick={() => setShowUpcoming((v) => !v)}
-              className="flex items-center gap-1 text-[10px] text-faint hover:text-muted-foreground transition-colors"
+              aria-expanded={showUpcoming}
+              aria-controls={upcomingPanelId}
+              className="relative flex items-center gap-1 text-[10px] text-faint hover:text-muted-foreground transition-colors before:absolute before:-inset-3.5 before:content-['']"
             >
               <ChevronDown size={12} className={showUpcoming ? 'rotate-180 transition-transform' : 'transition-transform'} />
               +{upcomingLoops.length} upcoming
             </button>
 
             {showUpcoming && (
-              <ul className="mt-1.5 space-y-1">
+              <ul id={upcomingPanelId} className="mt-1.5 space-y-1">
                 {upcomingLoops.map((loop) => (
                   <li key={loop.id}>
                     <div className="flex items-center justify-between gap-2 text-[10px] text-faint">
@@ -425,7 +429,7 @@ const OpenLoopsWidget = ({
                         title="Don't revisit"
                         aria-label="Don't revisit"
                         disabled={busyIds.has(loop.id)}
-                        className="w-5 h-5 rounded flex items-center justify-center shrink-0 text-faint hover:text-muted-foreground transition-colors disabled:opacity-50"
+                        className="relative w-5 h-5 rounded flex items-center justify-center shrink-0 text-faint hover:text-muted-foreground transition-colors disabled:opacity-50 before:absolute before:-inset-3 before:content-['']"
                       >
                         <X size={12} />
                       </button>

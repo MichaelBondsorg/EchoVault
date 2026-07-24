@@ -715,7 +715,7 @@ const EntryCard = ({ entry, onDelete, onUpdate }) => {
                 value={editDate}
                 onChange={e => setEditDate(e.target.value)}
                 max={getTodayForInput()}
-                className="text-sm border border-border rounded-lg px-2 py-1 bg-card text-foreground focus:outline-none focus:border-accent"
+                className="text-base border border-border rounded-lg px-2 py-1 bg-card text-foreground focus:outline-none focus:border-accent"
               />
               <button
                 onClick={() => {

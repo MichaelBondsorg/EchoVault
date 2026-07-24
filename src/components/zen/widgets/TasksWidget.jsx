@@ -123,14 +123,17 @@ const TasksWidget = ({
                   transition={{ delay: index * 0.05 }}
                 >
                   <button
+                    type="button"
                     onClick={() => handleToggle(task)}
                     disabled={isEditing}
+                    aria-label={`Complete: ${task.text}`}
                     className="
-                      mt-0.5 w-4 h-4 rounded
+                      relative mt-0.5 w-4 h-4 rounded shrink-0
                       border border-hearth-300
                       flex items-center justify-center
                       hover:border-honey-400 hover:bg-honey-50
                       transition-colors
+                      before:absolute before:-inset-3.5 before:content-['']
                     "
                   >
                     {task.completed && <Check size={10} className="text-sage-600" />}
@@ -140,15 +143,18 @@ const TasksWidget = ({
                   </span>
                   {useIntents && !isEditing && (
                     <button
+                      type="button"
                       onClick={() => handleDismiss(task)}
                       title="Not a task"
                       aria-label="Not a task"
                       className="
-                        mt-0.5 w-4 h-4 rounded shrink-0
+                        relative mt-0.5 w-4 h-4 rounded shrink-0
                         text-warm-300 hover:text-warm-500
                         opacity-0 group-hover:opacity-100
+                        pointer-coarse:opacity-100 focus-visible:opacity-100
                         flex items-center justify-center
                         transition-opacity
+                        before:absolute before:-inset-3.5 before:content-['']
                       "
                     >
                       <X size={10} />

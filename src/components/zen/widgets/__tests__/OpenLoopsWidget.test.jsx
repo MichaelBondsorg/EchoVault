@@ -414,6 +414,50 @@ describe('OpenLoopsWidget - upcoming footer', () => {
     fireEvent.click(dismissButtons[dismissButtons.length - 1]);
     expect(dismissIntent).toHaveBeenCalledWith({ __db: true }, 'user-1', 'u1', null, undefined);
   });
+
+  it('A11Y-02: the "+N upcoming" toggle exposes aria-expanded/aria-controls, and the panel id matches', () => {
+    dueWith([loop({ id: 'l1', sourceSpan: { text: 'call the dentist' } })]);
+    subscribeUpcomingOpenLoops.mockImplementation((_db, _uid, cb) => {
+      cb([{ id: 'u1', sourceSpan: { text: 'renew passport' }, targetAt: new Date().toISOString() }]);
+      return () => {};
+    });
+    render(<OpenLoopsWidget />);
+
+    const toggle = screen.getByText('+1 upcoming').closest('button');
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    const controlsId = toggle.getAttribute('aria-controls');
+    expect(controlsId).toBeTruthy();
+
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
+    expect(document.getElementById(controlsId)).toBeTruthy();
+    expect(document.getElementById(controlsId).textContent).toMatch(/renew passport/);
+  });
+});
+
+describe('OpenLoopsWidget - A11Y-02: touch targets', () => {
+  it('the four due-row action buttons pad their 24px visual box to a 44px hit area', () => {
+    dueWith([loop({ id: 'l1', sourceSpan: { text: 'call the dentist' } })]);
+    render(<OpenLoopsWidget />);
+    for (const label of ['Answer', 'Snooze', 'Close', "Don't revisit"]) {
+      const btn = screen.getByLabelText(label);
+      expect(btn.className).toMatch(/relative/);
+      expect(btn.className).toMatch(/before:-inset-2\.5/);
+    }
+  });
+
+  it('the upcoming-row dismiss button pads its 20px visual box to a 44px hit area', () => {
+    dueWith([loop({ id: 'l1', sourceSpan: { text: 'call the dentist' } })]);
+    subscribeUpcomingOpenLoops.mockImplementation((_db, _uid, cb) => {
+      cb([{ id: 'u1', sourceSpan: { text: 'renew passport' }, targetAt: new Date().toISOString() }]);
+      return () => {};
+    });
+    render(<OpenLoopsWidget />);
+    fireEvent.click(screen.getByText('+1 upcoming'));
+    const dismissButtons = screen.getAllByLabelText("Don't revisit");
+    const upcomingDismiss = dismissButtons[dismissButtons.length - 1];
+    expect(upcomingDismiss.className).toMatch(/before:-inset-3\b/);
+  });
 });
 
 describe('OpenLoopsWidget - INT-02 item 3: failure handling', () => {

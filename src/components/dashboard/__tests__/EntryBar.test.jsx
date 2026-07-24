@@ -722,3 +722,16 @@ describe('EntryBar — wake lock acquire-at-start (CAP-02)', () => {
     expect(recorder).toBeTruthy();
   });
 });
+
+describe('EntryBar — A11Y-02: typing-mode textarea has a programmatic label', () => {
+  it('the entry textarea is reachable by its accessible name, not just its placeholder', () => {
+    render(<EntryBar ownerUid={OWNER} onVoiceSave={vi.fn()} onTextSave={vi.fn()} />);
+    fireEvent.click(screen.getByLabelText('Type entry'));
+
+    // getByRole with an accessible-name matcher fails if the textarea has no
+    // programmatic label (aria-label/aria-labelledby/<label>) — placeholder
+    // text alone does not satisfy this query.
+    const textarea = screen.getByRole('textbox', { name: 'New journal entry' });
+    expect(textarea).toBe(screen.getByPlaceholderText("What's on your mind?"));
+  });
+});

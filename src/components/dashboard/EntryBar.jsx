@@ -658,6 +658,7 @@ const EntryBar = ({
                 onChange={(e) => setTextValue(e.target.value)}
                 onKeyDown={handleKeyDown}
                 placeholder={promptContext ? "Your response..." : "What's on your mind?"}
+                aria-label="New journal entry"
                 className="w-full resize-none bg-transparent p-0 font-body text-[15px] leading-[1.65] text-foreground placeholder:text-[var(--text-placeholder)] focus:outline-none caret-accent-deep min-h-[130px] max-h-[280px]"
                 rows={1}
                 style={{ height: 'auto' }}

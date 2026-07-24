@@ -278,6 +278,60 @@ capture-durability flag above).
 - [ ] Close stays disabled/locked for the entire processing window in every
       combination (dismissal-locking policy is unchanged by this fix).
 
+### 10. A11Y-02 assistive-technology pass on capture/Home/Insights/tasks/loops
+
+**Setup:** Companion to the component-level a11y tests added under this task
+(`EntryBar.test.jsx`, `InsightsPage.a11y02.test.jsx`, `StoriesWidget.test.jsx`,
+`GlassCard.test.jsx`, `TasksWidget.test.jsx`, `OpenLoopsWidget.test.jsx`,
+`IntentSuggestionTray.test.jsx`, `CapturedToast.test.jsx`, `EntryCard.test.jsx`)
+— those assert role/name/aria-expanded/keyboard-activation/class-level target
+size in jsdom, which cannot exercise a real screen reader, real Dynamic Type
+reflow, a hardware keyboard, or the OS-level Reduce Motion setting. Run this
+row on a physical iPhone (VoiceOver) and, where noted, a laptop with an
+external keyboard, covering: the EntryBar capture composer (idle → typing
+mode textarea), the Home Bento grid (NexusInsightsWidget's tap card,
+StoriesWidget's story rows, TasksWidget, OpenLoopsWidget), and the Insights
+page (NexusInsightCard's expandable header, dismiss/report/receipt buttons).
+
+**Depends on:** none (a11y semantics are unconditional; `insightClaims`,
+`openLoops`/`intentExtraction`, and `voiceChapters` should each be tried both
+on and off since they change which of the above widgets/rows are present).
+
+**Expected outcome:**
+- [ ] **VoiceOver rotor:** swiping through the Home screen and Insights page
+      with VoiceOver's rotor set to "Headings"/"Form Controls" reaches the
+      entry textarea (announced "New journal entry, text field", not silent
+      or announced only by placeholder), every story row (announced as a
+      button with the story name, collapsed/expanded state included), the
+      NexusInsightsWidget card (announced as a button), and every
+      Dismiss/Report/Why-am-I-seeing-this/checkbox/snooze/close/answer
+      control (announced with its `aria-label`, not just an icon glyph).
+      Double-tapping each activates it exactly like a mouse click.
+- [ ] **Dynamic Type at 200%:** with iOS Larger Text set to its largest
+      Dynamic Type step (or the separate Accessibility Sizes range), the
+      Home Bento cards, story rows, task rows, and open-loop rows reflow
+      without truncating an interactive control's accessible name or
+      causing two controls to visually overlap into a single unreachable
+      tap target — text wraps/scrolls rather than being clipped.
+- [ ] **Keyboard-only (external keyboard, iPad or desktop Safari):** Tab
+      order reaches the entry textarea, every story row (Enter/Space
+      toggles expansion, matching the mouse behavior), the
+      NexusInsightsWidget card (Enter/Space navigates to Insights, matching
+      a click), and the NexusInsightCard header (Enter/Space toggles
+      expansion) — each control shows the Cloud kit's accent focus ring
+      (`:focus-visible` in `src/index.css`) while focused, and Tab never
+      gets trapped inside a widget or skips a control silently.
+- [ ] **Reduced Motion:** with iOS Reduce Motion enabled, the story-row
+      expand/collapse, insight-card expand/collapse, and card entrance
+      animations (Framer Motion `initial`/`animate`/`exit` on the touched
+      components) either respect the OS setting or, at minimum, never leave
+      a control in a visually-broken or unreachable intermediate state —
+      the underlying state change (expanded/collapsed, dismissed/kept)
+      still completes correctly with motion reduced or skipped.
+- [ ] Every touch-target fix in this task (checkbox/dismiss/answer/snooze/
+      close controls) is comfortably tappable with a thumb on a physical
+      device at default zoom, not just measurable as ≥44px in the DOM.
+
 ## Flag cross-reference
 
 | Row | Flag(s) | Default | Where read |
@@ -291,6 +345,7 @@ capture-durability flag above).
 | 7 | — | n/a | build configuration |
 | 8 | — | n/a | native plugin (unconditional) |
 | 9 | — | n/a | `src/components/capture/EntryComposer.jsx`, `src/components/dashboard/EntryBar.jsx`, `src/components/cloud/Drawer.jsx` (unconditional) |
+| 10 | `insightClaims`, `openLoops`, `intentExtraction`, `voiceChapters` (each varies which widgets/rows render; the a11y semantics themselves are unconditional) | all `false` | `src/config/flags.js` |
 
 Flip procedure for any flag above: edit the `config/flags` Firestore doc —
 see `docs/quality/trustworthy-capture-runbook.md` § Flags for the full table

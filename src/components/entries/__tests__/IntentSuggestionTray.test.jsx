@@ -168,6 +168,16 @@ describe('IntentSuggestionTray - actions', () => {
     expect(screen.getByDisplayValue('call the vet')).toBeTruthy();
   });
 
+  it('A11Y-02: the edit input has a programmatic label and is text-base (16px, avoids iOS auto-zoom)', () => {
+    suggestedWith([intent({ id: 'intent-1', userText: null, sourceSpan: { text: 'call the vet' } })]);
+    render(<IntentSuggestionTray entryId="e1" />);
+
+    fireEvent.click(screen.getByText('Edit'));
+    const input = screen.getByLabelText('Edit suggestion text');
+    expect(input).toBe(screen.getByDisplayValue('call the vet'));
+    expect(input.className).toMatch(/\btext-base\b/);
+  });
+
   it('Edit confirm calls setIntentUserText then keepIntent with the edited text, and hides the row', async () => {
     suggestedWith([intent({ id: 'intent-1', userText: null, sourceSpan: { text: 'call the vet' } })]);
     render(<IntentSuggestionTray entryId="e1" />);
@@ -300,5 +310,15 @@ describe('IntentSuggestionTray - copy', () => {
     expect(text).not.toMatch(/overdue/i);
     expect(text).not.toMatch(/streak/i);
     expect(text).not.toMatch(/you (missed|forgot|failed)/i);
+  });
+});
+
+describe('IntentSuggestionTray - A11Y-02: touch targets', () => {
+  it('Keep/Edit/No thanks all meet the 44px minimum height', () => {
+    suggestedWith([intent({ id: 'intent-1', sourceSpan: { text: 'call the vet' } })]);
+    render(<IntentSuggestionTray entryId="e1" />);
+    for (const label of ['Keep', 'Edit', 'No thanks']) {
+      expect(screen.getByText(label).className).toMatch(/\bmin-h-11\b/);
+    }
   });
 });

@@ -2295,6 +2295,11 @@ export default function App() {
         // the session within budget — unlike the old code, this is surfaced
         // as an honest "not sure it worked" prompt, not a success message.
         alert("Sign-in may still be completing. If the app doesn't update in a few seconds, please restart it.");
+      } else if (error?.code === 'functions/already-exists') {
+        // The server refuses to auto-link Google onto an existing identity
+        // (exchangeGoogleToken's provider_link_requires_reauthentication
+        // branch) — its message is the actionable instruction, show it as-is.
+        alert(error?.message || 'This email is already registered. Sign in with your existing method, then link Google in Settings.');
       } else if (error?.code === 'functions/unauthenticated') {
         alert('Google token verification failed. Please try signing in again.');
       } else if (error?.code === 'functions/internal') {
@@ -2719,7 +2724,7 @@ export default function App() {
                         placeholder="Name (optional)"
                         value={displayName}
                         onChange={(e) => setDisplayName(e.target.value)}
-                        className="w-full min-h-11 px-4 py-2.5 rounded-xl border border-border bg-card text-sm text-foreground placeholder:text-[var(--text-placeholder)] focus:outline-none focus:ring-2 focus:ring-accent transition-all"
+                        className="w-full min-h-11 px-4 py-2.5 rounded-xl border border-border bg-card text-base text-foreground placeholder:text-[var(--text-placeholder)] focus:outline-none focus:ring-2 focus:ring-accent transition-all"
                       />
                     )}
 
@@ -2729,7 +2734,7 @@ export default function App() {
                       value={email}
                       onChange={(e) => setEmail(e.target.value)}
                       required
-                      className="w-full min-h-11 px-4 py-2.5 rounded-xl border border-border bg-card text-sm text-foreground placeholder:text-[var(--text-placeholder)] focus:outline-none focus:ring-2 focus:ring-accent transition-all"
+                      className="w-full min-h-11 px-4 py-2.5 rounded-xl border border-border bg-card text-base text-foreground placeholder:text-[var(--text-placeholder)] focus:outline-none focus:ring-2 focus:ring-accent transition-all"
                     />
 
                     {authMode !== 'reset' && (
@@ -2741,7 +2746,7 @@ export default function App() {
                           onChange={(e) => setPassword(e.target.value)}
                           required
                           minLength={6}
-                          className="w-full min-h-11 px-4 py-2.5 pr-10 rounded-xl border border-border bg-card text-sm text-foreground placeholder:text-[var(--text-placeholder)] focus:outline-none focus:ring-2 focus:ring-accent transition-all"
+                          className="w-full min-h-11 px-4 py-2.5 pr-10 rounded-xl border border-border bg-card text-base text-foreground placeholder:text-[var(--text-placeholder)] focus:outline-none focus:ring-2 focus:ring-accent transition-all"
                         />
                         <button
                           type="button"

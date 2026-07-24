@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useState, useId } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { GitBranch, ChevronRight, Clock } from 'lucide-react';
 import GlassCard from '../GlassCard';
@@ -36,6 +36,9 @@ const StoriesWidget = ({
   size = '2x1',
 }) => {
   const [expandedStory, setExpandedStory] = useState(null);
+  // A11Y-02: stable base id for this widget instance's expandable-panel ids
+  // (aria-controls needs one per story row — see the map below).
+  const panelBaseId = useId();
 
   // Extract ongoing situations
   const situations = useMemo(() => {
@@ -152,12 +155,25 @@ const StoriesWidget = ({
           {situations.slice(0, 3).map((story) => {
             const trend = getMoodTrend(story.entries);
             const isExpanded = expandedStory === story.key;
+            const panelId = `${panelBaseId}-${story.key}`;
+            const toggleStory = () => !isEditing && setExpandedStory(isExpanded ? null : story.key);
 
             return (
               <motion.div
                 key={story.key}
                 className="bg-white/30 rounded-xl p-2 cursor-pointer hover:bg-white/50 transition-colors"
-                onClick={() => !isEditing && setExpandedStory(isExpanded ? null : story.key)}
+                onClick={toggleStory}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    toggleStory();
+                  }
+                }}
+                role="button"
+                tabIndex={isEditing ? -1 : 0}
+                aria-expanded={isExpanded}
+                aria-controls={panelId}
+                aria-label={story.name}
                 whileHover={{ scale: isEditing ? 1 : 1.01 }}
               >
                 <div className="flex items-center justify-between">
@@ -180,6 +196,7 @@ const StoriesWidget = ({
                 <AnimatePresence>
                   {isExpanded && (
                     <motion.div
+                      id={panelId}
                       initial={{ height: 0, opacity: 0 }}
                       animate={{ height: 'auto', opacity: 1 }}
                       exit={{ height: 0, opacity: 0 }}

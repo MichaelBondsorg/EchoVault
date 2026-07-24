@@ -435,3 +435,22 @@ describe('CapturedToast - FIFO queueing', () => {
     expect(screen.getByText('Captured: second capture')).toBeTruthy();
   });
 });
+
+describe('CapturedToast - A11Y-02: capture-surface input font size', () => {
+  it('the edit input is text-base (16px) — sub-16px inputs trigger unwanted iOS auto-zoom on focus', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2024, 0, 15, 10, 0, 0, 0));
+    withSubscribe();
+    render(<CapturedToast />);
+
+    vi.setSystemTime(new Date(2024, 0, 15, 10, 0, 1, 0));
+    act(() => {
+      emit([intent({ id: 'new-1', createdAt: new Date(2024, 0, 15, 10, 0, 1, 0).toISOString() })]);
+    });
+
+    fireEvent.click(screen.getByText('Edit'));
+    const input = screen.getByLabelText('Edit captured text');
+    expect(input.className).toMatch(/\btext-base\b/);
+    expect(input.className).not.toMatch(/\btext-sm\b/);
+  });
+});

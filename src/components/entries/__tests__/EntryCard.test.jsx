@@ -492,3 +492,15 @@ describe('EntryCard — Voice Chapters (flag: voiceChapters)', () => {
     });
   });
 });
+
+describe('EntryCard — A11Y-02: edit-mode date input font size', () => {
+  it('the entry-date input is text-base (16px) — sub-16px inputs trigger unwanted iOS auto-zoom on focus', () => {
+    render(<EntryCard entry={baseEntry()} onDelete={vi.fn()} onUpdate={vi.fn()} />);
+    fireEvent.click(screen.getByLabelText('Edit entry title'));
+
+    const dateInput = document.getElementById('entry-date-entry-1');
+    expect(dateInput).toBeTruthy();
+    expect(dateInput.className).toMatch(/\btext-base\b/);
+    expect(dateInput.className).not.toMatch(/\btext-sm\b/);
+  });
+});
