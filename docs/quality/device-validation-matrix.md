@@ -484,6 +484,30 @@ specifically about server behavior, not on-device UI.
       legitimate retry with the same operationId is not wrongly treated as a
       duplicate and successfully creates its entry.
 
+### CAP-01 pre-flip code items (in addition to rows 5, 6, 11-14)
+
+Recorded here per the whole-sprint final review (2026-07-24) so they live in
+the same durable gate document as the device rows they accompany. All three
+came out of CAP-01's own opus review — none blocks the dark landing, ALL
+block flipping `nativeBackgroundUpload`:
+
+- [ ] **Failed-breadcrumb age prune** — `markFailedByDraftId` leaves
+      permanently-failed upload breadcrumbs in
+      `capture_bg_uploads::{uid}` forever (reconcile only clears on a found
+      entry). Add an age-based prune during reconcile before flip
+      (`src/services/capture/nativeBackgroundUpload.js` /
+      `backgroundUploadStore.js`).
+- [ ] **Background-entry integration test** — entry-shape parity with the
+      foreground path is unit-asserted only; add an integration test that
+      drives a background-created entry through the real
+      `onEntryCreated` → analysis → conversationReady/INS-01 chain.
+- [ ] **operationId design note** — one-line code comment in
+      `uploadTicket.js`/`onAudioUploaded.js` stating the client-generated
+      UUID (auth-uid-namespaced, UUID-validated) is deliberate.
+- [ ] **flip-flag.mjs ALLOWED entry** — `nativeBackgroundUpload` is
+      intentionally NOT in the flip allowlist today; add it only when this
+      gate clears (the friction is the point).
+
 ## Flag cross-reference
 
 | Row | Flag(s) | Default | Where read |
