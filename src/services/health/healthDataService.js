@@ -274,7 +274,12 @@ export const checkHealthPermissions = async () => {
 export const getEntryHealthContext = async () => {
   console.log('[HealthDataService] getEntryHealthContext called');
   const summary = await getHealthSummary();
-  console.log('[HealthDataService] getHealthSummary returned:', JSON.stringify(summary, null, 2));
+  // PRIV-02: log availability/source only — never the health summary's
+  // actual values (sleep hours, HR, HRV, steps, workouts, etc.).
+  console.log('[HealthDataService] getHealthSummary returned:', {
+    available: summary.available,
+    source: summary.source
+  });
 
   if (!summary.available) {
     console.log('[HealthDataService] summary.available is false, returning null');
@@ -314,11 +319,13 @@ export const getEntryHealthContext = async () => {
       source: summary.source || 'healthkit',
       capturedAt: new Date().toISOString()
     };
-  console.log('[HealthDataService] Returning health context:', {
-    available: context.available,
-    source: context.source,
-    schemaVersion: context.schemaVersion,
-  });
+    // PRIV-02: presence/counts only — never the underlying values.
+    console.log('[HealthDataService] Returning health context:', {
+      source: context.source,
+      hasSleep: context.sleep.totalHours != null,
+      hasHeart: context.heart.restingRate != null || context.heart.currentRate != null,
+      workoutCount: context.activity.workouts.length
+    });
     return context;
   }
 

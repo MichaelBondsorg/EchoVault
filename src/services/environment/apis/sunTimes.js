@@ -3,6 +3,13 @@
  *
  * Uses Sunrise-Sunset.org API (free, no API key required)
  * https://sunrise-sunset.org/api
+ *
+ * Privacy (PRIV-02): sunrise/sunset times only need area-level precision,
+ * so the request below rounds latitude/longitude to 2 decimal places
+ * (~1.1km) via toFixed(2) BEFORE the URL is built — the device-precision
+ * coordinate is never sent over the network. At that precision, sunrise/
+ * sunset times shift by well under a minute, negligible for this app's
+ * daylight-context purpose.
  */
 
 const SUNRISE_SUNSET_API = 'https://api.sunrise-sunset.org/json';
@@ -20,8 +27,9 @@ export const getSunTimes = async (latitude, longitude, date = new Date()) => {
     const dateStr = date.toISOString().split('T')[0];
 
     const params = new URLSearchParams({
-      lat: latitude.toFixed(4),
-      lng: longitude.toFixed(4),
+      // PRIV-02: rounded to ~1.1km before this leaves the device — see file header.
+      lat: latitude.toFixed(2),
+      lng: longitude.toFixed(2),
       date: dateStr,
       formatted: '0' // Get ISO 8601 format
     });

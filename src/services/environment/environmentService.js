@@ -4,8 +4,16 @@
  * Main service for getting environmental context.
  * Combines location, weather, and sun times data.
  *
- * Privacy: Location is only accessed when user opens the app.
- * Data is processed locally and not shared with third parties.
+ * Privacy: Location is only accessed when user opens the app. Coordinates
+ * ARE sent to third parties to fetch conditions for your area — the
+ * Open-Meteo weather API (src/services/environment/apis/weather.js) and the
+ * sunrise-sunset.org sun-times API (src/services/environment/apis/sunTimes.js)
+ * — but those request-building functions round latitude/longitude to 2
+ * decimal places (~1.1km) before the coordinates ever reach a fetch() call,
+ * so no third party sees device-precision location. The device-precision
+ * value is only ever written to this owner's own local cache (see
+ * getCurrentLocation/getCachedLocation below) and to this user's own
+ * Firestore entry, never to an unrelated third party.
  */
 
 import { Geolocation } from '@capacitor/geolocation';
@@ -59,7 +67,17 @@ const withTimeout = (promise, ms, fallback = null) => {
 
 /**
  * Get current location with caching
- * Falls back to cached location if permission denied or error
+ *
+ * Actual permission-denied behavior: if the permission check reports
+ * 'denied', or a 'prompt' request does not come back 'granted', or the
+ * native getCurrentPosition() call throws, this falls back to
+ * getCachedLocation() — this owner's own last cached fix, if any and not
+ * expired. If there is no usable cache either (never signed in, never
+ * cached before, or the cache expired), getCachedLocation() returns null
+ * and this function returns that null (or, on a native/geolocation error
+ * with no cache, an `{ error, cached: false }` object) rather than any
+ * location data. It never falls back to another owner's or a pre-migration
+ * global cached value.
  *
  * @returns {Object|null} { latitude, longitude, cached, error }
  */

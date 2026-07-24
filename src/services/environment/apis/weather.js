@@ -3,6 +3,13 @@
  *
  * Uses Open-Meteo API (free, no API key required)
  * https://open-meteo.com/
+ *
+ * Privacy (PRIV-02): Open-Meteo only needs area-level precision to resolve
+ * weather conditions, so every request below rounds latitude/longitude to
+ * 2 decimal places (~1.1km) via toFixed(2) BEFORE the URL is built — the
+ * device-precision coordinate is never sent over the network. 1.1km makes
+ * no meaningful difference to hourly/daily weather, which is already
+ * reported at a coarser grid resolution than that.
  */
 
 const OPEN_METEO_BASE = 'https://api.open-meteo.com/v1/forecast';
@@ -48,8 +55,9 @@ const LOW_LIGHT_CONDITIONS = ['overcast', 'foggy', 'rain', 'heavy_rain', 'snow',
 export const getCurrentWeather = async (latitude, longitude) => {
   try {
     const params = new URLSearchParams({
-      latitude: latitude.toFixed(4),
-      longitude: longitude.toFixed(4),
+      // PRIV-02: rounded to ~1.1km before this leaves the device — see file header.
+      latitude: latitude.toFixed(2),
+      longitude: longitude.toFixed(2),
       current: 'temperature_2m,relative_humidity_2m,weather_code,cloud_cover,is_day',
       timezone: 'auto'
     });
@@ -100,8 +108,9 @@ export const getDailyWeatherHistory = async (latitude, longitude, days = 14) => 
     startDate.setDate(startDate.getDate() - days);
 
     const params = new URLSearchParams({
-      latitude: latitude.toFixed(4),
-      longitude: longitude.toFixed(4),
+      // PRIV-02: rounded to ~1.1km before this leaves the device — see file header.
+      latitude: latitude.toFixed(2),
+      longitude: longitude.toFixed(2),
       daily: 'weather_code,temperature_2m_max,temperature_2m_min,sunshine_duration,daylight_duration',
       timezone: 'auto',
       start_date: startDate.toISOString().split('T')[0],

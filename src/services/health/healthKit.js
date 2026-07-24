@@ -351,7 +351,8 @@ const querySleep = async (plugin, start, end) => {
       startDate: start.toISOString(),
       endDate: end.toISOString()
     });
-    console.log('[HealthKit] querySleep (sleep-stages) completed:', JSON.stringify(result));
+    // PRIV-02: log presence only — never raw sleep-stage minutes/timestamps.
+    console.log('[HealthKit] querySleep (sleep-stages) completed. hasData:', !!result && result.total > 0);
 
     if (!result || result.total === undefined || result.total <= 0) {
       console.log('[HealthKit] No sleep-stages data, falling back to basic');
@@ -496,7 +497,8 @@ const getNativeSleepScore = async (plugin, data) => {
       inBedMinutes
     });
     const elapsed = performance.now() - startTime;
-    console.log(`[HealthKit] Native sleep score calculated in ${elapsed.toFixed(1)}ms:`, result.score);
+    // PRIV-02: timing only — the score itself is a derived health value.
+    console.log(`[HealthKit] Native sleep score calculated in ${elapsed.toFixed(1)}ms`);
     return result.score;
   } catch (error) {
     console.warn('[HealthKit] Native sleep score failed, using JS fallback:', error.message);

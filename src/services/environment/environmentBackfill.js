@@ -117,7 +117,8 @@ const fetchEnvironmentForEntry = async (entry) => {
   // Check cache first (avoid redundant API calls for same day/location)
   const cacheKey = getCacheKey(entryDate, latitude, longitude);
   if (weatherCache.has(cacheKey)) {
-    console.log(`[EnvironmentBackfill] Cache hit for ${cacheKey}`);
+    // PRIV-02: no coordinates in logs, even rounded ones — log the date only.
+    console.log(`[EnvironmentBackfill] Cache hit for ${entryDate.toISOString().split('T')[0]}`);
     const cachedData = weatherCache.get(cacheKey);
     return {
       ...cachedData,

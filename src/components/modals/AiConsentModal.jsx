@@ -34,7 +34,7 @@ const AiConsentModal = ({ onAgree, onDecline, agreeing = false }) => {
         <ul className="text-sm text-warm-600 dark:text-warm-300 space-y-2 mb-4 list-disc pl-5">
           <li><strong>Your journal text</strong> is sent to Google Gemini for mood analysis, pattern detection, and insights.</li>
           <li><strong>Voice recordings</strong> are sent to OpenAI to transcribe them and (in voice conversations) to power the AI companion.</li>
-          <li><strong>Health &amp; weather context</strong> you connect is used only to add context — never for advertising.</li>
+          <li><strong>Health &amp; weather context</strong> you connect is used only to add context — never for advertising. Weather and daylight context comes from Open-Meteo and sunrise-sunset.org, using your approximate (rounded) location.</li>
         </ul>
 
         <div className="rounded-xl bg-sage-50 dark:bg-sage-900/20 border border-sage-200/50 dark:border-sage-800/40 px-4 py-3 mb-4">
