@@ -1,0 +1,756 @@
+{
+  "_meta": {
+    "description": "Committed 'past outputs' fixture for --replay mode (INT-01). Keyed by corpus case id. Each value is { text, candidates }: `text` pins the exact entry text the fixture was captured against (so a later corpus edit that changes a case's text is caught as a mismatch instead of silently scoring stale evidence) and `candidates` is the array of RAW candidate objects a model call would have returned (runCorpusEval.js JSON.stringifies just the `candidates` array before feeding it to the real extractIntentCandidates/parseCandidatesResponse, so replay mode exercises the exact same string-parsing path a live call would).",
+    "provenance": "HAND-AUTHORED for this task, not captured from a real Gemini call (no live key was exercised in this task). It stands in for a real captured-from-a-live-run snapshot so --replay mode and the scoring logic can be exercised hermetically in CI. Before this becomes a genuine prompt/model regression gate, run `node runCorpusEval.js --live` once against real Gemini with a valid key and commit ITS raw output as the new replayFixture.json (see CORPUS_EVAL.md).",
+    "intentionalImperfections": {
+      "zero-2": "Injects a hallucinated candidate (a dream mis-read as a real commitment) that reaches 'active' with no corresponding expected intent -> exercises the hallucination/false-positive path in corpusScoring.js.",
+      "temporal-4": "Omits the expected active candidate entirely (model returns []) -> exercises the not-proposed/false-negative (recall miss) path.",
+      "openloop-clear-3": "Mislabels the candidate's kind as 'task' instead of the expected 'open_loop' (still explicit-command, still activates) -> exercises the kind-confusion path."
+    }
+  },
+  "task-clear-1": {
+    "text": "The heater in my apartment is still broken and it's getting cold. Email the landlord about the broken heater before Friday. I keep putting it off.",
+    "candidates": [
+      {
+        "kind": "task",
+        "text": "Email the landlord about the broken heater",
+        "attributes": {
+          "agency": true,
+          "concrete": true,
+          "unfinished": true,
+          "temporalFit": true
+        },
+        "confidence": 0.9,
+        "targetAt": "2026-07-27T09:00:00.000Z",
+        "tense": "future"
+      }
+    ]
+  },
+  "task-clear-2": {
+    "text": "Long day. Pick up the dry cleaning tomorrow on the way home — I really don't want another week to go by without doing it.",
+    "candidates": [
+      {
+        "kind": "task",
+        "text": "Pick up the dry cleaning tomorrow on the way home",
+        "attributes": {
+          "agency": true,
+          "concrete": true,
+          "unfinished": true,
+          "temporalFit": true
+        },
+        "confidence": 0.88,
+        "targetAt": "2026-07-25T18:00:00.000Z",
+        "tense": "future"
+      }
+    ]
+  },
+  "task-clear-3": {
+    "text": "Prices keep climbing. Book the flight to Lisbon this week before it gets worse.",
+    "candidates": [
+      {
+        "kind": "task",
+        "text": "Book the flight to Lisbon",
+        "attributes": {
+          "agency": true,
+          "concrete": true,
+          "unfinished": true,
+          "temporalFit": true
+        },
+        "confidence": 0.85,
+        "targetAt": null
+      }
+    ]
+  },
+  "task-clear-4": {
+    "text": "It expires next month and I keep forgetting. Renew the passport this week.",
+    "candidates": [
+      {
+        "kind": "task",
+        "text": "Renew the passport",
+        "attributes": {
+          "agency": true,
+          "concrete": true,
+          "unfinished": true,
+          "temporalFit": true
+        },
+        "confidence": 0.87,
+        "targetAt": "2026-07-30T00:00:00.000Z",
+        "tense": "future"
+      }
+    ]
+  },
+  "openloop-clear-1": {
+    "text": "Sam's surgery is scheduled for next week and I'm nervous for him. Remind me to check how Sam's surgery went once it's done.",
+    "candidates": [
+      {
+        "kind": "open_loop",
+        "text": "Remind me to check how Sam's surgery went",
+        "attributes": {
+          "agency": true,
+          "unfinished": true
+        },
+        "confidence": 0.75,
+        "explicitCommand": true,
+        "targetAt": null
+      }
+    ]
+  },
+  "openloop-clear-2": {
+    "text": "Interview went okay I think, hard to tell. Ask me Friday how the interview went, I'll have heard back by then.",
+    "candidates": [
+      {
+        "kind": "open_loop",
+        "text": "Ask me Friday how the interview went",
+        "attributes": {
+          "agency": true,
+          "unfinished": true
+        },
+        "confidence": 0.8,
+        "explicitCommand": true,
+        "targetAt": "2026-07-31T09:00:00.000Z",
+        "tense": "future"
+      }
+    ]
+  },
+  "openloop-clear-3": {
+    "text": "Submitted the loan paperwork today, now it's a waiting game. Follow up with me next week about the loan approval.",
+    "candidates": [
+      {
+        "kind": "task",
+        "text": "Follow up with me next week about the loan approval",
+        "attributes": {
+          "agency": true,
+          "unfinished": true
+        },
+        "confidence": 0.78,
+        "explicitCommand": true,
+        "targetAt": "2026-08-03T09:00:00.000Z",
+        "tense": "future"
+      }
+    ]
+  },
+  "musing-mom-a": {
+    "text": "I've been a bad daughter lately. I should probably call mom sometime, she probably thinks I forgot about her.",
+    "candidates": [
+      {
+        "kind": "goal_habit",
+        "text": "I should probably call mom sometime",
+        "attributes": {
+          "agency": true,
+          "unfinished": true,
+          "goalLanguage": true
+        },
+        "confidence": 0.6
+      }
+    ]
+  },
+  "musing-mom-b": {
+    "text": "Mom's been worried since the doctor's appointment. I need to call mom tomorrow and tell her the test results.",
+    "candidates": [
+      {
+        "kind": "task",
+        "text": "call mom tomorrow",
+        "attributes": {
+          "agency": true,
+          "concrete": true,
+          "unfinished": true,
+          "temporalFit": true
+        },
+        "confidence": 0.9,
+        "targetAt": "2026-07-25T10:00:00.000Z",
+        "tense": "future"
+      }
+    ]
+  },
+  "musing-report-a": {
+    "text": "I keep meaning to get better at finishing what I start. I should really wrap up that report eventually.",
+    "candidates": [
+      {
+        "kind": "goal_habit",
+        "text": "wrap up that report eventually",
+        "attributes": {
+          "agency": true,
+          "unfinished": true,
+          "goalLanguage": true
+        },
+        "confidence": 0.55
+      }
+    ]
+  },
+  "musing-report-b": {
+    "text": "Deadline's real now, no more slipping it. I need to finish the quarterly report by Thursday.",
+    "candidates": [
+      {
+        "kind": "task",
+        "text": "finish the quarterly report by Thursday",
+        "attributes": {
+          "agency": true,
+          "concrete": true,
+          "unfinished": true,
+          "temporalFit": true
+        },
+        "confidence": 0.92,
+        "targetAt": "2026-07-30T17:00:00.000Z",
+        "tense": "future"
+      }
+    ]
+  },
+  "musing-exercise-a": {
+    "text": "I want to exercise more, I really do, but every day just slips by.",
+    "candidates": [
+      {
+        "kind": "goal_habit",
+        "text": "I want to exercise more",
+        "attributes": {
+          "agency": true,
+          "unfinished": true,
+          "goalLanguage": true
+        },
+        "confidence": 0.6
+      }
+    ]
+  },
+  "musing-exercise-b": {
+    "text": "I'm doing it this time. Sign up for the 6am spin class tomorrow, no more excuses.",
+    "candidates": [
+      {
+        "kind": "task",
+        "text": "Sign up for the 6am spin class",
+        "attributes": {
+          "agency": true,
+          "concrete": true,
+          "unfinished": true,
+          "temporalFit": true
+        },
+        "confidence": 0.88,
+        "targetAt": "2026-07-25T06:00:00.000Z",
+        "tense": "future"
+      }
+    ]
+  },
+  "temporal-1": {
+    "text": "One of these days I'm going to sort out the garage — it's been driving me nuts for months.",
+    "candidates": [
+      {
+        "kind": "task",
+        "text": "sort out the garage",
+        "attributes": {
+          "agency": true,
+          "concrete": true,
+          "unfinished": true
+        },
+        "confidence": 0.68
+      }
+    ]
+  },
+  "temporal-2": {
+    "text": "Someday I'll finally organize all these old photos, they're just sitting in boxes.",
+    "candidates": [
+      {
+        "kind": "task",
+        "text": "organize all these old photos",
+        "attributes": {
+          "agency": true,
+          "concrete": true,
+          "unfinished": true
+        },
+        "confidence": 0.45
+      }
+    ]
+  },
+  "temporal-3": {
+    "text": "Eventually I need to update my resume before I start applying anywhere.",
+    "candidates": [
+      {
+        "kind": "task",
+        "text": "update my resume",
+        "attributes": {
+          "agency": true,
+          "concrete": true,
+          "unfinished": true
+        },
+        "confidence": 0.7
+      }
+    ]
+  },
+  "temporal-4": {
+    "text": "By the end of the month I need to renew my visa paperwork, no room to slip on this one.",
+    "candidates": []
+  },
+  "emotional-1": {
+    "text": "I need to process what happened with my dad before I explode at someone who doesn't deserve it.",
+    "candidates": [
+      {
+        "kind": "reflection",
+        "text": "process what happened with my dad",
+        "attributes": {
+          "agency": true,
+          "unfinished": true
+        },
+        "confidence": 0.82
+      }
+    ]
+  },
+  "emotional-2": {
+    "text": "I have to stop being so hard on myself, it's exhausting living like this.",
+    "candidates": [
+      {
+        "kind": "reflection",
+        "text": "stop being so hard on myself",
+        "attributes": {
+          "agency": true
+        },
+        "confidence": 0.8
+      }
+    ]
+  },
+  "emotional-3": {
+    "text": "I really need to sit with this grief instead of running from it like I always do.",
+    "candidates": [
+      {
+        "kind": "reflection",
+        "text": "sit with this grief",
+        "attributes": {
+          "agency": true,
+          "unfinished": true
+        },
+        "confidence": 0.85
+      }
+    ]
+  },
+  "emotional-4": {
+    "text": "I need to figure out why I keep sabotaging good things in my life.",
+    "candidates": [
+      {
+        "kind": "reflection",
+        "text": "figure out why I keep sabotaging good things",
+        "attributes": {
+          "agency": true,
+          "unfinished": true
+        },
+        "confidence": 0.83
+      }
+    ]
+  },
+  "boundary-1": {
+    "text": "Sam had the surgery consult today, didn't get the details yet. Remind me to ask Sam how the surgery consult went.",
+    "candidates": [
+      {
+        "kind": "open_loop",
+        "text": "Remind me to ask Sam how the surgery consult went",
+        "attributes": {
+          "agency": true,
+          "unfinished": true
+        },
+        "confidence": 0.8,
+        "explicitCommand": true,
+        "targetAt": null
+      }
+    ]
+  },
+  "boundary-2": {
+    "text": "Sam had the surgery consult today, didn't get the details yet. Call Sam today and ask about the surgery consult.",
+    "candidates": [
+      {
+        "kind": "task",
+        "text": "Call Sam today and ask about the surgery consult",
+        "attributes": {
+          "agency": true,
+          "concrete": true,
+          "unfinished": true,
+          "temporalFit": true
+        },
+        "confidence": 0.85,
+        "targetAt": "2026-07-24T18:00:00.000Z"
+      }
+    ]
+  },
+  "boundary-3": {
+    "text": "That thread with HR has been open forever. I should probably check back in on how that thread with HR resolves.",
+    "candidates": [
+      {
+        "kind": "open_loop",
+        "text": "check back in on how that thread with HR resolves",
+        "attributes": {
+          "agency": true,
+          "concrete": true,
+          "unfinished": true
+        },
+        "confidence": 0.65
+      }
+    ]
+  },
+  "boundary-4": {
+    "text": "This keeps coming up in different forms. Remind me to check in on this every Friday from now on.",
+    "candidates": [
+      {
+        "kind": "open_loop",
+        "text": "Remind me to check in on this every Friday",
+        "attributes": {
+          "agency": true,
+          "unfinished": true,
+          "goalLanguage": true
+        },
+        "confidence": 0.8,
+        "explicitCommand": true
+      }
+    ]
+  },
+  "zero-1": {
+    "text": "The rain finally stopped this afternoon and the sky went that strange orange color. I sat on the porch for a while just watching it. Felt calm for the first time in days.",
+    "candidates": []
+  },
+  "zero-2": {
+    "text": "Had a weird dream about being back in high school, running through hallways that didn't exist when I actually went there. Woke up disoriented but oddly nostalgic.",
+    "candidates": [
+      {
+        "kind": "task",
+        "text": "running through hallways",
+        "attributes": {
+          "agency": true,
+          "concrete": true,
+          "unfinished": true,
+          "temporalFit": true
+        },
+        "confidence": 0.72,
+        "targetAt": null
+      }
+    ]
+  },
+  "zero-3": {
+    "text": "Grateful today for small things: good coffee, a text from an old friend, the dog falling asleep on my feet while I worked.",
+    "candidates": []
+  },
+  "zero-4": {
+    "text": "Finished the novel I've been reading for weeks. The ending wrecked me a little. Going to sit with it before starting something new.",
+    "candidates": []
+  },
+  "zero-5": {
+    "text": "Anxious energy all day for no clear reason. Tried to name it and couldn't. Just noting it here so I remember this feeling passed before.",
+    "candidates": []
+  },
+  "negation-1": {
+    "text": "I don't need to call the dentist anymore — I already rescheduled through the app.",
+    "candidates": [
+      {
+        "kind": "task",
+        "text": "call the dentist",
+        "attributes": {
+          "agency": true,
+          "concrete": true,
+          "unfinished": true,
+          "negated": true
+        },
+        "confidence": 0.85
+      }
+    ]
+  },
+  "negation-2": {
+    "text": "No longer need to renew the gym membership since I'm cancelling it anyway.",
+    "candidates": [
+      {
+        "kind": "task",
+        "text": "renew the gym membership",
+        "attributes": {
+          "agency": true,
+          "concrete": true,
+          "unfinished": true,
+          "negated": true
+        },
+        "confidence": 0.8
+      }
+    ]
+  },
+  "hypothetical-1": {
+    "text": "If I have energy after work, I might go for a run.",
+    "candidates": [
+      {
+        "kind": "task",
+        "text": "go for a run",
+        "attributes": {
+          "agency": true,
+          "concrete": true,
+          "unfinished": true,
+          "temporalFit": true,
+          "conditional": true
+        },
+        "confidence": 0.8
+      }
+    ]
+  },
+  "hypothetical-2": {
+    "text": "If it doesn't rain this weekend, I'll finally paint the fence.",
+    "candidates": [
+      {
+        "kind": "task",
+        "text": "paint the fence",
+        "attributes": {
+          "agency": true,
+          "concrete": true,
+          "unfinished": true,
+          "conditional": true
+        },
+        "confidence": 0.78
+      }
+    ]
+  },
+  "quoted-1": {
+    "text": "My manager told me, quote, you need to redo the whole deck, unquote. Great, love that for me.",
+    "candidates": [
+      {
+        "kind": "task",
+        "text": "redo the whole deck",
+        "attributes": {
+          "agency": true,
+          "concrete": true,
+          "unfinished": true,
+          "temporalFit": true,
+          "quoted": true
+        },
+        "confidence": 0.85
+      }
+    ]
+  },
+  "quoted-2": {
+    "text": "She said, you should really see a therapist, and honestly she's right.",
+    "candidates": [
+      {
+        "kind": "task",
+        "text": "see a therapist",
+        "attributes": {
+          "agency": true,
+          "quoted": true,
+          "goalLanguage": true
+        },
+        "confidence": 0.8
+      }
+    ]
+  },
+  "instructions-1": {
+    "text": "Told my roommate he needs to take out the trash before Monday or the landlord will complain again.",
+    "candidates": [
+      {
+        "kind": "task",
+        "text": "take out the trash before Monday",
+        "attributes": {
+          "concrete": true,
+          "unfinished": true,
+          "otherOwned": true
+        },
+        "confidence": 0.85
+      }
+    ]
+  },
+  "instructions-2": {
+    "text": "The team needs to finish the deck before the client call tomorrow, not on me this time.",
+    "candidates": [
+      {
+        "kind": "external_action",
+        "text": "finish the deck before the client call",
+        "attributes": {
+          "concrete": true,
+          "unfinished": true,
+          "otherOwned": true
+        },
+        "confidence": 0.85
+      }
+    ]
+  },
+  "completed-1": {
+    "text": "Finally paid off the last of the credit card balance today, feels incredible.",
+    "candidates": [
+      {
+        "kind": "completed",
+        "text": "paid off the last of the credit card balance",
+        "attributes": {
+          "agency": true,
+          "concrete": true
+        },
+        "confidence": 0.85
+      }
+    ]
+  },
+  "completed-2": {
+    "text": "Remembered to submit the reimbursement form before the deadline, small win.",
+    "candidates": [
+      {
+        "kind": "task",
+        "text": "submit the reimbursement form",
+        "attributes": {
+          "agency": true,
+          "concrete": true,
+          "completed": true
+        },
+        "confidence": 0.85
+      }
+    ]
+  },
+  "selfcorrect-1": {
+    "text": "I need to email the client about the delay — actually wait, no, Priya already handled that yesterday.",
+    "candidates": [
+      {
+        "kind": "task",
+        "text": "email the client about the delay",
+        "attributes": {
+          "agency": true,
+          "concrete": true,
+          "negated": true
+        },
+        "confidence": 0.75
+      }
+    ]
+  },
+  "selfcorrect-2": {
+    "text": "Oh great, another thing I need to schedule. Yeah right, like that's happening.",
+    "candidates": [
+      {
+        "kind": "reflection",
+        "text": "another thing I need to schedule",
+        "attributes": {
+          "agency": true
+        },
+        "confidence": 0.7
+      }
+    ]
+  },
+  "brainstorm-1": {
+    "text": "Ideas for the weekend: maybe hike, maybe just stay in, maybe finally start that painting project. Who knows.",
+    "candidates": [
+      {
+        "kind": "task",
+        "text": "start that painting project",
+        "attributes": {
+          "agency": true,
+          "unfinished": true
+        },
+        "confidence": 0.5
+      }
+    ]
+  },
+  "brainstorm-2": {
+    "text": "Brainstorming ways to save money — could cut streaming subscriptions, could meal prep more, could just stop ordering delivery at midnight.",
+    "candidates": [
+      {
+        "kind": "goal_habit",
+        "text": "cut streaming subscriptions",
+        "attributes": {
+          "agency": true
+        },
+        "confidence": 0.6
+      }
+    ]
+  },
+  "recurring-1": {
+    "text": "Same worry as always creeping back in — am I actually going to be okay financially long-term. I think about this every few months.",
+    "candidates": [
+      {
+        "kind": "reflection",
+        "text": "am I actually going to be okay financially long-term",
+        "attributes": {
+          "agency": true
+        },
+        "confidence": 0.75
+      }
+    ]
+  },
+  "recurring-2": {
+    "text": "Here's that recurring thought again: I should really check in with myself about whether this job still fits. It comes and goes.",
+    "candidates": [
+      {
+        "kind": "goal_habit",
+        "text": "check in with myself about whether this job still fits",
+        "attributes": {
+          "agency": true,
+          "goalLanguage": true
+        },
+        "confidence": 0.7
+      }
+    ]
+  },
+  "explicit-1": {
+    "text": "Notes from today: TODO: renew passport before the trip.",
+    "candidates": [
+      {
+        "kind": "task",
+        "text": "renew passport",
+        "attributes": {
+          "agency": true,
+          "unfinished": true
+        },
+        "confidence": 0.6,
+        "explicitCommand": true
+      }
+    ]
+  },
+  "explicit-2": {
+    "text": "Quick list before bed: - [ ] Call the plumber about the leak",
+    "candidates": [
+      {
+        "kind": "task",
+        "text": "Call the plumber about the leak",
+        "attributes": {
+          "agency": true,
+          "unfinished": true
+        },
+        "confidence": 0.55,
+        "explicitCommand": true
+      }
+    ]
+  },
+  "multi-1": {
+    "text": "Busy week ahead: email the landlord about the lease renewal, and call the vet to schedule Ziggy's checkup for next week.",
+    "candidates": [
+      {
+        "kind": "task",
+        "text": "email the landlord about the lease renewal",
+        "attributes": {
+          "agency": true,
+          "concrete": true,
+          "unfinished": true,
+          "temporalFit": true
+        },
+        "confidence": 0.85,
+        "targetAt": null
+      },
+      {
+        "kind": "task",
+        "text": "call the vet to schedule Ziggy's checkup",
+        "attributes": {
+          "agency": true,
+          "concrete": true,
+          "unfinished": true,
+          "temporalFit": true
+        },
+        "confidence": 0.87,
+        "targetAt": "2026-07-30T10:00:00.000Z",
+        "tense": "future"
+      }
+    ]
+  },
+  "multi-2": {
+    "text": "Two things on my mind: I need to sit with why today felt so heavy, and I need to finish the budget spreadsheet by tomorrow.",
+    "candidates": [
+      {
+        "kind": "reflection",
+        "text": "sit with why today felt so heavy",
+        "attributes": {
+          "agency": true
+        },
+        "confidence": 0.75
+      },
+      {
+        "kind": "task",
+        "text": "finish the budget spreadsheet",
+        "attributes": {
+          "agency": true,
+          "concrete": true,
+          "unfinished": true,
+          "temporalFit": true
+        },
+        "confidence": 0.85,
+        "targetAt": "2026-07-25T12:00:00.000Z",
+        "tense": "future"
+      }
+    ]
+  }
+}

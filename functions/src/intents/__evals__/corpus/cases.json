@@ -1,0 +1,318 @@
+{
+  "meta": {
+    "description": "INT-01 raw-text intent-extraction eval corpus. Unlike ../fixtures.json (which injects a structural candidate directly into the pure activation policy), every case here is a full synthetic journal ENTRY run through the REAL extraction pipeline end-to-end: extractIntentCandidates (model call) -> parseCandidatesResponse -> normalizeCandidates -> decideActivation, via runCorpusEval.js. 100% synthetic content: no real journal text, no real people (all names/pets are obviously fabricated placeholders).",
+    "version": 1,
+    "labelingProtocol": "Each case's expectedIntents encode the honest structural reading a reviewer would assign the raw text (kind + expectedState), mirroring ../fixtures.json's protocol but applied to the whole entry rather than a pre-built candidate. evidenceContains is the substring a correct extraction should anchor its span on; scoring (corpusScoring.js) fuzzy-matches on it, not exact equality.",
+    "growthNote": "This corpus (50 synthetic cases) exists to lock the raw-text-in/policy-decision-out contract in code and to give prompt/model changes a regression gate. It is NOT a substitute for ../fixtures.json's >=500-real-example growth gate that guards the intentExtraction flag flip itself — see that file's README for the flag-flip bar."
+  },
+  "cases": [
+    { "id": "task-clear-1", "category": "clear_task", "difficulty": "easy",
+      "text": "The heater in my apartment is still broken and it's getting cold. Email the landlord about the broken heater before Friday. I keep putting it off.",
+      "rationale": "Concrete, self-owned, one-time action with a near-future deadline — the canonical active task.",
+      "expectedIntents": [
+        { "kind": "task", "expectedState": "active", "evidenceContains": "Email the landlord about the broken heater", "rationale": "agency+concrete+unfinished+temporalFit, no blockers." }
+      ] },
+    { "id": "task-clear-2", "category": "clear_task", "difficulty": "easy",
+      "text": "Long day. Pick up the dry cleaning tomorrow on the way home — I really don't want another week to go by without doing it.",
+      "rationale": "Clear self-owned action with an explicit near-term time reference.",
+      "expectedIntents": [
+        { "kind": "task", "expectedState": "active", "evidenceContains": "Pick up the dry cleaning tomorrow on the way home", "rationale": "agency+concrete+unfinished+temporalFit, no blockers." }
+      ] },
+    { "id": "task-clear-3", "category": "clear_task", "difficulty": "easy",
+      "text": "Prices keep climbing. Book the flight to Lisbon this week before it gets worse.",
+      "rationale": "Concrete one-time booking action, no specific instant but a plausible near-term fit.",
+      "expectedIntents": [
+        { "kind": "task", "expectedState": "active", "evidenceContains": "Book the flight to Lisbon", "rationale": "agency+concrete+unfinished+temporalFit, no blockers." }
+      ] },
+    { "id": "task-clear-4", "category": "clear_task", "difficulty": "easy",
+      "text": "It expires next month and I keep forgetting. Renew the passport this week.",
+      "rationale": "Concrete administrative task with a stated near-term window.",
+      "expectedIntents": [
+        { "kind": "task", "expectedState": "active", "evidenceContains": "Renew the passport", "rationale": "agency+concrete+unfinished+temporalFit, no blockers." }
+      ] },
+
+    { "id": "openloop-clear-1", "category": "clear_open_loop", "difficulty": "easy",
+      "text": "Sam's surgery is scheduled for next week and I'm nervous for him. Remind me to check how Sam's surgery went once it's done.",
+      "rationale": "Explicit 'remind me' follow-up request with a vague-but-fine (no specific instant required) target.",
+      "expectedIntents": [
+        { "kind": "open_loop", "expectedState": "active", "evidenceContains": "Remind me to check how Sam's surgery went", "rationale": "explicitCommand + agency + unfinished, no blockers, no past target." }
+      ] },
+    { "id": "openloop-clear-2", "category": "clear_open_loop", "difficulty": "easy",
+      "text": "Interview went okay I think, hard to tell. Ask me Friday how the interview went, I'll have heard back by then.",
+      "rationale": "Canonical explicit open-loop pattern from the R1 PRD example set, at raw-text level.",
+      "expectedIntents": [
+        { "kind": "open_loop", "expectedState": "active", "evidenceContains": "Ask me Friday how the interview went", "rationale": "explicitCommand + agency + unfinished, future target." }
+      ] },
+    { "id": "openloop-clear-3", "category": "clear_open_loop", "difficulty": "medium",
+      "text": "Submitted the loan paperwork today, now it's a waiting game. Follow up with me next week about the loan approval.",
+      "rationale": "Open-loop vs task kind boundary case; the replay fixture deliberately mislabels this candidate's kind to demonstrate the harness's kind-confusion detection (see CORPUS_EVAL.md).",
+      "expectedIntents": [
+        { "kind": "open_loop", "expectedState": "active", "evidenceContains": "Follow up with me next week about the loan approval", "rationale": "explicitCommand + agency + unfinished, future target." }
+      ] },
+
+    { "id": "musing-mom-a", "category": "musing_vs_commitment", "difficulty": "hard",
+      "text": "I've been a bad daughter lately. I should probably call mom sometime, she probably thinks I forgot about her.",
+      "rationale": "The precision-first near-miss: soft 'should...sometime' guilt-musing, not a committed one-time action. Pairs with musing-mom-b.",
+      "expectedIntents": [
+        { "kind": "goal_habit", "expectedState": "abstain", "evidenceContains": "I should probably call mom sometime", "rationale": "ongoing-goal/aspiration language, context-only kind regardless of confidence." }
+      ] },
+    { "id": "musing-mom-b", "category": "musing_vs_commitment", "difficulty": "medium",
+      "text": "Mom's been worried since the doctor's appointment. I need to call mom tomorrow and tell her the test results.",
+      "rationale": "Same underlying life event as musing-mom-a, phrased as an actual committed action with a concrete deadline.",
+      "expectedIntents": [
+        { "kind": "task", "expectedState": "active", "evidenceContains": "call mom tomorrow", "rationale": "agency+concrete+unfinished+temporalFit, no blockers." }
+      ] },
+    { "id": "musing-report-a", "category": "musing_vs_commitment", "difficulty": "hard",
+      "text": "I keep meaning to get better at finishing what I start. I should really wrap up that report eventually.",
+      "rationale": "Ongoing self-improvement musing with vague timing ('eventually') — must never surface as a task.",
+      "expectedIntents": [
+        { "kind": "goal_habit", "expectedState": "abstain", "evidenceContains": "wrap up that report eventually", "rationale": "goalLanguage + vague timing, context-only kind." }
+      ] },
+    { "id": "musing-report-b", "category": "musing_vs_commitment", "difficulty": "medium",
+      "text": "Deadline's real now, no more slipping it. I need to finish the quarterly report by Thursday.",
+      "rationale": "Same report, now a real commitment with a hard deadline.",
+      "expectedIntents": [
+        { "kind": "task", "expectedState": "active", "evidenceContains": "finish the quarterly report by Thursday", "rationale": "agency+concrete+unfinished+temporalFit, no blockers." }
+      ] },
+    { "id": "musing-exercise-a", "category": "musing_vs_commitment", "difficulty": "hard",
+      "text": "I want to exercise more, I really do, but every day just slips by.",
+      "rationale": "The system prompt's own worked example of ongoing-goal language ('exercise more') — the textbook precision trap.",
+      "expectedIntents": [
+        { "kind": "goal_habit", "expectedState": "abstain", "evidenceContains": "I want to exercise more", "rationale": "aspiration language, not a concrete one-time action; context-only kind." }
+      ] },
+    { "id": "musing-exercise-b", "category": "musing_vs_commitment", "difficulty": "medium",
+      "text": "I'm doing it this time. Sign up for the 6am spin class tomorrow, no more excuses.",
+      "rationale": "Same underlying goal, now expressed as a concrete scheduled action.",
+      "expectedIntents": [
+        { "kind": "task", "expectedState": "active", "evidenceContains": "Sign up for the 6am spin class", "rationale": "agency+concrete+unfinished+temporalFit, no blockers." }
+      ] },
+
+    { "id": "temporal-1", "category": "ambiguous_temporal", "difficulty": "hard",
+      "text": "One of these days I'm going to sort out the garage — it's been driving me nuts for months.",
+      "rationale": "Concrete action, genuinely vague timing, confidence clears the suggest floor — soft-fails temporal only.",
+      "expectedIntents": [
+        { "kind": "task", "expectedState": "suggested", "evidenceContains": "sort out the garage", "rationale": "concrete true, temporalFit false, confidence >= 0.6 -> exactly one soft failure." }
+      ] },
+    { "id": "temporal-2", "category": "ambiguous_temporal", "difficulty": "hard",
+      "text": "Someday I'll finally organize all these old photos, they're just sitting in boxes.",
+      "rationale": "Same shape as temporal-1 but the model's own confidence is genuinely low — must stay silent, not merely demoted.",
+      "expectedIntents": [
+        { "kind": "task", "expectedState": "abstain", "evidenceContains": "organize all these old photos", "rationale": "concrete true, temporalFit false, confidence below the 0.6 suggest floor." }
+      ] },
+    { "id": "temporal-3", "category": "ambiguous_temporal", "difficulty": "hard",
+      "text": "Eventually I need to update my resume before I start applying anywhere.",
+      "rationale": "Another vague-timing-but-concrete case; contrast with temporal-4's resolved deadline.",
+      "expectedIntents": [
+        { "kind": "task", "expectedState": "suggested", "evidenceContains": "update my resume", "rationale": "concrete true, temporalFit false, confidence >= 0.6." }
+      ] },
+    { "id": "temporal-4", "category": "ambiguous_temporal", "difficulty": "hard",
+      "text": "By the end of the month I need to renew my visa paperwork, no room to slip on this one.",
+      "rationale": "Control case: 'end of month' reads as concrete-enough timing, not vague — should resolve active, not suggested. The replay fixture deliberately OMITS this candidate to demonstrate the harness's recall-miss detection (see CORPUS_EVAL.md).",
+      "expectedIntents": [
+        { "kind": "task", "expectedState": "active", "evidenceContains": "renew my visa paperwork", "rationale": "agency+concrete+unfinished+temporalFit (specific-enough window), no blockers." }
+      ] },
+
+    { "id": "emotional-1", "category": "emotional_not_actionable", "difficulty": "hard",
+      "text": "I need to process what happened with my dad before I explode at someone who doesn't deserve it.",
+      "rationale": "'Need to' phrasing over an emotional-processing statement — reads as reflection, not a task, regardless of surface urgency.",
+      "expectedIntents": [
+        { "kind": "reflection", "expectedState": "abstain", "evidenceContains": "process what happened with my dad", "rationale": "reflection is context-only; kind gate abstains before any attribute is consulted." }
+      ] },
+    { "id": "emotional-2", "category": "emotional_not_actionable", "difficulty": "hard",
+      "text": "I have to stop being so hard on myself, it's exhausting living like this.",
+      "rationale": "Self-critical statement phrased with 'have to' — not an actionable task.",
+      "expectedIntents": [
+        { "kind": "reflection", "expectedState": "abstain", "evidenceContains": "stop being so hard on myself", "rationale": "reflection is context-only." }
+      ] },
+    { "id": "emotional-3", "category": "emotional_not_actionable", "difficulty": "hard",
+      "text": "I really need to sit with this grief instead of running from it like I always do.",
+      "rationale": "'Sit with' emotional processing language, easily confused with a to-do by surface urgency words.",
+      "expectedIntents": [
+        { "kind": "reflection", "expectedState": "abstain", "evidenceContains": "sit with this grief", "rationale": "reflection is context-only." }
+      ] },
+    { "id": "emotional-4", "category": "emotional_not_actionable", "difficulty": "hard",
+      "text": "I need to figure out why I keep sabotaging good things in my life.",
+      "rationale": "Introspective 'figure out why' framing, not a concrete external action.",
+      "expectedIntents": [
+        { "kind": "reflection", "expectedState": "abstain", "evidenceContains": "figure out why I keep sabotaging good things", "rationale": "reflection is context-only." }
+      ] },
+
+    { "id": "boundary-1", "category": "open_loop_vs_task_boundary", "difficulty": "medium",
+      "text": "Sam had the surgery consult today, didn't get the details yet. Remind me to ask Sam how the surgery consult went.",
+      "rationale": "Explicit follow-up-later request — the writer isn't doing the asking now, they're deferring it. Pairs with boundary-2's same-day task phrasing.",
+      "expectedIntents": [
+        { "kind": "open_loop", "expectedState": "active", "evidenceContains": "Remind me to ask Sam how the surgery consult went", "rationale": "explicitCommand + agency + unfinished, no blockers." }
+      ] },
+    { "id": "boundary-2", "category": "open_loop_vs_task_boundary", "difficulty": "medium",
+      "text": "Sam had the surgery consult today, didn't get the details yet. Call Sam today and ask about the surgery consult.",
+      "rationale": "Same context as boundary-1 but phrased as the writer's own immediate action — a task, not an open loop.",
+      "expectedIntents": [
+        { "kind": "task", "expectedState": "active", "evidenceContains": "Call Sam today and ask about the surgery consult", "rationale": "agency+concrete+unfinished+temporalFit, no blockers." }
+      ] },
+    { "id": "boundary-3", "category": "open_loop_vs_task_boundary", "difficulty": "hard",
+      "text": "That thread with HR has been open forever. I should probably check back in on how that thread with HR resolves.",
+      "rationale": "Soft, non-explicit open-loop phrasing — concrete follow-up but no clear timing and no explicit-command syntax.",
+      "expectedIntents": [
+        { "kind": "open_loop", "expectedState": "suggested", "evidenceContains": "check back in on how that thread with HR resolves", "rationale": "concrete true, temporalFit false, confidence >= 0.6 -> one soft failure." }
+      ] },
+    { "id": "boundary-4", "category": "open_loop_vs_task_boundary", "difficulty": "hard",
+      "text": "This keeps coming up in different forms. Remind me to check in on this every Friday from now on.",
+      "rationale": "Recurring-loop hard negative at raw-text level — explicit-command syntax must NOT override the goalLanguage/recurring blocker.",
+      "expectedIntents": [
+        { "kind": "open_loop", "expectedState": "abstain", "evidenceContains": "Remind me to check in on this every Friday", "rationale": "recurring/ongoing framing is a hard blocker; explicitCommand cannot override it." }
+      ] },
+
+    { "id": "zero-1", "category": "zero_intent", "difficulty": "easy",
+      "text": "The rain finally stopped this afternoon and the sky went that strange orange color. I sat on the porch for a while just watching it. Felt calm for the first time in days.",
+      "rationale": "Pure sensory/mood entry, nothing actionable — the empty case matters for precision measurement.",
+      "expectedIntents": [] },
+    { "id": "zero-2", "category": "zero_intent", "difficulty": "medium",
+      "text": "Had a weird dream about being back in high school, running through hallways that didn't exist when I actually went there. Woke up disoriented but oddly nostalgic.",
+      "rationale": "Dream narrative containing action-shaped verbs ('running through hallways') that must never be read as a real commitment. The replay fixture deliberately injects a false-positive candidate here to demonstrate the harness's hallucination detection (see CORPUS_EVAL.md).",
+      "expectedIntents": [] },
+    { "id": "zero-3", "category": "zero_intent", "difficulty": "easy",
+      "text": "Grateful today for small things: good coffee, a text from an old friend, the dog falling asleep on my feet while I worked.",
+      "rationale": "Gratitude/observation entry, nothing actionable.",
+      "expectedIntents": [] },
+    { "id": "zero-4", "category": "zero_intent", "difficulty": "medium",
+      "text": "Finished the novel I've been reading for weeks. The ending wrecked me a little. Going to sit with it before starting something new.",
+      "rationale": "'Going to sit with it' reads as emotional processing intent, not a task, and 'starting something new' is too vague to be concrete.",
+      "expectedIntents": [] },
+    { "id": "zero-5", "category": "zero_intent", "difficulty": "easy",
+      "text": "Anxious energy all day for no clear reason. Tried to name it and couldn't. Just noting it here so I remember this feeling passed before.",
+      "rationale": "Pure mood-tracking entry, nothing actionable.",
+      "expectedIntents": [] },
+
+    { "id": "negation-1", "category": "negation", "difficulty": "easy",
+      "text": "I don't need to call the dentist anymore — I already rescheduled through the app.",
+      "rationale": "Negated task-shaped phrase — must never surface despite the literal action verb.",
+      "expectedIntents": [
+        { "kind": "task", "expectedState": "abstain", "evidenceContains": "call the dentist", "rationale": "negated is a hard blocker." }
+      ] },
+    { "id": "negation-2", "category": "negation", "difficulty": "easy",
+      "text": "No longer need to renew the gym membership since I'm cancelling it anyway.",
+      "rationale": "Second negation phrasing to confirm the blocker generalizes beyond one syntactic pattern.",
+      "expectedIntents": [
+        { "kind": "task", "expectedState": "abstain", "evidenceContains": "renew the gym membership", "rationale": "negated is a hard blocker." }
+      ] },
+
+    { "id": "hypothetical-1", "category": "hypothetical_conditional", "difficulty": "easy",
+      "text": "If I have energy after work, I might go for a run.",
+      "rationale": "Classic conditional/hypothetical — gated on an 'if', never a commitment.",
+      "expectedIntents": [
+        { "kind": "task", "expectedState": "abstain", "evidenceContains": "go for a run", "rationale": "conditional is a hard blocker." }
+      ] },
+    { "id": "hypothetical-2", "category": "hypothetical_conditional", "difficulty": "easy",
+      "text": "If it doesn't rain this weekend, I'll finally paint the fence.",
+      "rationale": "Second conditional phrasing with a concrete, specific action to prove the blocker isn't confidence-sensitive.",
+      "expectedIntents": [
+        { "kind": "task", "expectedState": "abstain", "evidenceContains": "paint the fence", "rationale": "conditional is a hard blocker." }
+      ] },
+
+    { "id": "quoted-1", "category": "quoted_speech", "difficulty": "easy",
+      "text": "My manager told me, quote, you need to redo the whole deck, unquote. Great, love that for me.",
+      "rationale": "Reported/quoted directive from someone else — not the writer's own commitment.",
+      "expectedIntents": [
+        { "kind": "task", "expectedState": "abstain", "evidenceContains": "redo the whole deck", "rationale": "quoted is a hard blocker." }
+      ] },
+    { "id": "quoted-2", "category": "quoted_speech", "difficulty": "easy",
+      "text": "She said, you should really see a therapist, and honestly she's right.",
+      "rationale": "Quoted advice from another person, agreed with but not self-committed.",
+      "expectedIntents": [
+        { "kind": "task", "expectedState": "abstain", "evidenceContains": "see a therapist", "rationale": "quoted is a hard blocker." }
+      ] },
+
+    { "id": "instructions-1", "category": "instructions_to_others", "difficulty": "medium",
+      "text": "Told my roommate he needs to take out the trash before Monday or the landlord will complain again.",
+      "rationale": "Action explicitly owned by someone else, reported by the writer.",
+      "expectedIntents": [
+        { "kind": "task", "expectedState": "abstain", "evidenceContains": "take out the trash before Monday", "rationale": "otherOwned is a hard blocker; also no agency." }
+      ] },
+    { "id": "instructions-2", "category": "instructions_to_others", "difficulty": "medium",
+      "text": "The team needs to finish the deck before the client call tomorrow, not on me this time.",
+      "rationale": "External-action kind, explicitly disowned by the writer in the same sentence.",
+      "expectedIntents": [
+        { "kind": "external_action", "expectedState": "abstain", "evidenceContains": "finish the deck before the client call", "rationale": "external_action is context-only." }
+      ] },
+
+    { "id": "completed-1", "category": "completed_actions", "difficulty": "easy",
+      "text": "Finally paid off the last of the credit card balance today, feels incredible.",
+      "rationale": "Already-done action, reported as a past achievement, not a to-do.",
+      "expectedIntents": [
+        { "kind": "completed", "expectedState": "abstain", "evidenceContains": "paid off the last of the credit card balance", "rationale": "completed kind is context-only." }
+      ] },
+    { "id": "completed-2", "category": "completed_actions", "difficulty": "easy",
+      "text": "Remembered to submit the reimbursement form before the deadline, small win.",
+      "rationale": "The R1 PRD's own 'I remembered to...' completed-action trap, at raw-text level.",
+      "expectedIntents": [
+        { "kind": "task", "expectedState": "abstain", "evidenceContains": "submit the reimbursement form", "rationale": "completed is a hard blocker." }
+      ] },
+
+    { "id": "selfcorrect-1", "category": "self_correction", "difficulty": "hard",
+      "text": "I need to email the client about the delay — actually wait, no, Priya already handled that yesterday.",
+      "rationale": "The writer states a task then immediately negates/retracts it mid-entry — the retraction must win.",
+      "expectedIntents": [
+        { "kind": "task", "expectedState": "abstain", "evidenceContains": "email the client about the delay", "rationale": "self-correction reads as negated; hard blocker." }
+      ] },
+    { "id": "selfcorrect-2", "category": "self_correction", "difficulty": "hard",
+      "text": "Oh great, another thing I need to schedule. Yeah right, like that's happening.",
+      "rationale": "Sarcastic self-correction — surface task language undercut by tone; reads as venting, not a commitment.",
+      "expectedIntents": [
+        { "kind": "reflection", "expectedState": "abstain", "evidenceContains": "another thing I need to schedule", "rationale": "sarcasm reads as reflection/venting, context-only kind." }
+      ] },
+
+    { "id": "brainstorm-1", "category": "brainstorming", "difficulty": "medium",
+      "text": "Ideas for the weekend: maybe hike, maybe just stay in, maybe finally start that painting project. Who knows.",
+      "rationale": "A list of unresolved options, none committed to — not concrete, not temporally fit, low confidence.",
+      "expectedIntents": [
+        { "kind": "task", "expectedState": "abstain", "evidenceContains": "start that painting project", "rationale": "two soft failures (not concrete, not temporalFit) and confidence below floor." }
+      ] },
+    { "id": "brainstorm-2", "category": "brainstorming", "difficulty": "medium",
+      "text": "Brainstorming ways to save money — could cut streaming subscriptions, could meal prep more, could just stop ordering delivery at midnight.",
+      "rationale": "Ongoing-habit brainstorm, correctly read as goal_habit context rather than a task list.",
+      "expectedIntents": [
+        { "kind": "goal_habit", "expectedState": "abstain", "evidenceContains": "cut streaming subscriptions", "rationale": "goal_habit is context-only." }
+      ] },
+
+    { "id": "recurring-1", "category": "recurring_worries", "difficulty": "medium",
+      "text": "Same worry as always creeping back in — am I actually going to be okay financially long-term. I think about this every few months.",
+      "rationale": "A recurring anxious rumination, explicitly named as recurring — reflection, not a task.",
+      "expectedIntents": [
+        { "kind": "reflection", "expectedState": "abstain", "evidenceContains": "am I actually going to be okay financially long-term", "rationale": "reflection is context-only." }
+      ] },
+    { "id": "recurring-2", "category": "recurring_worries", "difficulty": "medium",
+      "text": "Here's that recurring thought again: I should really check in with myself about whether this job still fits. It comes and goes.",
+      "rationale": "'I should really...' ongoing self-check, explicitly framed as recurring.",
+      "expectedIntents": [
+        { "kind": "goal_habit", "expectedState": "abstain", "evidenceContains": "check in with myself about whether this job still fits", "rationale": "goalLanguage + recurring framing, context-only kind." }
+      ] },
+
+    { "id": "explicit-1", "category": "explicit_command", "difficulty": "easy",
+      "text": "Notes from today: TODO: renew passport before the trip.",
+      "rationale": "Explicit TODO syntax activates without needing the concrete+temporalFit soft criteria.",
+      "expectedIntents": [
+        { "kind": "task", "expectedState": "active", "evidenceContains": "renew passport", "rationale": "explicitCommand + agency + unfinished, no blockers." }
+      ] },
+    { "id": "explicit-2", "category": "explicit_command", "difficulty": "easy",
+      "text": "Quick list before bed: - [ ] Call the plumber about the leak",
+      "rationale": "Explicit checkbox syntax, second explicit-command variant.",
+      "expectedIntents": [
+        { "kind": "task", "expectedState": "active", "evidenceContains": "Call the plumber about the leak", "rationale": "explicitCommand + agency + unfinished, no blockers." }
+      ] },
+
+    { "id": "multi-1", "category": "multi_intent", "difficulty": "medium",
+      "text": "Busy week ahead: email the landlord about the lease renewal, and call the vet to schedule Ziggy's checkup for next week.",
+      "rationale": "Two independent active tasks in one entry — exercises multi-candidate matching within a single case.",
+      "expectedIntents": [
+        { "kind": "task", "expectedState": "active", "evidenceContains": "email the landlord about the lease renewal", "rationale": "agency+concrete+unfinished+temporalFit, no blockers." },
+        { "kind": "task", "expectedState": "active", "evidenceContains": "call the vet to schedule Ziggy's checkup", "rationale": "agency+concrete+unfinished+temporalFit, no blockers." }
+      ] },
+    { "id": "multi-2", "category": "multi_intent", "difficulty": "hard",
+      "text": "Two things on my mind: I need to sit with why today felt so heavy, and I need to finish the budget spreadsheet by tomorrow.",
+      "rationale": "One reflection (must abstain) and one real task (must activate) in the same entry — the mixed case where precision and recall are both tested at once.",
+      "expectedIntents": [
+        { "kind": "reflection", "expectedState": "abstain", "evidenceContains": "sit with why today felt so heavy", "rationale": "reflection is context-only." },
+        { "kind": "task", "expectedState": "active", "evidenceContains": "finish the budget spreadsheet", "rationale": "agency+concrete+unfinished+temporalFit, no blockers." }
+      ] }
+  ]
+}
