@@ -9,6 +9,7 @@
 import { onCall, HttpsError } from 'firebase-functions/v2/https';
 import { getFirestore, FieldValue } from 'firebase-admin/firestore';
 import { APP_COLLECTION_ID, DEFAULT_REGION, MEMORY, TIMEOUTS, CRISIS_KEYWORDS } from '../shared/constants.js';
+import { getServerFlag } from '../shared/flags.js';
 
 const CONFIDENCE_THRESHOLD = 0.7;
 const MAX_QUEUE_SIZE = 5;
@@ -118,6 +119,47 @@ function assignSuggestedTiming(insight) {
 }
 
 /**
+ * INS-01 (voice-queue follow-up): whether the legacy Nexus scoring/queue-write
+ * path below should be skipped this run.
+ *
+ * `insightClaims` (R4 Phase 1, default OFF) marks the cutover to claim-backed
+ * insights: once ON, `nexus/insights.active` is legacy content the cutover
+ * contract says must never reach the user proactively — including via the
+ * relay server's voice injector, which this file feeds. This module has no
+ * insightClaims-sourcing path yet (that's the natural Phase-C upgrade —
+ * scoring verified claims into this same queue), so the correct behavior for
+ * ON is silence, not a substitute.
+ *
+ * `getServerFlag` is documented as "never throws" (it already has its own
+ * internal try/catch + console.warn + default-value fallback), so normally a
+ * single `getServerFlag(db, 'insightClaims', false)` call would be enough.
+ * The try/catch here is deliberate defense-in-depth on top of that, because
+ * this call site's risk asymmetry is NOT symmetric the way getServerFlag's
+ * generic default-on-failure contract assumes: getServerFlag can't tell "flag
+ * field genuinely absent" (today's normal state — must resolve OFF, so
+ * existing behavior stays byte-identical) apart from "read genuinely failed"
+ * (must resolve ON, so we never risk voicing stale legacy content). Passing a
+ * single defaultValue can only serve one of those two cases correctly, so we
+ * pass `false` for the normal/missing-field case and let this wrapper's own
+ * catch — matching flags.js's own console.warn + safe-default style — force
+ * the ON/silent outcome if a read ever does throw past getServerFlag.
+ *
+ * @param {object} db
+ * @returns {Promise<boolean>} true → skip nexus scoring/queue-write this run.
+ */
+async function shouldSkipLegacyNexusQueue(db) {
+  try {
+    const insightClaimsOn = await getServerFlag(db, 'insightClaims', false);
+    return insightClaimsOn === true;
+  } catch (error) {
+    console.warn('[conversationReady] insightClaims flag read failed — failing toward silent (skipping legacy nexus queue)', {
+      err: error?.message,
+    });
+    return true;
+  }
+}
+
+/**
  * Score Nexus insights for conversation-worthiness and write the top results
  * to the user's conversation_queue document.
  *
@@ -129,6 +171,16 @@ export async function scoreInsightsForConversation(userId) {
   const userBase = `artifacts/${APP_COLLECTION_ID}/users/${userId}`;
 
   try {
+    // 0. INS-01: insightClaims ON (or unreadable) means legacy Nexus content
+    // must not reach the user proactively — skip scoring entirely and write
+    // an empty queue (same "nothing to say" shape already used below for no
+    // recent activity / no insights doc / no active insights), rather than
+    // skipping the write. See shouldSkipLegacyNexusQueue's doc comment.
+    if (await shouldSkipLegacyNexusQueue(db)) {
+      await writeQueue(db, userBase, []);
+      return { queued: 0, filtered: 0, claimsGated: true };
+    }
+
     // 1. Check for recent activity (last 30 days)
     const recentEntriesSnap = await db.collection(`${userBase}/entries`)
       .where('createdAt', '>', new Date(Date.now() - STALENESS_DAYS * 86400000))

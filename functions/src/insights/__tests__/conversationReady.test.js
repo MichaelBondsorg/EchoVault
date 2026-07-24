@@ -22,6 +22,16 @@ vi.mock('firebase-admin/firestore', () => ({
   Timestamp: { now: () => ({ toMillis: () => Date.now() }) },
 }));
 
+// Mock the shared server-flag reader (INS-01) — controlled per-test rather
+// than routed through the mockDoc('config/flags') plumbing above, since one
+// test needs the flag read to actually throw (getServerFlag itself never
+// throws, so the only way to exercise conversationReady's own defense-in-depth
+// catch is to make the imported function reject directly).
+const mockGetServerFlag = vi.fn().mockResolvedValue(false);
+vi.mock('../../shared/flags.js', () => ({
+  getServerFlag: (...args) => mockGetServerFlag(...args),
+}));
+
 // Import after mocks
 const {
   scoreInsightsForConversation,
@@ -59,6 +69,9 @@ const makeEntry = (overrides = {}) => ({
 describe('conversationReady', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // Default: flag off — matches today's production state (field absent
+    // from config/flags) and keeps every pre-existing test byte-identical.
+    mockGetServerFlag.mockResolvedValue(false);
   });
 
   describe('classifyEmotionalTone', () => {
@@ -287,6 +300,102 @@ describe('conversationReady', () => {
       expect(mockTxn.set).toHaveBeenCalled();
       const setArgs = mockTxn.set.mock.calls[0][1];
       expect(setArgs.version).toBe(4);
+    });
+  });
+
+  describe('INS-01: insightClaims voice-queue gate', () => {
+    const setupMocks = ({ insights = [], history = [], recentEntries = [], queueVersion = 0 } = {}) => {
+      mockDoc.mockImplementation((path) => ({
+        get: vi.fn().mockResolvedValue({
+          exists: insights.length > 0 || history.length > 0,
+          data: () => ({ active: insights, history }),
+        }),
+      }));
+
+      mockCollection.mockReturnValue({
+        where: vi.fn().mockReturnValue({
+          orderBy: vi.fn().mockReturnValue({
+            limit: vi.fn().mockReturnValue({
+              get: vi.fn().mockResolvedValue({
+                empty: recentEntries.length === 0,
+                docs: recentEntries.map(e => ({ data: () => e, id: e.id })),
+              }),
+            }),
+          }),
+        }),
+      });
+
+      mockRunTransaction.mockImplementation(async (fn) => {
+        const txn = {
+          get: vi.fn().mockResolvedValue({
+            exists: queueVersion > 0,
+            data: () => ({ version: queueVersion, insights: [] }),
+          }),
+          set: vi.fn(),
+        };
+        return fn(txn);
+      });
+    };
+
+    it('flag ON: writes an empty queue and never scores/queues nexus insights', async () => {
+      mockGetServerFlag.mockResolvedValue(true);
+      setupMocks({
+        insights: [makeInsight({ id: 'legacy-1', confidence: 0.95 })],
+        recentEntries: [makeEntry()],
+      });
+
+      const result = await scoreInsightsForConversation('user1');
+
+      expect(result.queued).toBe(0);
+      expect(result.filtered).toBe(0);
+      expect(result.claimsGated).toBe(true);
+
+      // The queue write happened (empty items), and the entries/nexus
+      // collection reads were skipped entirely — no scoring occurred.
+      expect(mockRunTransaction).toHaveBeenCalledTimes(1);
+      const txnFn = mockRunTransaction.mock.calls[0][0];
+      const mockTxn = { get: vi.fn().mockResolvedValue({ exists: false, data: () => ({}) }), set: vi.fn() };
+      await txnFn(mockTxn);
+      expect(mockTxn.set).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ insights: [] }),
+      );
+      expect(mockCollection).not.toHaveBeenCalled();
+    });
+
+    it('flag OFF: behavior is byte-identical to today (nexus insights still queued)', async () => {
+      mockGetServerFlag.mockResolvedValue(false);
+      setupMocks({
+        insights: [makeInsight({ id: 'legit-1', confidence: 0.95 })],
+        recentEntries: [makeEntry()],
+      });
+
+      const result = await scoreInsightsForConversation('user1');
+
+      expect(result.queued).toBe(1);
+      expect(result.filtered).toBe(0);
+      expect(result.claimsGated).toBeUndefined();
+    });
+
+    it('flag read throws: fails toward silent (treated as ON) and warns, without crashing', async () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      mockGetServerFlag.mockRejectedValue(new Error('firestore unavailable'));
+      setupMocks({
+        insights: [makeInsight({ id: 'legacy-1', confidence: 0.95 })],
+        recentEntries: [makeEntry()],
+      });
+
+      const result = await scoreInsightsForConversation('user1');
+
+      expect(result.queued).toBe(0);
+      expect(result.filtered).toBe(0);
+      expect(result.claimsGated).toBe(true);
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('insightClaims flag read failed'),
+        expect.objectContaining({ err: 'firestore unavailable' }),
+      );
+
+      warnSpy.mockRestore();
     });
   });
 });
