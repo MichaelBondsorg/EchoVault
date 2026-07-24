@@ -9,6 +9,7 @@ import {
   getModel,
   getModelSync,
   getModelFlag,
+  logModelManifest,
 } from '../registry.js';
 import { _clearFlagCacheForTest } from '../../shared/flags.js';
 
@@ -99,6 +100,42 @@ describe('registry — getModel resolution', () => {
 
   it('throws on an unknown workload', async () => {
     await expect(getModel(makeDb({}), 'bogus')).rejects.toThrow(/Unknown model workload/);
+  });
+});
+
+describe('registry — runtime model manifest (MOD-02 observability)', () => {
+  it('getModel emits one content-free manifest line per resolution', async () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      await getModel(makeDb({}), 'transcriptionFallback');
+      expect(logSpy).toHaveBeenCalledTimes(1);
+      const line = JSON.parse(logSpy.mock.calls[0][0]);
+      expect(line).toMatchObject({
+        type: 'model_manifest',
+        workload: 'transcriptionFallback',
+        modelId: 'whisper-1',
+      });
+      // Never content: only ids/booleans/numbers/null in the manifest line.
+      for (const value of Object.values(line)) {
+        expect(value === null || ['string', 'number', 'boolean'].includes(typeof value)).toBe(true);
+      }
+    } finally {
+      logSpy.mockRestore();
+    }
+  });
+
+  it('logModelManifest logs ok/durationMs/fallback for a call-site outcome', () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      logModelManifest({ workload: 'transcriptionFallback', modelId: 'whisper-1', ok: true, durationMs: 42, fallback: true });
+      const line = JSON.parse(logSpy.mock.calls[0][0]);
+      expect(line).toMatchObject({
+        type: 'model_manifest', workload: 'transcriptionFallback', modelId: 'whisper-1',
+        ok: true, durationMs: 42, fallback: true,
+      });
+    } finally {
+      logSpy.mockRestore();
+    }
   });
 });
 

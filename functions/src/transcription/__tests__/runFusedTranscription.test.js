@@ -90,6 +90,37 @@ describe('runFusedTranscription', () => {
     expect(mockWhisper).toHaveBeenCalledTimes(1);
   });
 
+  // MOD-02: the Whisper fallback previously never threaded a registry-resolved
+  // model through to transcribeWithWhisper, so `model.transcriptionFallback`
+  // overrides in config/flags had no effect on this path.
+  describe('whisperModelId (MOD-02 registry bypass fix)', () => {
+    it('forwards a non-default whisperModelId into the Whisper call options', async () => {
+      const fetchImpl = vi.fn().mockResolvedValue({ ok: false, status: 500, json: async () => ({}) });
+      mockWhisper.mockResolvedValue({ text: 'fallback transcript' });
+
+      await runFusedTranscription({
+        base64: 'QUJD', mimeType: 'audio/webm', gemKey: 'g', oaiKey: 'o', fetchImpl,
+        whisperModelId: 'gpt-4o-mini-transcribe',
+      });
+
+      expect(mockWhisper).toHaveBeenCalledTimes(1);
+      const [, , options] = mockWhisper.mock.calls[0];
+      expect(options.model).toBe('gpt-4o-mini-transcribe');
+    });
+
+    it('does not pass a model option when whisperModelId is omitted (preserves the helper default)', async () => {
+      const fetchImpl = vi.fn().mockResolvedValue({ ok: false, status: 500, json: async () => ({}) });
+      mockWhisper.mockResolvedValue({ text: 'fallback transcript' });
+
+      await runFusedTranscription({
+        base64: 'QUJD', mimeType: 'audio/webm', gemKey: 'g', oaiKey: 'o', fetchImpl,
+      });
+
+      const [, , options] = mockWhisper.mock.calls[0];
+      expect(options.model).toBeUndefined();
+    });
+  });
+
   describe('markers / chapters (Task 14)', () => {
     it('threads markers into the Gemini request body and returns valid chapters', async () => {
       const fetchImpl = vi.fn().mockResolvedValue(geminiOk({

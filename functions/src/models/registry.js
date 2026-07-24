@@ -90,9 +90,46 @@ function assertKnownWorkload(workload) {
 }
 
 /**
+ * Runtime model manifest (review MOD-02, "observability ask" — see plan
+ * docs/superpowers/plans/2026-07-24-full-product-review.md). One structured,
+ * content-free JSON line per resolved workload so which model actually
+ * served a request is grep/queryable in Cloud Logging without redeploying —
+ * reuses the same "one console.log(JSON.stringify(...))  per event" shape
+ * functions/src/telemetry/stageLog.js already established. NEVER logs prompt
+ * text, transcript text, or any journal content — only ids/booleans/numbers.
+ *
+ * Called from getModel() below for the resolution half of the manifest
+ * (`workload`, `modelId`); the outcome half (`ok`, `durationMs`, `fallback`,
+ * optional `promptVersion`) is logged by the call site once the actual
+ * provider call finishes (see functions/index.js's transcribeEntry and
+ * runFusedTranscription's Whisper-fallback path for the reference usage).
+ *
+ * @param {object} fields
+ * @param {string} fields.workload - One of WORKLOADS.
+ * @param {string} fields.modelId - Resolved model id.
+ * @param {string|number} [fields.promptVersion] - Optional prompt/schema version.
+ * @param {boolean} [fields.ok] - Whether the provider call succeeded (omit at pure resolution time).
+ * @param {number} [fields.durationMs] - Provider call latency (omit at pure resolution time).
+ * @param {boolean} [fields.fallback] - Whether this call is a fallback engine/model (default false).
+ */
+export function logModelManifest({ workload, modelId, promptVersion = null, ok = null, durationMs = null, fallback = false }) {
+  console.log(JSON.stringify({
+    type: 'model_manifest',
+    workload,
+    modelId,
+    promptVersion,
+    ok,
+    durationMs,
+    fallback: !!fallback,
+    at: Date.now(),
+  }));
+}
+
+/**
  * Resolve the model id for a workload, honouring a `config/flags` string
  * override. Never throws for a missing/failed flag read (getServerFlag returns
- * the default); DOES throw for an unknown workload.
+ * the default); DOES throw for an unknown workload. Emits the resolution half
+ * of the runtime model manifest (see logModelManifest above) on every call.
  *
  * @param {object} db - Firestore instance (admin SDK).
  * @param {string} workload - One of WORKLOADS.
@@ -101,10 +138,11 @@ function assertKnownWorkload(workload) {
 export async function getModel(db, workload) {
   assertKnownWorkload(workload);
   const override = await getServerFlag(db, `model.${workload}`, null);
-  if (typeof override === 'string' && override.trim()) {
-    return override.trim();
-  }
-  return MODEL_DEFAULTS[workload];
+  const modelId = (typeof override === 'string' && override.trim())
+    ? override.trim()
+    : MODEL_DEFAULTS[workload];
+  logModelManifest({ workload, modelId });
+  return modelId;
 }
 
 /**
@@ -132,4 +170,5 @@ export default {
   getModel,
   getModelSync,
   getModelFlag,
+  logModelManifest,
 };

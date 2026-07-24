@@ -5,6 +5,7 @@
  * the model hears the audio, removes disfluencies, never restructures.
  */
 import { transcribeWithWhisper } from '../shared/openai.js';
+import { logModelManifest } from '../models/registry.js';
 
 // Verify against the live models list before changing (see plan Task 2 Step 1).
 export const GEMINI_TRANSCRIBE_MODEL = 'gemini-2.5-flash';
@@ -244,6 +245,10 @@ export function parseFusedResponse(geminiJson, { markers = [], durationMs = null
  * @param {string|null} [args.oaiKey]     OpenAI API key (Whisper fallback).
  * @param {number} [args.timeoutMs]       Per-call network timeout.
  * @param {Function} [args.fetchImpl]     Injectable fetch (tests); defaults to global fetch.
+ * @param {string} [args.modelId]         Gemini model id (resolve via getModel(db, 'fusedTranscription')).
+ * @param {string} [args.whisperModelId]  Whisper fallback model id (MOD-02: resolve via
+ *   getModel(db, 'transcriptionFallback') — a caller that doesn't pass this gets
+ *   transcribeWithWhisper's own 'whisper-1' default, same as before this fix).
  */
 export async function runFusedTranscription({
   base64,
@@ -256,6 +261,7 @@ export async function runFusedTranscription({
   timeoutMs = FUSED_TRANSCRIBE_TIMEOUT_MS,
   fetchImpl = fetch,
   modelId = GEMINI_TRANSCRIBE_MODEL,
+  whisperModelId = undefined,
 } = {}) {
   if (!gemKey && !oaiKey) {
     return { error: 'API_ERROR' };
@@ -263,6 +269,7 @@ export async function runFusedTranscription({
 
   // 1. Primary: fused Gemini call (transcript + tone in one pass).
   if (gemKey) {
+    const startedAt = Date.now();
     try {
       const geminiRes = await fetchImpl(
         `https://generativelanguage.googleapis.com/v1beta/models/${modelId}:generateContent?key=${gemKey}`,
@@ -276,9 +283,11 @@ export async function runFusedTranscription({
 
       if (geminiRes.status === 429) {
         // rate limited — fall through to Whisper
+        logModelManifest({ workload: 'fusedTranscription', modelId, ok: false, durationMs: Date.now() - startedAt, fallback: false });
       } else if (geminiRes.ok) {
         const parsed = parseFusedResponse(await geminiRes.json(), { markers, durationMs });
         if (parsed && parsed.transcript) {
+          logModelManifest({ workload: 'fusedTranscription', modelId, ok: true, durationMs: Date.now() - startedAt, fallback: false });
           return {
             rawTranscript: parsed.rawTranscript,
             transcript: parsed.transcript,
@@ -291,13 +300,18 @@ export async function runFusedTranscription({
           };
         }
         if (parsed && parsed.transcript === '') {
+          logModelManifest({ workload: 'fusedTranscription', modelId, ok: true, durationMs: Date.now() - startedAt, fallback: false });
           return { error: 'API_NO_CONTENT' }; // model heard no speech
         }
         // unparseable — fall through to Whisper
+        logModelManifest({ workload: 'fusedTranscription', modelId, ok: false, durationMs: Date.now() - startedAt, fallback: false });
+      } else {
+        // non-429 HTTP error — fall through to Whisper
+        logModelManifest({ workload: 'fusedTranscription', modelId, ok: false, durationMs: Date.now() - startedAt, fallback: false });
       }
-      // non-429 HTTP error — fall through to Whisper
     } catch (geminiError) {
       // network/timeout — fall through to Whisper
+      logModelManifest({ workload: 'fusedTranscription', modelId, ok: false, durationMs: Date.now() - startedAt, fallback: false });
     }
   }
 
@@ -305,24 +319,33 @@ export async function runFusedTranscription({
   if (!oaiKey) {
     return { error: 'API_ERROR' };
   }
+  const whisperStartedAt = Date.now();
   try {
     const buffer = Buffer.from(base64, 'base64');
     const fileExt = mimeType.includes('webm') ? 'webm' : mimeType.includes('mp4') ? 'mp4' : 'wav';
     const whisperResult = await transcribeWithWhisper(oaiKey, buffer, {
+      // MOD-02: thread the registry-resolved fallback model through — without
+      // this, transcribeWithWhisper's own 'whisper-1' default silently wins
+      // even when `model.transcriptionFallback` is overridden in config/flags.
+      ...(whisperModelId ? { model: whisperModelId } : {}),
       filename: `audio.${fileExt}`,
       signal: AbortSignal.timeout(timeoutMs),
     });
 
     if (whisperResult === null) {
+      logModelManifest({ workload: 'transcriptionFallback', modelId: whisperModelId || 'whisper-1', ok: false, durationMs: Date.now() - whisperStartedAt, fallback: true });
       return { error: 'API_ERROR' };
     }
     const transcript = whisperResult?.text?.trim();
     if (!transcript) {
+      logModelManifest({ workload: 'transcriptionFallback', modelId: whisperModelId || 'whisper-1', ok: true, durationMs: Date.now() - whisperStartedAt, fallback: true });
       return { error: 'API_NO_CONTENT' }; // call succeeded, no speech detected
     }
+    logModelManifest({ workload: 'transcriptionFallback', modelId: whisperModelId || 'whisper-1', ok: true, durationMs: Date.now() - whisperStartedAt, fallback: true });
     // Whisper has no audio-aligned segmentation ability — chapters always null.
     return { rawTranscript: transcript, transcript, toneAnalysis: null, engine: 'whisper', chapters: null };
   } catch (error) {
+    logModelManifest({ workload: 'transcriptionFallback', modelId: whisperModelId || 'whisper-1', ok: false, durationMs: Date.now() - whisperStartedAt, fallback: true });
     return { error: 'API_EXCEPTION' };
   }
 }

@@ -309,7 +309,7 @@ Examples:
 - "I've been feeling tired lately" -> no specific references`;
 
   try {
-    const raw = await callGemini(prompt, '', 'gemini-2.0-flash');
+    const raw = await callGemini(prompt, '');
     if (!raw) {
       return {
         detected: false,

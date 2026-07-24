@@ -62,6 +62,10 @@ export async function callOpenAI(apiKey, systemPrompt, userPrompt, options = {})
  * @param {string} apiKey - OpenAI API key
  * @param {Buffer} audioBuffer - Audio data as buffer
  * @param {Object} options - Additional options
+ * @param {string} [options.model] - Whisper model id (default: 'whisper-1'). Callers
+ *   that resolve a model from the server registry (getModel(db, 'transcriptionFallback'),
+ *   see MOD-02) MUST pass it here — this default only covers callers that never
+ *   consulted the registry at all.
  * @param {AbortSignal} [options.signal] - Optional AbortSignal to cancel/timeout the request
  * @returns {Promise<Object|null>} Transcription result or null on error
  */

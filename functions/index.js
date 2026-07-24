@@ -33,7 +33,7 @@ import { maybeReanalyzeOnEntryUpdate } from './src/triggers/entryUpdateAnalysis.
 import { shouldWatchdogSkipEditedEntry } from './src/triggers/watchdogGuards.js';
 import { callGemini, classifyEntry, analyzeEntry, extractEnhancedContext, generateInsight } from './src/analysis/analysisHelpers.js';
 import { getServerFlag } from './src/shared/flags.js';
-import { getModel, getModelSync, getModelFlag } from './src/models/registry.js';
+import { getModel, getModelSync, getModelFlag, logModelManifest } from './src/models/registry.js';
 import { handleWriteClaimWording } from './src/insights/writeClaimWordingHandler.js';
 import { runEntryAnalysis } from './src/analysis/orchestrator.js';
 import { issueCaptureUploadTicketCore } from './src/capture/uploadTicket.js';
@@ -1288,6 +1288,7 @@ export const transcribeEntry = onCall(
     // 1. Primary: fused Gemini call (transcript + tone in one pass)
     const fusedModel = await getModel(db, 'fusedTranscription');
     if (gemKey) {
+      const geminiStartedAt = Date.now();
       try {
         const geminiRes = await fetch(
           `https://generativelanguage.googleapis.com/v1beta/models/${fusedModel}:generateContent?key=${gemKey}`,
@@ -1301,9 +1302,11 @@ export const transcribeEntry = onCall(
 
         if (geminiRes.status === 429) {
           console.warn('[transcribeEntry] Gemini rate limited, falling back to Whisper', { userId, status: geminiRes.status });
+          logModelManifest({ workload: 'fusedTranscription', modelId: fusedModel, ok: false, durationMs: Date.now() - geminiStartedAt, fallback: false });
         } else if (geminiRes.ok) {
           const parsed = parseFusedResponse(await geminiRes.json(), { markers, durationMs });
           if (parsed && parsed.transcript) {
+            logModelManifest({ workload: 'fusedTranscription', modelId: fusedModel, ok: true, durationMs: Date.now() - geminiStartedAt, fallback: false });
             logTranscribeEnd('gemini');
             return {
               rawTranscript: parsed.rawTranscript,
@@ -1316,15 +1319,19 @@ export const transcribeEntry = onCall(
             };
           }
           if (parsed && parsed.transcript === '') {
+            logModelManifest({ workload: 'fusedTranscription', modelId: fusedModel, ok: true, durationMs: Date.now() - geminiStartedAt, fallback: false });
             logTranscribeEnd('gemini');
             return { error: 'API_NO_CONTENT' }; // model heard no speech
           }
           console.warn('[transcribeEntry] unparseable Gemini response, falling back to Whisper', { userId });
+          logModelManifest({ workload: 'fusedTranscription', modelId: fusedModel, ok: false, durationMs: Date.now() - geminiStartedAt, fallback: false });
         } else {
           console.warn('[transcribeEntry] Gemini HTTP error, falling back to Whisper', { userId, status: geminiRes.status });
+          logModelManifest({ workload: 'fusedTranscription', modelId: fusedModel, ok: false, durationMs: Date.now() - geminiStartedAt, fallback: false });
         }
       } catch (geminiError) {
         console.warn('[transcribeEntry] Gemini call failed, falling back to Whisper', { userId, err: geminiError?.message });
+        logModelManifest({ workload: 'fusedTranscription', modelId: fusedModel, ok: false, durationMs: Date.now() - geminiStartedAt, fallback: false });
       }
     }
 
@@ -1333,10 +1340,16 @@ export const transcribeEntry = onCall(
       logTranscribeEnd('none');
       return { error: 'API_ERROR' };
     }
+    // MOD-02: resolve the Whisper fallback model from the registry — without
+    // this, transcribeWithWhisper's own 'whisper-1' default silently wins
+    // even when `model.transcriptionFallback` is overridden in config/flags.
+    const whisperModel = await getModel(db, 'transcriptionFallback');
+    const whisperStartedAt = Date.now();
     try {
       const buffer = Buffer.from(base64, 'base64');
       const fileExt = mimeType.includes('webm') ? 'webm' : mimeType.includes('mp4') ? 'mp4' : 'wav';
       const whisperResult = await transcribeWithWhisper(oaiKey, buffer, {
+        model: whisperModel,
         filename: `audio.${fileExt}`,
         signal: AbortSignal.timeout(TRANSCRIBE_TIMEOUT_MS)
       });
@@ -1347,15 +1360,18 @@ export const transcribeEntry = onCall(
         console.error('[transcribeEntry] both engines failed', {
           userId, audioBytes: base64?.length, mimeType
         });
+        logModelManifest({ workload: 'transcriptionFallback', modelId: whisperModel, ok: false, durationMs: Date.now() - whisperStartedAt, fallback: true });
         logTranscribeEnd('none');
         return { error: 'API_ERROR' };
       }
 
       const transcript = whisperResult?.text?.trim();
       if (!transcript) {
+        logModelManifest({ workload: 'transcriptionFallback', modelId: whisperModel, ok: true, durationMs: Date.now() - whisperStartedAt, fallback: true });
         logTranscribeEnd('whisper');
         return { error: 'API_NO_CONTENT' }; // call succeeded, no speech detected
       }
+      logModelManifest({ workload: 'transcriptionFallback', modelId: whisperModel, ok: true, durationMs: Date.now() - whisperStartedAt, fallback: true });
       logTranscribeEnd('whisper');
       // Whisper has no audio-aligned segmentation ability — chapters always null.
       return { rawTranscript: transcript, transcript, toneAnalysis: null, engine: 'whisper', chapters: null };
@@ -1363,6 +1379,7 @@ export const transcribeEntry = onCall(
       console.error('[transcribeEntry] both engines failed', {
         userId, audioBytes: base64?.length, mimeType, err: error?.message
       });
+      logModelManifest({ workload: 'transcriptionFallback', modelId: whisperModel, ok: false, durationMs: Date.now() - whisperStartedAt, fallback: true });
       logTranscribeEnd('none');
       return { error: 'API_EXCEPTION' };
     }
@@ -1434,6 +1451,9 @@ export const onCaptureAudioUploaded = onObjectFinalized(
           gemKey: geminiApiKey.value(),
           oaiKey: openaiApiKey.value(),
           modelId: await getModel(db, 'fusedTranscription'),
+          // MOD-02: resolve the Whisper fallback model from the registry too —
+          // previously only the Gemini primary model was registry-resolved here.
+          whisperModelId: await getModel(db, 'transcriptionFallback'),
         }),
     });
   }
