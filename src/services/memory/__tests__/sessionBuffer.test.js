@@ -12,6 +12,15 @@ function wireStorage() {
   localStorage.getItem.mockImplementation((key) => (localStore.has(key) ? localStore.get(key) : null));
   localStorage.setItem.mockImplementation((key, value) => { localStore.set(key, String(value)); });
   localStorage.removeItem.mockImplementation((key) => { localStore.delete(key); });
+  // Add key() and length for iteration (used by sweepLegacyVoiceTranscripts)
+  localStorage.key = (index) => {
+    const keys = Array.from(localStore.keys());
+    return keys[index] ?? null;
+  };
+  Object.defineProperty(localStorage, 'length', {
+    get() { return localStore.size; },
+    configurable: true
+  });
   sessionStorage.getItem.mockImplementation((key) => (sessionStore.has(key) ? sessionStore.get(key) : null));
   sessionStorage.setItem.mockImplementation((key, value) => { sessionStore.set(key, String(value)); });
   sessionStorage.removeItem.mockImplementation((key) => { sessionStore.delete(key); });
@@ -97,5 +106,39 @@ describe('sessionBuffer.js owner-required API (PRIV-01)', () => {
 
     clearSessionBuffer('user-a');
     expect(hasEntryInBuffer('user-a', 'e1')).toBe(false);
+  });
+
+  it('sweepLegacyVoiceTranscripts removes only unowned legacy voice_transcript_<sessionId> keys', async () => {
+    // Seed two legacy keys and one owned key BEFORE resetting modules,
+    // so they're present when the module imports and runs its sweep.
+    localStore.set('voice_transcript_session-1', JSON.stringify({ content: 'old transcript 1' }));
+    localStore.set('voice_transcript_session-2', JSON.stringify({ content: 'old transcript 2' }));
+    // Owned key format: engram:v2:owner:<uid>:voice%2Ftranscript
+    localStore.set('engram:v2:owner:user-a:voice%2Ftranscript', JSON.stringify({ sessionId: 'current', content: 'owned transcript' }));
+
+    // Reset modules triggers the sweep at import time
+    vi.resetModules();
+    await import('../sessionBuffer.js');
+
+    // Legacy keys removed
+    expect(localStore.has('voice_transcript_session-1')).toBe(false);
+    expect(localStore.has('voice_transcript_session-2')).toBe(false);
+    // Owned key untouched
+    expect(localStore.has('engram:v2:owner:user-a:voice%2Ftranscript')).toBe(true);
+    expect(JSON.parse(localStore.get('engram:v2:owner:user-a:voice%2Ftranscript')).content).toBe('owned transcript');
+  });
+
+  it('sweepLegacyVoiceTranscripts is idempotent', async () => {
+    // Seed one legacy key
+    localStore.set('voice_transcript_session-1', JSON.stringify({ content: 'to remove' }));
+    expect(localStore.has('voice_transcript_session-1')).toBe(true);
+
+    // Reset modules triggers the first sweep at import time
+    vi.resetModules();
+    const { sweepLegacyVoiceTranscripts } = await import('../sessionBuffer.js');
+    expect(localStore.has('voice_transcript_session-1')).toBe(false);
+
+    // Second sweep (idempotent) does not throw or fail
+    expect(() => sweepLegacyVoiceTranscripts()).not.toThrow();
   });
 });

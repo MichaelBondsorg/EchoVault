@@ -55,8 +55,34 @@ export const quarantineLegacySessionBuffer = () => {
   }
 };
 
+/**
+ * One-time sweep of pre-migration unowned voice transcripts. Voice transcripts
+ * used to be stored with a per-session key `voice_transcript_<sessionId>`
+ * (unowned, one per session). This sweep removes those legacy orphaned keys,
+ * never touching the new owner-scoped format `engram:v2:owner:...` that the
+ * owned key invariant is enforced on.
+ *
+ * Idempotent: safe to call repeatedly on every app startup + login. Called
+ * at module load and at login (same pattern as quarantineLegacySessionBuffer).
+ */
+export const sweepLegacyVoiceTranscripts = () => {
+  try {
+    if (typeof localStorage !== 'undefined') {
+      for (let i = localStorage.length - 1; i >= 0; i--) {
+        const k = localStorage.key(i);
+        if (k && k.startsWith('voice_transcript_')) {
+          localStorage.removeItem(k);
+        }
+      }
+    }
+  } catch {
+    // Best-effort.
+  }
+};
+
 // "At startup": runs once, the first time this module is imported.
 quarantineLegacySessionBuffer();
+sweepLegacyVoiceTranscripts();
 
 /**
  * Store a recent entry in the session buffer, scoped to the given owner.
@@ -280,5 +306,6 @@ export default {
   extendBufferExpiry,
   formatBufferForContext,
   isExpired,
-  quarantineLegacySessionBuffer
+  quarantineLegacySessionBuffer,
+  sweepLegacyVoiceTranscripts
 };

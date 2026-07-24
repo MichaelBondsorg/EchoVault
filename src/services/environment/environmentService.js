@@ -21,7 +21,8 @@ import { getSunTimes, isAfterSunset, isBeforeSunrise, getDaylightRemaining } fro
 // whichever account happens to be signed in when it's next encountered.
 const LEGACY_LOCATION_CACHE_KEY = 'env_location_cache';
 const locationCacheKey = (uid) => `env_location_cache::${uid}`;
-const CACHE_DURATION_MS = 30 * 60 * 1000; // 30 minutes
+// Location cache retention: 24 hours. Matches the storageRegistry entry's retentionMs.
+const LOCATION_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 const GEOLOCATION_TIMEOUT_MS = 5000; // 5 second timeout for permission checks
 
 /**
@@ -149,9 +150,9 @@ const getCachedLocation = async () => {
 
     const cached = JSON.parse(value);
 
-    // Check if cache is still valid (24 hours for location). An expired
-    // cache is deleted, not just ignored, so it can never resurface later.
-    if (Date.now() - cached.timestamp > 24 * 60 * 60 * 1000) {
+    // Check if cache is still valid. An expired cache is deleted, not just
+    // ignored, so it can never resurface later.
+    if (Date.now() - cached.timestamp > LOCATION_CACHE_TTL_MS) {
       await Preferences.remove({ key: locationCacheKey(uid) });
       return null;
     }

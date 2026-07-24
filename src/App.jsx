@@ -62,7 +62,7 @@ import {
   flushConsentOutbox,
 } from './services/consent/consentService';
 import { clearOwnerCaches } from './services/storage/clearOwnerCaches';
-import { quarantineLegacySessionBuffer } from './services/memory/sessionBuffer';
+import { quarantineLegacySessionBuffer, sweepLegacyVoiceTranscripts } from './services/memory/sessionBuffer';
 import { deleteNativeDraft, recoverNativeDrafts } from './services/capture/nativeCaptureAdapter';
 import { prepareDurableRecording } from './services/capture/prepareDurableRecording';
 import {
@@ -633,6 +633,11 @@ export default function App() {
         // module already runs once at import/app-startup — see
         // sessionBuffer.js's own comment.
         quarantineLegacySessionBuffer();
+        // PRIV-01: sweep legacy unowned voice transcripts (pre-session keys,
+        // one per session) at login, in addition to the same sweep at module
+        // load. Idempotent: safe to call on every login even if already
+        // swept at startup.
+        sweepLegacyVoiceTranscripts();
         // Fire-and-forget: feature flags must never block first paint.
         // getFlag() falls back to defaults/localStorage until this
         // resolves. Triggered here (not before auth) because config/flags

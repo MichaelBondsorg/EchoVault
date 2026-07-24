@@ -533,6 +533,10 @@ export const useVoiceRelay = () => {
    * read). The stored sessionId must also match the CURRENT session, so a
    * stale entry from a previous session (already past its natural
    * usefulness even if not yet expired) is never misapplied.
+   *
+   * NOTE: Currently has no production caller — reconnect-restore path
+   * (useVoiceRelay → tryRestoreSession) is inert. Preserved for future
+   * reconnection recovery feature.
    */
   const tryRestoreSession = useCallback(() => {
     if (!sessionId || wsRef.current?.readyState !== WebSocket.OPEN) return;
