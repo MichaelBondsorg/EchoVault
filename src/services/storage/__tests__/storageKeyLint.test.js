@@ -14,6 +14,10 @@
  * those already go through a named, greppable identifier or helper. This
  * lint exists to catch the specific anti-pattern of a raw string typed
  * directly into a `localStorage` call with no name attached to it at all.
+ * Corollary (QA-01 reviewer caveat): the guarantee is "no new INLINE
+ * literal key", not "no new key" — extracting the literal to a variable
+ * one line above evades this lint by design. Review remains the net for
+ * that; sessionStorage is likewise out of scope (no current users).
  *
  * A literal key passes if it is:
  *  - listed in `KNOWN_LITERAL_KEYS` (pre-existing, non-sensitive, genuinely

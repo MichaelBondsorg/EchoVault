@@ -21,7 +21,7 @@
     "cap:build:ios": "npm run build && cap sync ios && cap build ios",
     "cap:build:android": "npm run build && cap sync android && cap build android",
     "test": "vitest run",
-    "test:ci-parity": "CI_PARITY=1 vitest run",
+    "test:ci-parity": "rm -rf node_modules/.vite && CI_PARITY=1 vitest run",
     "test:rules": "firebase emulators:exec --only firestore --project echo-vault-test \"vitest run --config vitest.rules.config.js\"",
     "test:ci": "npm test && npm run test:rules && npm run build",
     "test:watch": "vitest",

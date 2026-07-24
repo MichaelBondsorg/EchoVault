@@ -38,7 +38,7 @@ function collectSourceFiles(dir) {
     const st = statSync(full);
     if (st.isDirectory()) {
       out.push(...collectSourceFiles(full));
-    } else if (/\.(js|ts)$/.test(name) && !/\.test\.(js|ts)$/.test(name)) {
+    } else if (/\.(js|jsx|ts|tsx)$/.test(name) && !/\.test\.(js|jsx|ts|tsx)$/.test(name)) {
       out.push(full);
     }
   }

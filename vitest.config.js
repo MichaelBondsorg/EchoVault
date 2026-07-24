@@ -14,6 +14,16 @@ const envDir = process.env.CI_PARITY === '1'
   ? path.resolve(__dirname, '.ci-parity-empty-env')
   : undefined;
 
+// NOTE (QA-01 review Critical): envDir alone is NOT enough — Vite's
+// dep/transform cache in node_modules/.vite bakes .env-sourced
+// import.meta.env values in at first build, and a later CI_PARITY=1 run
+// serves the REAL key from that cache (false pass). Empirically verified:
+// a cacheDir override does not bypass it either; only removing
+// node_modules/.vite works. The test:ci-parity npm script therefore
+// rm -rf's node_modules/.vite before running — keep that coupling if you
+// rename either side. Remaining documented leak path: VITE_* vars exported
+// in the shell (not via .env) still reach import.meta.env in either mode.
+
 export default defineConfig({
   envDir,
   plugins: [react()],
