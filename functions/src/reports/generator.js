@@ -66,8 +66,7 @@ export async function generateReport(userId, cadence, periodStart, periodEnd, ge
     // invoked and would otherwise get stamped into metadata.model,
     // overstating what generated the report.
     const isWeekly = cadence === 'weekly';
-    const [analyticsData, nexusData, signalData, entriesData, healthData, model, verifiedClaims] = await Promise.all([
-      readAnalytics(db, userBase),
+    const [nexusData, signalData, entriesData, healthData, model, rankedVerifiedClaims] = await Promise.all([
       readNexusData(db, userBase),
       readSignalData(db, userBase, periodStart, periodEnd),
       readEntries(db, userBase, periodStart, periodEnd, cadence),
@@ -75,6 +74,21 @@ export async function generateReport(userId, cadence, periodStart, periodEnd, ge
       isWeekly ? Promise.resolve(null) : getModel(db, 'insight'),
       readVerifiedClaims(db, userBase),
     ]);
+
+    // REP-01 fix #1: period statistics derived deterministically from the
+    // period-scoped entry set just read above — no global analytics
+    // snapshot is read for report content at all (see derivePeriodStats's
+    // doc comment for what this replaces and why).
+    const periodStats = derivePeriodStats(entriesData);
+
+    // REP-01 fix #2: split ranked verified claims by whether their evidence
+    // window overlaps THIS report's period. `periodClaims` feeds "What held
+    // up this period"; `currentClaims` feeds the separately-labeled
+    // "Current verified insights (not period-specific)" section (see
+    // splitClaimsByPeriodOverlap's doc comment for the overlap rule).
+    const { periodClaims, currentClaims } = splitClaimsByPeriodOverlap(
+      rankedVerifiedClaims, periodStart, periodEnd
+    );
 
     // Prepare chart data. Entry-level mood (`e.moodScore` from readEntries,
     // below) is the 0-1 INTERNAL scale (analysis.mood_score — see
@@ -91,7 +105,7 @@ export async function generateReport(userId, cadence, periodStart, periodEnd, ge
         .map(e => ({ date: e.date, moodScore: e.moodScore * 100 })),
       cadence
     );
-    const categoryBreakdown = prepareCategoryBreakdown(analyticsData.categoryStats || {});
+    const categoryBreakdown = prepareCategoryBreakdown(periodStats.categoryStats || {});
     const entryFrequency = prepareEntryFrequency(
       entriesData.map(e => ({ date: e.date })),
       cadence
@@ -105,7 +119,7 @@ export async function generateReport(userId, cadence, periodStart, periodEnd, ge
     const contextData = {
       entries: safeEntries,
       analytics: {
-        ...analyticsData,
+        ...periodStats,
         moodTrend: moodTrend.map(p => p.value),
         entryCount: entriesData.length,
         filteredEntryCount,
@@ -113,11 +127,15 @@ export async function generateReport(userId, cadence, periodStart, periodEnd, ge
       signals: signalData,
       nexus: nexusData,
       health: healthData,
-      // Verified claims (P2-D6): the ONLY source for the "What held up this
-      // period" section and for the premium narrative's pattern context —
-      // nexus prose (`nexus` above) no longer feeds either. Already
-      // ranked + capped at 5 by readVerifiedClaims.
-      claims: verifiedClaims,
+      // Verified claims (P2-D6, split per REP-01 fix #2): `claims` is the
+      // PERIOD-OVERLAPPING half — the ONLY source for the "What held up
+      // this period" section and for the premium narrative's LLM prompt
+      // context. `currentClaims` is the non-overlapping half, rendered only
+      // via the separately-labeled "Current verified insights" section
+      // (narrative.js's buildCurrentContextSection) — it never reaches the
+      // LLM prompt. nexus prose (`nexus` above) feeds neither.
+      claims: periodClaims,
+      currentClaims,
     };
 
     // Generate sections
@@ -131,7 +149,7 @@ export async function generateReport(userId, cadence, periodStart, periodEnd, ge
       // (see privacy.js filterForPersonalView), and export/share paths
       // (pdfExport.applyRedactions) strip crisis-flagged entryRefs before
       // anything leaves the app.
-      sections = generateWeeklyTemplate(contextData.analytics, nexusData, entriesData, verifiedClaims);
+      sections = generateWeeklyTemplate(contextData.analytics, nexusData, entriesData, periodClaims, currentClaims);
       // Attach mood chart data to the mood_trend section
       const moodSection = sections.find(s => s.id === 'mood_trend');
       if (moodSection) moodSection.chartData = { type: 'sparkline', data: moodTrend };
@@ -149,9 +167,28 @@ export async function generateReport(userId, cadence, periodStart, periodEnd, ge
     const metadata = {
       entryCount: entriesData.length,
       filteredEntryCount,
-      moodAvg: analyticsData.moodAvg || null,
-      topInsights: (nexusData.insights || []).slice(0, 5).map(i => i.id || ''),
-      topEntities: (analyticsData.topEntities || []).slice(0, 5),
+      // REP-01 fix #1: period-derived, not a global analytics snapshot —
+      // see derivePeriodStats's doc comment.
+      moodAvg: periodStats.moodAvg,
+      // REP-01 fix #3: claim ids (claims-mode), never legacy Nexus insight
+      // ids — this report pipeline has been claims-first since P2-D6 (the
+      // "What held up this period" / premium-narrative pattern context both
+      // already came exclusively from verified claims), but this metadata
+      // field was never updated to match and kept stamping
+      // `nexusData.insights` ids, an unrelated/legacy id space. Union of
+      // both halves of the REP-01 overlap split (periodClaims +
+      // currentClaims) — i.e. every claim this report actually surfaced
+      // somewhere, whether in "held up" or "current context" — capped at 5
+      // (both halves already partition a <=5 ranked list, so this slice is
+      // a no-op safety net, not a real truncation). `[]` when there are no
+      // verified claims at all.
+      topInsights: [...periodClaims, ...currentClaims].slice(0, 5).map(c => c.id || ''),
+      // No per-entry entity data is read for reports (readEntries doesn't
+      // select it), and the global analytics/entity_activity current
+      // snapshot is deliberately excluded from period report content per
+      // REP-01 — see derivePeriodStats's doc comment. Honestly empty rather
+      // than silently global.
+      topEntities: [],
       // Scheduled reports are always all-spaces (ratified product decision
       // #3) — labeled explicitly so a future space-scoped report type can
       // never be silently confused with this one.
@@ -196,23 +233,75 @@ export async function generateReport(userId, cadence, periodStart, periodEnd, ge
   }
 }
 
-// Note: Analytics are single-document aggregates (current snapshots), not period-scoped.
-// The analytics layer (section-01) computes these from entries which are period-scoped.
-async function readAnalytics(db, userBase) {
-  try {
-    const refs = ['topic_coverage', 'entry_stats', 'entity_activity'];
-    const snaps = await Promise.all(
-      refs.map(ref => db.doc(`${userBase}/analytics/${ref}`).get())
-    );
-    const data = {};
-    for (let i = 0; i < refs.length; i++) {
-      if (snaps[i].exists) Object.assign(data, snaps[i].data());
-    }
-    return data;
-  } catch (e) {
-    console.warn('[report] Failed to read analytics:', e.message);
-    return {};
+/**
+ * REP-01 fix #1 — period statistics (moodAvg/categoryStats/topTheme/
+ * topThemes) derived DETERMINISTICALLY from the period-scoped entry set
+ * (the same rows `readEntries` returns, post source-exclusion filtering),
+ * never from a global current-snapshot analytics doc.
+ *
+ * This REPLACES the previous `readAnalytics()`, which read the
+ * `analytics/topic_coverage`, `analytics/entry_stats`, and
+ * `analytics/entity_activity` docs and spread their raw fields into the
+ * report context. Those documents are current, cross-period AGGREGATES —
+ * `entry_stats` even nests its real per-period breakdown under
+ * `periods.<periodKey>.*` (see `functions/src/analytics/onEntryAnalyzed.js`)
+ * rather than exposing it at the top level `readAnalytics` read from — so
+ * spreading them flat could never have been period-scoped even in
+ * principle. In practice the report's own field names (`moodAvg`,
+ * `categoryStats`, `topTheme`) did not exist at the top level of ANY of
+ * those three docs, so the spread was always a silent no-op (every
+ * consumer read `undefined`) — masking, rather than avoiding, the review's
+ * finding. Re-generating a HISTORICAL report must reconcile to that
+ * period's own entries, not to whatever the global docs say today; deriving
+ * from `entries` (already period-scoped by `readEntries`'s Firestore query)
+ * makes that true by construction. The `analytics/*` docs are no longer
+ * read by the report pipeline at all.
+ *
+ * `moodAvg` here is on the 0-10 DISPLAY scale this report's narrative and
+ * `metadata.moodAvg` use (`generateWeeklyTemplate`'s "avg X/10" bullet,
+ * `src/components/reports/ReportViewer.jsx`'s `moodAvg.toFixed(1)}/10`) —
+ * NOT the 0-100 scale `moodTrend`'s sparkline chartData uses (see this
+ * function's `generateReport` caller for that separate, explicit
+ * conversion). `entry.moodScore` is the 0-1 internal scale
+ * (`analysis.mood_score`); this multiplies by 10, not 100.
+ *
+ * `topTheme`/`topThemes` are derived from entries' `category` field (the
+ * only per-entry topic-like dimension `readEntries` currently selects —
+ * entries do not carry per-entry `tags`/entities through this report's read
+ * path) — the single most-frequent category in the period, and up to 5
+ * categories ordered by frequency, respectively. `null`/`[]` when the
+ * period has no entries.
+ *
+ * `topEntities` is intentionally NOT derived here (and metadata.topEntities
+ * stays `[]` at the call site below): `readEntries` does not select
+ * per-entry entity data, and the global `analytics/entity_activity` doc is
+ * exactly the kind of current-snapshot source this fix removes from period
+ * claims. Silently empty is more honest than silently global.
+ *
+ * @param {Array<{category: string, moodScore: number|null}>} entries
+ * @returns {{moodAvg: number|null, categoryStats: Object<string, number>, topTheme: string|null, topThemes: string[]}}
+ */
+export function derivePeriodStats(entries) {
+  const list = Array.isArray(entries) ? entries : [];
+
+  const moodScores = list
+    .map((e) => e.moodScore)
+    .filter((m) => m != null);
+  const moodAvg = moodScores.length > 0
+    ? (moodScores.reduce((sum, m) => sum + m, 0) / moodScores.length) * 10
+    : null;
+
+  const categoryStats = {};
+  for (const e of list) {
+    const category = e.category || 'uncategorized';
+    categoryStats[category] = (categoryStats[category] || 0) + 1;
   }
+
+  const rankedCategories = Object.entries(categoryStats).sort((a, b) => b[1] - a[1]);
+  const topTheme = rankedCategories.length > 0 ? rankedCategories[0][0] : null;
+  const topThemes = rankedCategories.slice(0, 5).map(([category]) => category);
+
+  return { moodAvg, categoryStats, topTheme, topThemes };
 }
 
 /**
@@ -379,6 +468,72 @@ export async function readVerifiedClaims(db, userBase) {
     console.warn('[report] Failed to read verified claims:', e.message);
     return [];
   }
+}
+
+/**
+ * REP-01 fix #2 — the claim/report overlap rule (controller-ratified,
+ * Michael veto): a verified claim is eligible for "What held up this
+ * period" ONLY when its `receipt.timeWindow` overlaps the requested report
+ * period. Documented threshold: ANY overlap qualifies — an inclusive-
+ * endpoints interval-overlap test (`claimStart <= periodEnd && claimEnd >=
+ * periodStart`). A claim whose window only touches a period boundary
+ * (e.g. `claimEnd === periodStart`) still counts; there is no minimum-
+ * duration/proportion requirement. (Also documented in
+ * `docs/quality/trustworthy-capture-runbook.md`'s REP-01 line.)
+ *
+ * Source of truth: `claim.receipt.timeWindow` (`{start, end}` ISO strings —
+ * `src/services/insights/receipts.js`'s `buildReceipt` shape, binding per
+ * the R2 plan). `evidence.observedSpanDays` (claimSchema.js) was considered
+ * as a secondary source (per the review's "(or evidence observedSpan)")
+ * but is a bare DAY COUNT with no anchor date — it cannot itself answer
+ * "does this window overlap THIS period" without also trusting some other
+ * field for an end date, so it is not used here. A claim with a missing or
+ * unparsable `receipt.timeWindow` fails CLOSED toward "does not overlap"
+ * (never toward "overlaps") — it lands in the separately-labeled current-
+ * context bucket (`splitClaimsByPeriodOverlap` below), never silently
+ * attributed to a period it cannot be proven to cover.
+ *
+ * @param {object} claim
+ * @param {Date} periodStart
+ * @param {Date} periodEnd
+ * @returns {boolean}
+ */
+export function claimOverlapsPeriod(claim, periodStart, periodEnd) {
+  const timeWindow = claim?.receipt?.timeWindow;
+  const claimStartMs = timeWindow?.start ? Date.parse(timeWindow.start) : NaN;
+  const claimEndMs = timeWindow?.end ? Date.parse(timeWindow.end) : NaN;
+  if (!Number.isFinite(claimStartMs) || !Number.isFinite(claimEndMs)) return false;
+
+  const periodStartMs = periodStart instanceof Date ? periodStart.getTime() : Date.parse(periodStart);
+  const periodEndMs = periodEnd instanceof Date ? periodEnd.getTime() : Date.parse(periodEnd);
+  if (!Number.isFinite(periodStartMs) || !Number.isFinite(periodEndMs)) return false;
+
+  return claimStartMs <= periodEndMs && claimEndMs >= periodStartMs;
+}
+
+/**
+ * REP-01 fix #2 — partitions ranked/capped verified claims (readVerifiedClaims's
+ * output) into `periodClaims` (feed "What held up this period",
+ * narrative.js's `buildHeldUpSection`) and `currentClaims` (feed the
+ * separately-labeled "Current verified insights (not period-specific)"
+ * section, narrative.js's `buildCurrentContextSection` — the review's
+ * option 3, used here as the fallback that keeps a report from going
+ * completely empty when nothing verified happens to overlap the period).
+ * Both output arrays preserve `claims`' original (pre-ranked) relative
+ * order — this only filters, it never re-sorts.
+ * @param {Array<object>} claims - pre-ranked, capped verified claims
+ * @param {Date} periodStart
+ * @param {Date} periodEnd
+ * @returns {{periodClaims: Array<object>, currentClaims: Array<object>}}
+ */
+export function splitClaimsByPeriodOverlap(claims, periodStart, periodEnd) {
+  const periodClaims = [];
+  const currentClaims = [];
+  for (const claim of Array.isArray(claims) ? claims : []) {
+    if (claimOverlapsPeriod(claim, periodStart, periodEnd)) periodClaims.push(claim);
+    else currentClaims.push(claim);
+  }
+  return { periodClaims, currentClaims };
 }
 
 async function readSignalData(db, userBase, periodStart, periodEnd) {

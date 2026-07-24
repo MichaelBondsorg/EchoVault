@@ -167,6 +167,120 @@ describe('generateWeeklyTemplate', () => {
   });
 });
 
+describe('current_context section — non-period-overlapping claims (REP-01 fix #2)', () => {
+  it('generateWeeklyTemplate omits the current_context section when currentClaims is empty/absent (back-compat: 3 sections)', () => {
+    const sections = generateWeeklyTemplate({ entryCount: 2 }, {}, [], []);
+    expect(sections).toHaveLength(3);
+    expect(sections.find((s) => s.id === 'current_context')).toBeUndefined();
+  });
+
+  it('generateWeeklyTemplate adds a current_context section, labeled "Current verified insights (not period-specific)", when currentClaims is non-empty', () => {
+    const staleClaim = claimFixture({ wording: 'STALE claim wording.' });
+    const sections = generateWeeklyTemplate({ entryCount: 2 }, {}, [], [], [staleClaim]);
+    const current = sections.find((s) => s.id === 'current_context');
+    expect(current).toBeTruthy();
+    expect(current.title).toBe('Current verified insights (not period-specific)');
+    expect(current.narrative).toContain('STALE claim wording.');
+  });
+
+  it('current_context renders only the top-ranked current claim when multiple are passed', () => {
+    const top = claimFixture({ id: 'c_top', wording: 'TOP current wording.' });
+    const second = claimFixture({ id: 'c_second', wording: 'SECOND current wording.' });
+    const sections = generateWeeklyTemplate({ entryCount: 2 }, {}, [], [], [top, second]);
+    const current = sections.find((s) => s.id === 'current_context');
+    expect(current.narrative).toContain('TOP current wording.');
+    expect(current.narrative).not.toContain('SECOND current wording.');
+  });
+
+  it("current_context entryRefs is the claim's own evidence.sourceEntryIds, NEVER the period's entry id list (no cross-period attribution via receipts)", () => {
+    const claim = claimFixture();
+    const periodEntries = [{ id: 'period-e1' }, { id: 'period-e2' }];
+    const sections = generateWeeklyTemplate({ entryCount: 2 }, {}, periodEntries, [], [claim]);
+    const current = sections.find((s) => s.id === 'current_context');
+    expect(current.entryRefs).toEqual(claim.evidence.sourceEntryIds);
+    expect(current.entryRefs).not.toContain('period-e1');
+    expect(current.entryRefs).not.toContain('period-e2');
+  });
+
+  it('current_context entryRefs is [] (not the period fallback) when the current claim has no sourceEntryIds', () => {
+    const claim = claimFixture({
+      evidence: { exposedDayCount: 9, comparisonDayCount: 15, effectMoodPoints: 5, sourceEntryIds: [] },
+    });
+    const periodEntries = [{ id: 'period-e1' }];
+    const sections = generateWeeklyTemplate({ entryCount: 2 }, {}, periodEntries, [], [claim]);
+    const current = sections.find((s) => s.id === 'current_context');
+    expect(current.entryRefs).toEqual([]);
+  });
+
+  it('held_up (period claims) and current_context (non-overlapping claims) are independent and can both appear at once', () => {
+    const periodClaim = claimFixture({ id: 'p1', wording: 'PERIOD claim wording.' });
+    const currentClaim = claimFixture({ id: 'c1', wording: 'CURRENT claim wording.' });
+    const sections = generateWeeklyTemplate({ entryCount: 2 }, {}, [], [periodClaim], [currentClaim]);
+    expect(sections.find((s) => s.id === 'held_up').narrative).toContain('PERIOD claim wording.');
+    const current = sections.find((s) => s.id === 'current_context');
+    expect(current.narrative).toContain('CURRENT claim wording.');
+    expect(current.narrative).not.toContain('PERIOD claim wording.');
+  });
+
+  describe('generatePremiumNarrative', () => {
+    beforeEach(() => {
+      vi.clearAllMocks();
+      getModel.mockResolvedValue('registry-insight-model-x');
+      callGemini.mockResolvedValue('Generated narrative text.');
+    });
+
+    it('appends a current_context section when contextData.currentClaims is non-empty', async () => {
+      const staleClaim = claimFixture({ wording: 'STALE not-period-specific claim.' });
+      const contextData = {
+        entries: [{ id: 'e1', date: '2026-01-15', text: 'Test entry' }],
+        analytics: {}, signals: { activeGoals: [], achievedGoals: [] },
+        nexus: { patterns: [] }, health: {},
+        claims: [],
+        currentClaims: [staleClaim],
+      };
+
+      const sections = await generatePremiumNarrative('monthly', contextData, 'test-key', fakeDb);
+      const current = sections.find((s) => s.id === 'current_context');
+      expect(current).toBeTruthy();
+      expect(current.title).toBe('Current verified insights (not period-specific)');
+      expect(current.narrative).toContain('STALE not-period-specific claim.');
+    });
+
+    it('omits current_context entirely when contextData.currentClaims is empty/absent', async () => {
+      const contextData = {
+        entries: [{ id: 'e1', date: '2026-01-15', text: 'Test entry' }],
+        analytics: {}, signals: { activeGoals: [], achievedGoals: [] },
+        nexus: { patterns: [] }, health: {},
+        claims: [],
+      };
+
+      const sections = await generatePremiumNarrative('monthly', contextData, 'test-key', fakeDb);
+      expect(sections.find((s) => s.id === 'current_context')).toBeUndefined();
+    });
+
+    it('currentClaims never reaches the LLM prompt (only contextData.claims — the period-overlapping half — does)', async () => {
+      const staleClaim = claimFixture({ wording: 'CURRENT-CLAIM-SHOULD-NOT-REACH-PROMPT' });
+      const periodClaim = claimFixture({ id: 'period_c', wording: 'PERIOD-CLAIM-SHOULD-REACH-PROMPT' });
+      const contextData = {
+        entries: [{ id: 'e1', date: '2026-01-15', text: 'Test entry' }],
+        analytics: {}, signals: { activeGoals: [], achievedGoals: [] },
+        nexus: { patterns: [] }, health: {},
+        claims: [periodClaim],
+        currentClaims: [staleClaim],
+      };
+
+      await generatePremiumNarrative('monthly', contextData, 'test-key', fakeDb);
+
+      expect(callGemini.mock.calls.length).toBeGreaterThan(0);
+      for (const call of callGemini.mock.calls) {
+        const userPrompt = call[2];
+        expect(userPrompt).not.toContain('CURRENT-CLAIM-SHOULD-NOT-REACH-PROMPT');
+        expect(userPrompt).toContain('PERIOD-CLAIM-SHOULD-REACH-PROMPT');
+      }
+    });
+  });
+});
+
 describe('selectRepresentativeEntries (R4 Task 4)', () => {
   it('returns all entries unchanged when entries.length <= windowCount (sparse fixture)', () => {
     const entries = [{ id: 'a' }, { id: 'b' }, { id: 'c' }];

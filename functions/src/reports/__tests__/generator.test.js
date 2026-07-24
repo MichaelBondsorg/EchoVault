@@ -150,7 +150,12 @@ function buildFakeDb({ entries = [], exclusions = [], entriesError = null, exclu
 // the field name of this helper's parameter is kept for readability, but
 // it now writes to the actual field the app writes (mood_score), not the
 // camelCase field the app never writes.
-function entryDoc(id, { createdAt = new Date('2026-01-10T12:00:00Z'), moodScore = null, text = 'entry text', safety_flagged = false } = {}) {
+//
+// `category` (REP-01): when set, writes the top-level `category` field
+// readEntries reads (`d.classification?.category || d.category ||
+// 'uncategorized'`) — undefined by default so existing fixtures that never
+// cared about category keep defaulting to 'uncategorized' unchanged.
+function entryDoc(id, { createdAt = new Date('2026-01-10T12:00:00Z'), moodScore = null, text = 'entry text', safety_flagged = false, category } = {}) {
   return {
     id,
     data: {
@@ -158,6 +163,7 @@ function entryDoc(id, { createdAt = new Date('2026-01-10T12:00:00Z'), moodScore 
       text,
       analysis: { mood_score: moodScore },
       safety_flagged,
+      ...(category !== undefined ? { category } : {}),
     },
   };
 }
@@ -192,6 +198,14 @@ function engagementDoc(id, { dismissalKey, dismissed = true } = {}) {
 // formatClaimLine actually read are populated; the full buildClaim shape
 // (analysisPlan, receipt, etc.) is a client-pipeline concern out of scope
 // for this server-side read/rank test.
+//
+// `receipt.timeWindow` (REP-01) defaults to fully containing the file's
+// standard PERIOD_START..PERIOD_END fixture window (2026-01-05..01-11) —
+// i.e. a plain `claimDoc()` overlaps the period and is eligible for
+// "held_up" via `splitClaimsByPeriodOverlap`, matching every pre-REP-01
+// test's assumption that a claim fixture applies to the period under test.
+// Tests exercising the overlap split itself override `receipt.timeWindow`
+// explicitly (see the "cross-period fixture" describe block below).
 function claimDoc(id, overrides = {}) {
   return {
     id,
@@ -207,13 +221,24 @@ function claimDoc(id, overrides = {}) {
         effectMoodPoints: 5,
         sourceEntryIds: [`${id}-e1`],
       },
+      receipt: {
+        sources: [],
+        scope: null,
+        timeWindow: { start: '2026-01-01T00:00:00.000Z', end: '2026-01-15T00:00:00.000Z' },
+        sampleSize: 1,
+        missingness: null,
+        versions: { generator: 'test', computationVersion: 1, generatedAt: '2026-01-05T00:00:00.000Z', model: null, promptVersion: null },
+      },
       createdAt: '2026-01-05T00:00:00.000Z',
       ...overrides,
     },
   };
 }
 
-import { readEntries, readNexusData, readVerifiedClaims, generateReport } from '../generator.js';
+import {
+  readEntries, readNexusData, readVerifiedClaims, generateReport,
+  derivePeriodStats, claimOverlapsPeriod, splitClaimsByPeriodOverlap,
+} from '../generator.js';
 import { getModel } from '../../models/registry.js';
 import { callGemini } from '../../shared/gemini.js';
 
@@ -549,6 +574,144 @@ describe('readVerifiedClaims (R4 Phase 2 Task 8)', () => {
   });
 });
 
+describe('derivePeriodStats (REP-01 fix #1 — period stats derived from entries, not global analytics)', () => {
+  it('returns null moodAvg, empty categoryStats, null topTheme, [] topThemes for an empty entry set', () => {
+    expect(derivePeriodStats([])).toEqual({
+      moodAvg: null,
+      categoryStats: {},
+      topTheme: null,
+      topThemes: [],
+    });
+  });
+
+  it('same for undefined/non-array input (defensive default)', () => {
+    expect(derivePeriodStats(undefined)).toEqual({
+      moodAvg: null,
+      categoryStats: {},
+      topTheme: null,
+      topThemes: [],
+    });
+  });
+
+  it('moodAvg averages only entries with a non-null moodScore, on the 0-10 display scale (0-1 internal * 10)', () => {
+    const entries = [
+      { category: 'personal', moodScore: 0.8 },
+      { category: 'personal', moodScore: 0.4 },
+      { category: 'personal', moodScore: null }, // excluded, not treated as 0
+    ];
+    const stats = derivePeriodStats(entries);
+    // (0.8 + 0.4) / 2 * 10 = 6
+    expect(stats.moodAvg).toBeCloseTo(6, 5);
+  });
+
+  it('moodAvg is null (not 0) when zero entries have a mood score', () => {
+    const entries = [{ category: 'personal', moodScore: null }, { category: 'work', moodScore: undefined }];
+    expect(derivePeriodStats(entries).moodAvg).toBeNull();
+  });
+
+  it('treats moodScore: 0 as a real value (not falsy-missing)', () => {
+    const entries = [{ category: 'personal', moodScore: 0 }, { category: 'personal', moodScore: 1 }];
+    // (0 + 1) / 2 * 10 = 5
+    expect(derivePeriodStats(entries).moodAvg).toBeCloseTo(5, 5);
+  });
+
+  it('categoryStats counts entries per category, defaulting missing category to "uncategorized"', () => {
+    const entries = [
+      { category: 'work', moodScore: null },
+      { category: 'work', moodScore: null },
+      { category: 'personal', moodScore: null },
+      { category: undefined, moodScore: null },
+    ];
+    expect(derivePeriodStats(entries).categoryStats).toEqual({
+      work: 2,
+      personal: 1,
+      uncategorized: 1,
+    });
+  });
+
+  it('topTheme is the single most-frequent category; topThemes is up to 5 ordered by frequency descending', () => {
+    const entries = [
+      { category: 'work', moodScore: null },
+      { category: 'work', moodScore: null },
+      { category: 'work', moodScore: null },
+      { category: 'personal', moodScore: null },
+      { category: 'personal', moodScore: null },
+      { category: 'health', moodScore: null },
+    ];
+    const stats = derivePeriodStats(entries);
+    expect(stats.topTheme).toBe('work');
+    expect(stats.topThemes).toEqual(['work', 'personal', 'health']);
+  });
+});
+
+describe('claimOverlapsPeriod / splitClaimsByPeriodOverlap (REP-01 fix #2 — overlap rule)', () => {
+  const PERIOD_A_START = new Date('2026-02-01T00:00:00Z');
+  const PERIOD_A_END = new Date('2026-02-28T23:59:59Z');
+
+  function claimWithWindow(id, start, end) {
+    return { id, receipt: { timeWindow: { start, end } } };
+  }
+
+  it('overlaps when the claim window is fully inside the period', () => {
+    const claim = claimWithWindow('c1', '2026-02-10T00:00:00.000Z', '2026-02-15T00:00:00.000Z');
+    expect(claimOverlapsPeriod(claim, PERIOD_A_START, PERIOD_A_END)).toBe(true);
+  });
+
+  it('overlaps when the claim window fully contains the period', () => {
+    const claim = claimWithWindow('c1', '2026-01-01T00:00:00.000Z', '2026-03-31T00:00:00.000Z');
+    expect(claimOverlapsPeriod(claim, PERIOD_A_START, PERIOD_A_END)).toBe(true);
+  });
+
+  it('overlaps when the claim window partially overlaps the start of the period', () => {
+    const claim = claimWithWindow('c1', '2026-01-25T00:00:00.000Z', '2026-02-05T00:00:00.000Z');
+    expect(claimOverlapsPeriod(claim, PERIOD_A_START, PERIOD_A_END)).toBe(true);
+  });
+
+  it('overlaps when the claim window only TOUCHES a period boundary (inclusive endpoints, documented "any overlap" threshold)', () => {
+    const claim = claimWithWindow('c1', '2026-01-15T00:00:00.000Z', '2026-02-01T00:00:00.000Z');
+    expect(claimOverlapsPeriod(claim, PERIOD_A_START, PERIOD_A_END)).toBe(true);
+  });
+
+  it('does NOT overlap a claim window entirely before the period (January vs. February)', () => {
+    const claim = claimWithWindow('c1', '2026-01-01T00:00:00.000Z', '2026-01-31T23:59:59.000Z');
+    expect(claimOverlapsPeriod(claim, PERIOD_A_START, PERIOD_A_END)).toBe(false);
+  });
+
+  it('does NOT overlap a claim window entirely after the period', () => {
+    const claim = claimWithWindow('c1', '2026-03-01T00:00:00.000Z', '2026-03-31T00:00:00.000Z');
+    expect(claimOverlapsPeriod(claim, PERIOD_A_START, PERIOD_A_END)).toBe(false);
+  });
+
+  it('fails CLOSED (does not overlap) when receipt.timeWindow is missing entirely', () => {
+    expect(claimOverlapsPeriod({ id: 'c1' }, PERIOD_A_START, PERIOD_A_END)).toBe(false);
+    expect(claimOverlapsPeriod({ id: 'c1', receipt: {} }, PERIOD_A_START, PERIOD_A_END)).toBe(false);
+    expect(claimOverlapsPeriod({ id: 'c1', receipt: { timeWindow: {} } }, PERIOD_A_START, PERIOD_A_END)).toBe(false);
+  });
+
+  it('fails CLOSED when receipt.timeWindow has an unparsable date string', () => {
+    const claim = claimWithWindow('c1', 'not-a-date', '2026-02-15T00:00:00.000Z');
+    expect(claimOverlapsPeriod(claim, PERIOD_A_START, PERIOD_A_END)).toBe(false);
+  });
+
+  it('splitClaimsByPeriodOverlap partitions into periodClaims/currentClaims, preserving relative order', () => {
+    const overlapping1 = claimWithWindow('overlap1', '2026-02-01T00:00:00.000Z', '2026-02-05T00:00:00.000Z');
+    const stale = claimWithWindow('stale', '2026-01-01T00:00:00.000Z', '2026-01-31T00:00:00.000Z');
+    const overlapping2 = claimWithWindow('overlap2', '2026-02-20T00:00:00.000Z', '2026-02-25T00:00:00.000Z');
+
+    const { periodClaims, currentClaims } = splitClaimsByPeriodOverlap(
+      [overlapping1, stale, overlapping2], PERIOD_A_START, PERIOD_A_END
+    );
+
+    expect(periodClaims.map((c) => c.id)).toEqual(['overlap1', 'overlap2']);
+    expect(currentClaims.map((c) => c.id)).toEqual(['stale']);
+  });
+
+  it('splitClaimsByPeriodOverlap returns empty arrays for empty/undefined input', () => {
+    expect(splitClaimsByPeriodOverlap([], PERIOD_A_START, PERIOD_A_END)).toEqual({ periodClaims: [], currentClaims: [] });
+    expect(splitClaimsByPeriodOverlap(undefined, PERIOD_A_START, PERIOD_A_END)).toEqual({ periodClaims: [], currentClaims: [] });
+  });
+});
+
 describe('generateReport — verified claims feed the held_up section (R4 Phase 2 Task 8)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -757,5 +920,129 @@ describe('generateReport — exclusions-read failure fails closed (finding 3)', 
     const readyCall = mockReportRefUpdate.mock.calls.find((args) => args[0]?.status === 'ready');
     expect(readyCall).toBeTruthy();
     expect(readyCall[0].metadata.entryCount).toBe(0);
+  });
+});
+
+// REP-01 — cross-period fixture (the review's "January-vs-February" test):
+// current global state (a stale, January-scoped verified claim) must not be
+// silently attributed to a February report. This is the RED driver for the
+// whole REP-01 fix: before it, generator.js read a global analytics
+// snapshot into period stats and fed every verified claim into "held_up"
+// regardless of its evidence window.
+describe('generateReport — cross-period fixture: January state must not leak into a February report (REP-01)', () => {
+  const FEB_START = new Date('2026-02-01T00:00:00Z');
+  const FEB_END = new Date('2026-02-28T23:59:59Z');
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    getModel.mockResolvedValue('registry-insight-model-x');
+  });
+
+  function claimWithWindow(id, { start, end, wording, sourceEntryIds }) {
+    return claimDoc(id, {
+      wording,
+      evidence: {
+        exposedDayCount: 9,
+        comparisonDayCount: 15,
+        effectMoodPoints: 5,
+        sourceEntryIds: sourceEntryIds ?? [`${id}-e1`],
+      },
+      receipt: {
+        sources: [],
+        scope: null,
+        timeWindow: { start, end },
+        sampleSize: 1,
+        missingness: null,
+        versions: { generator: 'test', computationVersion: 1, generatedAt: start, model: null, promptVersion: null },
+      },
+    });
+  }
+
+  it("February report's mood/category/theme reconcile exactly to the February entry set, and a January-only claim appears only under the current-context label", async () => {
+    const febEntries = [
+      entryDoc('feb1', { createdAt: new Date('2026-02-02T10:00:00Z'), moodScore: 0.8, category: 'work' }),
+      entryDoc('feb2', { createdAt: new Date('2026-02-15T10:00:00Z'), moodScore: 0.4, category: 'work' }),
+      entryDoc('feb3', { createdAt: new Date('2026-02-20T10:00:00Z'), moodScore: null, category: 'personal' }),
+    ];
+    const januaryStaleClaim = claimWithWindow('january_claim', {
+      start: '2026-01-01T00:00:00.000Z',
+      end: '2026-01-31T23:59:59.000Z',
+      wording: 'STALE-JANUARY-CLAIM-WORDING',
+    });
+
+    buildFakeDb({ entries: febEntries, exclusions: [], claims: [januaryStaleClaim] });
+
+    await generateReport('user1', 'weekly', FEB_START, FEB_END, null);
+
+    const readyCall = mockReportRefUpdate.mock.calls.find((args) => args[0]?.status === 'ready');
+    expect(readyCall).toBeTruthy();
+    const { sections, metadata } = readyCall[0];
+
+    // Mood/category/theme reconcile EXACTLY to the February entry set —
+    // never to some global/current snapshot.
+    // (0.8 + 0.4) / 2 * 10 = 6
+    expect(metadata.moodAvg).toBeCloseTo(6, 5);
+    expect(metadata.entryCount).toBe(3);
+
+    const categorySection = sections[0];
+    expect(categorySection.chartData.categoryBreakdown).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ label: 'work', value: 2 }),
+        expect.objectContaining({ label: 'personal', value: 1 }),
+      ])
+    );
+
+    // The January claim does NOT overlap February -> "held_up" shows the
+    // explicit no-claims copy, never the stale claim's wording.
+    const heldUp = sections.find((s) => s.id === 'held_up');
+    expect(heldUp.narrative).toContain('No verified patterns');
+    expect(heldUp.narrative).not.toContain('STALE-JANUARY-CLAIM-WORDING');
+
+    // The stale claim surfaces ONLY under the separately-labeled
+    // current-context section — never unlabeled, never inside held_up.
+    const currentContext = sections.find((s) => s.id === 'current_context');
+    expect(currentContext).toBeTruthy();
+    expect(currentContext.title).toBe('Current verified insights (not period-specific)');
+    expect(currentContext.narrative).toContain('STALE-JANUARY-CLAIM-WORDING');
+
+    // Its entryRefs are its own claim evidence ids, never borrowed from the
+    // February period's entry id list (no unlabeled cross-period
+    // attribution via receipts either).
+    expect(currentContext.entryRefs).toEqual(['january_claim-e1']);
+    expect(currentContext.entryRefs).not.toContain('feb1');
+
+    // topInsights (claims-mode metadata) records the claim id, not a
+    // legacy Nexus id.
+    expect(metadata.topInsights).toEqual(['january_claim']);
+  });
+
+  it('re-generating a historical (January) report from the SAME global state reconciles to January\'s own entries, not February\'s', async () => {
+    const JAN_START = new Date('2026-01-01T00:00:00Z');
+    const JAN_END = new Date('2026-01-31T23:59:59Z');
+
+    const janEntries = [
+      entryDoc('jan1', { createdAt: new Date('2026-01-10T10:00:00Z'), moodScore: 0.2, category: 'health' }),
+    ];
+    const febOnlyClaim = claimWithWindow('feb_claim', {
+      start: '2026-02-01T00:00:00.000Z',
+      end: '2026-02-28T23:59:59.000Z',
+      wording: 'FEBRUARY-ONLY-CLAIM-WORDING',
+    });
+
+    buildFakeDb({ entries: janEntries, exclusions: [], claims: [febOnlyClaim] });
+
+    await generateReport('user1', 'weekly', JAN_START, JAN_END, null);
+
+    const readyCall = mockReportRefUpdate.mock.calls.find((args) => args[0]?.status === 'ready');
+    const { sections, metadata } = readyCall[0];
+
+    // 0.2 * 10 = 2
+    expect(metadata.moodAvg).toBeCloseTo(2, 5);
+    expect(metadata.entryCount).toBe(1);
+
+    const heldUp = sections.find((s) => s.id === 'held_up');
+    expect(heldUp.narrative).not.toContain('FEBRUARY-ONLY-CLAIM-WORDING');
+    const currentContext = sections.find((s) => s.id === 'current_context');
+    expect(currentContext.narrative).toContain('FEBRUARY-ONLY-CLAIM-WORDING');
   });
 });

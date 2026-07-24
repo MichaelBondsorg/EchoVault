@@ -97,13 +97,19 @@ function formatClaimLine(claim) {
 /**
  * Build the "What held up this period" section — the single top-ranked
  * verified claim (claims arrives pre-ranked from
- * generator.js's `readVerifiedClaims`), or the explicit no-claims copy.
- * Shared by both `generateWeeklyTemplate` and `generatePremiumNarrative` so
- * the two cadence families render this section identically.
- * @param {Array<object>} claims - pre-ranked, capped verified claims
+ * generator.js's `readVerifiedClaims`, then split by
+ * `generator.js`'s `splitClaimsByPeriodOverlap` — this function only ever
+ * receives the PERIOD-OVERLAPPING half, see that split's doc comment for
+ * the overlap rule itself), or the explicit no-claims copy. Shared by both
+ * `generateWeeklyTemplate` and `generatePremiumNarrative` so the two
+ * cadence families render this section identically.
+ * @param {Array<object>} claims - pre-ranked, capped, period-overlapping
+ *   verified claims
  * @param {string[]} fallbackEntryRefs - used when there's no claim to cite
  *   an entry-level receipt from (zero claims, or a claim missing
- *   evidence.sourceEntryIds)
+ *   evidence.sourceEntryIds). Safe to default to the period's own entry id
+ *   list here BECAUSE every claim reaching this function has already been
+ *   verified to overlap the report period.
  * @returns {object} section
  */
 function buildHeldUpSection(claims, fallbackEntryRefs) {
@@ -123,6 +129,48 @@ function buildHeldUpSection(claims, fallbackEntryRefs) {
 }
 
 /**
+ * REP-01 fix #2 (overlap rule, review's option 3 as fallback): build the
+ * "Current verified insights (not period-specific)" section from verified
+ * claims whose evidence window did NOT overlap the requested report period
+ * (`generator.js`'s `splitClaimsByPeriodOverlap` — the other half of the
+ * same split `buildHeldUpSection` consumes). This is how a stale/current
+ * claim is allowed to reach a historical report AT ALL: explicitly labeled
+ * as current, non-period context, never folded into "What held up this
+ * period" — the exact "unlabeled cross-period attribution" REP-01 exists to
+ * close.
+ *
+ * Returns `null` (never an empty-copy section) when there are zero
+ * non-overlapping claims — unlike `buildHeldUpSection`, this section only
+ * exists to carry content that would otherwise be silently dropped, so an
+ * empty state means "omit the section," not "render a placeholder."
+ *
+ * entryRefs is deliberately NEVER the period's own entry id list (no
+ * fallback to a period-scoped default) — these claims are, by construction,
+ * NOT period-scoped, so falling back to period entryRefs would itself be
+ * the unlabeled cross-period attribution this section exists to prevent.
+ * A current claim with no `evidence.sourceEntryIds` cites nothing rather
+ * than borrowing the period's entries.
+ * @param {Array<object>} currentClaims - pre-ranked, capped, NON-overlapping
+ *   verified claims
+ * @returns {object|null}
+ */
+function buildCurrentContextSection(currentClaims) {
+  if (!Array.isArray(currentClaims) || currentClaims.length === 0) return null;
+  const topClaim = currentClaims[0];
+  const claimEntryIds = Array.isArray(topClaim.evidence?.sourceEntryIds)
+    ? topClaim.evidence.sourceEntryIds.filter(Boolean)
+    : [];
+  return {
+    id: 'current_context',
+    title: 'Current verified insights (not period-specific)',
+    narrative: formatClaimLine(topClaim),
+    chartData: null,
+    entities: [],
+    entryRefs: claimEntryIds,
+  };
+}
+
+/**
  * Generate a weekly digest using templates (no LLM).
  * @param {object} analyticsData - Pre-computed analytics
  * @param {object} nexusData - `{insights, patterns}` read from the Nexus
@@ -134,15 +182,21 @@ function buildHeldUpSection(claims, fallbackEntryRefs) {
  *   entries (post source-exclusion filtering), used to populate entryRefs
  *   receipts. Optional/defaults to [] for backward compatibility with
  *   callers that only need narrative text.
- * @param {Array<object>} [claims] - Verified claims (generator.js's
- *   `readVerifiedClaims`, pre-ranked, capped at 5) — the ONLY source for
- *   the "What held up this period" section (P2-D6). `nexusData` is no
+ * @param {Array<object>} [claims] - Verified claims that OVERLAP the report
+ *   period (generator.js's `readVerifiedClaims` result, pre-ranked/capped,
+ *   then split by `splitClaimsByPeriodOverlap` — REP-01) — the ONLY source
+ *   for the "What held up this period" section (P2-D6). `nexusData` is no
  *   longer read for that purpose; it's kept as a parameter for signature
  *   stability with the call site (generator.js still reads it for other,
  *   non-prompt purposes, e.g. report metadata.topInsights).
+ * @param {Array<object>} [currentClaims] - Verified claims that did NOT
+ *   overlap the report period (REP-01 fix #2) — rendered, if any, as a
+ *   separately-labeled "Current verified insights (not period-specific)"
+ *   section so a report is never emptied out just because nothing verified
+ *   happens to overlap a short/quiet period.
  * @returns {Array<object>} sections
  */
-export function generateWeeklyTemplate(analyticsData, nexusData, entries = [], claims = []) {
+export function generateWeeklyTemplate(analyticsData, nexusData, entries = [], claims = [], currentClaims = []) {
   const { entryCount = 0, moodAvg, moodTrend, topTheme } = analyticsData;
 
   // Summary bullets
@@ -173,7 +227,7 @@ export function generateWeeklyTemplate(analyticsData, nexusData, entries = [], c
     .map(e => e.id)
     .filter(Boolean);
 
-  return [
+  const sections = [
     {
       id: 'summary',
       title: 'This Week',
@@ -192,6 +246,13 @@ export function generateWeeklyTemplate(analyticsData, nexusData, entries = [], c
       entryRefs: moodEntryIds,
     },
   ];
+
+  // REP-01 fix #2: appended only when there's non-period-overlapping content
+  // to show — see buildCurrentContextSection's doc comment.
+  const currentContextSection = buildCurrentContextSection(currentClaims);
+  if (currentContextSection) sections.push(currentContextSection);
+
+  return sections;
 }
 
 const SECTION_CONFIGS = {
@@ -309,6 +370,15 @@ export async function generatePremiumNarrative(cadence, contextData, apiKey, db)
   // monthly/quarterly/annual.
   sections.push(buildHeldUpSection(synthesisContext.claims || [], sourceEntryIds));
 
+  // REP-01 fix #2: non-period-overlapping verified claims, explicitly
+  // labeled, never folded into "held_up" and never LLM-authored/LLM-prompted
+  // (buildSectionPrompt above only ever sees `synthesisContext.claims`, the
+  // period-overlapping half — see that function's comment). Omitted
+  // entirely when there's nothing to show (buildCurrentContextSection
+  // returns null on empty input).
+  const currentContextSection = buildCurrentContextSection(synthesisContext.currentClaims || []);
+  if (currentContextSection) sections.push(currentContextSection);
+
   return sections;
 }
 
@@ -342,9 +412,14 @@ function buildSectionPrompt(config, cadence, contextData) {
   // P2-D6: verified claims + deterministic stats replace the old Nexus
   // "Detected patterns" injection (nexus.patterns via nexusInsightLabel) —
   // that fed this LLM prose from ANOTHER, unverified LLM's output. `claims`
-  // is generator.js's `readVerifiedClaims` result: pre-ranked, capped at 5,
-  // `status === 'verified'` only, wording already causal-language-checked
-  // by claimSchema's buildClaim. Every line here is grounded in a specific
+  // here is `synthesisContext.claims` — generator.js's `readVerifiedClaims`
+  // result AFTER `splitClaimsByPeriodOverlap` (REP-01): only the claims
+  // whose evidence window overlaps THIS report's period, never the
+  // non-overlapping `currentClaims` half (that half never reaches this
+  // prompt at all — see `buildCurrentContextSection`, which renders it
+  // deterministically instead). Pre-ranked, capped at 5, `status ===
+  // 'verified'` only, wording already causal-language-checked by
+  // claimSchema's buildClaim. Every line here is grounded in a specific
   // claim's own numbers — nothing paraphrased or invented by this prompt.
   if (claims?.length) {
     const claimLines = claims.map(formatClaimLine);
