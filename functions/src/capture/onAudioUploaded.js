@@ -51,6 +51,19 @@ export function parseCaptureObjectPath(name) {
 }
 
 /**
+ * Idempotency guard doc path for one background-upload operation. The
+ * operationId IS the uploadId embedded in the Storage object path
+ * (`capture-uploads/{uid}/{operationId}.m4a`) — this doc is the durable,
+ * transactionally-claimed marker keyed by that same id. Owner-scoped under
+ * the user's own artifacts subtree (never surfaced to the client — no
+ * firestore.rules grant exists for it, so the default deny-all applies; only
+ * the Admin SDK, which bypasses rules, ever touches it).
+ */
+export function captureUploadGuardRef(db, uid, operationId) {
+  return db.doc(`artifacts/${APP_COLLECTION_ID}/users/${uid}/captureUploadGuards/${operationId}`);
+}
+
+/**
  * Build the core journal entry for a background-captured recording. Mirrors the
  * client's buildCoreEntry shape (src/services/entries/buildCoreEntry.js) but
  * uses server timestamps and marks provenance as 'ios-background'. Only the
@@ -153,11 +166,14 @@ export async function processCaptureAudioObject(object, deps) {
     return { status: 'deleted', reason: 'consent-denied' };
   }
 
-  // 3. Duplicate guard — an entry already exists for this op (redelivered event
-  // or a client that also saved foreground). Delete the object, create nothing.
-  const entriesRef = db.collection(`artifacts/${APP_COLLECTION_ID}/users/${uid}/entries`);
-  const dup = await entriesRef.where('operationId', '==', operationId).limit(1).get();
-  if (!dup.empty) {
+  // 3. Cheap early duplicate check — a guard doc already exists for this
+  // operationId (a prior finalize event already claimed it, or already
+  // succeeded). This is a non-transactional fast path purely to skip the
+  // expensive download/transcribe for the common redelivery case; it is NOT
+  // the authoritative dedup guarantee (see step 5's transaction for that).
+  const guard = captureUploadGuardRef(db, uid, operationId);
+  const existingGuard = await guard.get();
+  if (existingGuard.exists) {
     await safeDelete();
     log(operationId, 'duplicate_skipped', { errorCode: 'duplicate' });
     return { status: 'deleted', reason: 'duplicate' };
@@ -205,7 +221,33 @@ export async function processCaptureAudioObject(object, deps) {
       },
       { FieldValue: FV }
     );
-    await entriesRef.add(entry);
+
+    // Atomic guard-claim + entry-create — the AUTHORITATIVE dedup mechanism.
+    // Even if two invocations for the same operationId run concurrently (a
+    // genuinely-redelivered finalize event, or a client re-PUT to the same
+    // path racing this trigger's own retry), Firestore serializes the
+    // transaction on `guard`'s document: the loser re-reads it as
+    // already-existing inside its own transaction attempt and creates no
+    // entry. The guard is written ONLY alongside a successful entry create
+    // (never on the early non-transactional check above, and never on a
+    // transcription failure) — so a genuine retry of a FAILED upload with
+    // the same operationId is never wrongly blocked by its own prior
+    // attempt; only a truly duplicate SUCCESS is deduped.
+    const entriesRef = db.collection(`artifacts/${APP_COLLECTION_ID}/users/${uid}/entries`);
+    const outcome = await db.runTransaction(async (tx) => {
+      const guardSnap = await tx.get(guard);
+      if (guardSnap.exists) return { created: false };
+      const entryRef = entriesRef.doc();
+      tx.set(entryRef, entry);
+      tx.set(guard, { entryId: entryRef.id, operationId, createdAt: FV.serverTimestamp() });
+      return { created: true, entryId: entryRef.id };
+    });
+
+    if (!outcome.created) {
+      await safeDelete();
+      log(operationId, 'duplicate_skipped', { errorCode: 'duplicate' });
+      return { status: 'deleted', reason: 'duplicate' };
+    }
 
     // Success ⇒ raw audio retention: delete immediately.
     await safeDelete();
@@ -257,4 +299,5 @@ export default {
   sweepCaptureUploads,
   buildBackgroundCoreEntry,
   parseCaptureObjectPath,
+  captureUploadGuardRef,
 };

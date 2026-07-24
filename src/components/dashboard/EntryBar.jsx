@@ -4,6 +4,7 @@ import { Mic, Square, X, Loader2, Tag, Bookmark } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
 import { CaptureService } from '../../services/capture/captureService';
 import { nativeCaptureAdapter } from '../../services/capture/nativeCaptureAdapter';
+import { enqueueNativeBackgroundUpload } from '../../services/capture/nativeBackgroundUpload';
 import { appendChunk, appendMarker, deleteDraft, recoverWebDrafts } from '../../services/capture/webChunkStore';
 import { normalizeMarkers } from '../../services/capture/chapterMarkers';
 import { restoreDraft, writeDraft, clearDraft } from '../../services/capture/draftAutosave';
@@ -505,6 +506,25 @@ const EntryBar = ({
         alert('The recording is safe on this device but needs review before processing.');
         return;
       }
+
+      // CAP-01: native background upload (flag: nativeBackgroundUpload,
+      // default OFF — ships DARK, see docs/quality/device-validation-matrix.md
+      // rows 11-14). getFlag() returning false (always, today) short-circuits
+      // this whole branch — zero calls to the ticket callable or the native
+      // plugin's enqueueUpload, byte-for-byte the same behavior as before
+      // this feature existed. Only once the flag is ever flipped on does a
+      // successful enqueue skip the base64/foreground path below; any
+      // enqueue failure falls back to it so a capture is never lost.
+      if (getFlag('nativeBackgroundUpload')) {
+        const queued = await enqueueNativeBackgroundUpload({
+          ownerUid, draftId: stored.draftId, mimeType: stored.mime,
+        });
+        if (queued) {
+          setMode('idle');
+          return;
+        }
+      }
+
       // Voice Chapters: markers/durationMs come from the native sidecar
       // (stored.markers/stored.durationMs, the durable ground truth) — only
       // threaded through when the flag is on, so a flag-off recording's

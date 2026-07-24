@@ -1,6 +1,15 @@
-import { registerPlugin } from '@capacitor/core';
+import { registerPlugin, type PluginListenerHandle } from '@capacitor/core';
 import type { CaptureAdapter, StoredCapture } from './captureService';
 import { markPendingReview, isPendingReview } from './pendingReviewDrafts';
+
+// CAP-01 (background-upload flag: nativeBackgroundUpload, default OFF — ships
+// DARK) event payloads. Forwarded by CapturePlugin.swift from
+// BackgroundUploader's NotificationCenter posts; content-free by
+// construction (draftId + progress fraction / HTTP status / error code
+// only — never audio bytes or transcript text).
+export type CaptureUploadProgressEvent = { draftId: string; progress: number };
+export type CaptureUploadCompleteEvent = { draftId: string; httpStatus: number };
+export type CaptureUploadFailedEvent = { draftId: string; errorCode: string };
 
 type NativeCapturePlugin = {
   requestPermission(): Promise<{ granted: boolean }>;
@@ -13,6 +22,34 @@ type NativeCapturePlugin = {
     options: { ownerUid: string; draftId: string; status: string }
   ): Promise<{ draftId: string; status: string }>;
   markChapter(options: { ownerUid: string; draftId: string }): Promise<{ tMs: number }>;
+  // CAP-01 — hand an already-finalized draft's on-disk file to the native
+  // BackgroundUploader (URLSession background configuration), which PUTs it
+  // straight to `signedUrl` (from issueCaptureUploadTicketFn) without routing
+  // audio bytes through the WebView bridge. `headers` carries any additional
+  // `x-goog-meta-*` provenance headers the ticket's `requiredHeaders` echoed
+  // back (see uploadTicket.js) — they must match exactly what was signed, or
+  // Cloud Storage rejects the PUT. Resolves once the upload is *enqueued*,
+  // not once it completes — completion arrives asynchronously via the
+  // captureUpload* listener events below.
+  enqueueUpload(options: {
+    ownerUid: string;
+    draftId: string;
+    signedUrl: string;
+    contentType: string;
+    headers?: Record<string, string>;
+  }): Promise<{ draftId: string }>;
+  addListener(
+    eventName: 'captureUploadProgress',
+    listener: (event: CaptureUploadProgressEvent) => void
+  ): Promise<PluginListenerHandle>;
+  addListener(
+    eventName: 'captureUploadComplete',
+    listener: (event: CaptureUploadCompleteEvent) => void
+  ): Promise<PluginListenerHandle>;
+  addListener(
+    eventName: 'captureUploadFailed',
+    listener: (event: CaptureUploadFailedEvent) => void
+  ): Promise<PluginListenerHandle>;
 };
 
 // A draft still in 'recording' status means the app died mid-recording (no

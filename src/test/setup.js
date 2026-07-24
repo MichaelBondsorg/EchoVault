@@ -219,6 +219,9 @@ const EXPECTED_APP_WARN_ALLOWLIST = [
   { pattern: /\[enrichmentRunner\] updateDoc failed \(non-blocking\):/, reason: 'enrichmentRunner non-blocking updateDoc-failure test.' },
   { pattern: /\[templates\] Unknown notification type:/, reason: 'notification templates unknown-type test.' },
   { pattern: /\[deepLinks\] Unknown notification type:/, reason: 'deepLinks unknown-notification-type test.' },
+  { pattern: /\[Capture\] background upload enqueue failed, caller should fall back:/, reason: 'nativeBackgroundUpload (CAP-01) ticket/plugin-rejection falls-back-to-foreground test.' },
+  { pattern: /\[Capture\] background upload failed/, reason: 'nativeBackgroundUpload (CAP-01) captureUploadFailed-event handler test.' },
+  { pattern: /\[Capture\] background-upload reconcile failed for one op, continuing:/, reason: 'nativeBackgroundUpload (CAP-01) non-blocking per-op reconcile-failure test.' },
 ];
 
 function formatConsoleArgs(args) {

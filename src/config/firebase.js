@@ -76,6 +76,11 @@ export const exportReportPdfFn = httpsCallable(functions, 'exportReportPdf', { t
 export const deleteAccountFn = httpsCallable(functions, 'deleteAccount', { timeout: 300000 }); // 5 min - recursive delete can be slow
 export const revokeAiProcessingFn = httpsCallable(functions, 'revokeAiProcessing', { timeout: 30000 }); // 30s - consent write should be fast
 export const grantAiProcessingFn = httpsCallable(functions, 'grantAiProcessing', { timeout: 30000 }); // 30s - consent write should be fast
+// CAP-01 (flag: nativeBackgroundUpload, default OFF) - mints a short-lived
+// (15 min) V4 signed Storage PUT URL so BackgroundUploader.swift can upload a
+// captured .m4a without routing audio bytes through the WebView bridge. See
+// src/services/capture/nativeBackgroundUpload.js.
+export const issueCaptureUploadTicketFn = httpsCallable(functions, 'issueCaptureUploadTicket', { timeout: 30000 }); // 30s - just mints a signed URL
 
 // Expose for console debugging
 if (typeof window !== 'undefined') {

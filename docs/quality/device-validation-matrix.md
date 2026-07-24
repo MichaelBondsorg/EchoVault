@@ -11,10 +11,15 @@ and again whenever `src/services/capture/**`, `ios/App/App/Capture/**`, or
 the native capture plugin change. Run rows 9-10 (added by the capture-sheet/
 A11Y-02 work — no capture-durability flag involved) whenever the New Entry
 capture sheet layout or the a11y semantics of Home/Insights/tasks/loops
-change.
+change. Run rows 11-14 (CAP-01, product review 2026-07-24 — the client
+wiring that makes `nativeBackgroundUpload` actually do something, see
+`docs/ops/feature-manifest.md`) before this flag is EVER flipped on for a
+real account, anywhere; they are the gate referenced by the CAP-01 task
+report (`.superpowers/sdd/task-cap01-report.md`).
 
 Source plan: `docs/superpowers/plans/2026-07-20-trustworthy-capture-and-intelligence.md`
-(Task D3). Runbook: `docs/quality/trustworthy-capture-runbook.md`.
+(Task D3) + `docs/superpowers/plans/2026-07-24-full-product-review.md` (CAP-01).
+Runbook: `docs/quality/trustworthy-capture-runbook.md`.
 
 ## How to run this
 
@@ -337,6 +342,148 @@ on and off since they change which of the above widgets/rows are present).
       close controls) is comfortably tappable with a thumb on a physical
       device at default zoom, not just measurable as ≥44px in the DOM.
 
+### 11. CAP-01 — suspend mid-upload
+
+**Setup:** With `nativeBackgroundUpload` set to `true` in `config/flags` on a
+test/staging account, record a voice entry of at least 15-20 seconds (large
+enough that the PUT is still in flight a moment later), tap Stop, and — while
+`BackgroundUploader`'s `URLSession` upload is actively transferring (watch
+Xcode's network debugger or a proxy to confirm bytes are still moving) —
+press the physical lock button to suspend the app. Distinct from row 2
+("Manual lock after Stop", which covers the instant right after Stop) and
+row 5 (which backgrounds immediately without confirming the transfer was
+mid-flight) — this row specifically confirms the upload survives a
+suspend that lands **while bytes are actively being sent**, not just before
+the transfer starts.
+
+**Depends on:** `nativeBackgroundUpload`. Code-complete but ships DARK this
+sprint (CAP-01) — do not run against a production account.
+
+**Expected outcome:**
+- [ ] The PUT continues and completes after the device locks — no partial
+      upload, no silent stall (confirm via the same network debugging tool,
+      or via the `captureUploadComplete` event firing once the app is next
+      foregrounded).
+- [ ] `onCaptureAudioUploaded` creates exactly one entry once the object
+      finalizes, indistinguishable in shape from a foreground-saved entry
+      (same `transcription`/`analysisStatus`/`entryInputVersion` fields —
+      see `functions/src/capture/onAudioUploaded.js`'s
+      `buildBackgroundCoreEntry`).
+- [ ] Unlocking and foregrounding the app clears the local
+      `capture_bg_uploads::{uid}` breadcrumb for that draft (via the
+      `captureUploadComplete` listener in
+      `src/services/capture/nativeBackgroundUpload.js`) and deletes the now-
+      redundant native draft — it does not linger in the Capture Reliability
+      Center as a "stored" draft needing manual review.
+
+### 12. CAP-01 — force-kill mid-upload
+
+**Setup:** With `nativeBackgroundUpload` on, record and Stop, then — while the
+upload is still in flight — force-kill the app from the app switcher (swipe
+up and away), not just lock it. This is stronger than row 11: a suspended app
+keeps its process; a force-kill terminates it, so recovery must not depend on
+ANY in-memory JS state surviving.
+
+**Depends on:** `nativeBackgroundUpload`. Ships DARK this sprint.
+
+**Expected outcome:**
+- [ ] The native `URLSession` background session (identifier
+      `engram.capture.upload`, see `BackgroundUploader.swift`) continues the
+      transfer at the OS level even though the app process is gone — this is
+      the entire point of a background `URLSessionConfiguration`, as opposed
+      to a plain in-process fetch.
+- [ ] When iOS relaunches the app to deliver the completion (or the user
+      manually reopens it), `AppDelegate.application(_:
+      handleEventsForBackgroundURLSession:completionHandler:)` re-attaches
+      the completion handler and the app's launch-time
+      `reconcileNativeBackgroundUploads` (`src/App.jsx`, gated by the flag)
+      is able to resolve the breadcrumb even though NO JS code was running
+      when the upload actually completed on the wire.
+- [ ] Exactly one entry exists — no duplicate, no silent loss. If the kill
+      happened before the object even finished uploading (not just before
+      the JS heard about it), the retention sweeper
+      (`captureUploadsRetention`, every 6h) is the eventual backstop for any
+      object left orphaned server-side.
+- [ ] The local native draft (`CaptureDraftStore`) is never silently deleted
+      before either (a) the server confirms the entry was created, or (b)
+      the object is confirmed abandoned — a force-kill must never be able to
+      lose the only durable copy of the recording.
+
+### 13. CAP-01 — airplane-mode retry
+
+**Setup:** With `nativeBackgroundUpload` on, enable Airplane Mode BEFORE
+tapping Stop (so the PUT can never even start), then Stop the recording, wait
+a few seconds, and turn Airplane Mode back off.
+
+**Depends on:** `nativeBackgroundUpload`. Ships DARK this sprint.
+
+**Expected outcome:**
+- [ ] `issueCaptureUploadTicket` either fails fast (surfaced as a
+      foreground-path fallback per `enqueueNativeBackgroundUpload`'s design —
+      see `src/services/capture/nativeBackgroundUpload.js`, which falls back
+      to the existing base64 pipeline on any enqueue failure) or the ticket
+      succeeds but `BackgroundUploader`'s `URLSession` itself queues the PUT
+      and retries once connectivity returns (`URLSession` background tasks
+      are designed to survive exactly this).
+- [ ] Whichever path is taken, the recording is NEVER lost: either the
+      foreground fallback transcribes it directly, or the background PUT
+      completes once the network returns and `onCaptureAudioUploaded`
+      creates the entry.
+- [ ] If the signed URL's 15-minute expiry (`UPLOAD_TICKET_TTL_MS`,
+      `functions/src/capture/uploadTicket.js`) is exceeded while offline, the
+      PUT fails with an expired-signature error; confirm this surfaces as a
+      `captureUploadFailed` event (not a silent hang) so the record in
+      `capture_bg_uploads::{uid}` is marked `failed` rather than staying
+      `queued` forever, and that the native draft remains recoverable
+      through the existing Capture Reliability Center path.
+- [ ] Exactly one entry is created — not zero (lost), not two (foreground
+      fallback AND background upload both succeeding for the same
+      operationId; this is what row 14's duplicate-finalize guard exists
+      for).
+
+### 14. CAP-01 — duplicate-finalize
+
+**Setup:** This row validates the idempotency guard itself
+(`functions/src/capture/onAudioUploaded.js`'s `captureUploadGuardRef` +
+transactional guard-and-create) against a REAL duplicate Storage finalize
+delivery, which the unit tests
+(`functions/src/capture/__tests__/onAudioUploaded.test.js`) simulate but
+cannot fully substitute for. With `nativeBackgroundUpload` on: (a) trigger a
+natural redelivery by forcing the `onCaptureAudioUploaded` function to fail
+transiently right after it successfully commits the transaction but before
+it returns (e.g. temporarily throw after the `db.runTransaction` call in a
+local/staging deploy, forcing Cloud Functions' at-least-once retry), and (b)
+separately, manually re-PUT the same object path
+(`capture-uploads/{uid}/{operationId}.m4a`) a second time with the Storage
+console/`gsutil` after the first upload already completed and was deleted
+(reconstructing the redelivery/re-PUT scenario from first principles rather
+than the unit test's injected race).
+
+**Depends on:** `nativeBackgroundUpload`. Ships DARK this sprint — safe to
+exercise directly against Cloud Functions logs/Firestore, since this row is
+specifically about server behavior, not on-device UI.
+
+**Expected outcome:**
+- [ ] In both (a) and (b), exactly ONE entry exists for the operationId
+      afterward — check via a Firestore query
+      (`entries` where `operationId == <opId>`) returning exactly one
+      document, and via server logs showing `duplicate_skipped` for the
+      redelivered/re-PUT event.
+- [ ] The guard doc at
+      `artifacts/echo-vault-v5-fresh/users/{uid}/captureUploadGuards/{operationId}`
+      exists and its `entryId` matches the single entry that was created —
+      confirm no second guard write, transaction retry loop, or crash
+      occurred.
+- [ ] The SECOND (duplicate) object is deleted from Storage — no orphaned
+      audio left behind by the duplicate path specifically (distinct from
+      the retention sweeper, which is the backstop for genuinely stuck
+      objects, not a substitute for this guard).
+- [ ] Repeat scenario (a) with a transcription FAILURE instead of success
+      (temporarily force `transcribe()` to reject) to confirm the inverse: NO
+      guard doc is left behind by a failed attempt, so a subsequent
+      legitimate retry with the same operationId is not wrongly treated as a
+      duplicate and successfully creates its entry.
+
 ## Flag cross-reference
 
 | Row | Flag(s) | Default | Where read |
@@ -351,6 +498,10 @@ on and off since they change which of the above widgets/rows are present).
 | 8 | — | n/a | native plugin (unconditional) |
 | 9 | — | n/a | `src/components/capture/EntryComposer.jsx`, `src/components/dashboard/EntryBar.jsx`, `src/components/cloud/Drawer.jsx` (unconditional) |
 | 10 | `insightClaims`, `openLoops`, `intentExtraction`, `voiceChapters` (each varies which widgets/rows render; the a11y semantics themselves are unconditional) | all `false` | `src/config/flags.js` |
+| 11 | `nativeBackgroundUpload` | `false` | `src/config/flags.js`, `functions/src/shared/flags.js`, `src/services/capture/nativeBackgroundUpload.js` |
+| 12 | `nativeBackgroundUpload` | `false` | same |
+| 13 | `nativeBackgroundUpload` | `false` | same |
+| 14 | `nativeBackgroundUpload` | `false` | same (server-only exercise — `functions/src/capture/onAudioUploaded.js`) |
 
 Flip procedure for any flag above: edit the `config/flags` Firestore doc —
 see `docs/quality/trustworthy-capture-runbook.md` § Flags for the full table

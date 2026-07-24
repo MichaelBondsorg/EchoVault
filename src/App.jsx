@@ -70,6 +70,10 @@ import { quarantineLegacySessionBuffer, sweepLegacyVoiceTranscripts } from './se
 import { deleteNativeDraft, recoverNativeDrafts } from './services/capture/nativeCaptureAdapter';
 import { prepareDurableRecording } from './services/capture/prepareDurableRecording';
 import {
+  attachNativeBackgroundUploadListeners,
+  reconcileNativeBackgroundUploads,
+} from './services/capture/nativeBackgroundUpload';
+import {
   createOperation,
   advance as advanceOperation,
   completeOperation,
@@ -396,6 +400,16 @@ export default function App() {
           // still available via the options param.
         ).then((count) => count && console.log(`[Capture] recovered ${count} interrupted recording(s)`))
           .catch((error) => console.warn('[Capture] recovery scan failed:', error?.message));
+
+        // CAP-01: native background upload (flag: nativeBackgroundUpload,
+        // default OFF — ships DARK). Both calls check the flag first and
+        // no-op immediately when it's off — zero plugin/network calls, byte-
+        // for-byte the same startup behavior as before this feature existed.
+        attachNativeBackgroundUploadListeners(user.uid)
+          .catch((error) => console.warn('[Capture] background-upload listener attach failed:', error?.message));
+        reconcileNativeBackgroundUploads({ ownerUid: user.uid })
+          .then((s) => s && s.resolved && console.log('[Capture] background-upload reconcile:', s))
+          .catch((error) => console.warn('[Capture] background-upload reconcile failed:', error?.message));
       }
 
       // Resume voice-capture operations interrupted by an app kill/crash. The

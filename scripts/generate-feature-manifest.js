@@ -333,9 +333,9 @@ const CLIENT_FLAG_NOTES = {
     ownerGate: 'None on file beyond the general R1-era rollout posture.',
   },
   nativeBackgroundUpload: {
-    surface: 'CAP-01 (product review, P0): native direct-to-storage background upload for capture. No `getFlag(\'nativeBackgroundUpload\')` call site found anywhere in src/**/*.{js,jsx} at generation time — the flag is declared but not yet read client-side; verify native (ios/android) wiring before flipping.',
-    kpi: 'Capture-upload retention sweep `count` field (functions/src/telemetry/stageLog.js META_WHITELIST) once wired, plus capture success/duplicate-recovery test coverage (device-validation-matrix.md).',
-    ownerGate: 'CAP-01 is an open P0 in the product review — do not flip until that workstream lands and is verified end to end.',
+    surface: 'CAP-01 (product review, P0): native direct-to-storage background upload for capture, landed code-complete but DARK. Client call sites now exist — src/components/dashboard/EntryBar.jsx (native stopRecording branch, enqueue), src/App.jsx (launch-time listener attach + reconcile) — both via src/services/capture/nativeBackgroundUpload.js, and the server (functions/src/capture/{uploadTicket,onAudioUploaded}.js) + Swift (ios/App/App/Capture/{CapturePlugin,BackgroundUploader}.swift) sides are complete. Every call site checks this flag first and no-ops when it is off (verified by dedicated flag-off-inertness unit tests) — flipping requires Michael\'s physical-device validation (docs/quality/device-validation-matrix.md rows 5, 6, 11-14) first.',
+    kpi: 'Capture-upload retention sweep `count` field (functions/src/telemetry/stageLog.js META_WHITELIST), plus capture success/duplicate-recovery test coverage (device-validation-matrix.md rows 5, 6, 11-14).',
+    ownerGate: 'CAP-01 ships dark this sprint — do not flip until Michael completes the physical-device matrix rows (11-14: suspend/force-kill mid-upload, airplane-mode retry, duplicate-finalize) and signs off.',
   },
   webChunkPersistence: {
     surface: 'Additive web capture durability (chunked local persistence before upload).',

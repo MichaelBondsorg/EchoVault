@@ -27,7 +27,7 @@ read-only for clients; only the Admin SDK/Firebase console can write it.
 |---|---|---|---|---|
 | `coreFirstSave` | `true` | Persisting the core journal entry FIRST (before any optional enrichment), with enrichment moved to an async post-save `updateDoc` (`enrichmentRunner.js`). | The legacy inline pre-save enrichment path in `App.jsx` (health/location/weather awaited before the entry write). | `src/App.jsx:1330,1791` |
 | `serverAnalysisOrchestrator` | `false` | Skipping the client-side classify/analyze/insight/context chain after save, because the server `onEntryCreatedAnalysis` trigger owns it end-to-end. | The client-owned analysis chain (`runAnalysisChain` in `postSavePipeline`'s caller) — safe fallback if the server orchestrator misbehaves. | `src/services/entries/postSavePipeline.js:34` |
-| `nativeBackgroundUpload` | `false` | The native background-upload vertical slice: signed-URL PUT from `BackgroundUploader.swift`, server-side `onCaptureAudioUploaded` transcription + entry creation. **Fail-safe when off**: any object that somehow lands in `capture-uploads/**` is deleted without transcription (`onAudioUploaded.js` step 1). | The existing foreground base64 transcription pipeline (`transcribeEntryFn` et al.) — capture still works, just without background continuation. | Server: `functions/index.js` (`issueCaptureUploadTicket` callable, gates before signing), `functions/src/capture/onAudioUploaded.js` (`NATIVE_BACKGROUND_UPLOAD_FLAG`). **Client wiring status: incomplete** — see Known gaps below. |
+| `nativeBackgroundUpload` | `false` | The native background-upload vertical slice: signed-URL PUT from `BackgroundUploader.swift`, server-side `onCaptureAudioUploaded` transcription + entry creation. **Fail-safe when off**: any object that somehow lands in `capture-uploads/**` is deleted without transcription (`onAudioUploaded.js` step 1). | The existing foreground base64 transcription pipeline (`transcribeEntryFn` et al.) — capture still works, just without background continuation. | Server: `functions/index.js` (`issueCaptureUploadTicket` callable, gates before signing), `functions/src/capture/onAudioUploaded.js` (`NATIVE_BACKGROUND_UPLOAD_FLAG`). Client: `src/services/capture/nativeBackgroundUpload.js` (enqueue at `EntryBar.jsx`'s native stop path, launch-time reconcile + listener attach in `App.jsx`) — CAP-01 (product review 2026-07-24). **Ships code-complete but DARK**: every layer checks the flag first and no-ops when it's off; do not flip until the physical-device matrix (`docs/quality/device-validation-matrix.md` rows 5, 6, 11-14) is signed off. |
 | `webChunkPersistence` | `true` | Web `MediaRecorder` chunks writing incrementally to IndexedDB (`webChunkStore.js`) as they arrive, instead of only living in a RAM closure until Stop. Additive durability; default-on. | The RAM-only chunk array — a tab crash/reload mid-recording loses the in-progress web recording. | `src/components/dashboard/EntryBar.jsx:88,179` |
 | `intentExtraction` | `false` | Async server-side intent extraction (PRD 0B, `functions/src/intents/extractIntents.js`) feeding the policy-qualified `TasksWidget`. Not part of this sprint's capture-durability surface. | The legacy `extracted_tasks` local-analysis path. | Batch 7 (I1–I4) — not yet implemented as of this runbook's writing. |
 | `model.<workload>` (string) | (unset) | **Authoritative model lever.** A string value in `config/flags` for a key like `model.classify`, `model.analyze`, `model.insight`, `model.embedding`, `model.embeddingV2`, `model.fusedTranscription`, `model.tone`, `model.digest`, `model.transcriptionFallback` overrides that workload's default. | Removing the key → the compiled `MODEL_DEFAULTS`. | `functions/src/models/registry.js` `getModel(db, workload)` — LIVE at every threaded call site (see § Model registry flip procedure for the real/inventory-only breakdown). |
@@ -328,19 +328,30 @@ needs a Cloud Run env/redeploy, not a flag flip.
 
 ## Known gaps (accurate as of this runbook's writing)
 
-- **`nativeBackgroundUpload` client wiring is incomplete.** The server side
-  (`issueCaptureUploadTicket` callable, `onCaptureAudioUploaded` trigger,
-  `captureUploadsRetention` sweeper) and the Swift side
-  (`ios/App/App/Capture/BackgroundUploader.swift`) exist, but no client JS
-  call site requests an upload ticket or invokes `BackgroundUploader` yet —
-  `prepareDurableRecording.js` and the capture pipeline have no
-  `getFlag('nativeBackgroundUpload')` branch. **Flipping this flag on today
-  has no effect**: nothing client-side triggers the background-upload path,
-  so device-validation-matrix rows 5 and 6 cannot be exercised until that
-  wiring lands. This is a FINDING for whoever picks up the remainder of
-  Task B5 (or a follow-up task), not something this runbook's author
-  (task D34) was scoped to fix — flagged here so it isn't mistaken for an
-  already-shipped, flag-gated capability.
+- **`nativeBackgroundUpload` client wiring landed (CAP-01, product review
+  2026-07-24) — still ships DARK, not a resolved gap in the "safe to flip"
+  sense.** The server side (`issueCaptureUploadTicket` callable,
+  `onCaptureAudioUploaded` trigger, `captureUploadsRetention` sweeper) and
+  the Swift side (`ios/App/App/Capture/BackgroundUploader.swift`) that
+  existed before CAP-01 are now joined by a client seam:
+  `src/services/capture/nativeBackgroundUpload.js` (+
+  `backgroundUploadStore.js`) requests a ticket and calls
+  `NativeCapture.enqueueUpload` from `EntryBar.jsx`'s native `stopRecording`
+  branch, and attaches the `captureUploadComplete`/`captureUploadFailed`
+  listeners + reconciles pending uploads on launch from `App.jsx`. Every one
+  of those call sites checks `getFlag('nativeBackgroundUpload')` first and
+  is a fully-verified no-op when it's off (unit tests assert zero
+  ticket-callable/plugin calls in that state) — so flipping the flag on
+  today WOULD now exercise the whole loop, which is exactly why it must
+  stay off until Michael completes the physical-device matrix
+  (`docs/quality/device-validation-matrix.md` rows 5, 6, 11-14: suspend/
+  force-kill mid-upload, airplane-mode retry, duplicate-finalize) — none of
+  that is exercisable by CI (jsdom has no real `URLSession`/backgrounding).
+  The idempotency guarantee (a transactional guard doc keyed by the
+  operationId embedded in the Storage object path — see
+  `captureUploadGuardRef` in `onAudioUploaded.js`) was also hardened as part
+  of this task: the previous non-transactional duplicate check is replaced
+  with an atomic guard-and-create.
 - **Model registry (M1–M4) has landed.** `functions/src/models/registry.js`
   now owns every AI model id; the `model.<workload>` keys in `config/flags`
   are read by `getModel`, and the shut-down Gemini 2.0 digest/tone paths plus
