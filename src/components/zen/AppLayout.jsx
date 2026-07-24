@@ -83,6 +83,11 @@ const AppLayout = ({
   processing,
   captureSpaceId,
   onCaptureSpaceIdChange,
+  // CAP-02: threaded straight through to EntryComposer/EntryBar so a fresh
+  // web recording can acquire the wake lock at recording START, inside the
+  // mic-tap gesture — see App.jsx and EntryBar.jsx's startRecording.
+  requestWakeLock,
+  releaseWakeLock,
 
   // Quick Log Modal (state lifted to App.jsx)
   showQuickLog,
@@ -537,6 +542,8 @@ const AppLayout = ({
         promptContext={isFreshEntry ? null : replyContext}
         initialContext={initialContext}
         onEntrySaved={onEntrySavedCallback}
+        requestWakeLock={requestWakeLock}
+        releaseWakeLock={releaseWakeLock}
         reflection={isFreshEntry && reflectionQuestions.length > 0 ? (
           <div className="mb-3 rounded-2xl bg-[var(--accent-wash)] p-3">
             <div className="mb-1 flex items-center justify-between text-[var(--accent-deep)]">

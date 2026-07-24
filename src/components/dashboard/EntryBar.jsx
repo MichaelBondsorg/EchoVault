@@ -78,6 +78,17 @@ const webChunkRecoveryOwners = new Set();
 const EntryBar = ({
   ownerUid, onVoiceSave, onTextSave, onStateChange, loading, disabled, promptContext, onClearPrompt,
   preferredMode = 'text', embedded = false, captureSpaceId = null, onCaptureSpaceIdChange,
+  // CAP-02: web capture acquires the wake lock at recording START (inside
+  // this component's own mic-tap gesture) rather than after the recording
+  // has already stopped — see startRecording below. Both are optional
+  // (default no-ops) so this component still renders standalone/in tests
+  // without a caller wired up. releaseWakeLock is only used here to unwind
+  // the lock on THIS component's own pre-processing failure paths (denied
+  // mic permission, empty/failed recording, etc.) — the success path hands
+  // the lock's eventual release to the processing pipeline
+  // (handleAudioWrapper), which already owns it end to end.
+  requestWakeLock = async () => false,
+  releaseWakeLock = async () => {},
 }) => {
   const [mode, setMode] = useState('idle'); // idle, recording, typing
   const [recording, setRecording] = useState(false);
@@ -279,6 +290,11 @@ const EntryBar = ({
 
     try {
       console.log('[Recording] Starting microphone capture...');
+      // CAP-02: acquire the wake lock HERE — the first await in this
+      // gesture-initiated handler — before getUserMedia's own (potentially
+      // gesture-consuming) permission prompt. This is the only call site
+      // allowed to create the NoSleep video fallback; see useWakeLock.js.
+      await requestWakeLock();
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       const mime = MediaRecorder.isTypeSupported("audio/webm") ? "audio/webm" : "audio/mp4";
       console.log('[Recording] Using MIME type:', mime);
@@ -317,6 +333,10 @@ const EntryBar = ({
         setRecording(false);
         clearInterval(timerRef.current);
         stream.getTracks().forEach(t => t.stop());
+        // CAP-02: recording never reached the processing pipeline (which
+        // would otherwise own the release), so this early-failure path must
+        // release the lock itself.
+        releaseWakeLock();
       };
 
       recorder.onstop = () => {
@@ -328,6 +348,7 @@ const EntryBar = ({
           alert('No audio was captured. Please try again.');
           setMode('idle');
           stream.getTracks().forEach(t => t.stop());
+          releaseWakeLock(); // CAP-02: never reached the processing pipeline.
           return;
         }
 
@@ -339,6 +360,7 @@ const EntryBar = ({
           alert('Recording failed - no data. Please try again.');
           setMode('idle');
           stream.getTracks().forEach(t => t.stop());
+          releaseWakeLock(); // CAP-02: never reached the processing pipeline.
           return;
         }
 
@@ -349,6 +371,7 @@ const EntryBar = ({
           alert('Failed to process recording. Please try again.');
           setMode('idle');
           stream.getTracks().forEach(t => t.stop());
+          releaseWakeLock(); // CAP-02: never reached the processing pipeline.
         };
 
         reader.onloadend = async () => {
@@ -359,6 +382,7 @@ const EntryBar = ({
             alert('Recording processing failed. Please try again.');
             setMode('idle');
             stream.getTracks().forEach(t => t.stop());
+            releaseWakeLock(); // CAP-02: never reached the processing pipeline.
             return;
           }
 
@@ -370,6 +394,7 @@ const EntryBar = ({
             alert('Recording processing failed. Please try again.');
             setMode('idle');
             stream.getTracks().forEach(t => t.stop());
+            releaseWakeLock(); // CAP-02: never reached the processing pipeline.
             return;
           }
 
@@ -440,6 +465,7 @@ const EntryBar = ({
     } catch (e) {
       console.error('[Recording] Setup error:', e);
       alert("Microphone access denied or error occurred: " + e.message);
+      releaseWakeLock(); // CAP-02: mic access failed — never reached the processing pipeline.
     }
   };
 
@@ -596,7 +622,7 @@ const EntryBar = ({
               <span>Processing your voice...</span>
             </div>
             <p className="text-xs text-muted-foreground text-center max-w-xs">
-              Please keep the app open until processing is complete.
+              Your recording is saved. Processing may pause and resume if you leave.
             </p>
           </motion.div>
         ) : mode === 'typing' ? (

@@ -92,7 +92,13 @@ import { useIOSMeta } from './hooks/useIOSMeta';
 import { useNotifications } from './hooks/useNotifications';
 import { useNetworkStatus } from './hooks/useNetworkStatus';
 import { useWakeLock } from './hooks/useWakeLock';
-import { useBackgroundAudio } from './hooks/useBackgroundAudio';
+// CAP-02: useBackgroundAudio was dead code (its backupAudio/clearBackup/
+// recoverBackups were invoked here but never used — see the comment that
+// used to sit at this call site). Removed; its legacy
+// echov_audio_backup_* localStorage keys are now quarantined unconditionally
+// at module load by this side-effect import instead of the old per-mount
+// >24h-only cleanup effect below.
+import './services/storage/legacyAudioBackupSweep';
 
 // Zustand Stores
 import {
@@ -149,10 +155,6 @@ export default function App() {
   console.log('[Engram] App component rendering...');
   useIOSMeta();
   const { requestWakeLock, releaseWakeLock } = useWakeLock();
-  // backupAudio/clearBackup/isProcessing are unused here (audio backup is now
-  // owned by audioVault); isProcessing never existed on this hook's return
-  // value, so the old `isBackgroundProcessing` binding was always falsy.
-  useBackgroundAudio();
 
   // ============================================
   // ZUSTAND STORES (migrated from useState)
@@ -364,40 +366,13 @@ export default function App() {
     };
   }, [processing]);
 
-  // Cleanup stale audio backups on app startup (older than 24 hours)
+  // CAP-02: the legacy per-mount, >24h-only `echov_audio_backup_*` cleanup
+  // that used to live here is now redundant — those keys are quarantined
+  // unconditionally (not just once stale) by the module-load side-effect
+  // import ('./services/storage/legacyAudioBackupSweep') above, and nothing
+  // writes new ones any more (useBackgroundAudio, the only writer, is
+  // deleted). This effect keeps its other startup-recovery responsibilities.
   useEffect(() => {
-    try {
-      const now = Date.now();
-      const ONE_DAY = 24 * 60 * 60 * 1000;
-      const keysToRemove = [];
-
-      for (let i = 0; i < localStorage.length; i++) {
-        const key = localStorage.key(i);
-        if (key && key.startsWith('echov_audio_backup_')) {
-          try {
-            const data = JSON.parse(localStorage.getItem(key));
-            if (data.timestamp && (now - data.timestamp) > ONE_DAY) {
-              keysToRemove.push(key);
-            }
-          } catch (e) {
-            // Invalid data, remove it
-            keysToRemove.push(key);
-          }
-        }
-      }
-
-      keysToRemove.forEach(key => {
-        localStorage.removeItem(key);
-        console.log('Cleaned up stale audio backup:', key);
-      });
-
-      if (keysToRemove.length > 0) {
-        console.log(`Cleaned up ${keysToRemove.length} stale audio backup(s)`);
-      }
-    } catch (e) {
-      console.warn('Error cleaning up audio backups:', e);
-    }
-
     // Sweep the durable audio vault for recordings past the retention window.
     if (user?.uid) {
       audioVault.cleanupExpired(user.uid).then(n => n && console.log(`[audioVault] cleaned ${n} expired recording(s)`));
@@ -1967,6 +1942,15 @@ export default function App() {
     } = options;
     if (!aiProcessingEnabled) {
       setNeedsAiConsent(true);
+      // CAP-02: a web recording that reaches here already acquired the wake
+      // lock at recording START (EntryBar's startRecording) — this early
+      // return never reaches the processing pipeline that would otherwise
+      // own the release. Guard on `!processing`: this hook is one shared
+      // instance app-wide, so if a DIFFERENT operation is genuinely mid-
+      // pipeline right now, releasing here would wrongly drop its lock too
+      // — in that case leave it held; that other operation's own
+      // success/error path already owns releasing it.
+      if (!processing) releaseWakeLock();
       return false;
     }
     console.log('[Transcription] handleAudioWrapper called');
@@ -1979,6 +1963,7 @@ export default function App() {
     if (!base64 || base64.length < 100) {
       console.error('[Transcription] Invalid audio data received');
       alert('No audio data received. Please try recording again.');
+      if (!processing) releaseWakeLock(); // CAP-02: see the aiProcessingEnabled branch above.
       return false;
     }
 
@@ -1987,12 +1972,20 @@ export default function App() {
     // transcription+save pipeline for the same or another recording.
     if (processing) {
       console.log('[Transcription] handleAudioWrapper called while already processing — ignoring');
+      // CAP-02: deliberately NOT releasing here — an in-flight operation
+      // still owns this shared hook instance's lock; only ITS OWN
+      // success/error path may release it.
       return false;
     }
 
     setProcessing(true);
 
-    // Request wake lock to prevent iOS from killing the request during long transcriptions
+    // Request wake lock to prevent iOS from killing the request during long
+    // transcriptions. CAP-02: for a fresh web recording this is now a no-op
+    // (EntryBar's startRecording already acquired it) — acquireApiLock's
+    // idempotency guard makes the second call safe. It remains the sole
+    // acquire point for callers that never went through EntryBar's
+    // recording-start gesture (PendingAudioBanner retry, launch-resume).
     const wakeLockAcquired = await requestWakeLock();
     console.log('[Transcription] Wake lock acquired:', wakeLockAcquired);
 
@@ -3041,6 +3034,13 @@ export default function App() {
       onAudioSubmit={handleAudioWrapper}
       onTextSubmit={saveEntry}
       processing={processing}
+      // CAP-02: web capture must hold the wake lock for the WHOLE
+      // recording, not just during post-stop processing. EntryBar acquires
+      // it at recording START (inside the mic-tap gesture); handleAudioWrapper
+      // still owns every release (success/error/finally) once the pipeline
+      // settles — see EntryBar.jsx's startRecording and useWakeLock.js.
+      requestWakeLock={requestWakeLock}
+      releaseWakeLock={releaseWakeLock}
       captureSpaceId={captureSpaceId}
       onCaptureSpaceIdChange={setCaptureSpaceId}
 

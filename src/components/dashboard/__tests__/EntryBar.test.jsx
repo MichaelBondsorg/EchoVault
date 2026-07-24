@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, waitFor, cleanup } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, cleanup, act } from '@testing-library/react';
 import EntryBar from '../EntryBar';
 import { appendChunk, appendMarker, deleteDraft, recoverWebDrafts } from '../../../services/capture/webChunkStore';
 import { audioVault } from '../../../services/audio/audioVault';
@@ -595,6 +595,17 @@ describe('EntryBar — processing state (Fix A, UI-1)', () => {
     expect(status.className).not.toMatch(/\binset-0\b/);
   });
 
+  // CAP-02: the durable-custody copy fix. Durability (audioVault/
+  // webChunkStore) already secures the recording before this panel ever
+  // shows, and CAP-01 (background completion) hasn't landed — so this must
+  // never promise the app can finish while backgrounded, only state the
+  // save is already safe and processing may pause/resume.
+  it('CAP-02: processing copy is honest about custody — no "keep the app open" instruction, no background-completion promise', () => {
+    render(<EntryBar ownerUid={OWNER} onVoiceSave={vi.fn()} onTextSave={vi.fn()} embedded loading />);
+    expect(screen.getByText('Your recording is saved. Processing may pause and resume if you leave.')).toBeTruthy();
+    expect(screen.queryByText(/keep the app open/i)).toBeNull();
+  });
+
   it('gives the processing panel role=status, aria-live=polite, and an accessible name', () => {
     render(<EntryBar ownerUid={OWNER} onVoiceSave={vi.fn()} onTextSave={vi.fn()} embedded loading />);
     const status = screen.getByRole('status');
@@ -613,5 +624,101 @@ describe('EntryBar — processing state (Fix A, UI-1)', () => {
       <EntryBar ownerUid={OWNER} onVoiceSave={vi.fn()} onTextSave={vi.fn()} embedded loading />
     );
     expect(container.querySelector('.bg-destructive')).toBeNull();
+  });
+});
+
+// CAP-02: web capture must acquire the wake lock at recording START (inside
+// the mic-tap gesture) — not after the recording has already stopped — and
+// must release it on any of EntryBar's OWN pre-processing failure paths
+// (the ones that never reach the caller's processing pipeline, which is the
+// only other place that owns a release).
+describe('EntryBar — wake lock acquire-at-start (CAP-02)', () => {
+  it('acquires the wake lock as part of the mic-tap gesture, before getUserMedia resolves', async () => {
+    const requestWakeLock = vi.fn().mockResolvedValue(true);
+    const releaseWakeLock = vi.fn().mockResolvedValue(undefined);
+    render(
+      <EntryBar
+        ownerUid={OWNER}
+        onVoiceSave={vi.fn().mockResolvedValue(true)}
+        onTextSave={vi.fn()}
+        requestWakeLock={requestWakeLock}
+        releaseWakeLock={releaseWakeLock}
+      />
+    );
+
+    fireEvent.click(screen.getByLabelText('Record voice entry'));
+    await waitFor(() => expect(requestWakeLock).toHaveBeenCalledTimes(1));
+    expect(releaseWakeLock).not.toHaveBeenCalled();
+  });
+
+  it('releases the wake lock when getUserMedia is denied (never reaches the processing pipeline)', async () => {
+    const requestWakeLock = vi.fn().mockResolvedValue(true);
+    const releaseWakeLock = vi.fn().mockResolvedValue(undefined);
+    navigator.mediaDevices.getUserMedia = vi.fn().mockRejectedValue(new Error('denied'));
+    const alertSpy = vi.spyOn(window, 'alert').mockImplementation(() => {});
+
+    render(
+      <EntryBar
+        ownerUid={OWNER}
+        onVoiceSave={vi.fn()}
+        onTextSave={vi.fn()}
+        requestWakeLock={requestWakeLock}
+        releaseWakeLock={releaseWakeLock}
+      />
+    );
+
+    fireEvent.click(screen.getByLabelText('Record voice entry'));
+    await waitFor(() => expect(releaseWakeLock).toHaveBeenCalledTimes(1));
+    alertSpy.mockRestore();
+  });
+
+  it('releases the wake lock when the stopped recording captured no audio data', async () => {
+    const requestWakeLock = vi.fn().mockResolvedValue(true);
+    const releaseWakeLock = vi.fn().mockResolvedValue(undefined);
+    const alertSpy = vi.spyOn(window, 'alert').mockImplementation(() => {});
+
+    render(
+      <EntryBar
+        ownerUid={OWNER}
+        onVoiceSave={vi.fn()}
+        onTextSave={vi.fn()}
+        requestWakeLock={requestWakeLock}
+        releaseWakeLock={releaseWakeLock}
+      />
+    );
+    const recorder = await startFakeRecording();
+    // No ondataavailable events fired — chunks stays empty.
+    await act(async () => { recorder.stop(); });
+
+    await waitFor(() => expect(releaseWakeLock).toHaveBeenCalledTimes(1));
+    alertSpy.mockRestore();
+  });
+
+  it('does NOT release the wake lock on a successful stop — the processing pipeline (onVoiceSave) owns that release', async () => {
+    const requestWakeLock = vi.fn().mockResolvedValue(true);
+    const releaseWakeLock = vi.fn().mockResolvedValue(undefined);
+    const onVoiceSave = vi.fn().mockResolvedValue(true);
+
+    render(
+      <EntryBar
+        ownerUid={OWNER}
+        onVoiceSave={onVoiceSave}
+        onTextSave={vi.fn()}
+        requestWakeLock={requestWakeLock}
+        releaseWakeLock={releaseWakeLock}
+      />
+    );
+    const recorder = await startFakeRecording();
+    recorder.ondataavailable({ data: new Blob(['chunk-0-'.repeat(20)]) });
+    fireEvent.click(screen.getByLabelText('Stop recording'));
+
+    await waitFor(() => expect(onVoiceSave).toHaveBeenCalled());
+    expect(releaseWakeLock).not.toHaveBeenCalled();
+  });
+
+  it('renders and records fine with no wake-lock props supplied (defaults to safe no-ops)', async () => {
+    render(<EntryBar ownerUid={OWNER} onVoiceSave={vi.fn().mockResolvedValue(true)} onTextSave={vi.fn()} />);
+    const recorder = await startFakeRecording();
+    expect(recorder).toBeTruthy();
   });
 });

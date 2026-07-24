@@ -85,6 +85,14 @@ describe('EntryComposer — processing state (Fix A, UI-1)', () => {
     expect(status.className).not.toMatch(/\binset-0\b/);
   });
 
+  // CAP-02: same honest-custody copy contract as EntryBar.test.jsx, exercised
+  // through the real composition (EntryComposer renders the real EntryBar).
+  it('CAP-02: processing copy is honest about custody — no "keep the app open" instruction, no background-completion promise', () => {
+    render(<EntryComposer {...baseProps} processing reflection={<div>Reflect</div>} />);
+    expect(screen.getByText('Your recording is saved. Processing may pause and resume if you leave.')).toBeTruthy();
+    expect(screen.queryByText(/keep the app open/i)).toBeNull();
+  });
+
   it('gives the processing status role=status, aria-live=polite, and an accessible name', () => {
     render(<EntryComposer {...baseProps} processing reflection={<div>Reflect</div>} />);
     const status = screen.getByRole('status');

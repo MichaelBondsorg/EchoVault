@@ -36,6 +36,11 @@ const EntryComposer = ({
   onEntrySaved,
   captureSpaceId,
   onCaptureSpaceIdChange,
+  // CAP-02: passed straight through to EntryBar, which calls
+  // requestWakeLock() at recording START (inside the mic-tap gesture) and
+  // releaseWakeLock() on its own pre-processing failure paths.
+  requestWakeLock,
+  releaseWakeLock,
 }) => {
   const [captureState, setCaptureState] = useState('idle');
   const captureLocked = captureState === 'preparing' || captureState === 'recording';
@@ -176,6 +181,8 @@ const EntryComposer = ({
             onStateChange={setCaptureState}
             captureSpaceId={captureSpaceId}
             onCaptureSpaceIdChange={onCaptureSpaceIdChange}
+            requestWakeLock={requestWakeLock}
+            releaseWakeLock={releaseWakeLock}
           />
         </div>
         <p className="mt-3 shrink-0 text-center text-xs text-muted-foreground">

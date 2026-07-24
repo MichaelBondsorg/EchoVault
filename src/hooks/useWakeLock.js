@@ -1,28 +1,48 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 
 /**
- * Hook to keep the device awake during long operations
+ * Hook to keep the device awake during long operations (CAP-02).
  *
- * Uses multiple strategies:
- * 1. Wake Lock API (Chrome, Edge) - proper API when available
- * 2. NoSleep video trick (iOS Safari) - plays invisible video to prevent suspension
+ * Uses two strategies:
+ * 1. Screen Wake Lock API (Chrome, Edge, some Android browsers) — the real
+ *    API, and the ONLY strategy the spec allows to be (re)requested outside
+ *    a user gesture (e.g. from a `visibilitychange` handler).
+ * 2. NoSleep video trick (iOS Safari, and any other browser without the
+ *    Wake Lock API) — plays a tiny invisible looping video to prevent
+ *    suspension. Browsers that require user-activation for media playback
+ *    (iOS Safari in particular) will silently no-op `video.play()` if it is
+ *    not the direct result of a user gesture, so the video element is only
+ *    ever CREATED and first played from `requestWakeLock()` itself — the
+ *    function callers invoke directly from a click/tap handler. Once
+ *    created, that same element is reused (never recreated) by later
+ *    reacquire attempts.
  *
- * This is critical for iOS Safari which aggressively suspends pages and kills
- * pending network requests when the user switches apps or the screen dims.
+ * State-machine shape (the CAP-02 fix): `shouldStayAwakeRef` is the DESIRED
+ * state — true from the moment a caller asks for the lock until it
+ * explicitly releases it — tracked separately from `wakeLockRef`/`videoRef`,
+ * which represent the CURRENT lock handle(s). The single conflated
+ * `isLocked` boolean this hook used to expose as both couldn't tell "the
+ * operation is still active but the OS silently dropped the lock" apart
+ * from "the operation ended" — that distinction is exactly what the
+ * `visibilitychange` reacquire needs: it must reacquire only while
+ * `shouldStayAwakeRef.current` is true (an operation still wants the
+ * screen kept on), and must never reacquire once `releaseWakeLock()` has
+ * run. `isLocked` remains exposed as the CURRENT (not desired) lock state,
+ * for any caller that wants to render lock status.
  */
 export const useWakeLock = () => {
   const [isLocked, setIsLocked] = useState(false);
-  const wakeLockRef = useRef(null);
-  const videoRef = useRef(null);
-  const isIOSRef = useRef(false);
+  const wakeLockRef = useRef(null); // Screen Wake Lock API sentinel, or null.
+  const videoRef = useRef(null); // NoSleep video element, created lazily — ONLY inside a gesture-initiated requestWakeLock() call. Never created from the visibility-reacquire path.
+  // Desired state — true while some caller wants the device kept awake, set
+  // by requestWakeLock() and cleared by releaseWakeLock(). A ref (not
+  // state): the visibilitychange listener reads the latest value without
+  // needing to re-subscribe on every acquire/release.
+  const shouldStayAwakeRef = useRef(false);
 
-  // Detect iOS
-  useEffect(() => {
-    isIOSRef.current = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
-      (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
-  }, []);
-
-  // Create a tiny video element for iOS NoSleep trick
+  // Create a tiny video element for iOS NoSleep trick. Idempotent — returns
+  // the existing element if one was already created, so this never produces
+  // a second <video> even if called again.
   const createNoSleepVideo = useCallback(() => {
     if (videoRef.current) return videoRef.current;
 
@@ -43,59 +63,91 @@ export const useWakeLock = () => {
     return video;
   }, []);
 
-  // Request wake lock
+  // Try (or retry) the real Screen Wake Lock API only. Safe to call from
+  // outside a user gesture — that's the whole point of the API. Idempotent:
+  // a no-op (returns true without re-requesting) if a sentinel is already
+  // held, so a second caller (e.g. handleAudioWrapper acquiring again once
+  // processing starts, after EntryBar already acquired at recording start)
+  // never orphans an earlier sentinel.
+  const acquireApiLock = useCallback(async () => {
+    if (wakeLockRef.current) return true;
+    if (!('wakeLock' in navigator)) return false;
+    try {
+      const sentinel = await navigator.wakeLock.request('screen');
+      wakeLockRef.current = sentinel;
+      sentinel.addEventListener('release', () => {
+        // The OS/browser can release the sentinel out from under us (tab
+        // backgrounded, battery saver, etc.) without releaseWakeLock() ever
+        // running — shouldStayAwakeRef is deliberately left untouched here
+        // so a later visibilitychange reacquire can still fire.
+        if (wakeLockRef.current === sentinel) wakeLockRef.current = null;
+        setIsLocked(Boolean(videoRef.current && !videoRef.current.paused));
+      });
+      setIsLocked(true);
+      console.log('Wake lock acquired via API');
+      return true;
+    } catch (err) {
+      console.warn('Wake Lock API failed:', err);
+      wakeLockRef.current = null;
+      return false;
+    }
+  }, []);
+
+  // Play the NoSleep video. `allowCreate` gates whether this call is allowed
+  // to CREATE the element (only true from the gesture-initiated
+  // requestWakeLock() path) — the visibility-reacquire path passes false so
+  // it only ever resumes an element that a prior gesture already created,
+  // never conjuring a fresh `<video>` (and therefore a fresh, gesture-less
+  // `.play()`) out of a background callback.
+  const playVideoFallback = useCallback(async (allowCreate) => {
+    let video = videoRef.current;
+    if (!video) {
+      if (!allowCreate) return false;
+      video = createNoSleepVideo();
+    }
+    try {
+      await video.play();
+      setIsLocked(true);
+      console.log('Wake lock acquired via video (iOS fallback)');
+      return true;
+    } catch (err) {
+      console.warn('Video wake lock play failed:', err);
+      return false;
+    }
+  }, [createNoSleepVideo]);
+
+  // Request wake lock — the gesture-initiated entry point. Callers MUST
+  // invoke this directly from a user gesture (click/tap handler), not after
+  // intervening awaits, because it is the only place allowed to create +
+  // play the NoSleep video fallback.
   const requestWakeLock = useCallback(async () => {
-    // Strategy 1: Try Wake Lock API first (works on Chrome, Edge, some Android browsers)
-    if ('wakeLock' in navigator) {
-      try {
-        wakeLockRef.current = await navigator.wakeLock.request('screen');
-        setIsLocked(true);
+    shouldStayAwakeRef.current = true;
 
-        wakeLockRef.current.addEventListener('release', () => {
-          console.log('Wake lock released');
-          setIsLocked(false);
-        });
+    const apiOk = await acquireApiLock();
+    if (apiOk) return true;
 
-        console.log('Wake lock acquired via API');
-        return true;
-      } catch (err) {
-        console.warn('Wake Lock API failed, falling back to video:', err);
-      }
-    }
-
-    // Strategy 2: iOS Safari - use video playback trick
-    if (isIOSRef.current || !('wakeLock' in navigator)) {
-      try {
-        const video = createNoSleepVideo();
-        await video.play();
-        setIsLocked(true);
-        console.log('Wake lock acquired via video (iOS fallback)');
-        return true;
-      } catch (err) {
-        console.error('Video wake lock failed:', err);
-        // On iOS, video might need user gesture - log but continue
-        console.log('Note: iOS may require user interaction for video playback');
-      }
-    }
+    const videoOk = await playVideoFallback(/* allowCreate */ true);
+    if (videoOk) return true;
 
     console.log('No wake lock mechanism available');
     return false;
-  }, [createNoSleepVideo]);
+  }, [acquireApiLock, playVideoFallback]);
 
-  // Release wake lock
+  // Release wake lock — clears desired state, so no later visibilitychange
+  // reacquires on behalf of an operation that has already ended.
   const releaseWakeLock = useCallback(async () => {
-    // Release Wake Lock API
+    shouldStayAwakeRef.current = false;
+
     if (wakeLockRef.current) {
       try {
         await wakeLockRef.current.release();
-        wakeLockRef.current = null;
         console.log('Wake lock released (API)');
       } catch (err) {
         console.error('Failed to release wake lock:', err);
       }
+      wakeLockRef.current = null;
     }
 
-    // Stop video playback
     if (videoRef.current) {
       videoRef.current.pause();
       console.log('Wake lock released (video)');
@@ -104,22 +156,25 @@ export const useWakeLock = () => {
     setIsLocked(false);
   }, []);
 
-  // Re-acquire wake lock when page becomes visible again
+  // Re-acquire on visibility change — ONLY while the operation is still
+  // active (shouldStayAwakeRef.current), and ONLY via the Wake Lock API or
+  // the already-created video element — never creates a new video here.
   useEffect(() => {
     const handleVisibilityChange = async () => {
-      if (document.visibilityState === 'visible' && isLocked) {
-        // Page became visible again, try to re-acquire wake lock
-        if (!wakeLockRef.current && !videoRef.current?.paused === false) {
-          await requestWakeLock();
-        }
-      }
+      if (document.visibilityState !== 'visible') return;
+      if (!shouldStayAwakeRef.current) return;
+
+      const apiOk = await acquireApiLock();
+      if (apiOk) return;
+
+      await playVideoFallback(/* allowCreate */ false);
     };
 
     document.addEventListener('visibilitychange', handleVisibilityChange);
     return () => {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, [isLocked, requestWakeLock]);
+  }, [acquireApiLock, playVideoFallback]);
 
   // Cleanup on unmount
   useEffect(() => {
