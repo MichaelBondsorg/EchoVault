@@ -1,0 +1,59 @@
+{
+  "_note": "Synthetic, content-free fixtures for scripts/benchmark-model.mjs. No real journal text, no audio binaries. Values below are placeholders chosen only to exercise prompt-assembly and shape validation.",
+
+  "fusedTranscription": {
+    "_note": "Audio binaries are never committed. To run a REAL candidate comparison for this workload, pass --audio-file <path-to-a-local-wav-or-m4a-on-your-machine>; without it, this workload only runs in --dry-run (prompt assembly + request-body shape check, no audio, no network call).",
+    "mimeType": "audio/wav",
+    "properNouns": ["Notion", "Whoop", "Duolingo"],
+    "markers": [{ "tMs": 1200 }, { "tMs": 4300 }],
+    "durationMs": 7000
+  },
+
+  "insightWriter": {
+    "bundle": {
+      "subject": "reading before bed",
+      "outcome": "sleep quality",
+      "direction": "positive",
+      "claimType": "pattern_to_watch",
+      "numbers": {
+        "exposedDayCount": 11,
+        "comparisonDayCount": 18,
+        "observedSpanDays": 40,
+        "effectMoodPoints": 5.4,
+        "hiddenSensitiveSourceCount": 0
+      },
+      "limitations": ["Same-day association only."],
+      "excerpts": [
+        { "date": "2026-01-04", "excerpt": "Read a chapter, fell asleep fast." },
+        { "date": "2026-01-06", "excerpt": "Scrolled instead of reading, restless night." }
+      ],
+      "deterministicWording": "On days you logged reading before bed, your recorded sleep quality averaged 5.4 points higher (0-100 scale) than days you didn't - 11 vs 18 days over 40 days."
+    }
+  },
+
+  "insightVerifier": {
+    "bundle": {
+      "subject": "reading before bed",
+      "outcome": "sleep quality",
+      "direction": "positive",
+      "claimType": "pattern_to_watch",
+      "numbers": {
+        "exposedDayCount": 11,
+        "comparisonDayCount": 18,
+        "observedSpanDays": 40,
+        "effectMoodPoints": 5.4,
+        "hiddenSensitiveSourceCount": 0
+      },
+      "limitations": ["Same-day association only."],
+      "excerpts": [
+        { "date": "2026-01-04", "excerpt": "Read a chapter, fell asleep fast." },
+        { "date": "2026-01-06", "excerpt": "Scrolled instead of reading, restless night." }
+      ],
+      "deterministicWording": "On days you logged reading before bed, your recorded sleep quality averaged 5.4 points higher (0-100 scale) than days you didn't - 11 vs 18 days over 40 days."
+    },
+    "candidateWordings": [
+      "On days you logged reading before bed, your sleep quality tended to be about 5 points higher than days you didn't, across 40 days.",
+      "Reading before bed always improves your sleep quality by 12 points, which proves it works."
+    ]
+  }
+}

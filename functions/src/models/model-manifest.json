@@ -1,0 +1,89 @@
+{
+  "workloads": [
+    {
+      "workload": "analyze",
+      "modelId": "gemini-3-flash-preview",
+      "promptVersion": 1
+    },
+    {
+      "workload": "chat",
+      "modelId": "gpt-4o-mini",
+      "promptVersion": null
+    },
+    {
+      "workload": "chatFallback",
+      "modelId": "gpt-4o",
+      "promptVersion": null
+    },
+    {
+      "workload": "classify",
+      "modelId": "gemini-3-flash-preview",
+      "promptVersion": null
+    },
+    {
+      "workload": "digest",
+      "modelId": "gemini-3.5-flash",
+      "promptVersion": null
+    },
+    {
+      "workload": "embedding",
+      "modelId": "text-embedding-004",
+      "promptVersion": null
+    },
+    {
+      "workload": "embeddingV2",
+      "modelId": "gemini-embedding-2",
+      "promptVersion": null
+    },
+    {
+      "workload": "entityResolution",
+      "modelId": "gemini-3-flash-preview",
+      "promptVersion": null
+    },
+    {
+      "workload": "fusedTranscription",
+      "modelId": "gemini-2.5-flash",
+      "promptVersion": null
+    },
+    {
+      "workload": "insight",
+      "modelId": "gemini-3-flash-preview",
+      "promptVersion": null
+    },
+    {
+      "workload": "insightVerifier",
+      "modelId": "gemini-3-flash-preview",
+      "promptVersion": 1
+    },
+    {
+      "workload": "insightWriter",
+      "modelId": "gemini-3.5-flash",
+      "promptVersion": null
+    },
+    {
+      "workload": "intentExtraction",
+      "modelId": "gemini-3.5-flash",
+      "promptVersion": 1
+    },
+    {
+      "workload": "realtimeNA",
+      "modelId": "gpt-realtime-2.1",
+      "promptVersion": null
+    },
+    {
+      "workload": "temporal",
+      "modelId": "gemini-3.5-flash",
+      "promptVersion": null
+    },
+    {
+      "workload": "tone",
+      "modelId": "gemini-3.5-flash",
+      "promptVersion": null
+    },
+    {
+      "workload": "transcriptionFallback",
+      "modelId": "whisper-1",
+      "promptVersion": null
+    }
+  ]
+}
