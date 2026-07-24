@@ -12,13 +12,25 @@
  *   - `functions/src/models/registry.js` -> MODEL_DEFAULTS / WORKLOADS /
  *                                      MODEL_FLAG_DEFAULTS (server model
  *                                      registry)
- *   - every `functions/src/**\/*.js` (excluding __tests__) -> every literal
- *     `getServerFlag(db, 'name', default)` call site (server-only flags a
- *     client never reads, e.g. `intentAbstainAudit`)
- *   - every `src/**\/*.js` + `functions/src/**\/*.js` (excluding
- *     __tests__/node_modules/dist) -> every `export const SCREAMING_CASE =
- *     true|false;` (dark code-constant kill switches with no Firestore
- *     doc at all, e.g. `LLM_WRITER_ENABLED`, `USE_FUSED_TRANSCRIPTION`)
+ *   - every `functions/src/**\/*.js` PLUS the top-level `functions/index.js`
+ *     monolith (excluding __tests__) -> every literal `getServerFlag(db,
+ *     'name', default)` call site (server-only flags a client never reads,
+ *     e.g. `intentAbstainAudit`) AND every literal `getModelFlag(db,
+ *     'name')` call site (model-boolean flags like `model.embeddingWriteV2`
+ *     that are wired through the registry's own accessor, not a raw
+ *     getServerFlag literal). `functions/index.js` is a real, ~4,900-line,
+ *     pre-modularization scan root, NOT an incidental extra dir — an
+ *     earlier version of this generator only walked `functions/src/`,
+ *     which produced a manifest row asserting `model.embeddingWriteV2` had
+ *     "zero callers repo-wide" when in fact `functions/index.js`'s
+ *     `generateEmbeddingInternal()` reads it on every embedding write (see
+ *     `scripts/__tests__/feature-manifest.test.js`'s "blind spot" tests,
+ *     which pin this specific regression).
+ *   - every `src/**\/*.js` + `functions/src/**\/*.js` + `functions/index.js`
+ *     (excluding __tests__/node_modules/dist) -> every `export const
+ *     SCREAMING_CASE = true|false;` (dark code-constant kill switches with
+ *     no Firestore doc at all, e.g. `LLM_WRITER_ENABLED`,
+ *     `USE_FUSED_TRANSCRIPTION`)
  *
  * ---- Parsing approach (documented per the task's "your call" note) -------
  *
@@ -137,6 +149,12 @@ export function extractExportedLiteral(source, name) {
 
 // ---------------------------------------------------------------------------
 // Filesystem walk
+//
+// `collectFiles` accepts a mix of DIRECTORY roots (walked recursively) and
+// FILE roots (included directly if their extension matches) — the latter
+// exists specifically so a monolith like `functions/index.js` can be added
+// as a scan root alongside directory trees like `functions/src`, without
+// every scanner needing its own directory-vs-file special case.
 // ---------------------------------------------------------------------------
 
 function walkFiles(dir, { excludeDirs = ['node_modules', '__tests__', 'dist'], exts = ['.js'] } = {}) {
@@ -155,32 +173,76 @@ function walkFiles(dir, { excludeDirs = ['node_modules', '__tests__', 'dist'], e
   return out.sort();
 }
 
+/**
+ * Resolve a list of roots (directories and/or individual files) into a
+ * deduplicated, sorted list of absolute file paths matching `exts`.
+ */
+function collectFiles(roots, opts = {}) {
+  const { exts = ['.js'] } = opts;
+  const seen = new Set();
+  const out = [];
+  for (const root of roots) {
+    if (!existsSync(root)) continue;
+    const st = statSync(root);
+    if (st.isFile()) {
+      if (exts.some((ext) => root.endsWith(ext)) && !seen.has(root)) {
+        seen.add(root);
+        out.push(root);
+      }
+    } else if (st.isDirectory()) {
+      for (const f of walkFiles(root, opts)) {
+        if (!seen.has(f)) {
+          seen.add(f);
+          out.push(f);
+        }
+      }
+    }
+  }
+  return out.sort();
+}
+
 function toRelPosix(absPath) {
   return relative(ROOT, absPath).split(sep).join('/');
 }
 
+/** 1-based line number of `index` within `text` (for file:line call-site references). */
+function lineNumberAt(text, index) {
+  let line = 1;
+  for (let i = 0; i < index && i < text.length; i++) {
+    if (text[i] === '\n') line++;
+  }
+  return line;
+}
+
 // ---------------------------------------------------------------------------
 // Source-derived scans
+//
+// Every scanner below takes an array of ROOTS (directories and/or files —
+// see `collectFiles`) rather than a single directory, specifically so
+// `functions/index.js` (the pre-modularization monolith — see the file
+// header) can be included alongside `functions/src`/`src` everywhere a
+// scanner might otherwise miss a real call site living in it.
 // ---------------------------------------------------------------------------
 
 /**
- * Every literal `getServerFlag(db, 'name', default)` call site under
- * functions/src (excluding __tests__). Returns a Map name -> { defaults:
+ * Every literal `getServerFlag(db, 'name', default)` call site under the
+ * given roots (excluding __tests__). Returns a Map name -> { defaults:
  * Set<string>, files: string[] } — `defaults` holds every distinct literal
  * default text seen (normally exactly one; more than one is a real
- * inconsistency worth surfacing, not hiding).
+ * inconsistency worth surfacing, not hiding). `files` entries are
+ * `relative/path.js:LINE` so a reader can jump straight to the call site.
  */
-export function scanServerFlagReads(functionsSrcDir) {
+export function scanServerFlagReads(roots) {
   const re = /getServerFlag\(\s*db\s*,\s*['"]([\w.]+)['"]\s*,\s*(true|false|null)\s*\)/g;
   const result = new Map();
-  for (const file of walkFiles(functionsSrcDir, { exts: ['.js'] })) {
+  for (const file of collectFiles(roots, { exts: ['.js'] })) {
     const text = readFileSync(file, 'utf8');
     let m;
     while ((m = re.exec(text)) !== null) {
       const [, name, def] = m;
       if (!result.has(name)) result.set(name, { defaults: new Set(), files: [] });
       result.get(name).defaults.add(def);
-      result.get(name).files.push(toRelPosix(file));
+      result.get(name).files.push(`${toRelPosix(file)}:${lineNumberAt(text, m.index)}`);
     }
   }
   for (const v of result.values()) v.files.sort();
@@ -188,33 +250,58 @@ export function scanServerFlagReads(functionsSrcDir) {
 }
 
 /**
- * Every `export const SCREAMING_CASE = true|false;` under the given root
- * dirs (excluding __tests__/node_modules/dist) — the repo's dark
+ * Every literal `getModelFlag(db, 'name')` call site under the given roots
+ * (excluding __tests__) — the registry's own accessor for boolean model
+ * flags (`MODEL_FLAG_DEFAULTS`, e.g. `model.embeddingWriteV2`), distinct
+ * from the raw `getServerFlag` literal pattern above because `getModel()`'s
+ * per-workload override uses a template-literal flag name (not a string
+ * literal), so it is intentionally NOT matched by either flag scanner —
+ * that resolution path is documented instead via the model-workload table
+ * (`MODEL_DEFAULTS`/`STRING_ALLOWED`). Returns a Map name -> string[] of
+ * `relative/path.js:LINE` call sites.
+ */
+export function scanModelFlagReads(roots) {
+  const re = /getModelFlag\(\s*db\s*,\s*['"]([\w.]+)['"]\s*\)/g;
+  const result = new Map();
+  for (const file of collectFiles(roots, { exts: ['.js'] })) {
+    const text = readFileSync(file, 'utf8');
+    let m;
+    while ((m = re.exec(text)) !== null) {
+      const name = m[1];
+      if (!result.has(name)) result.set(name, []);
+      result.get(name).push(`${toRelPosix(file)}:${lineNumberAt(text, m.index)}`);
+    }
+  }
+  for (const v of result.values()) v.sort();
+  return result;
+}
+
+/**
+ * Every `export const SCREAMING_CASE = true|false;` under the given roots
+ * (excluding __tests__/node_modules/dist) — the repo's dark
  * code-constant kill-switch naming convention (verified low-noise: as of
  * generation time this pattern matches exactly the two real toggles this
  * manifest documents, `LLM_WRITER_ENABLED` and `USE_FUSED_TRANSCRIPTION`;
  * a newly added one is picked up automatically on the next regen).
  */
-export function scanDarkConstants(rootDirs) {
+export function scanDarkConstants(roots) {
   const re = /export\s+const\s+([A-Z][A-Z0-9_]*)\s*=\s*(true|false)\s*;/g;
   const rows = [];
-  for (const dir of rootDirs) {
-    for (const file of walkFiles(dir, { exts: ['.js'] })) {
-      const text = readFileSync(file, 'utf8');
-      let m;
-      while ((m = re.exec(text)) !== null) {
-        rows.push({ name: m[1], value: m[2] === 'true', file: toRelPosix(file) });
-      }
+  for (const file of collectFiles(roots, { exts: ['.js'] })) {
+    const text = readFileSync(file, 'utf8');
+    let m;
+    while ((m = re.exec(text)) !== null) {
+      rows.push({ name: m[1], value: m[2] === 'true', file: toRelPosix(file) });
     }
   }
   rows.sort((a, b) => a.name.localeCompare(b.name));
   return rows;
 }
 
-/** True iff a literal `getFlag('name')` call site exists anywhere under srcDir (excluding __tests__). */
-export function scanClientFlagReadSites(srcDir) {
+/** Set of every literal `getFlag('name')` call site found under the given roots (excluding __tests__). */
+export function scanClientFlagReadSites(roots) {
   const found = new Set();
-  for (const file of walkFiles(srcDir, { exts: ['.js', '.jsx'] })) {
+  for (const file of collectFiles(roots, { exts: ['.js', '.jsx'] })) {
     const text = readFileSync(file, 'utf8');
     const re = /getFlag\(\s*'([\w.]+)'\s*\)/g;
     let m;
@@ -306,7 +393,7 @@ const CLIENT_FLAG_NOTES = {
     ownerGate: 'Checklist item (5): 4th in the recommended R2 flip order.',
   },
   gentleRevisit: {
-    surface: 'functions/src/revisit/selectRevisits.js — server-side, no-LLM heuristic job writing `revisit_queue`, suppressed by `revisit_exclusions`; six non-negotiable safety rules including a 14-day current-state pause gate and weekly cadence.',
+    surface: 'functions/src/revisit/selectRevisits.js — server-side, no-LLM heuristic job writing `revisit_queue`, suppressed by `revisit_exclusions`; enforces the plan/brief\'s six non-negotiable safety rules (GR1 added a legacy-fail-closed eligibility rule + retuned the mood floor within that set), PLUS two separate GR1 per-user "skip today" gates layered on top before selection even runs: a current-state pause gate (recent safety signal/sustained low mood) and a weekly cadence gate.',
     kpi: '`revisit_queue`/`revisit_exclusions` document counts and outcome fields (shown/dismissed) — owner-scoped Firestore query, no dashboard.',
     ownerGate: 'Checklist item (4): safety memo docs/quality/gentle-revisit-safety.md SIGNED 2026-07-22 (both boxes). Still gated by checklist item (5) — flip LAST, after insightReceipts/voiceChapters/reflectionRecipes/sessionPrep. The memo gate is separate from and in addition to the flag itself.',
   },
@@ -316,9 +403,9 @@ const CLIENT_FLAG_NOTES = {
     ownerGate: 'Checklist item (8): safety/data-method memo docs/quality/experiments-data-method.md SIGNED 2026-07-22 (both boxes). No composite index needed (item 10).',
   },
   'model.embeddingWriteV2': {
-    surface: 'functions/src/models/registry.js MODEL_FLAG_DEFAULTS — intended to gate writing embeddings through the v2 (gemini-embedding-2) path during the dual-index migration. No `getModelFlag(\'model.embeddingWriteV2\')` (or any) call site found anywhere in functions/src at generation time — `getModelFlag()` itself has zero callers repo-wide. Declared but not wired to any code path today.',
-    kpi: 'N/A — nothing reads it yet.',
-    ownerGate: 'Part of the 2026-07-22 embeddings-v2-migration plan (docs/superpowers/plans/2026-07-22-embeddings-v2-migration.md) — confirm intended write-path wiring before relying on this flag; it may need a real call site added, not just a flip.',
+    surface: 'functions/src/models/registry.js MODEL_FLAG_DEFAULTS — gates writing embeddings through the v2 (gemini-embedding-2) path during the dual-index migration. WIRED: read via `getModelFlag(db, \'model.embeddingWriteV2\')` inside `generateEmbeddingInternal()` in the `functions/index.js` monolith (NOT `functions/src` — the exact file:line is auto-derived below). Flipping this ON activates the v2 dual-write for every subsequent embedding write; flipping it back OFF stops new v2 writes (existing v2 vectors already written are untouched).',
+    kpi: 'v2-embedding write volume — no dedicated log line found; watch `embeddingV2` field presence rate on newly-written entry docs (owner-scoped Firestore query) before/after flip, and the `model_manifest` log lines for the `embeddingV2` workload once a write-path call logs through `logModelManifest` (confirm at flip time — not verified as wired to that log call specifically).',
+    ownerGate: 'Part of the 2026-07-22 embeddings-v2-migration plan (docs/superpowers/plans/2026-07-22-embeddings-v2-migration.md). Rollback = flip back to false via `node scripts/flip-flag.mjs model.embeddingWriteV2 false` — the v1 legacy path in `generateEmbeddingInternal()` runs independently in its own try/catch regardless of this flag, so flipping OFF does not remove v1 coverage.',
   },
   insightClaims: {
     surface: 'src/services/insights/{observations,testingLedger}.js + src/services/insights/claims/ — canonical, versioned, immutable-with-lineage InsightClaim store; writes to `insight_claims` and `testing_ledger` collections.',
@@ -376,6 +463,7 @@ export function buildManifestData() {
   const flipFlagPath = join(ROOT, 'scripts', 'flip-flag.mjs');
   const registryPath = join(ROOT, 'functions', 'src', 'models', 'registry.js');
   const functionsSrcDir = join(ROOT, 'functions', 'src');
+  const functionsIndexPath = join(ROOT, 'functions', 'index.js');
   const srcDir = join(ROOT, 'src');
 
   const flagsJsSrc = readFileSync(flagsJsPath, 'utf8');
@@ -388,21 +476,29 @@ export function buildManifestData() {
   const MODEL_DEFAULTS = extractExportedLiteral(registrySrc, 'MODEL_DEFAULTS');
   const MODEL_FLAG_DEFAULTS = extractExportedLiteral(registrySrc, 'MODEL_FLAG_DEFAULTS');
 
-  const serverFlagReads = scanServerFlagReads(functionsSrcDir);
-  const clientReadSites = scanClientFlagReadSites(srcDir);
-  const darkConstants = scanDarkConstants([srcDir, functionsSrcDir]);
+  // Every scan root list below includes `functions/index.js` explicitly —
+  // the pre-modularization monolith is a real, live call-site location
+  // (see the file header's "blind spot" note), not covered by
+  // `functions/src` alone.
+  const functionsRoots = [functionsSrcDir, functionsIndexPath];
+  const serverFlagReads = scanServerFlagReads(functionsRoots);
+  const modelFlagReads = scanModelFlagReads(functionsRoots);
+  const clientReadSites = scanClientFlagReadSites([srcDir, functionsIndexPath]);
+  const darkConstants = scanDarkConstants([srcDir, functionsSrcDir, functionsIndexPath]);
 
   // --- Unified flags table (client + server-only + model-boolean flags) ---
   const names = new Set([
     ...Object.keys(FLAG_DEFAULTS),
     ...Object.keys(MODEL_FLAG_DEFAULTS),
     ...serverFlagReads.keys(),
+    ...modelFlagReads.keys(),
   ]);
 
   const flagRows = [...names].sort().map((name) => {
     const inClientDefaults = Object.prototype.hasOwnProperty.call(FLAG_DEFAULTS, name);
     const inModelFlagDefaults = Object.prototype.hasOwnProperty.call(MODEL_FLAG_DEFAULTS, name);
     const serverInfo = serverFlagReads.get(name);
+    const modelInfo = modelFlagReads.get(name); // string[] of file:line, or undefined
 
     let defaultValue;
     let defaultSource;
@@ -423,10 +519,23 @@ export function buildManifestData() {
 
     const inAllowed = ALLOWED.includes(name);
     const inStringAllowed = Object.prototype.hasOwnProperty.call(STRING_ALLOWED, name);
+    // NOTE: `inStringAllowed` is currently always false at this point in the
+    // unified flags loop — STRING_ALLOWED's keys (model.fusedTranscription,
+    // model.insightWriter, model.insightVerifier) are read via getModel()'s
+    // generic `getServerFlag(db, \`model.${workload}\`, null)` template-literal
+    // call, which scanServerFlagReads' regex deliberately does NOT match (it
+    // only matches string-LITERAL flag names), so no STRING_ALLOWED name can
+    // ever land in `names` above via serverFlagReads/modelFlagReads, and none
+    // are declared in FLAG_DEFAULTS/MODEL_FLAG_DEFAULTS either. The branch is
+    // kept (not deleted) because a future flag COULD be both a plain boolean
+    // and separately string-overridable — this guards that shape correctly
+    // if it ever exists; today it is unexercised by real data (confirmed by
+    // the "STRING_ALLOWED-only" test in feature-manifest.test.js).
     let flipMechanism;
+    let takesEffect;
     let rollback;
     if (inAllowed) {
-      flipMechanism = `node scripts/flip-flag.mjs ${name} true  (client: next app load; server: within 60s; no deploy)`;
+      flipMechanism = `node scripts/flip-flag.mjs ${name} true`;
       rollback = `node scripts/flip-flag.mjs ${name} false`;
     } else if (inStringAllowed) {
       const values = STRING_ALLOWED[name].join(' | ');
@@ -437,16 +546,45 @@ export function buildManifestData() {
       rollback = `Direct Admin SDK/Firestore-console write: delete/false the \`config/flags.${name}\` field.`;
     }
 
+    // Timing is a property of WHERE the flag is read (client getFlag / server
+    // getServerFlag+getModelFlag caching), not of how the Firestore field got
+    // written — so it applies the same whether the write came from
+    // flip-flag.mjs or a direct console edit. Kept in its own column (not
+    // spliced onto the flip-mechanism command) so that cell stays a single,
+    // cleanly copy-pasteable command — matching the Rollback column.
+    const readsClientSide = clientReadSites.has(name);
+    const readsServerSide = Boolean(serverInfo) || Boolean(modelInfo);
+    const timingParts = [];
+    if (readsClientSide) timingParts.push('client: next app load');
+    if (readsServerSide) timingParts.push('server: within 60s (getServerFlag 60s in-process cache)');
+    takesEffect = timingParts.length > 0 ? `${timingParts.join('; ')} — no deploy` : 'unknown — see Gaps (no confirmed read site)';
+
     const notes = CLIENT_FLAG_NOTES[name] || SERVER_FLAG_NOTES[name] || {
       surface: '(not yet annotated — add an entry to CLIENT_FLAG_NOTES/SERVER_FLAG_NOTES in scripts/generate-feature-manifest.js)',
       kpi: '(not yet annotated)',
       ownerGate: '(not yet annotated)',
     };
 
+    // Auto-derived, self-correcting evidence: appended programmatically
+    // (not hand-typed) so a future new/moved call site is reflected even if
+    // the curated prose above goes stale — this is the direct fix for the
+    // false "zero callers repo-wide" claim a hand-typed note previously made
+    // about `model.embeddingWriteV2` before functions/index.js was a scan root.
+    let surface = notes.surface;
+    if (modelInfo && modelInfo.length > 0) {
+      surface += ` [derived: read via getModelFlag() at ${modelInfo.join(', ')}]`;
+    }
+    if (serverInfo && serverInfo.files.length > 0) {
+      surface += ` [derived: read via getServerFlag() at ${serverInfo.files.join(', ')}]`;
+    }
+
     const gaps = [];
-    if (inClientDefaults && !clientReadSites.has(name) && name !== 'model.gemini35flash') {
+    if (inClientDefaults && !readsClientSide && name !== 'model.gemini35flash') {
       // model.gemini35flash's dead-flag gap is already called out in its own note.
       gaps.push('No `getFlag(...)` call site found in src/ at generation time.');
+    }
+    if ((inClientDefaults || inModelFlagDefaults) && !readsClientSide && !readsServerSide && name !== 'model.gemini35flash') {
+      gaps.push('No read call site (getFlag/getServerFlag/getModelFlag) found anywhere at generation time — declared but unwired.');
     }
     if (!inAllowed && !inStringAllowed) {
       gaps.push('No flip-flag.mjs entry (see mechanism column).');
@@ -459,9 +597,12 @@ export function buildManifestData() {
       defaultSource,
       clientDefined: inClientDefaults,
       serverReadFiles: serverInfo ? serverInfo.files : [],
+      modelFlagReadFiles: modelInfo || [],
       flipMechanism,
+      takesEffect,
       rollback,
       ...notes,
+      surface,
       gaps,
     };
   });
@@ -506,7 +647,8 @@ export function buildManifestData() {
     generatedNote:
       'This file is GENERATED by `node scripts/generate-feature-manifest.js` from ' +
       'src/config/flags.js, scripts/flip-flag.mjs, functions/src/models/registry.js, ' +
-      'and a repo-wide scan for getServerFlag()/dark-constant call sites. Do not hand-edit — ' +
+      'and a repo-wide scan (functions/src/**, the functions/index.js monolith, and src/**) ' +
+      'for getServerFlag()/getModelFlag()/getFlag()/dark-constant call sites. Do not hand-edit — ' +
       'edit the source files (or this generator\'s curated annotation maps) and regenerate. ' +
       'A vitest check (scripts/__tests__/feature-manifest.test.js) fails CI if this file drifts ' +
       'from a fresh regeneration.',
@@ -543,11 +685,13 @@ export function renderManifest(data) {
 
   lines.push('## Flags (client `src/config/flags.js` + server-only + model-boolean)');
   lines.push('');
-  lines.push('| Flag | Default | Prod flip mechanism | Rollback | Surface | KPI to watch after flip | Owner-gate notes | Gaps |');
-  lines.push('|---|---|---|---|---|---|---|---|');
+  lines.push('The "Prod flip mechanism" and "Rollback" cells are always a single, cleanly copy-pasteable command (or a plain sentence when nothing is wired) — timing is reported separately in "Takes effect" so a reader never has to strip prose off a command before pasting it.');
+  lines.push('');
+  lines.push('| Flag | Default | Prod flip mechanism | Takes effect | Rollback | Surface | KPI to watch after flip | Owner-gate notes | Gaps |');
+  lines.push('|---|---|---|---|---|---|---|---|---|');
   for (const r of data.flagRows) {
     lines.push(
-      `| \`${r.name}\` | ${fmtDefault(r.default)} | ${mdEscape(r.flipMechanism)} | ${mdEscape(r.rollback)} | ${mdEscape(r.surface)} | ${mdEscape(r.kpi)} | ${mdEscape(r.ownerGate)} | ${r.gaps.length ? mdEscape(r.gaps.join(' ')) : '—'} |`
+      `| \`${r.name}\` | ${fmtDefault(r.default)} | ${mdEscape(r.flipMechanism)} | ${mdEscape(r.takesEffect)} | ${mdEscape(r.rollback)} | ${mdEscape(r.surface)} | ${mdEscape(r.kpi)} | ${mdEscape(r.ownerGate)} | ${r.gaps.length ? mdEscape(r.gaps.join(' ')) : '—'} |`
     );
   }
   lines.push('');

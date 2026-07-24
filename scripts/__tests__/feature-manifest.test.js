@@ -1,7 +1,7 @@
 /**
  * `scripts/__tests__/feature-manifest.test.js` — OPS-01 generated-manifest tests.
  *
- * Three concerns, mirroring `check-bundle-budget.test.js`'s precedent of
+ * Four concerns, mirroring `check-bundle-budget.test.js`'s precedent of
  * unit-testing the pure logic directly rather than shelling out:
  *
  *   1. The extraction primitives (bracket-balancing + literal eval) behave
@@ -16,14 +16,32 @@
  *      byte-identical to a fresh regeneration from current source — this is
  *      the check that fails CI when someone edits a flag without
  *      regenerating the manifest.
+ *   4. "Monolith blind spot" regression pins (review fix wave): a prior
+ *      version of this generator only scanned `functions/src/**`, missing
+ *      real call sites in the ~4,900-line `functions/index.js` monolith
+ *      (`getModelFlag(db, 'model.embeddingWriteV2')` at index.js:491, and
+ *      two `getServerFlag('serverAnalysisOrchestrator')` sites at
+ *      index.js:2183/2312) — which produced a manifest row FALSELY
+ *      claiming `model.embeddingWriteV2` had "zero callers repo-wide" when
+ *      it is in fact live-wired. These tests prove (a) the scan-site
+ *      primitives detect a call site living in a FILE root (not just a
+ *      directory root) via an isolated fixture, and (b) the real repo's
+ *      `functions/index.js` call sites are actually picked up by
+ *      `buildManifestData()` today, so this exact regression can't recur
+ *      silently.
  */
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'fs';
+import { readFileSync, mkdtempSync, writeFileSync, mkdirSync, rmSync } from 'fs';
 import { join } from 'path';
+import { tmpdir } from 'os';
 import {
   ROOT,
   findMatchingBracket,
   extractExportedLiteral,
+  scanServerFlagReads,
+  scanModelFlagReads,
+  scanDarkConstants,
+  scanClientFlagReadSites,
   buildManifestData,
   renderManifest,
 } from '../generate-feature-manifest.js';
@@ -168,7 +186,7 @@ describe('buildManifestData + renderManifest (against the real repo tree)', () =
     const row = data.flagRows.find((r) => r.name === 'intentAbstainAudit');
     expect(row).toBeDefined();
     expect(row.default).toBe(false);
-    expect(row.serverReadFiles).toContain('functions/src/intents/extractIntents.js');
+    expect(row.serverReadFiles.some((f) => f.startsWith('functions/src/intents/extractIntents.js:'))).toBe(true);
   });
 
   it('spot-check: string-valued model workload overrides pick up STRING_ALLOWED values', () => {
@@ -192,6 +210,147 @@ describe('buildManifestData + renderManifest (against the real repo tree)', () =
     const data = buildManifestData();
     expect(data.darkRows.some((r) => r.name === 'RISKY_CLAIMS_ENABLED')).toBe(false);
     expect(data.reappearedRetired).toEqual([]);
+  });
+});
+
+describe('monolith blind spot regression pins (functions/index.js scan coverage)', () => {
+  it('scan roots literally include functions/index.js, not just functions/src', () => {
+    // buildManifestData() constructs its scan roots internally; the
+    // authoritative proof that functions/index.js is actually one of them
+    // is that a known-real call site living ONLY in that file (not in
+    // functions/src) is detected below. This test additionally asserts the
+    // file itself exists at the expected path, so a future rename/move of
+    // the monolith fails loud here instead of the scan silently finding
+    // nothing.
+    const indexPath = join(ROOT, 'functions', 'index.js');
+    expect(() => readFileSync(indexPath, 'utf8')).not.toThrow();
+  });
+
+  it('fixture: scanServerFlagReads detects a call site living in a FILE root (not a directory)', () => {
+    const tmp = mkdtempSync(join(tmpdir(), 'feature-manifest-fixture-'));
+    try {
+      const emptyDir = join(tmp, 'functions-src-stub');
+      mkdirSync(emptyDir);
+      const monolithFile = join(tmp, 'index.js');
+      writeFileSync(
+        monolithFile,
+        "async function f(db) {\n  return getServerFlag(db, 'fixtureOnlyFlag', true);\n}\n"
+      );
+
+      // Directory root alone (mirrors the OLD, blind-spot behavior) must NOT find it.
+      const dirOnly = scanServerFlagReads([emptyDir]);
+      expect(dirOnly.has('fixtureOnlyFlag')).toBe(false);
+
+      // Directory root + file root (the FIX) must find it.
+      const dirPlusFile = scanServerFlagReads([emptyDir, monolithFile]);
+      expect(dirPlusFile.has('fixtureOnlyFlag')).toBe(true);
+      expect([...dirPlusFile.get('fixtureOnlyFlag').defaults]).toEqual(['true']);
+      expect(dirPlusFile.get('fixtureOnlyFlag').files[0]).toMatch(/index\.js:2$/);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it('fixture: scanModelFlagReads detects a getModelFlag() call site living in a FILE root', () => {
+    const tmp = mkdtempSync(join(tmpdir(), 'feature-manifest-fixture-'));
+    try {
+      const monolithFile = join(tmp, 'index.js');
+      writeFileSync(
+        monolithFile,
+        "async function f(db) {\n  const on = await getModelFlag(db, 'model.fixtureWrite');\n  return on;\n}\n"
+      );
+      const result = scanModelFlagReads([monolithFile]);
+      expect(result.has('model.fixtureWrite')).toBe(true);
+      expect(result.get('model.fixtureWrite')[0]).toMatch(/index\.js:2$/);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it('fixture: scanDarkConstants and scanClientFlagReadSites also accept a FILE root', () => {
+    const tmp = mkdtempSync(join(tmpdir(), 'feature-manifest-fixture-'));
+    try {
+      const monolithFile = join(tmp, 'index.js');
+      writeFileSync(
+        monolithFile,
+        "export const FIXTURE_KILL_SWITCH = true;\nfunction g() { return getFlag('fixtureClientFlag'); }\n"
+      );
+      const darkRows = scanDarkConstants([monolithFile]);
+      expect(darkRows.some((r) => r.name === 'FIXTURE_KILL_SWITCH' && r.value === true)).toBe(true);
+
+      const clientSites = scanClientFlagReadSites([monolithFile]);
+      expect(clientSites.has('fixtureClientFlag')).toBe(true);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it('REAL REPO: model.embeddingWriteV2 is detected as wired via functions/index.js (the exact prior false-negative)', () => {
+    const data = buildManifestData();
+    const row = data.flagRows.find((r) => r.name === 'model.embeddingWriteV2');
+    expect(row).toBeDefined();
+    // The load-bearing assertion: at least one real getModelFlag() call site
+    // was found, and it lives in functions/index.js (generateEmbeddingInternal),
+    // not functions/src — this is exactly what the old functions/src-only scan
+    // root missed, producing the false "zero callers" manifest claim.
+    expect(row.modelFlagReadFiles.length).toBeGreaterThan(0);
+    expect(row.modelFlagReadFiles.some((f) => f.startsWith('functions/index.js:'))).toBe(true);
+    // The rendered surface text must no longer assert "zero callers" —
+    // pin the absence of the old false claim, not just the presence of a new one.
+    expect(row.surface).not.toMatch(/zero callers/i);
+    expect(row.surface).toMatch(/functions\/index\.js:\d+/);
+  });
+
+  it('REAL REPO: serverAnalysisOrchestrator picks up BOTH functions/index.js call sites the old scan missed', () => {
+    const data = buildManifestData();
+    const row = data.flagRows.find((r) => r.name === 'serverAnalysisOrchestrator');
+    expect(row).toBeDefined();
+    const indexJsSites = row.serverReadFiles.filter((f) => f.startsWith('functions/index.js:'));
+    // Reviewer found index.js:2183 and index.js:2312 specifically.
+    expect(indexJsSites.length).toBeGreaterThanOrEqual(2);
+    // functions/src call sites (watchdogGuards.js, entryUpdateAnalysis.js) must still be present too.
+    expect(row.serverReadFiles.some((f) => f.startsWith('functions/src/triggers/watchdogGuards.js:'))).toBe(true);
+    expect(row.serverReadFiles.some((f) => f.startsWith('functions/src/triggers/entryUpdateAnalysis.js:'))).toBe(true);
+  });
+});
+
+describe('flip-mechanism cells stay cleanly copy-pasteable (review fix wave, MINOR 1)', () => {
+  it('an ALLOWED boolean flag\'s flipMechanism is JUST the command — no trailing prose spliced on', () => {
+    const data = buildManifestData();
+    const row = data.flagRows.find((r) => r.name === 'gentleRevisit');
+    expect(row.flipMechanism).toBe('node scripts/flip-flag.mjs gentleRevisit true');
+    // Timing prose lives in its own field/column instead.
+    expect(row.takesEffect).toMatch(/next app load|within 60s/);
+  });
+
+  it('every flagRow flipMechanism that starts with the CLI command has no parenthetical timing note appended', () => {
+    const data = buildManifestData();
+    for (const row of data.flagRows) {
+      if (row.flipMechanism.startsWith('node scripts/flip-flag.mjs')) {
+        expect(row.flipMechanism).not.toMatch(/\(client:|\(server:/);
+      }
+    }
+  });
+});
+
+describe('unified flags table never actually reaches the inStringAllowed branch today (review fix wave, MINOR 3)', () => {
+  it('"STRING_ALLOWED-only" property: no name in the unified flagRows table is a STRING_ALLOWED key', () => {
+    // Direct evidence for the one-line comment in buildManifestData()
+    // explaining why the `inStringAllowed` branch at that point in the loop
+    // is unreachable with current data (STRING_ALLOWED's keys are read via
+    // getModel()'s template-literal getServerFlag call, which
+    // scanServerFlagReads' string-literal regex deliberately never matches,
+    // and none of them are declared in FLAG_DEFAULTS/MODEL_FLAG_DEFAULTS
+    // either) — kept as a real, re-checked assertion rather than just prose,
+    // so if this ever DOES become reachable (e.g. a future flag is both a
+    // plain boolean AND string-overridable), this test goes red as a
+    // deliberate signal to re-read that branch rather than trust stale prose.
+    const data = buildManifestData();
+    const flipFlagSrc = readFileSync(join(ROOT, 'scripts', 'flip-flag.mjs'), 'utf8');
+    const STRING_ALLOWED = extractExportedLiteral(flipFlagSrc, 'STRING_ALLOWED');
+    const stringAllowedNames = new Set(Object.keys(STRING_ALLOWED));
+    const overlap = data.flagRows.filter((r) => stringAllowedNames.has(r.name));
+    expect(overlap).toEqual([]);
   });
 });
 
